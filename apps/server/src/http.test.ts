@@ -201,4 +201,22 @@ describe("HTTP server", () => {
     expect(summary.statusCode).toBe(200);
     expect(summary.json().summary.createdNodeIds).toEqual(["agent-http-note"]);
   });
+
+  test("exports a design file as CSS, HTML, and importable element modules", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const server = createHttpServer(new FileStorage(tempRoot));
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/files/sample-file/export/code?moduleBasePath=./elements"
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.export.css).toContain(".canvas-export-root");
+    expect(body.export.html).toContain('data-node-id="frame-1"');
+    expect(body.export.elements.map((element: { id: string }) => element.id)).toEqual(["frame-1"]);
+    expect(body.export.elements[0].jsModule).toContain("export default");
+    expect(body.export.indexModule).toContain('from "./elements/frame-1.mjs"');
+  });
 });
