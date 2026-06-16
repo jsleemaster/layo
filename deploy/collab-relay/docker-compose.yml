@@ -1,0 +1,24 @@
+services:
+  collab-relay:
+    build:
+      context: ../..
+      dockerfile: apps/collab-relay/Dockerfile
+    image: canvas-mcp-editor-collab-relay:latest
+    environment:
+      COLLAB_RELAY_HOST: ${COLLAB_RELAY_HOST:-0.0.0.0}
+      COLLAB_RELAY_PORT: ${COLLAB_RELAY_PORT:-4327}
+      COLLAB_ALLOWED_ROOM_PREFIX: ${COLLAB_ALLOWED_ROOM_PREFIX:-canvas-mcp-editor:}
+      COLLAB_ROOM_TOKEN: ${COLLAB_ROOM_TOKEN:-}
+    ports:
+      - "${COLLAB_RELAY_PORT:-4327}:4327"
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1:4327/health
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
