@@ -6,6 +6,7 @@ import {
   type RendererNode
 } from "@canvas-mcp-editor/renderer";
 import { parseDocumentPayload } from "./document-api";
+import { editorKonvaTokens } from "./design-tokens";
 
 function renderNode(node: RendererNode) {
   const body =
@@ -26,7 +27,7 @@ function renderNode(node: RendererNode) {
         stroke={node.style.stroke ?? undefined}
         strokeWidth={node.style.stroke_width}
         opacity={node.style.opacity}
-        cornerRadius={node.kind === "frame" ? 8 : 0}
+        cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
       />
     );
 
@@ -70,7 +71,7 @@ export function App() {
       </aside>
       <section className="canvas-area">
         <div className="stage-frame">
-          <Stage width={960} height={640}>
+          <Stage width={editorKonvaTokens.stage.width} height={editorKonvaTokens.stage.height}>
             <Layer>{document?.pages[0]?.children.map(renderNode)}</Layer>
           </Stage>
         </div>

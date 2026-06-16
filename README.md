@@ -42,6 +42,8 @@ MIT
 
 ## Development
 
+Design rules live in `DESIGN.md`. App UI styles must use the executable tokens in `apps/web/src/design-tokens.css` and runtime canvas constants from `apps/web/src/design-tokens.ts`.
+
 Install dependencies:
 
 ```bash
@@ -64,6 +66,7 @@ Run checks:
 
 ```bash
 pnpm typecheck
+pnpm run check:design-rules
 cargo test --workspace
 ```
 
