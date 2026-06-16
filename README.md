@@ -10,7 +10,7 @@ The project goal is not to clone Figma feature-for-feature. The first milestone 
 - React/TypeScript editor UI for panels, tools, keyboard shortcuts, and app state.
 - Replaceable renderer adapter, starting with a TypeScript/Konva implementation.
 - Local server for document JSON and asset storage.
-- MCP and HTTP tools for file metadata, node trees, design context, components, deterministic edits, validation, and change summaries.
+- MCP and HTTP tools for file metadata, node trees, design context, components, deterministic edits, validation, change summaries, and code export.
 
 ## Architecture Direction
 
@@ -74,6 +74,27 @@ Run the MCP server over stdio:
 
 ```bash
 pnpm --filter @canvas-mcp-editor/server mcp
+```
+
+## Code Export
+
+Design files can be exported into generated code artifacts:
+
+- Full-canvas CSS under `.canvas-export-root`
+- Full-canvas HTML with stable `data-node-id` attributes
+- Per-root-element artifacts with `id`, `name`, `className`, `html`, `css`, and an importable `.mjs` module body
+- An `indexModule` that imports each element module from a configurable `moduleBasePath`
+
+HTTP:
+
+```bash
+curl "http://127.0.0.1:4317/files/sample-file/export/code?moduleBasePath=./elements"
+```
+
+MCP:
+
+```text
+export_code({ "fileId": "sample-file", "moduleBasePath": "./elements" })
 ```
 
 ## Agent Control Workflow

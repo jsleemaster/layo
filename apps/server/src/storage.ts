@@ -15,6 +15,11 @@ import {
   type ChangeSummary,
   type DocumentValidation
 } from "./agent-control.js";
+import {
+  exportDesignToCode,
+  type CodeExportOptions,
+  type CodeExportResult
+} from "./code-export.js";
 import { sampleDocument } from "./sample-document.js";
 
 export interface DesignNode {
@@ -299,6 +304,10 @@ export class FileStorage {
     }
 
     return result;
+  }
+
+  async exportCode(fileId: string, options: CodeExportOptions = {}): Promise<CodeExportResult> {
+    return exportDesignToCode(await this.readFile(fileId), options);
   }
 }
 

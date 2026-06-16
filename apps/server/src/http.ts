@@ -19,6 +19,17 @@ export function createHttpServer(storage = new FileStorage()) {
     return { file: await storage.readFile(request.params.fileId) };
   });
 
+  server.get<{ Params: { fileId: string }; Querystring: { moduleBasePath?: string } }>(
+    "/files/:fileId/export/code",
+    async (request) => {
+      return {
+        export: await storage.exportCode(request.params.fileId, {
+          moduleBasePath: request.query.moduleBasePath
+        })
+      };
+    }
+  );
+
   server.patch<{ Params: { fileId: string; nodeId: string }; Body: GeometryPatch }>(
     "/files/:fileId/nodes/:nodeId/geometry",
     async (request) => {

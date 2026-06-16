@@ -156,6 +156,36 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "export_code",
+    {
+      description:
+        "Export a design file as generated CSS, rendered HTML, per-element JS modules, and an index module.",
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        moduleBasePath: z
+          .string()
+          .default(".")
+          .describe("Relative module path used by generated index imports")
+      }
+    },
+    async ({ fileId, moduleBasePath }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              fileId,
+              export: await storage.exportCode(fileId, { moduleBasePath })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "inspect_canvas",
     {
       description: "Return an agent-friendly canvas summary, component summary, node summaries, and validation status.",
