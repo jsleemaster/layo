@@ -37,6 +37,52 @@ fn resizing_rejects_non_positive_dimensions() {
 }
 
 #[test]
+fn setting_fill_returns_inverse_command() {
+    let mut file = DesignFile::sample();
+    let inverse = file
+        .apply_command(Command::SetFill {
+            node_id: "text-1".to_string(),
+            fill: "#2563eb".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(file.pages[0].children[0].children[0].style.fill, "#2563eb");
+    assert_eq!(
+        inverse,
+        Command::SetFill {
+            node_id: "text-1".to_string(),
+            fill: "#111827".to_string()
+        }
+    );
+}
+
+#[test]
+fn updating_text_returns_inverse_command() {
+    let mut file = DesignFile::sample();
+    let inverse = file
+        .apply_command(Command::UpdateText {
+            node_id: "text-1".to_string(),
+            value: "Edited headline".to_string(),
+        })
+        .unwrap();
+
+    match &file.pages[0].children[0].children[0].content {
+        editor_core::NodeContent::Text { value, .. } => {
+            assert_eq!(value, "Edited headline");
+        }
+        _ => panic!("expected text node"),
+    }
+
+    assert_eq!(
+        inverse,
+        Command::UpdateText {
+            node_id: "text-1".to_string(),
+            value: "Canvas MCP Editor".to_string()
+        }
+    );
+}
+
+#[test]
 fn design_context_flattens_nodes_for_agents() {
     let file = DesignFile::sample();
     let context = file.design_context();

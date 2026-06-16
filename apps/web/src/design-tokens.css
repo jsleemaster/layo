@@ -41,6 +41,8 @@
   --editor-radius-lg: 12px;
 
   --editor-size-sidebar: 280px;
+  --editor-size-inspector: 300px;
+  --editor-size-toolbar: 48px;
   --editor-size-stage-width: 960px;
   --editor-size-stage-height: 640px;
   --editor-border-hairline: 1px;

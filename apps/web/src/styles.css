@@ -14,23 +14,43 @@ body {
   margin: 0;
 }
 
-button {
+button,
+input,
+textarea {
   font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .app-shell {
   display: grid;
-  grid-template-columns: var(--editor-size-sidebar) minmax(0, 1fr);
+  grid-template-columns: var(--editor-size-sidebar) minmax(0, 1fr) var(--editor-size-inspector);
   min-height: 100vh;
 }
 
-.sidebar {
-  border-right: var(--editor-border-hairline) solid var(--editor-color-border);
+.sidebar,
+.inspector {
   background: var(--editor-color-panel);
   padding: var(--editor-space-md);
 }
 
-.sidebar h1 {
+.sidebar {
+  border-right: var(--editor-border-hairline) solid var(--editor-color-border);
+}
+
+.inspector {
+  border-left: var(--editor-border-hairline) solid var(--editor-color-border);
+}
+
+.sidebar h1,
+.inspector h2 {
   margin: 0 0 var(--editor-space-xs);
   font-size: var(--editor-text-title-size);
   font-weight: var(--editor-text-title-weight);
@@ -38,7 +58,8 @@ button {
   letter-spacing: var(--editor-letter-spacing);
 }
 
-.sidebar p {
+.sidebar p,
+.empty-state {
   margin: 0 0 var(--editor-space-md);
   color: var(--editor-color-muted);
   font-size: var(--editor-text-small-size);
@@ -51,23 +72,62 @@ button {
   gap: var(--editor-space-xxs);
 }
 
-.layer-list button {
-  width: 100%;
+.layer-list button,
+.toolbar button {
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   background: var(--editor-color-control);
   color: var(--editor-color-ink);
   border-radius: var(--editor-radius-sm);
-  padding: var(--editor-space-xs) var(--editor-space-sm);
   font-size: var(--editor-text-control-size);
   font-weight: var(--editor-text-control-weight);
   line-height: var(--editor-text-control-line);
   letter-spacing: var(--editor-letter-spacing);
+}
+
+.layer-list button {
+  width: 100%;
+  padding: var(--editor-space-xs) var(--editor-space-sm);
   text-align: left;
 }
 
-.layer-list button:focus-visible {
+.layer-list button.is-selected {
+  border-color: var(--editor-color-selection);
+  color: var(--editor-color-selection);
+}
+
+.layer-list button:focus-visible,
+.toolbar button:focus-visible,
+.inspector input:focus-visible,
+.inspector textarea:focus-visible {
   outline: var(--editor-border-hairline) solid var(--editor-color-focus);
   outline-offset: var(--editor-space-xxs);
+}
+
+.editor-workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: var(--editor-size-toolbar) minmax(0, 1fr);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--editor-space-xs);
+  padding: var(--editor-space-xs) var(--editor-space-md);
+  border-bottom: var(--editor-border-hairline) solid var(--editor-color-border);
+  background: var(--editor-color-panel);
+}
+
+.toolbar button {
+  min-width: var(--editor-space-xl);
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+}
+
+.zoom-readout {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
 }
 
 .canvas-area {
@@ -82,4 +142,59 @@ button {
   height: var(--editor-size-stage-height);
   background: var(--editor-color-stage);
   box-shadow: var(--editor-shadow-stage);
+}
+
+.node-summary {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  margin-bottom: var(--editor-space-md);
+  padding-bottom: var(--editor-space-md);
+  border-bottom: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.node-summary strong {
+  font-size: var(--editor-text-body-size);
+  line-height: var(--editor-text-body-line);
+}
+
+.node-summary span {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--editor-space-sm);
+}
+
+.field-grid label,
+.stacked-field {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.stacked-field {
+  margin-top: var(--editor-space-md);
+}
+
+.inspector input,
+.inspector textarea {
+  width: 100%;
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  padding: var(--editor-space-xs);
+  font-size: var(--editor-text-control-size);
+  line-height: var(--editor-text-control-line);
+}
+
+.inspector textarea {
+  resize: vertical;
+  min-height: var(--editor-size-toolbar);
 }

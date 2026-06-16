@@ -30,5 +30,12 @@ export const editorKonvaTokens = {
   radius: {
     none: 0,
     frame: 8
+  },
+  selection: {
+    strokeWidth: 2,
+    handleSize: 10,
+    resizeHitSize: 64,
+    stroke: "#6d5efc",
+    handleFill: "#ffffff"
   }
 } as const;

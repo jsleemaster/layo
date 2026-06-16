@@ -8,8 +8,12 @@
     "check:design-rules": "node scripts/check-design-rules.mjs",
     "dev": "pnpm --parallel --filter @canvas-mcp-editor/server --filter @canvas-mcp-editor/web dev",
     "test": "node --test scripts/check-design-rules.test.mjs && pnpm run check:design-rules && pnpm -r test && cargo test --workspace",
+    "test:e2e": "playwright test apps/web/e2e/editor-mvp.spec.ts --reporter=line",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm run check:design-rules && pnpm -r lint"
   },
-  "packageManager": "pnpm@10.13.1"
+  "packageManager": "pnpm@10.13.1",
+  "devDependencies": {
+    "@playwright/test": "^1.61.0"
+  }
 }

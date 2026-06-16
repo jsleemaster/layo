@@ -1,5 +1,5 @@
 use crate::geometry::{Size, Transform};
-use crate::model::{DesignFile, Node};
+use crate::model::{DesignFile, Node, NodeContent};
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10,6 +10,14 @@ pub enum Command {
         width: f64,
         height: f64,
     },
+    SetFill {
+        node_id: String,
+        fill: String,
+    },
+    UpdateText {
+        node_id: String,
+        value: String,
+    },
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -18,6 +26,8 @@ pub enum CommandError {
     NodeNotFound(String),
     #[error("size must be positive")]
     InvalidSize,
+    #[error("node is not text: {0}")]
+    NodeIsNotText(String),
 }
 
 impl DesignFile {
@@ -58,6 +68,36 @@ impl DesignFile {
                 };
                 node.size = Size { width, height };
                 Ok(inverse)
+            }
+            Command::SetFill { node_id, fill } => {
+                let node = self
+                    .find_node_mut(&node_id)
+                    .ok_or_else(|| CommandError::NodeNotFound(node_id.clone()))?;
+                let inverse = Command::SetFill {
+                    node_id,
+                    fill: node.style.fill.clone(),
+                };
+                node.style.fill = fill;
+                Ok(inverse)
+            }
+            Command::UpdateText { node_id, value } => {
+                let node = self
+                    .find_node_mut(&node_id)
+                    .ok_or_else(|| CommandError::NodeNotFound(node_id.clone()))?;
+                match &mut node.content {
+                    NodeContent::Text {
+                        value: previous_value,
+                        ..
+                    } => {
+                        let inverse = Command::UpdateText {
+                            node_id,
+                            value: previous_value.clone(),
+                        };
+                        *previous_value = value;
+                        Ok(inverse)
+                    }
+                    _ => Err(CommandError::NodeIsNotText(node_id)),
+                }
             }
         }
     }
