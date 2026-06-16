@@ -64,6 +64,9 @@ describe("web collaboration session", () => {
         onStatus(listener) {
           listener("synced");
         },
+        onPresence() {
+          return () => {};
+        },
         updatePresence() {},
         getPresence() {
           return [];
@@ -102,6 +105,67 @@ describe("web collaboration session", () => {
       }
     ]);
     expect(session.status).toBe("synced");
+
+    session.destroy();
+  });
+
+  test("publishes provider presence changes", () => {
+    let presenceListener: (() => void) | null = null;
+    const providerFactory: CollaborationProviderFactory = () => ({
+      onStatus() {},
+      onPresence(listener) {
+        presenceListener = listener;
+        return () => {
+          presenceListener = null;
+        };
+      },
+      updatePresence() {},
+      getPresence() {
+        return [
+          {
+            userId: "remote-user",
+            displayName: "Remote",
+            color: "#16a34a",
+            selectedNodeId: "text-1",
+            cursor: null,
+            activeTool: "select"
+          }
+        ];
+      },
+      destroy() {}
+    });
+    const team = createTeamManifest({
+      name: "Remote Team",
+      currentUser: {
+        userId: "user-1",
+        displayName: "Lee",
+        color: "#2563eb"
+      },
+      sync: {
+        mode: "websocket",
+        roomPrefix: "canvas-mcp-editor",
+        relayUrl: "ws://127.0.0.1:4327"
+      }
+    });
+    const session = createCollabDocumentSession({
+      team,
+      documentId: "sample-file",
+      initialDocument: sampleDocument(),
+      enablePersistence: false,
+      providerFactory
+    });
+    const snapshots: string[][] = [];
+    session.subscribePresence((presence) =>
+      snapshots.push(presence.map((member) => member.selectedNodeId ?? "none"))
+    );
+
+    const emitPresence = presenceListener as (() => void) | null;
+    if (!emitPresence) {
+      throw new Error("presence listener was not registered");
+    }
+    emitPresence();
+
+    expect(snapshots).toEqual([["text-1"]]);
 
     session.destroy();
   });

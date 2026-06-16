@@ -83,6 +83,13 @@ const agentCommandSchema = z.discriminatedUnion("type", [
   })
 ]);
 
+const agentCollaborationSchema = z.object({
+  teamId: z.string().describe("Team manifest id for the collaboration room"),
+  documentId: z.string().describe("Document id in the collaboration room"),
+  relayUrl: z.string().describe("Self-hosted collaboration relay websocket URL"),
+  token: z.string().optional().describe("Optional relay token")
+});
+
 export function createMcpServer(storage = new FileStorage()) {
   const server = new McpServer({
     name: "canvas-mcp-editor",
@@ -243,17 +250,20 @@ export function createMcpServer(storage = new FileStorage()) {
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         dryRun: z.boolean().default(true).describe("When true, return preview without writing"),
+        collaboration: agentCollaborationSchema
+          .optional()
+          .describe("Optional team-owned relay target for collaborative document mutation"),
         commands: z.array(agentCommandSchema).min(1).describe("Agent edit commands to apply in order")
       }
     },
-    async ({ fileId, dryRun, commands }) => ({
+    async ({ fileId, dryRun, collaboration, commands }) => ({
       content: [
         {
           type: "text",
           text: JSON.stringify(
             {
               fileId,
-              result: await storage.applyAgentCommands(fileId, { dryRun, commands })
+              result: await storage.applyAgentCommands(fileId, { dryRun, collaboration, commands })
             },
             null,
             2

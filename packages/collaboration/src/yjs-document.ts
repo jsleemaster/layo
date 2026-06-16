@@ -14,10 +14,11 @@ const DOCUMENT_MAP = "design";
 const DOCUMENT_JSON = "documentJson";
 
 export function createCollaborativeDesignDocument(input: {
-  document: RendererDocument;
+  document?: RendererDocument;
+  ydoc?: Y.Doc;
   origin?: unknown;
 }): CollaborativeDesignDocument {
-  const ydoc = new Y.Doc();
+  const ydoc = input.ydoc ?? new Y.Doc();
   const root = ydoc.getMap<RendererDocument>(DOCUMENT_MAP);
   const listeners = new Set<(document: RendererDocument) => void>();
 
@@ -37,7 +38,9 @@ export function createCollaborativeDesignDocument(input: {
   };
 
   root.observe(observer);
-  setDocument(input.document, input.origin);
+  if (input.document && !root.has(DOCUMENT_JSON)) {
+    setDocument(input.document, input.origin);
+  }
 
   return {
     ydoc,

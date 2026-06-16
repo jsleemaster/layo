@@ -21,6 +21,9 @@ apps/web
 apps/server
   Node.js/Fastify document, asset, and MCP server
 
+apps/collab-relay
+  Optional team-owned websocket relay for Yjs collaboration
+
 crates/editor-core
   Rust document model, commands, geometry, selection, undo/redo
 
@@ -29,6 +32,9 @@ crates/editor-wasm
 
 packages/renderer
   Renderer interface and first Konva adapter
+
+packages/collaboration
+  Team manifests, room ids, Yjs document adapter, and awareness helpers
 
 packages/shared
   Shared schemas and generated bindings
@@ -60,6 +66,12 @@ Run the web editor:
 
 ```bash
 pnpm --filter @canvas-mcp-editor/web dev
+```
+
+Run the optional team collaboration relay:
+
+```bash
+pnpm dev:collab
 ```
 
 Run checks:
@@ -124,3 +136,39 @@ The first agent command batch supports:
 - `create_component`
 - `create_component_instance`
 - `detach_instance`
+
+For an active team-owned relay room, `apply_agent_commands` also accepts:
+
+```json
+{
+  "dryRun": false,
+  "collaboration": {
+    "teamId": "team-id-from-manifest",
+    "documentId": "sample-file",
+    "relayUrl": "ws://127.0.0.1:4327"
+  },
+  "commands": []
+}
+```
+
+When `collaboration` is present, the server connects to the relay room, applies the deterministic command batch to the Yjs-backed `DesignFile`, updates the local file copy, and connected browsers receive the same update.
+
+## Team Collaboration
+
+The web app can be shared as a static build. Real-time collaboration is optional and team-owned:
+
+- The browser stores team manifests and local document state in IndexedDB.
+- `packages/collaboration` stores document state in a Yjs map and uses awareness for presence and selected-node state.
+- `apps/collab-relay` relays Yjs sync and awareness messages for rooms named `canvas-mcp-editor:{teamId}:{documentId}`.
+- The project does not require a maintainer-operated production collaboration server.
+
+Relay environment variables:
+
+```bash
+COLLAB_RELAY_HOST=127.0.0.1
+COLLAB_RELAY_PORT=4327
+COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:
+COLLAB_ROOM_TOKEN=
+```
+
+The MVP token is a relay gate, not account authentication. End-to-end encryption is not implemented yet.

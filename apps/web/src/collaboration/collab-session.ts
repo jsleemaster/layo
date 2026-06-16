@@ -24,6 +24,7 @@ export interface CollaborationProviderInput {
 
 export interface CollaborationProvider {
   onStatus(listener: (status: CollabConnectionStatus) => void): void;
+  onPresence(listener: () => void): () => void;
   updatePresence(presence: CollaborationPresence): void;
   getPresence(): CollaborationPresence[];
   destroy(): void;
@@ -38,6 +39,8 @@ export interface CollabDocumentSession {
   getDocument(): RendererDocument;
   transact(label: string, apply: (document: RendererDocument) => RendererDocument): void;
   subscribe(listener: (document: RendererDocument) => void): () => void;
+  subscribeStatus(listener: (status: CollabConnectionStatus) => void): () => void;
+  subscribePresence(listener: (presence: CollaborationPresence[]) => void): () => void;
   updatePresence(patch: Partial<CollaborationPresence>): void;
   getPresence(): CollaborationPresence[];
   destroy(): void;
@@ -63,6 +66,14 @@ export function createCollabDocumentSession(
   let status: CollabConnectionStatus = input.team.sync.mode === "websocket" ? "connecting" : "offline";
   let provider: CollaborationProvider | null = null;
   let persistence: { destroy(): Promise<void> | void } | null = null;
+  const statusListeners = new Set<(status: CollabConnectionStatus) => void>();
+  const presenceListeners = new Set<(presence: CollaborationPresence[]) => void>();
+  const notifyPresence = () => {
+    const nextPresence = getPresence();
+    for (const listener of presenceListeners) {
+      listener(nextPresence);
+    }
+  };
 
   if (input.enablePersistence ?? true) {
     persistence = new IndexeddbPersistence(
@@ -81,7 +92,20 @@ export function createCollabDocumentSession(
     });
     provider.onStatus((nextStatus) => {
       status = nextStatus;
+      for (const listener of statusListeners) {
+        listener(status);
+      }
     });
+    provider.onPresence(notifyPresence);
+  }
+
+  function getPresence() {
+    if (provider) {
+      const remotePresence = provider.getPresence();
+      return remotePresence.length ? remotePresence : [localPresenceState.current];
+    }
+
+    return [localPresenceState.current];
   }
 
   return {
@@ -93,22 +117,30 @@ export function createCollabDocumentSession(
     getDocument: document.getDocument,
     transact: document.transact,
     subscribe: document.subscribe,
+    subscribeStatus(listener) {
+      statusListeners.add(listener);
+      return () => {
+        statusListeners.delete(listener);
+      };
+    },
+    subscribePresence(listener) {
+      presenceListeners.add(listener);
+      return () => {
+        presenceListeners.delete(listener);
+      };
+    },
     updatePresence(patch) {
       localPresenceState.current = createPresenceState({
         ...localPresenceState.current,
         ...patch
       });
       provider?.updatePresence(localPresenceState.current);
+      notifyPresence();
     },
-    getPresence() {
-      if (provider) {
-        const remotePresence = provider.getPresence();
-        return remotePresence.length ? remotePresence : [localPresenceState.current];
-      }
-
-      return [localPresenceState.current];
-    },
+    getPresence,
     destroy() {
+      statusListeners.clear();
+      presenceListeners.clear();
       provider?.destroy();
       void persistence?.destroy();
       document.destroy();
@@ -124,6 +156,7 @@ function createDefaultProvider(input: CollaborationProviderInput): Collaboration
     params: input.token ? { token: input.token } : undefined
   });
   const statusListeners = new Set<(status: CollabConnectionStatus) => void>();
+  const presenceListeners = new Set<() => void>();
 
   provider.on("status", (event: { status: "connected" | "disconnected" | "connecting" }) => {
     const nextStatus =
@@ -137,10 +170,21 @@ function createDefaultProvider(input: CollaborationProviderInput): Collaboration
       listener("error");
     }
   });
+  awareness.on("change", () => {
+    for (const listener of presenceListeners) {
+      listener();
+    }
+  });
 
   return {
     onStatus(listener) {
       statusListeners.add(listener);
+    },
+    onPresence(listener) {
+      presenceListeners.add(listener);
+      return () => {
+        presenceListeners.delete(listener);
+      };
     },
     updatePresence(presence) {
       awareness.setLocalState(presence);
@@ -150,6 +194,7 @@ function createDefaultProvider(input: CollaborationProviderInput): Collaboration
     },
     destroy() {
       statusListeners.clear();
+      presenceListeners.clear();
       provider.destroy();
       awareness.destroy();
     }

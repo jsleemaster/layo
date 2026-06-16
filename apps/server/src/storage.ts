@@ -20,6 +20,7 @@ import {
   type CodeExportOptions,
   type CodeExportResult
 } from "./code-export.js";
+import { applyAgentCommandsToCollaboration } from "./collaboration-agent.js";
 import { sampleDocument } from "./sample-document.js";
 
 export interface DesignNode {
@@ -292,11 +293,30 @@ export class FileStorage {
 
   async applyAgentCommands(fileId: string, input: AgentBatchInput): Promise<AgentBatchResult> {
     const before = await this.readFile(fileId);
+    const persisted = !(input.dryRun ?? false);
+
+    if (persisted && input.collaboration) {
+      const collaborativeResult = await applyAgentCommandsToCollaboration({
+        target: input.collaboration,
+        fallbackDocument: before,
+        commands: input.commands
+      });
+      const result = createAgentBatchResult(
+        fileId,
+        collaborativeResult.before,
+        collaborativeResult.preview,
+        input,
+        true,
+        collaborativeResult.changedNodeIds
+      );
+      await this.writeFile(fileId, collaborativeResult.preview);
+      return result;
+    }
+
     const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
       before,
       input.commands
     );
-    const persisted = !(input.dryRun ?? false);
     const result = createAgentBatchResult(fileId, before, preview, input, persisted, changedNodeIds);
 
     if (persisted) {

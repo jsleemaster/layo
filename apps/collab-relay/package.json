@@ -1,24 +1,24 @@
 {
-  "name": "@canvas-mcp-editor/server",
+  "name": "@canvas-mcp-editor/collab-relay",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
-    "mcp": "tsx src/mcp.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@canvas-mcp-editor/collaboration": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "fastify": "^5.0.0",
+    "lib0": "^0.2.114",
     "ws": "^8.18.3",
-    "y-websocket": "^3.0.0",
-    "yjs": "^13.6.27",
-    "zod": "^4.0.0"
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.27"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

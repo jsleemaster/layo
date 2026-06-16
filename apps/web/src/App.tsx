@@ -259,6 +259,7 @@ export function App() {
   const [relayToken, setRelayToken] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
+  const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
   const resizeSessionRef = useRef<{ nodeId: string } | null>(null);
   const collabSessionRef = useRef<CollabDocumentSession | null>(null);
@@ -291,24 +292,23 @@ export function App() {
     : undefined;
 
   const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
-    setEditor((current) => {
-      if (!current) {
-        return current;
-      }
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      setEditor((current) => (current ? executeEditorCommand(current, command) : current));
+      return;
+    }
 
-      const activeSession = collabSessionRef.current;
-      if (!activeSession) {
-        return executeEditorCommand(current, command);
-      }
+    if (!editor) {
+      return;
+    }
 
-      let nextState = current;
-      activeSession.transact("editor-command", (document) => {
-        nextState = executeEditorCommand({ ...current, document }, command);
-        return nextState.document;
-      });
-      setPresence(activeSession.getPresence());
-      return nextState;
-    });
+    const nextState = executeEditorCommand(
+      { ...editor, document: activeSession.getDocument() },
+      command
+    );
+    activeSession.transact("editor-command", () => nextState.document);
+    setPresence(activeSession.getPresence());
+    setEditor(nextState);
   };
 
   const selectNode = (nodeId: string) => {
@@ -417,8 +417,15 @@ export function App() {
       });
       setPresence(session.getPresence());
     });
+    session.subscribePresence((nextPresence) => {
+      setPresence(nextPresence);
+    });
+    session.subscribeStatus((nextStatus) => {
+      setCollabStatus(nextStatus);
+    });
     collabSessionRef.current = session;
     setCollabSession(session);
+    setCollabStatus(session.status);
     setPresence(session.getPresence());
   };
 
@@ -555,6 +562,67 @@ export function App() {
             </button>
           ))}
         </div>
+        <section className="team-panel" aria-label="Team collaboration">
+          <h2>Team</h2>
+          <div className="team-fields">
+            <label>
+              Name
+              <input
+                data-testid="team-name"
+                value={teamName}
+                onChange={(event) => setTeamName(event.currentTarget.value)}
+              />
+            </label>
+            <label>
+              Relay
+              <input
+                data-testid="relay-url"
+                value={relayUrl}
+                placeholder="ws://127.0.0.1:4327"
+                onChange={(event) => setRelayUrl(event.currentTarget.value)}
+              />
+            </label>
+            <label>
+              Token
+              <input
+                data-testid="relay-token"
+                value={relayToken}
+                onChange={(event) => setRelayToken(event.currentTarget.value)}
+              />
+            </label>
+          </div>
+          <div className="team-actions">
+            <button type="button" onClick={createLocalTeam} disabled={!editor}>
+              Local
+            </button>
+            <button type="button" onClick={createRelayTeam} disabled={!editor || !relayUrl.trim()}>
+              Relay
+            </button>
+            <button type="button" onClick={exportCurrentTeam} disabled={!collabSession}>
+              Export
+            </button>
+            <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
+              Import
+            </button>
+          </div>
+          <div className="team-status" data-testid="team-status">
+            {collabSession ? `${collabSession.team.name} · ${collabStatus}` : "No team"}
+          </div>
+          <div className="presence-list" data-testid="presence-list">
+            {presence.map((member, index) => (
+              <span key={`${member.userId}-${index}`} className="presence-member">
+                <span style={{ backgroundColor: member.color }} />
+                {member.displayName}
+                {member.selectedNodeId ? ` · ${member.selectedNodeId}` : ""}
+              </span>
+            ))}
+          </div>
+          <textarea
+            data-testid="team-manifest"
+            value={manifestText}
+            onChange={(event) => setManifestText(event.currentTarget.value)}
+          />
+        </section>
       </aside>
       <section className="editor-workspace">
         <div className="toolbar" aria-label="Editor toolbar">
@@ -684,67 +752,6 @@ export function App() {
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onTextChange={(nodeId, value) => dispatch({ type: "update_text", nodeId, value })}
       />
-      <aside className="team-panel" aria-label="Team collaboration">
-        <h2>Team</h2>
-        <div className="team-fields">
-          <label>
-            Name
-            <input
-              data-testid="team-name"
-              value={teamName}
-              onChange={(event) => setTeamName(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Relay
-            <input
-              data-testid="relay-url"
-              value={relayUrl}
-              placeholder="ws://127.0.0.1:4327"
-              onChange={(event) => setRelayUrl(event.currentTarget.value)}
-            />
-          </label>
-          <label>
-            Token
-            <input
-              data-testid="relay-token"
-              value={relayToken}
-              onChange={(event) => setRelayToken(event.currentTarget.value)}
-            />
-          </label>
-        </div>
-        <div className="team-actions">
-          <button type="button" onClick={createLocalTeam} disabled={!editor}>
-            Local
-          </button>
-          <button type="button" onClick={createRelayTeam} disabled={!editor || !relayUrl.trim()}>
-            Relay
-          </button>
-          <button type="button" onClick={exportCurrentTeam} disabled={!collabSession}>
-            Export
-          </button>
-          <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
-            Import
-          </button>
-        </div>
-        <div className="team-status" data-testid="team-status">
-          {collabSession ? `${collabSession.team.name} · ${collabSession.status}` : "No team"}
-        </div>
-        <div className="presence-list" data-testid="presence-list">
-          {presence.map((member) => (
-            <span key={member.userId} className="presence-member">
-              <span style={{ backgroundColor: member.color }} />
-              {member.displayName}
-              {member.selectedNodeId ? ` · ${member.selectedNodeId}` : ""}
-            </span>
-          ))}
-        </div>
-        <textarea
-          data-testid="team-manifest"
-          value={manifestText}
-          onChange={(event) => setManifestText(event.currentTarget.value)}
-        />
-      </aside>
     </main>
   );
 }

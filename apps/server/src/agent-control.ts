@@ -98,7 +98,15 @@ export type AgentCommand =
 
 export interface AgentBatchInput {
   dryRun?: boolean;
+  collaboration?: AgentCollaborationTarget;
   commands: AgentCommand[];
+}
+
+export interface AgentCollaborationTarget {
+  teamId: string;
+  documentId: string;
+  relayUrl: string;
+  token?: string;
 }
 
 export interface AgentBatchAudit {

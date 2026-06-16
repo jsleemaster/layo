@@ -31,11 +31,7 @@ button:disabled {
 
 .app-shell {
   display: grid;
-  grid-template-columns:
-    var(--editor-size-sidebar)
-    minmax(0, 1fr)
-    var(--editor-size-inspector)
-    var(--editor-size-team-panel);
+  grid-template-columns: var(--editor-size-sidebar) minmax(0, 1fr) var(--editor-size-inspector);
   min-height: 100vh;
 }
 
@@ -55,7 +51,9 @@ button:disabled {
 }
 
 .team-panel {
-  border-left: var(--editor-border-hairline) solid var(--editor-color-border);
+  margin-top: var(--editor-space-lg);
+  padding-top: var(--editor-space-md);
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   display: grid;
   align-content: start;
   gap: var(--editor-space-md);
