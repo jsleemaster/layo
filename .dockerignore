@@ -1,0 +1,15 @@
+.DS_Store
+.git
+.github
+.canvas-mcp-editor
+.worktrees
+node_modules
+dist
+build
+target
+pkg
+test-results
+playwright-report
+.env
+.env.*
+!.env.example

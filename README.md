@@ -162,6 +162,12 @@ The web app can be shared as a static build. Real-time collaboration is optional
 - `apps/collab-relay` relays Yjs sync and awareness messages for rooms named `canvas-mcp-editor:{teamId}:{documentId}`.
 - The project does not require a maintainer-operated production collaboration server.
 
+## Deployment
+
+Canvas MCP Editor keeps static web hosting separate from real-time relay hosting. The static web app can be deployed from `apps/web/dist` with GitHub Pages or another static host, while each team runs its own team-owned relay only when it needs live collaboration.
+
+The maintainers do not operate a default production relay. For self-hosting, use the Docker Compose template in `deploy/collab-relay/docker-compose.yml` with `deploy/collab-relay/.env.example`, or run `pnpm dev:collab` for local development.
+
 Relay environment variables:
 
 ```bash
