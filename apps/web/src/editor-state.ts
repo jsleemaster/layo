@@ -178,6 +178,50 @@ export function setViewport(state: EditorState, patch: Partial<EditorViewport>):
   };
 }
 
+export function panViewport(state: EditorState, delta: Pick<EditorViewport, "x" | "y">): EditorState {
+  return setViewport(state, {
+    x: state.viewport.x + delta.x,
+    y: state.viewport.y + delta.y
+  });
+}
+
+export function zoomViewport(state: EditorState, delta: number): EditorState {
+  return setViewport(state, {
+    scale: state.viewport.scale + delta
+  });
+}
+
+export function createRectangleNode(sequence: number): RendererNode {
+  return {
+    id: `rectangle-${sequence}`,
+    kind: "rectangle",
+    name: `Rectangle ${sequence}`,
+    transform: { x: 180, y: 140, rotation: 0 },
+    size: { width: 160, height: 96 },
+    style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
+    content: { type: "empty" },
+    children: []
+  };
+}
+
+export function createTextNode(sequence: number): RendererNode {
+  return {
+    id: `text-${sequence}`,
+    kind: "text",
+    name: `Text ${sequence}`,
+    transform: { x: 220, y: 180, rotation: 0 },
+    size: { width: 220, height: 44 },
+    style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
+    content: {
+      type: "text",
+      value: "New text",
+      font_size: 24,
+      font_family: "Inter"
+    },
+    children: []
+  };
+}
+
 function applyCommand(document: RendererDocument, command: EditorCommand): CommandResult {
   const next = structuredClone(document);
 

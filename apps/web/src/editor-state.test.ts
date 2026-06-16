@@ -4,10 +4,14 @@ import {
   createEditorState,
   executeEditorCommand,
   findNodeById,
+  createRectangleNode,
+  createTextNode,
+  panViewport,
   redo,
   setSelection,
   setViewport,
-  undo
+  undo,
+  zoomViewport
 } from "./editor-state";
 
 function sampleDocument(): RendererDocument {
@@ -141,5 +145,35 @@ describe("editor state commands", () => {
     expect(selected.selection.nodeId).toBe("text-1");
     expect(zoomed.viewport).toEqual({ scale: 2.4, x: 80, y: -40 });
     expect(clamped.viewport.scale).toBe(0.25);
+  });
+
+  test("creates predictable default rectangle and text nodes for toolbar actions", () => {
+    const rectangle = createRectangleNode(3);
+    const text = createTextNode(4);
+
+    expect(rectangle).toMatchObject({
+      id: "rectangle-3",
+      kind: "rectangle",
+      name: "Rectangle 3",
+      transform: { x: 180, y: 140, rotation: 0 },
+      size: { width: 160, height: 96 }
+    });
+    expect(text).toMatchObject({
+      id: "text-4",
+      kind: "text",
+      name: "Text 4",
+      transform: { x: 220, y: 180, rotation: 0 },
+      size: { width: 220, height: 44 },
+      content: { type: "text", value: "New text" }
+    });
+  });
+
+  test("pans and zooms the viewport from toolbar actions", () => {
+    const initial = createEditorState(sampleDocument());
+    const panned = panViewport(initial, { x: 24, y: -16 });
+    const zoomed = zoomViewport(panned, 0.5);
+
+    expect(panned.viewport).toEqual({ scale: 1, x: 24, y: -16 });
+    expect(zoomed.viewport.scale).toBe(1.5);
   });
 });
