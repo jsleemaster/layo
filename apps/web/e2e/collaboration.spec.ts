@@ -7,6 +7,7 @@ test("relay team syncs document edits between two browser contexts", async ({ br
 
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
+  let contextBClosed = false;
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
@@ -34,6 +35,23 @@ test("relay team syncs document edits between two browser contexts", async ({ br
 
     await pageB.getByRole("button", { name: "Text 3" }).click();
     await expect(pageA.getByTestId("presence-list")).toContainText("text-3", { timeout: 8000 });
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute("data-selected-node-id", "text-3", {
+      timeout: 8000
+    });
+
+    const stageBox = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(stageBox).not.toBeNull();
+    await pageB.mouse.move(stageBox!.x + 320, stageBox!.y + 240);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+    const cursorBeforeZoom = await pageA.getByTestId("remote-cursor").boundingBox();
+    await pageA.getByRole("button", { name: "Zoom in" }).click();
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+    const cursorAfterZoom = await pageA.getByTestId("remote-cursor").boundingBox();
+    expect(cursorBeforeZoom?.x).not.toBe(cursorAfterZoom?.x);
+    await pageA.getByRole("button", { name: "Pan right" }).click();
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+    const cursorAfterPan = await pageA.getByTestId("remote-cursor").boundingBox();
+    expect(cursorAfterZoom?.x).not.toBe(cursorAfterPan?.x);
 
     const team = JSON.parse(manifest) as { teamId: string };
     const agentNodeId = `agent-collab-${Date.now()}`;
@@ -69,8 +87,14 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     );
     expect(agentResponse.ok()).toBeTruthy();
     await expect(pageB.getByRole("button", { name: agentNodeName })).toBeVisible({ timeout: 8000 });
+
+    await contextB.close();
+    contextBClosed = true;
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0, { timeout: 8000 });
   } finally {
     await contextA.close();
-    await contextB.close();
+    if (!contextBClosed) {
+      await contextB.close();
+    }
   }
 });

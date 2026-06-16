@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { RendererDocument } from "@canvas-mcp-editor/renderer";
-import { createDocumentRoomId, createTeamManifest } from "@canvas-mcp-editor/collaboration";
+import {
+  createDocumentRoomId,
+  createPresenceState,
+  createTeamManifest
+} from "@canvas-mcp-editor/collaboration";
 import {
   createCollabDocumentSession,
   type CollaborationProviderFactory
@@ -58,6 +62,7 @@ describe("web collaboration session", () => {
       roomId: string;
       token?: string;
       userId: string;
+      sessionId: string;
       memberToken?: string;
       access: "sync" | "awareness";
     }> = [];
@@ -67,6 +72,7 @@ describe("web collaboration session", () => {
         roomId: input.roomId,
         token: input.token,
         userId: input.userId,
+        sessionId: input.initialPresence.sessionId,
         memberToken: input.memberToken,
         access: input.access
       });
@@ -114,10 +120,17 @@ describe("web collaboration session", () => {
         roomId: createDocumentRoomId(team.teamId, "sample-file"),
         token: "relay-secret",
         userId: "user-1",
+        sessionId: session.getLocalPresence().sessionId,
         memberToken: "member-secret",
         access: "sync"
       }
     ]);
+    expect(session.getLocalPresence()).toMatchObject({
+      userId: "user-1",
+      displayName: "Lee",
+      color: "#2563eb"
+    });
+    expect(session.getLocalPresence().sessionId).not.toBe("user-1");
     expect(session.status).toBe("synced");
 
     session.destroy();
@@ -180,14 +193,15 @@ describe("web collaboration session", () => {
       updatePresence() {},
       getPresence() {
         return [
-          {
+          createPresenceState({
+            sessionId: "remote-session",
             userId: "remote-user",
             displayName: "Remote",
             color: "#16a34a",
             selectedNodeId: "text-1",
             cursor: null,
             activeTool: "select"
-          }
+          })
         ];
       },
       destroy() {}
@@ -248,11 +262,15 @@ describe("web collaboration session", () => {
 
     expect(session.getPresence()).toEqual([
       {
+        sessionId: session.getLocalPresence().sessionId,
         userId: "user-1",
         displayName: "Lee",
         color: "#2563eb",
         selectedNodeId: "text-1",
+        selectedNodeBounds: null,
         cursor: null,
+        viewport: null,
+        updatedAtMs: null,
         activeTool: "select"
       }
     ]);

@@ -37,6 +37,14 @@ import {
   undo,
   zoomViewport
 } from "./editor-state";
+import {
+  documentPointToViewport,
+  getRemotePresence,
+  getSelectedNodeBounds,
+  REMOTE_PRESENCE_STALE_MS,
+  shouldPublishCursor,
+  type PublishedCursor
+} from "./collaboration/remote-overlays";
 
 function numericInputValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -44,6 +52,16 @@ function numericInputValue(value: number) {
 
 const teamStore = createIndexedDbTeamStore();
 const LOCAL_USER_COLOR = "var(--editor-color-selection)";
+
+function remotePresenceSignature(member: CollaborationPresence) {
+  return JSON.stringify({
+    selectedNodeId: member.selectedNodeId,
+    selectedNodeBounds: member.selectedNodeBounds,
+    cursor: member.cursor,
+    viewport: member.viewport,
+    activeTool: member.activeTool
+  });
+}
 
 function renderNode({
   node,
@@ -156,6 +174,74 @@ function renderNode({
   );
 }
 
+function RemotePresenceOverlay({
+  localSessionId,
+  presence,
+  nowMs,
+  viewport
+}: {
+  localSessionId: string | null;
+  presence: CollaborationPresence[];
+  nowMs: number;
+  viewport: EditorState["viewport"];
+}) {
+  const remotePresence = getRemotePresence(presence, localSessionId, {
+    nowMs,
+    staleAfterMs: REMOTE_PRESENCE_STALE_MS
+  });
+
+  return (
+    <div className="remote-presence-layer" data-testid="remote-presence-layer" aria-hidden="true">
+      {remotePresence.map((member) => {
+        const cursorPosition = member.cursor ? documentPointToViewport(member.cursor, viewport) : null;
+        const selectionPosition = member.selectedNodeBounds
+          ? documentPointToViewport(member.selectedNodeBounds, viewport)
+          : null;
+
+        return (
+          <div key={member.sessionId}>
+            {selectionPosition && member.selectedNodeBounds ? (
+              <div
+                className="remote-selection"
+                data-testid="remote-selection"
+                data-member-session-id={member.sessionId}
+                data-selected-node-id={member.selectedNodeId ?? ""}
+                style={{
+                  left: selectionPosition.x,
+                  top: selectionPosition.y,
+                  width: member.selectedNodeBounds.width * viewport.scale,
+                  height: member.selectedNodeBounds.height * viewport.scale,
+                  borderColor: member.color,
+                  transform: `rotate(${member.selectedNodeBounds.rotation}deg)`
+                }}
+              >
+                <span style={{ backgroundColor: member.color }}>{member.displayName}</span>
+              </div>
+            ) : null}
+            {cursorPosition ? (
+              <div
+                className="remote-cursor"
+                data-testid="remote-cursor"
+                data-member-session-id={member.sessionId}
+                style={{
+                  left: cursorPosition.x,
+                  top: cursorPosition.y,
+                  color: member.color
+                }}
+              >
+                <span className="remote-cursor-mark" style={{ borderTopColor: member.color }} />
+                <span className="remote-cursor-label" style={{ backgroundColor: member.color }}>
+                  {member.displayName}
+                </span>
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Inspector({
   selectedNode,
   onGeometryChange,
@@ -262,8 +348,12 @@ export function App() {
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
+  const [presenceClock, setPresenceClock] = useState(() => Date.now());
   const resizeSessionRef = useRef<{ nodeId: string } | null>(null);
   const collabSessionRef = useRef<CollabDocumentSession | null>(null);
+  const publishedCursorRef = useRef<PublishedCursor | null>(null);
+  const remotePresenceSignatureRef = useRef(new Map<string, string>());
+  const remotePresenceSeenAtRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     fetch("http://127.0.0.1:4317/files/sample-file")
@@ -279,6 +369,15 @@ export function App() {
     []
   );
 
+  useEffect(() => {
+    if (!collabSession) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(() => setPresenceClock(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [collabSession]);
+
   const nodes = useMemo(
     () => (editor ? flattenRendererNodes(editor.document) : []),
     [editor]
@@ -291,6 +390,67 @@ export function App() {
   const selectedComponent = selectedNode
     ? components.find((component) => component.source_node.id === selectedNode.id)
     : undefined;
+  const localSessionId = collabSession?.getLocalPresence().sessionId ?? null;
+
+  const normalizePresenceForOverlay = (
+    nextPresence: CollaborationPresence[],
+    nextLocalSessionId: string | null
+  ) => {
+    const nowMs = Date.now();
+    const activeSessionIds = new Set(nextPresence.map((member) => member.sessionId));
+    for (const sessionId of remotePresenceSignatureRef.current.keys()) {
+      if (!activeSessionIds.has(sessionId)) {
+        remotePresenceSignatureRef.current.delete(sessionId);
+        remotePresenceSeenAtRef.current.delete(sessionId);
+      }
+    }
+
+    return nextPresence.map((member) => {
+      if (member.sessionId === nextLocalSessionId) {
+        return member;
+      }
+
+      const signature = remotePresenceSignature(member);
+      if (remotePresenceSignatureRef.current.get(member.sessionId) !== signature) {
+        remotePresenceSignatureRef.current.set(member.sessionId, signature);
+        remotePresenceSeenAtRef.current.set(member.sessionId, nowMs);
+      }
+
+      return {
+        ...member,
+        updatedAtMs: remotePresenceSeenAtRef.current.get(member.sessionId) ?? nowMs
+      };
+    });
+  };
+
+  const publishPresenceSnapshot = (activeSession: CollabDocumentSession) => {
+    setPresence(
+      normalizePresenceForOverlay(
+        activeSession.getPresence(),
+        activeSession.getLocalPresence().sessionId
+      )
+    );
+  };
+
+  const publishEditorPresence = (
+    state: EditorState,
+    patch: Partial<CollaborationPresence> = {}
+  ) => {
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      return;
+    }
+
+    activeSession.updatePresence({
+      selectedNodeId: state.selection.nodeId,
+      selectedNodeBounds: getSelectedNodeBounds(state.document, state.selection.nodeId),
+      viewport: state.viewport,
+      updatedAtMs: Date.now(),
+      ...patch
+    });
+    setPresenceClock(Date.now());
+    publishPresenceSnapshot(activeSession);
+  };
 
   const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
     const activeSession = collabSessionRef.current;
@@ -308,16 +468,20 @@ export function App() {
       command
     );
     activeSession.transact("editor-command", () => nextState.document);
-    setPresence(activeSession.getPresence());
+    publishEditorPresence(nextState);
     setEditor(nextState);
   };
 
   const selectNode = (nodeId: string) => {
-    setEditor((current) => (current ? setSelection(current, nodeId) : current));
-    collabSessionRef.current?.updatePresence({ selectedNodeId: nodeId, activeTool: "select" });
-    if (collabSessionRef.current) {
-      setPresence(collabSessionRef.current.getPresence());
-    }
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextState = setSelection(current, nodeId);
+      publishEditorPresence(nextState, { activeTool: "select" });
+      return nextState;
+    });
   };
 
   const updateGeometry = (nodeId: string, patch: GeometryPatch) => {
@@ -424,15 +588,21 @@ export function App() {
       setPresence(session.getPresence());
     });
     session.subscribePresence((nextPresence) => {
-      setPresence(nextPresence);
+      setPresence(normalizePresenceForOverlay(nextPresence, session.getLocalPresence().sessionId));
     });
     session.subscribeStatus((nextStatus) => {
       setCollabStatus(nextStatus);
     });
     collabSessionRef.current = session;
+    session.updatePresence({
+      selectedNodeId: editor.selection.nodeId,
+      selectedNodeBounds: getSelectedNodeBounds(editor.document, editor.selection.nodeId),
+      viewport: editor.viewport,
+      updatedAtMs: Date.now()
+    });
     setCollabSession(session);
     setCollabStatus(session.status);
-    setPresence(session.getPresence());
+    publishPresenceSnapshot(session);
   };
 
   const createLocalTeam = () => {
@@ -514,6 +684,43 @@ export function App() {
     });
     resizeSessionRef.current = null;
     setResizeSession(null);
+  };
+
+  const updateCursorFromPointer = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    if (!editor || !collabSessionRef.current) {
+      return;
+    }
+
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) {
+      return;
+    }
+
+    const cursor = {
+      x: Math.round((pointer.x - editor.viewport.x) / editor.viewport.scale),
+      y: Math.round((pointer.y - editor.viewport.y) / editor.viewport.scale),
+      space: "document" as const
+    };
+    const nowMs = performance.now();
+    if (!shouldPublishCursor(publishedCursorRef.current, cursor, nowMs)) {
+      return;
+    }
+
+    publishedCursorRef.current = { point: cursor, publishedAtMs: nowMs };
+    publishEditorPresence(editor, { cursor });
+  };
+
+  const clearCursorPresence = () => {
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      return;
+    }
+
+    activeSession.updatePresence({ cursor: null, updatedAtMs: Date.now() });
+    setPresenceClock(Date.now());
+    publishPresenceSnapshot(activeSession);
+    publishedCursorRef.current = null;
   };
 
   const startResizeFromPointer = (event: KonvaEventObject<MouseEvent>) => {
@@ -692,21 +899,51 @@ export function App() {
           <button
             type="button"
             aria-label="Pan left"
-            onClick={() => setEditor((current) => (current ? panViewport(current, { x: -40, y: 0 }) : current))}
+            onClick={() =>
+              setEditor((current) => {
+                if (!current) {
+                  return current;
+                }
+
+                const nextState = panViewport(current, { x: -40, y: 0 });
+                publishEditorPresence(nextState);
+                return nextState;
+              })
+            }
           >
             ←
           </button>
           <button
             type="button"
             aria-label="Pan right"
-            onClick={() => setEditor((current) => (current ? panViewport(current, { x: 40, y: 0 }) : current))}
+            onClick={() =>
+              setEditor((current) => {
+                if (!current) {
+                  return current;
+                }
+
+                const nextState = panViewport(current, { x: 40, y: 0 });
+                publishEditorPresence(nextState);
+                return nextState;
+              })
+            }
           >
             →
           </button>
           <button
             type="button"
             aria-label="Zoom out"
-            onClick={() => setEditor((current) => (current ? zoomViewport(current, -0.25) : current))}
+            onClick={() =>
+              setEditor((current) => {
+                if (!current) {
+                  return current;
+                }
+
+                const nextState = zoomViewport(current, -0.25);
+                publishEditorPresence(nextState);
+                return nextState;
+              })
+            }
           >
             −
           </button>
@@ -714,13 +951,23 @@ export function App() {
           <button
             type="button"
             aria-label="Zoom in"
-            onClick={() => setEditor((current) => (current ? zoomViewport(current, 0.25) : current))}
+            onClick={() =>
+              setEditor((current) => {
+                if (!current) {
+                  return current;
+                }
+
+                const nextState = zoomViewport(current, 0.25);
+                publishEditorPresence(nextState);
+                return nextState;
+              })
+            }
           >
             +
           </button>
         </div>
         <div className="canvas-area" data-testid="canvas-area">
-          <div className="stage-frame">
+          <div className="stage-frame" data-testid="stage-frame" onMouseLeave={clearCursorPresence}>
             <Stage
               width={editorKonvaTokens.stage.width}
               height={editorKonvaTokens.stage.height}
@@ -734,13 +981,23 @@ export function App() {
                 }
 
                 if (event.target === event.target.getStage()) {
-                  setEditor((current) => (current ? setSelection(current, null) : current));
-                  collabSessionRef.current?.updatePresence({ selectedNodeId: null });
-                  if (collabSessionRef.current) {
-                    setPresence(collabSessionRef.current.getPresence());
-                  }
+                  setEditor((current) => {
+                    if (!current) {
+                      return current;
+                    }
+
+                    const nextState = setSelection(current, null);
+                    publishEditorPresence(nextState, {
+                      activeTool: "select",
+                      selectedNodeId: null,
+                      selectedNodeBounds: null
+                    });
+                    return nextState;
+                  });
                 }
               }}
+              onMouseMove={updateCursorFromPointer}
+              onTouchMove={updateCursorFromPointer}
               onMouseUp={finishResize}
               onTouchEnd={finishResize}
             >
@@ -760,6 +1017,14 @@ export function App() {
                 )}
               </Layer>
             </Stage>
+            {editor ? (
+              <RemotePresenceOverlay
+                localSessionId={localSessionId}
+                nowMs={presenceClock}
+                presence={presence}
+                viewport={editor.viewport}
+              />
+            ) : null}
           </div>
         </div>
       </section>

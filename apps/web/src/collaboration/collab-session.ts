@@ -45,6 +45,7 @@ export interface CollabDocumentSession {
   subscribeStatus(listener: (status: CollabConnectionStatus) => void): () => void;
   subscribePresence(listener: (presence: CollaborationPresence[]) => void): () => void;
   updatePresence(patch: Partial<CollaborationPresence>): void;
+  getLocalPresence(): CollaborationPresence;
   getPresence(): CollaborationPresence[];
   destroy(): void;
 }
@@ -63,9 +64,11 @@ export function createCollabDocumentSession(
   input: CreateCollabDocumentSessionInput
 ): CollabDocumentSession {
   const document = createCollaborativeDesignDocument({ document: input.initialDocument });
+  const sessionId = createPresenceSessionId(input.team.currentUserId);
   const localPresence = createPresenceState({
     ...input.team.members.find((member) => member.userId === input.team.currentUserId),
-    userId: input.team.currentUserId
+    userId: input.team.currentUserId,
+    sessionId
   });
   const currentMember = input.team.members.find((member) => member.userId === input.team.currentUserId);
   const access = currentMember?.role === "viewer" ? "awareness" : "sync";
@@ -147,6 +150,9 @@ export function createCollabDocumentSession(
       provider?.updatePresence(localPresenceState.current);
       notifyPresence();
     },
+    getLocalPresence() {
+      return localPresenceState.current;
+    },
     getPresence,
     destroy() {
       statusListeners.clear();
@@ -156,6 +162,10 @@ export function createCollabDocumentSession(
       document.destroy();
     }
   };
+}
+
+function createPresenceSessionId(userId: string): string {
+  return `presence-${userId}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
 }
 
 function createDefaultProvider(input: CollaborationProviderInput): CollaborationProvider {
