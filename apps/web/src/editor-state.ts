@@ -249,6 +249,24 @@ export function zoomViewport(state: EditorState, delta: number): EditorState {
   });
 }
 
+export function zoomViewportAtPoint(
+  state: EditorState,
+  delta: number,
+  point: { x: number; y: number }
+): EditorState {
+  const nextScale = clamp(state.viewport.scale + delta, MIN_ZOOM, MAX_ZOOM);
+  const documentPoint = {
+    x: (point.x - state.viewport.x) / state.viewport.scale,
+    y: (point.y - state.viewport.y) / state.viewport.scale
+  };
+
+  return setViewport(state, {
+    scale: nextScale,
+    x: point.x - documentPoint.x * nextScale,
+    y: point.y - documentPoint.y * nextScale
+  });
+}
+
 export function createRectangleNode(sequence: number): RendererNode {
   return {
     id: `rectangle-${sequence}`,

@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent as ReactWheelEvent
+} from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
 import { Group, Layer, Rect, Stage, Text } from "react-konva";
 import {
@@ -38,10 +44,12 @@ import {
   panViewport,
   redo,
   setSelection,
+  setViewport,
   type EditorState,
   type GeometryPatch,
   undo,
-  zoomViewport
+  zoomViewport,
+  zoomViewportAtPoint
 } from "./editor-state";
 import {
   documentPointToViewport,
@@ -68,6 +76,9 @@ const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
   horizontal: "left",
   vertical: "top"
 };
+const KEYBOARD_PAN_STEP = 24;
+const KEYBOARD_PAN_STEP_LARGE = 96;
+const ZOOM_STEP = 0.25;
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
@@ -108,6 +119,19 @@ function collaborationStatusLabel(status: string): string {
     default:
       return "오프라인";
   }
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
 }
 
 function renderNode({
@@ -698,6 +722,116 @@ export function App() {
     setPresenceClock(Date.now());
     publishPresenceSnapshot(activeSession);
   };
+
+  const updateViewportFromInteraction = (deriveNextState: (state: EditorState) => EditorState) => {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextState = deriveNextState(current);
+      publishEditorPresence(nextState);
+      return nextState;
+    });
+  };
+
+  const clearSelectionFromInteraction = () => {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextState = setSelection(current, null);
+      publishEditorPresence(nextState, {
+        activeTool: "select",
+        selectedNodeId: null,
+        selectedNodeBounds: null
+      });
+      return nextState;
+    });
+  };
+
+  const handleCanvasWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const stageFrame = stageFrameRef.current;
+    if (!stageFrame) {
+      return;
+    }
+
+    const bounds = stageFrame.getBoundingClientRect();
+    const point = {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top
+    };
+    const delta = event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
+    updateViewportFromInteraction((state) => zoomViewportAtPoint(state, delta, point));
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (isEditableKeyboardTarget(event.target)) {
+        return;
+      }
+
+      const isCommand = event.metaKey || event.ctrlKey;
+      const centerPoint = {
+        x: Math.max(1, stageSize.width) / 2,
+        y: Math.max(1, stageSize.height) / 2
+      };
+
+      if (isCommand && (event.key === "=" || event.key === "+")) {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => zoomViewportAtPoint(state, ZOOM_STEP, centerPoint));
+        return;
+      }
+      if (isCommand && event.key === "-") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => zoomViewportAtPoint(state, -ZOOM_STEP, centerPoint));
+        return;
+      }
+      if (isCommand && event.key === "0") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => setViewport(state, { scale: 1, x: 0, y: 0 }));
+        return;
+      }
+      if (isCommand && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        setEditor((current) => {
+          if (!current) {
+            return current;
+          }
+
+          const nextState = event.shiftKey ? redo(current) : undo(current);
+          publishEditorPresence(nextState);
+          return nextState;
+        });
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        clearSelectionFromInteraction();
+        return;
+      }
+
+      const panStep = event.shiftKey ? KEYBOARD_PAN_STEP_LARGE : KEYBOARD_PAN_STEP;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => panViewport(state, { x: panStep, y: 0 }));
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => panViewport(state, { x: -panStep, y: 0 }));
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => panViewport(state, { x: 0, y: panStep }));
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => panViewport(state, { x: 0, y: -panStep }));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [stageSize.height, stageSize.width]);
 
   const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
     const activeSession = collabSessionRef.current;
@@ -1294,51 +1428,21 @@ export function App() {
           <button
             type="button"
             aria-label="왼쪽으로 이동"
-            onClick={() =>
-              setEditor((current) => {
-                if (!current) {
-                  return current;
-                }
-
-                const nextState = panViewport(current, { x: -40, y: 0 });
-                publishEditorPresence(nextState);
-                return nextState;
-              })
-            }
+            onClick={() => updateViewportFromInteraction((current) => panViewport(current, { x: -40, y: 0 }))}
           >
             ←
           </button>
           <button
             type="button"
             aria-label="오른쪽으로 이동"
-            onClick={() =>
-              setEditor((current) => {
-                if (!current) {
-                  return current;
-                }
-
-                const nextState = panViewport(current, { x: 40, y: 0 });
-                publishEditorPresence(nextState);
-                return nextState;
-              })
-            }
+            onClick={() => updateViewportFromInteraction((current) => panViewport(current, { x: 40, y: 0 }))}
           >
             →
           </button>
           <button
             type="button"
             aria-label="축소"
-            onClick={() =>
-              setEditor((current) => {
-                if (!current) {
-                  return current;
-                }
-
-                const nextState = zoomViewport(current, -0.25);
-                publishEditorPresence(nextState);
-                return nextState;
-              })
-            }
+            onClick={() => updateViewportFromInteraction((current) => zoomViewport(current, -ZOOM_STEP))}
           >
             −
           </button>
@@ -1346,17 +1450,7 @@ export function App() {
           <button
             type="button"
             aria-label="확대"
-            onClick={() =>
-              setEditor((current) => {
-                if (!current) {
-                  return current;
-                }
-
-                const nextState = zoomViewport(current, 0.25);
-                publishEditorPresence(nextState);
-                return nextState;
-              })
-            }
+            onClick={() => updateViewportFromInteraction((current) => zoomViewport(current, ZOOM_STEP))}
           >
             +
           </button>
@@ -1366,6 +1460,7 @@ export function App() {
             ref={stageFrameRef}
             className="stage-frame"
             data-testid="stage-frame"
+            onWheel={handleCanvasWheel}
             onMouseLeave={clearCursorPresence}
           >
             <Stage

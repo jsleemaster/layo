@@ -154,6 +154,46 @@ test("web editor fills the available work area with a white canvas", async ({ pa
   expect(metrics.stageHeight).toBe(metrics.canvasClientHeight);
 });
 
+test("mouse wheel and keyboard shortcuts control canvas interactions", async ({ page }) => {
+  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+
+  await page.goto("http://127.0.0.1:5173/");
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+
+  await page.mouse.move(stageBox.x + 360, stageBox.y + 260);
+  await page.mouse.wheel(0, -300);
+  await expect(page.getByText("125%")).toBeVisible();
+
+  await page.keyboard.press("Control+=");
+  await expect(page.getByText("150%")).toBeVisible();
+  await page.keyboard.press("Control+-");
+  await expect(page.getByText("125%")).toBeVisible();
+  await page.keyboard.press("Control+0");
+  await expect(page.getByText("100%")).toBeVisible();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await page.getByTestId("inspector-text").fill("키보드 단축키 검증");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("키보드 단축키 검증");
+
+  await page.mouse.click(stageBox.x + 40, stageBox.y + 40);
+  await page.keyboard.press("Control+Z");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+
+  await page.mouse.click(stageBox.x + 40, stageBox.y + 40);
+  await page.keyboard.press("Control+Shift+Z");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("키보드 단축키 검증");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+});
+
 test("component instances drag as a single selected object from nested content", async ({ page }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
