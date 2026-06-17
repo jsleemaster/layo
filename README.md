@@ -182,6 +182,29 @@ For an active team-owned relay room, `apply_agent_commands` also accepts:
 
 When `collaboration` is present, the server connects to the relay room, applies the deterministic command batch to the Yjs-backed `DesignFile`, updates the local file copy, and connected browsers receive the same update.
 
+## Projects
+
+Projects are saved as local-first manifests under `.canvas-mcp-editor/projects`.
+Each `ProjectManifest` records the project name, current document, document
+membership, and sharing reference. Canvas contents remain in
+`.canvas-mcp-editor/files` as `DesignFile` JSON.
+
+HTTP:
+
+```bash
+curl http://127.0.0.1:4317/projects
+```
+
+MCP:
+
+```text
+list_projects({})
+create_project({ "name": "새 프로젝트" })
+```
+
+Project sharing links a project to a `TeamManifest` by `teamId`. The project
+manifest never stores relay passphrases or derived encryption keys.
+
 ## Team Collaboration
 
 The web app can be shared as a static build. Real-time collaboration is optional and team-owned:

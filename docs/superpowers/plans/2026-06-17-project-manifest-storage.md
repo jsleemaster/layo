@@ -1376,7 +1376,7 @@ pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "creates, reope
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit web workflow**
+- [x] **Step 7: Commit web workflow**
 
 Run:
 
@@ -1391,7 +1391,7 @@ git commit -m "feat: add project workflow UI"
 - Modify: `README.md`
 - Modify: `docs/superpowers/PLAN_STATUS.md`
 
-- [ ] **Step 1: Update README project documentation**
+- [x] **Step 1: Update README project documentation**
 
 Add this section before `## Code Export` in `README.md`:
 
@@ -1420,7 +1420,7 @@ Project sharing links a project to a `TeamManifest` by `teamId`. The project
 manifest never stores relay passphrases or derived encryption keys.
 ````
 
-- [ ] **Step 2: Update plan status**
+- [x] **Step 2: Update plan status**
 
 Add a row to `docs/superpowers/PLAN_STATUS.md` under `## Current Active Plan` while the work is in progress:
 
@@ -1430,7 +1430,7 @@ Current active implementation:
 - `2026-06-17-project-manifest-storage.md`: In progress on `codex/project-manifest-storage`; implements project manifests, HTTP/MCP project tools, and web project workflow from `docs/superpowers/specs/2026-06-17-project-manifest-storage-design.md`.
 ```
 
-- [ ] **Step 3: Run focused tests**
+- [x] **Step 3: Run focused tests**
 
 Run:
 
@@ -1442,7 +1442,7 @@ pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "creates, reope
 
 Expected: all pass.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 Run:
 
@@ -1456,7 +1456,7 @@ pnpm test:e2e
 
 Expected: all pass. If `pnpm test:e2e` starts the dev servers through the existing test script, use that. If it does not, start `apps/server` and `apps/web` in separate terminals, then rerun the Playwright CLI command.
 
-- [ ] **Step 5: Commit docs and plan status**
+- [x] **Step 5: Commit docs and plan status**
 
 Run:
 
