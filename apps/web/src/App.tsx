@@ -70,22 +70,47 @@ function remotePresenceSignature(member: CollaborationPresence) {
 function renderNode({
   node,
   selectedNodeId,
+  hasSelectedAncestor = false,
+  hasComponentInstanceAncestor = false,
   onSelect,
   onGeometryChange,
   onResizeStart
 }: {
   node: RendererNode;
   selectedNodeId: string | null;
+  hasSelectedAncestor?: boolean;
+  hasComponentInstanceAncestor?: boolean;
   onSelect: (nodeId: string) => void;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onResizeStart: (nodeId: string) => void;
 }) {
   const isSelected = node.id === selectedNodeId;
+  const shouldDeferToAncestor = hasSelectedAncestor || hasComponentInstanceAncestor;
   const handleSize = editorKonvaTokens.selection.handleSize;
   const resizeHitSize = editorKonvaTokens.selection.resizeHitSize;
   const startResize = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
     event.cancelBubble = true;
     onResizeStart(node.id);
+  };
+  const selectAndPrimeDrag = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    if (shouldDeferToAncestor) {
+      return;
+    }
+
+    event.cancelBubble = true;
+    if (!isSelected) {
+      onSelect(node.id);
+      event.currentTarget.draggable(true);
+      event.currentTarget.startDrag();
+    }
+  };
+  const selectFromClick = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    if (shouldDeferToAncestor) {
+      return;
+    }
+
+    event.cancelBubble = true;
+    onSelect(node.id);
   };
 
   const body =
@@ -117,14 +142,10 @@ function renderNode({
       y={node.transform.y}
       rotation={node.transform.rotation}
       draggable={isSelected}
-      onClick={(event) => {
-        event.cancelBubble = true;
-        onSelect(node.id);
-      }}
-      onTap={(event) => {
-        event.cancelBubble = true;
-        onSelect(node.id);
-      }}
+      onMouseDown={selectAndPrimeDrag}
+      onTouchStart={selectAndPrimeDrag}
+      onClick={selectFromClick}
+      onTap={selectFromClick}
       onDragEnd={(event) => {
         onGeometryChange(node.id, {
           x: Math.round(event.target.x()),
@@ -169,6 +190,8 @@ function renderNode({
         renderNode({
           node: child,
           selectedNodeId,
+          hasSelectedAncestor: hasSelectedAncestor || isSelected,
+          hasComponentInstanceAncestor: hasComponentInstanceAncestor || node.kind === "component_instance",
           onSelect,
           onGeometryChange,
           onResizeStart
