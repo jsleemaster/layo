@@ -28,6 +28,7 @@ This inventory is based on current Figma Learn and Figma developer documentation
 - Sharing and permissions: https://help.figma.com/hc/en-us/articles/1500007609322-Guide-to-sharing-and-permissions
 - Branching: https://help.figma.com/hc/en-us/articles/360063144053-Guide-to-branching
 - Comments: https://help.figma.com/hc/en-us/articles/360039825314-Guide-to-comments-in-Figma
+- Core interaction rule matrix: `docs/product/figma-core-interaction-rules.md`
 
 ## Product Surface Map
 
@@ -95,11 +96,12 @@ Figma currently spans these product surfaces:
 The most important Figma gaps for this repo are not the largest feature surfaces. They are the features that make a canvas editor feel predictable:
 
 1. Auto layout and constraints.
-2. Resize, alignment, distribution, nesting, and layer ordering.
-3. Component variants, properties, overrides, swaps, and slots.
-4. Variables, styles, and library-like reuse.
-5. Comments, version history, and branchable change review.
-6. Prototype links and basic presentation mode.
-7. Dev handoff panel backed by the existing MCP/HTTP/code-export model.
+2. Core editing shortcuts and selection rules: delete, duplicate, copy/paste, multi-select, nesting, and layer ordering.
+3. Resize, alignment, distribution, and snap guides.
+4. Component variants, properties, overrides, swaps, and slots.
+5. Variables, styles, and library-like reuse.
+6. Comments, version history, and branchable change review.
+7. Prototype links and basic presentation mode.
+8. Dev handoff panel backed by the existing MCP/HTTP/code-export model.
 
 These become the migration roadmap in `docs/product/figma-migration-roadmap.md`.

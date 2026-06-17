@@ -291,6 +291,39 @@ export function nudgeSelectedNode(
   });
 }
 
+export function deleteSelectedNode(state: EditorState): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "delete_node",
+    parentId: selected.parentId,
+    node: selected.node
+  });
+}
+
+export function duplicateSelectedNode(state: EditorState): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected) {
+    return state;
+  }
+
+  const copyIndex = nextCopyIndex(state.document, selected.node.id);
+  const copiedNode = structuredClone(selected.node);
+  const copiedNodeId = `${selected.node.id}-copy-${copyIndex}`;
+  renameNodeTreeForCopy(copiedNode, selected.node.id, copiedNodeId);
+  copiedNode.name =
+    copyIndex === 1 ? `${selected.node.name} 복사본` : `${selected.node.name} 복사본 ${copyIndex}`;
+
+  return executeEditorCommand(state, {
+    type: "create_node",
+    parentId: selected.parentId,
+    node: copiedNode
+  });
+}
+
 export function createRectangleNode(sequence: number): RendererNode {
   return {
     id: `rectangle-${sequence}`,
@@ -778,6 +811,80 @@ function findParentChildren(
 
   const node = findNodeById(document, parentId);
   return node ? { children: node.children } : null;
+}
+
+function findSelectedNodeWithParent(
+  state: EditorState
+): { parentId: string; node: RendererNode } | null {
+  const selectedNodeId = state.selection.nodeId;
+  if (!selectedNodeId) {
+    return null;
+  }
+
+  for (const page of state.document.pages) {
+    const topLevelNode = page.children.find((node) => node.id === selectedNodeId);
+    if (topLevelNode) {
+      return { parentId: page.id, node: topLevelNode };
+    }
+
+    for (const node of page.children) {
+      const found = findNodeParentInTree(node, selectedNodeId);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findNodeParentInTree(
+  parent: RendererNode,
+  nodeId: string
+): { parentId: string; node: RendererNode } | null {
+  const child = parent.children.find((candidate) => candidate.id === nodeId);
+  if (child) {
+    return { parentId: parent.id, node: child };
+  }
+
+  for (const candidate of parent.children) {
+    const found = findNodeParentInTree(candidate, nodeId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function nextCopyIndex(document: RendererDocument, nodeId: string): number {
+  const existingIds = new Set<string>();
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectNodeIds(node, existingIds);
+    }
+  }
+
+  let copyIndex = 1;
+  while (existingIds.has(`${nodeId}-copy-${copyIndex}`)) {
+    copyIndex += 1;
+  }
+
+  return copyIndex;
+}
+
+function collectNodeIds(node: RendererNode, ids: Set<string>): void {
+  ids.add(node.id);
+  for (const child of node.children) {
+    collectNodeIds(child, ids);
+  }
+}
+
+function renameNodeTreeForCopy(node: RendererNode, originalRootId: string, copiedRootId: string): void {
+  node.id = node.id === originalRootId ? copiedRootId : `${copiedRootId}__${node.id}`;
+  for (const child of node.children) {
+    renameNodeTreeForCopy(child, originalRootId, copiedRootId);
+  }
 }
 
 function replaceNodeById(document: RendererDocument, nodeId: string, replacement: RendererNode): boolean {

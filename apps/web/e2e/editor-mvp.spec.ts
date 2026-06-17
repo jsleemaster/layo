@@ -235,6 +235,25 @@ test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with
   await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
 });
 
+test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ page }) => {
+  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+
+  await page.goto("http://127.0.0.1:5173/");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.keyboard.press("Control+D");
+  await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+
+  await page.keyboard.press("Backspace");
+  await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
+});
+
 test("component instances drag as a single selected object from nested content", async ({ page }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });

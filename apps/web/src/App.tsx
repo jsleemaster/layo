@@ -38,6 +38,8 @@ import {
   createEditorState,
   createRectangleNode,
   createTextNode,
+  deleteSelectedNode,
+  duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
   getNodeAbsolutePosition,
@@ -851,6 +853,16 @@ export function App() {
           publishEditorPresence(nextState);
           return nextState;
         });
+        return;
+      }
+      if (isCommand && event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        updateViewportFromInteraction(duplicateSelectedNode);
+        return;
+      }
+      if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
+        event.preventDefault();
+        updateViewportFromInteraction(deleteSelectedNode);
         return;
       }
       if (event.key === "Escape") {

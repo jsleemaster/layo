@@ -12,6 +12,7 @@ This roadmap translates `docs/product/figma-feature-inventory.md` into implement
 - Exclude centralized SaaS assumptions unless the user explicitly asks for hosted multi-tenant infrastructure.
 - Every adopted feature must be exposed through the document model and deterministic agent surfaces, not only through UI clicks.
 - Browser verification must use Playwright CLI.
+- For basic canvas behavior, use `docs/product/figma-core-interaction-rules.md` as the current rule matrix before creating a new implementation slice.
 
 ## Current Baseline
 
@@ -152,7 +153,8 @@ Implementation shape:
 
 ## Immediate Implementation Order
 
-1. Implement Lane 1 layout foundation.
-2. Verify the existing drag behavior still passes.
-3. Add Playwright CLI tests showing that child positions automatically update when auto layout is enabled.
-4. Merge only after `pnpm test`, `pnpm typecheck`, web build, and relevant Playwright suites pass.
+1. Keep the landed Lane 1 layout foundation and PR #20 navigation fixes green.
+2. Implement the first core interaction shortcut slice from `docs/product/figma-core-interaction-rules.md`: selected-layer Delete/Backspace and Cmd/Ctrl+D duplicate.
+3. Move to multi-selection and marquee before alignment/distribute, because those commands require multiple selected layers.
+4. Add snap guides only after live drag preview and multi-selection bounds are stable.
+5. Merge only after `pnpm test`, `pnpm typecheck`, web build, and relevant Playwright suites pass.

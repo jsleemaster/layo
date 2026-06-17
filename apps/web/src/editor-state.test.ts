@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { RendererDocument } from "@canvas-mcp-editor/renderer";
 import {
   createEditorState,
+  deleteSelectedNode,
+  duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
   createRectangleNode,
@@ -291,6 +293,28 @@ describe("editor state commands", () => {
     expect(findNodeById(nudged.document, "text-1")?.transform).toMatchObject({ x: 33, y: 40 });
     expect(nudged.selection.nodeId).toBe("text-1");
     expect(findNodeById(undo(nudged).document, "text-1")?.transform).toMatchObject({ x: 32, y: 40 });
+  });
+
+  test("deletes the selected node and restores it with undo", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const deleted = deleteSelectedNode(initial);
+
+    expect(findNodeById(deleted.document, "text-1")).toBeNull();
+    expect(deleted.selection.nodeId).toBeNull();
+    expect(findNodeById(undo(deleted).document, "text-1")?.name).toBe("헤드라인");
+  });
+
+  test("duplicates the selected node into the same parent and selects the duplicate", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const duplicated = duplicateSelectedNode(initial);
+    const duplicate = findNodeById(duplicated.document, "text-1-copy-1");
+
+    expect(duplicate?.name).toBe("헤드라인 복사본");
+    expect(duplicate?.transform).toMatchObject({ x: 32, y: 40 });
+    expect(duplicated.selection.nodeId).toBe("text-1-copy-1");
+    expect(findNodeById(undo(duplicated).document, "text-1-copy-1")).toBeNull();
   });
 
   test("calculates absolute node position through parent transforms", () => {
