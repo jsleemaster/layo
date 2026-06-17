@@ -38,6 +38,7 @@ The app supports these core workflows:
 - Collaboration must remain team-owned: static web hosting is separate from relay hosting.
 - Treat the Rust relay as experimental and encrypted-room-only unless plain Yjs support is explicitly added.
 - Do not store relay passphrases or derived encryption keys in exported team manifests.
+- Treat `docs/superpowers/PLAN_STATUS.md` as the source of truth for historical plan completion. Individual plan files may contain stale unchecked boxes from earlier execution.
 
 ## Common Commands
 
@@ -126,3 +127,7 @@ This project is currently an MVP foundation, not a finished professional design 
 - Rust core or Rust relay maturation.
 
 If a request does not fit one of these lanes, document the product tradeoff before expanding scope.
+
+## Plan Status
+
+Use `docs/superpowers/PLAN_STATUS.md` before resuming any file under `docs/superpowers/plans`. The plan directory is mostly historical implementation evidence now; new product work should start from a new plan unless `PLAN_STATUS.md` explicitly marks an existing plan active.

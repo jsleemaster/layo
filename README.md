@@ -4,7 +4,7 @@ Canvas MCP Editor is an open-source, local-first design editor experiment built 
 
 The project goal is not to clone Figma feature-for-feature. The first milestone is a small personal design editor with a stable document model that AI agents can inspect and edit through deterministic MCP and HTTP tools.
 
-For AI-agent handoff, read `AGENTS.md` first. For a concise product overview, read `docs/PROJECT_BRIEF.md`.
+For AI-agent handoff, read `AGENTS.md` first. For a concise product overview, read `docs/PROJECT_BRIEF.md`. For historical plan completion state, read `docs/superpowers/PLAN_STATUS.md`.
 
 ## Planned MVP
 
