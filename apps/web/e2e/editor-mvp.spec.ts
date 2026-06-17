@@ -1,13 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { rm } from "node:fs/promises";
 
-test("canvas editor MVP supports select, inspect, edit, undo, create, and zoom", async ({ page }) => {
+test("canvas editor MVP supports Korean-first select, inspect, edit, undo, create, and zoom", async ({ page }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
 
   await page.goto("http://127.0.0.1:5173/");
 
-  await page.getByRole("button", { name: "Headline" }).click();
+  await page.getByRole("button", { name: "헤드라인" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("32");
 
   const canvas = page.getByTestId("canvas-area");
@@ -42,40 +42,40 @@ test("canvas editor MVP supports select, inspect, edit, undo, create, and zoom",
   await page.getByTestId("inspector-y").fill("112");
   await page.getByTestId("inspector-width").fill("300");
   await page.getByTestId("inspector-height").fill("60");
-  await page.getByTestId("inspector-text").fill("Verified MVP headline");
+  await page.getByTestId("inspector-text").fill("검증된 MVP 헤드라인");
 
   await expect(page.getByTestId("inspector-x")).toHaveValue("96");
   await expect(page.getByTestId("inspector-y")).toHaveValue("112");
   await expect(page.getByTestId("inspector-width")).toHaveValue("300");
   await expect(page.getByTestId("inspector-height")).toHaveValue("60");
-  await expect(page.getByTestId("inspector-text")).toHaveValue("Verified MVP headline");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("검증된 MVP 헤드라인");
 
-  await page.getByRole("button", { name: "Undo" }).click();
-  await expect(page.getByTestId("inspector-text")).toHaveValue("Canvas MCP Editor");
+  await page.getByRole("button", { name: "되돌리기" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
 
-  await page.getByRole("button", { name: "Redo" }).click();
-  await expect(page.getByTestId("inspector-text")).toHaveValue("Verified MVP headline");
+  await page.getByRole("button", { name: "다시 실행" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("검증된 MVP 헤드라인");
 
-  await page.getByRole("button", { name: "Create rectangle" }).click();
-  await expect(page.getByRole("button", { name: "Rectangle 3" })).toBeVisible();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Landing Frame" }).click();
-  await page.getByRole("button", { name: "Create component" }).click();
-  await expect(page.getByRole("button", { name: /Landing Frame .* Component/ })).toBeVisible();
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
+  await expect(page.getByRole("button", { name: /랜딩 프레임 .* 컴포넌트/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "Create instance" }).click();
-  await expect(page.getByRole("button", { name: /Landing Frame Component Instance .* Instance/ })).toBeVisible();
-  await expect(page.getByText("component_instance")).toBeVisible();
+  await page.getByRole("button", { name: "인스턴스 만들기" }).click();
+  await expect(page.getByRole("button", { name: /랜딩 프레임 컴포넌트 인스턴스 .* 인스턴스/ })).toBeVisible();
+  await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
 
-  await page.getByRole("button", { name: "Detach instance" }).click();
-  await expect(page.getByText("frame", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "인스턴스 분리" }).click();
+  await expect(page.locator(".node-summary span")).toHaveText("프레임");
 
-  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "확대" }).click();
   await expect(page.getByText("125%")).toBeVisible();
 
   const agentId = `agent-note-${Date.now()}`;
-  const agentName = `Agent Note ${Date.now()}`;
-  const agentValue = "Verified agent-created text";
+  const agentName = `에이전트 메모 ${Date.now()}`;
+  const agentValue = "에이전트가 만든 검증 텍스트";
   const agentResponse = await page.request.post(
     "http://127.0.0.1:4317/files/sample-file/agent/commands",
     {
@@ -152,10 +152,10 @@ test("component instances drag as a single selected object from nested content",
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
 
   await page.goto("http://127.0.0.1:5173/");
-  await page.getByRole("button", { name: "Landing Frame" }).click();
-  await page.getByRole("button", { name: "Create component" }).click();
-  await page.getByRole("button", { name: "Create instance" }).click();
-  await expect(page.getByText("component_instance")).toBeVisible();
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
+  await page.getByRole("button", { name: "인스턴스 만들기" }).click();
+  await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
   await expect(page.getByTestId("inspector-x")).toHaveValue("560");
   await expect(page.getByTestId("inspector-y")).toHaveValue("120");
 
@@ -169,7 +169,7 @@ test("component instances drag as a single selected object from nested content",
   await page.mouse.move(stageBox.x + 672, stageBox.y + 208);
   await page.mouse.up();
 
-  await expect(page.getByText("component_instance")).toBeVisible();
+  await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
   await expect(page.getByTestId("inspector-x")).toHaveValue("620");
   await expect(page.getByTestId("inspector-y")).toHaveValue("150");
 });
@@ -179,10 +179,10 @@ test("unselected component instances move on the first drag gesture", async ({ p
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
 
   await page.goto("http://127.0.0.1:5173/");
-  await page.getByRole("button", { name: "Landing Frame" }).click();
-  await page.getByRole("button", { name: "Create component" }).click();
-  await page.getByRole("button", { name: "Create instance" }).click();
-  await expect(page.getByText("component_instance")).toBeVisible();
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
+  await page.getByRole("button", { name: "인스턴스 만들기" }).click();
+  await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
 
   const stageBox = await page.locator("canvas").first().boundingBox();
   if (!stageBox) {
@@ -190,14 +190,14 @@ test("unselected component instances move on the first drag gesture", async ({ p
   }
 
   await page.mouse.click(stageBox.x + 60, stageBox.y + 580);
-  await expect(page.getByText("Select a layer or canvas node.")).toBeVisible();
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
 
   await page.mouse.move(stageBox.x + 590, stageBox.y + 140);
   await page.mouse.down();
   await page.mouse.move(stageBox.x + 650, stageBox.y + 170);
   await page.mouse.up();
 
-  await expect(page.getByText("component_instance")).toBeVisible();
+  await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
   await expect(page.getByTestId("inspector-x")).toHaveValue("620");
   await expect(page.getByTestId("inspector-y")).toHaveValue("150");
 });
@@ -207,21 +207,21 @@ test("inspector auto layout stacks children inside a selected frame", async ({ p
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
 
   await page.goto("http://127.0.0.1:5173/");
-  await page.getByRole("button", { name: "Landing Frame" }).click();
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByTestId("inspector-layout-mode").selectOption("auto");
   await page.getByTestId("inspector-layout-direction").selectOption("vertical");
   await page.getByTestId("inspector-layout-gap").fill("12");
   await page.getByTestId("inspector-layout-padding-top").fill("20");
   await page.getByTestId("inspector-layout-padding-left").fill("24");
 
-  await page.getByRole("button", { name: "Create rectangle" }).click();
-  await expect(page.getByRole("button", { name: "Rectangle 3" })).toBeVisible();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Headline" }).click();
+  await page.getByRole("button", { name: "헤드라인" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("24");
   await expect(page.getByTestId("inspector-y")).toHaveValue("20");
 
-  await page.getByRole("button", { name: "Rectangle 3" }).click();
+  await page.getByRole("button", { name: "사각형 3" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("24");
   await expect(page.getByTestId("inspector-y")).toHaveValue("80");
 });

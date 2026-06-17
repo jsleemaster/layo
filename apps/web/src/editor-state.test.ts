@@ -18,16 +18,16 @@ import {
 function sampleDocument(): RendererDocument {
   return {
     id: "sample-file",
-    name: "Sample File",
+    name: "샘플 파일",
     pages: [
       {
         id: "page-1",
-        name: "Page 1",
+        name: "페이지 1",
         children: [
           {
             id: "frame-1",
             kind: "frame",
-            name: "Landing Frame",
+            name: "랜딩 프레임",
             transform: { x: 120, y: 80, rotation: 0 },
             size: { width: 420, height: 280 },
             style: { fill: "#ffffff", stroke: "#d1d5db", stroke_width: 1, opacity: 1 },
@@ -36,13 +36,13 @@ function sampleDocument(): RendererDocument {
               {
                 id: "text-1",
                 kind: "text",
-                name: "Headline",
+                name: "헤드라인",
                 transform: { x: 32, y: 40, rotation: 0 },
                 size: { width: 260, height: 48 },
                 style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
                 content: {
                   type: "text",
-                  value: "Canvas MCP Editor",
+                  value: "캔버스 MCP 에디터",
                   font_size: 28,
                   font_family: "Inter"
                 },
@@ -110,7 +110,7 @@ describe("editor state commands", () => {
     const undone = undo(renamed);
     expect(findNodeById(undone.document, "text-1")?.content).toMatchObject({
       type: "text",
-      value: "Canvas MCP Editor"
+      value: "캔버스 MCP 에디터"
     });
   });
 
@@ -123,7 +123,7 @@ describe("editor state commands", () => {
       node: {
         id: "rectangle-1",
         kind: "rectangle",
-        name: "Rectangle",
+        name: "사각형",
         transform: { x: 180, y: 140, rotation: 0 },
         size: { width: 160, height: 96 },
         style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
@@ -132,7 +132,7 @@ describe("editor state commands", () => {
       }
     });
 
-    expect(findNodeById(created.document, "rectangle-1")?.name).toBe("Rectangle");
+    expect(findNodeById(created.document, "rectangle-1")?.name).toBe("사각형");
     expect(created.selection.nodeId).toBe("rectangle-1");
     expect(findNodeById(undo(created).document, "rectangle-1")).toBeNull();
   });
@@ -153,7 +153,7 @@ describe("editor state commands", () => {
       node: {
         id: "rectangle-1",
         kind: "rectangle",
-        name: "Rectangle",
+        name: "사각형",
         transform: { x: 180, y: 140, rotation: 0 },
         size: { width: 160, height: 96 },
         style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
@@ -236,17 +236,17 @@ describe("editor state commands", () => {
     expect(rectangle).toMatchObject({
       id: "rectangle-3",
       kind: "rectangle",
-      name: "Rectangle 3",
+      name: "사각형 3",
       transform: { x: 180, y: 140, rotation: 0 },
       size: { width: 160, height: 96 }
     });
     expect(text).toMatchObject({
       id: "text-4",
       kind: "text",
-      name: "Text 4",
+      name: "텍스트 4",
       transform: { x: 220, y: 180, rotation: 0 },
       size: { width: 220, height: 44 },
-      content: { type: "text", value: "New text" }
+      content: { type: "text", value: "새 텍스트" }
     });
   });
 

@@ -56,7 +56,7 @@ fn layout_metadata_round_trips_through_json() {
       "pages": [
         {
           "id": "page-1",
-          "name": "Page 1",
+          "name": "페이지 1",
           "children": [
             {
               "id": "frame-1",

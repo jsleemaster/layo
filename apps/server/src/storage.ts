@@ -117,10 +117,30 @@ export class FileStorage {
     await mkdir(this.filesDir, { recursive: true });
     const filePath = this.filePathFor(sampleDocument.id);
 
+    let exists = true;
     try {
       await stat(filePath);
     } catch {
+      exists = false;
+    }
+
+    if (!exists) {
       await writeFile(filePath, `${JSON.stringify(sampleDocument, null, 2)}\n`, "utf8");
+      return;
+    }
+
+    await this.localizeLegacySeedFile(filePath);
+  }
+
+  private async localizeLegacySeedFile(filePath: string) {
+    const raw = await readFile(filePath, "utf8");
+    const document = JSON.parse(raw) as DesignFile;
+    if (document.id !== sampleDocument.id) {
+      return;
+    }
+
+    if (localizeLegacySampleLabels(document)) {
+      await writeFile(filePath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
     }
   }
 
@@ -275,7 +295,7 @@ export class FileStorage {
     const node = structuredClone(definition.source_node);
     renameInstanceTree(node, input.instanceId);
     node.id = input.instanceId;
-    node.name = `${definition.name} Instance`;
+    node.name = `${definition.name} 인스턴스`;
     node.kind = "component_instance";
     node.transform = { ...node.transform, x: input.x, y: input.y };
     node.component_instance = {
@@ -389,6 +409,48 @@ function findInNode(node: DesignNode, nodeId: string): DesignNode | null {
   }
 
   return null;
+}
+
+function localizeLegacySampleLabels(document: DesignFile): boolean {
+  let changed = false;
+  if (document.name === "Sample File") {
+    document.name = "샘플 파일";
+    changed = true;
+  }
+
+  for (const page of document.pages) {
+    if (page.name === "Page 1") {
+      page.name = "페이지 1";
+      changed = true;
+    }
+    for (const node of page.children) {
+      changed = localizeLegacySampleNode(node) || changed;
+    }
+  }
+
+  return changed;
+}
+
+function localizeLegacySampleNode(node: DesignNode): boolean {
+  let changed = false;
+  if (node.name === "Landing Frame") {
+    node.name = "랜딩 프레임";
+    changed = true;
+  }
+  if (node.name === "Headline") {
+    node.name = "헤드라인";
+    changed = true;
+  }
+  if (node.content.type === "text" && node.content.value === "Canvas MCP Editor") {
+    node.content.value = "캔버스 MCP 에디터";
+    changed = true;
+  }
+
+  for (const child of node.children) {
+    changed = localizeLegacySampleNode(child) || changed;
+  }
+
+  return changed;
 }
 
 function findParentChildren(document: DesignFile, parentId: string): { children: DesignNode[] } | null {

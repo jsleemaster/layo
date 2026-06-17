@@ -29,7 +29,7 @@ describe("HTTP server", () => {
 
     const file = await server.inject({ method: "GET", url: "/files/sample-file" });
     expect(file.statusCode).toBe(200);
-    expect(file.json().file.name).toBe("Sample File");
+    expect(file.json().file.name).toBe("샘플 파일");
   });
 
   test("updates node geometry, fill, text, and creates nodes", async () => {
@@ -55,10 +55,10 @@ describe("HTTP server", () => {
     const text = await server.inject({
       method: "PATCH",
       url: "/files/sample-file/nodes/text-1/text",
-      payload: { value: "Saved headline" }
+      payload: { value: "저장된 헤드라인" }
     });
     expect(text.statusCode).toBe(200);
-    expect(text.json().node.content.value).toBe("Saved headline");
+    expect(text.json().node.content.value).toBe("저장된 헤드라인");
 
     const created = await server.inject({
       method: "POST",
@@ -68,7 +68,7 @@ describe("HTTP server", () => {
         node: {
           id: "rectangle-99",
           kind: "rectangle",
-          name: "Rectangle 99",
+          name: "사각형 99",
           transform: { x: 12, y: 24, rotation: 0 },
           size: { width: 100, height: 80 },
           style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
@@ -134,7 +134,7 @@ describe("HTTP server", () => {
     const find = await server.inject({
       method: "POST",
       url: "/files/sample-file/agent/find",
-      payload: { text: "Canvas" }
+      payload: { text: "캔버스" }
     });
     expect(find.statusCode).toBe(200);
     expect(find.json().nodes.map((node: { id: string }) => node.id)).toEqual(["text-1"]);
@@ -149,8 +149,8 @@ describe("HTTP server", () => {
             type: "create_text",
             parentId: "page-1",
             id: "agent-http-note",
-            name: "Agent HTTP Note",
-            value: "HTTP agent edit",
+            name: "에이전트 HTTP 메모",
+            value: "HTTP 에이전트 편집",
             x: 112,
             y: 380,
             width: 260,
@@ -163,7 +163,7 @@ describe("HTTP server", () => {
     expect(dryRun.json().result.persisted).toBe(false);
 
     const afterDryRun = await server.inject({ method: "GET", url: "/files/sample-file" });
-    expect(JSON.stringify(afterDryRun.json().file)).not.toContain("HTTP agent edit");
+    expect(JSON.stringify(afterDryRun.json().file)).not.toContain("HTTP 에이전트 편집");
 
     const persisted = await server.inject({
       method: "POST",
@@ -175,8 +175,8 @@ describe("HTTP server", () => {
             type: "create_text",
             parentId: "page-1",
             id: "agent-http-note",
-            name: "Agent HTTP Note",
-            value: "HTTP agent edit",
+            name: "에이전트 HTTP 메모",
+            value: "HTTP 에이전트 편집",
             x: 112,
             y: 380,
             width: 260,
@@ -223,13 +223,13 @@ describe("HTTP server", () => {
       children: [{ id: "text-1", kind: "text" }]
     });
     expect(body.export.elements[0].implementation).toMatchObject({
-      componentName: "LandingFrame",
+      componentName: "Frame1",
       suggestedProps: [
         {
-          name: "headline",
+          name: "text",
           type: "string",
           sourceNodeId: "text-1",
-          defaultValue: "Canvas MCP Editor"
+          defaultValue: "캔버스 MCP 에디터"
         }
       ]
     });

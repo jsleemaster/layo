@@ -486,7 +486,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       const node: DesignNode = {
         id: command.id,
         kind: "rectangle",
-        name: command.name ?? "Rectangle",
+        name: command.name ?? "사각형",
         transform: { x: command.x ?? 180, y: command.y ?? 140, rotation: 0 },
         size: { width: command.width ?? 160, height: command.height ?? 96 },
         style: {
@@ -505,7 +505,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       const node: DesignNode = {
         id: command.id,
         kind: "text",
-        name: command.name ?? "Text",
+        name: command.name ?? "텍스트",
         transform: { x: command.x ?? 220, y: command.y ?? 180, rotation: 0 },
         size: { width: command.width ?? 220, height: command.height ?? 44 },
         style: {
@@ -516,7 +516,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
         },
         content: {
           type: "text",
-          value: command.value ?? "New text",
+          value: command.value ?? "새 텍스트",
           font_size: command.fontSize ?? 24,
           font_family: command.fontFamily ?? "Inter"
         },
@@ -560,7 +560,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       const node = structuredClone(component.source_node);
       renameInstanceTree(node, command.instanceId);
       node.id = command.instanceId;
-      node.name = `${component.name} Instance`;
+      node.name = `${component.name} 인스턴스`;
       node.kind = "component_instance";
       node.transform = { ...node.transform, x: command.x ?? 520, y: command.y ?? 140 };
       node.component_instance = {

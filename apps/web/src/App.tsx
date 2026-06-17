@@ -79,6 +79,37 @@ function remotePresenceSignature(member: CollaborationPresence) {
   });
 }
 
+function nodeKindLabel(kind: RendererNode["kind"]): string {
+  switch (kind) {
+    case "frame":
+      return "프레임";
+    case "rectangle":
+      return "사각형";
+    case "text":
+      return "텍스트";
+    case "image":
+      return "이미지";
+    case "component":
+      return "컴포넌트";
+    case "component_instance":
+      return "컴포넌트 인스턴스";
+  }
+}
+
+function collaborationStatusLabel(status: string): string {
+  switch (status) {
+    case "synced":
+      return "동기화됨";
+    case "connecting":
+      return "연결 중";
+    case "error":
+      return "오류";
+    case "offline":
+    default:
+      return "오프라인";
+  }
+}
+
 function renderNode({
   node,
   selectedNodeId,
@@ -299,8 +330,8 @@ function Inspector({
   if (!selectedNode) {
     return (
       <aside className="inspector">
-        <h2>Inspector</h2>
-        <p className="empty-state">Select a layer or canvas node.</p>
+        <h2>검사기</h2>
+        <p className="empty-state">레이어 또는 캔버스 요소를 선택하세요.</p>
       </aside>
     );
   }
@@ -338,10 +369,10 @@ function Inspector({
 
   return (
     <aside className="inspector">
-      <h2>Inspector</h2>
+      <h2>검사기</h2>
       <div className="node-summary">
         <strong>{selectedNode.name}</strong>
-        <span>{selectedNode.kind}</span>
+        <span>{nodeKindLabel(selectedNode.kind)}</span>
       </div>
       <div className="field-grid">
         <label>
@@ -382,7 +413,7 @@ function Inspector({
         </label>
       </div>
       <label className="stacked-field">
-        Fill
+        채우기
         <input
           data-testid="inspector-fill"
           type="color"
@@ -392,7 +423,7 @@ function Inspector({
       </label>
       {selectedNode.content.type === "text" ? (
         <label className="stacked-field">
-          Text
+          텍스트
           <textarea
             data-testid="inspector-text"
             value={selectedNode.content.value}
@@ -400,10 +431,10 @@ function Inspector({
           />
         </label>
       ) : null}
-      <section className="inspector-section" aria-label="Layout">
-        <h3>Layout</h3>
+      <section className="inspector-section" aria-label="레이아웃">
+        <h3>레이아웃</h3>
         <label className="stacked-field">
-          Mode
+          모드
           <select
             data-testid="inspector-layout-mode"
             value={layout.mode}
@@ -411,12 +442,12 @@ function Inspector({
               updateLayout({ mode: event.currentTarget.value as NodeLayout["mode"] })
             }
           >
-            <option value="none">None</option>
-            <option value="auto">Auto</option>
+            <option value="none">없음</option>
+            <option value="auto">자동</option>
           </select>
         </label>
         <label className="stacked-field">
-          Flow
+          방향
           <select
             data-testid="inspector-layout-direction"
             value={layout.direction}
@@ -424,13 +455,13 @@ function Inspector({
               updateLayout({ direction: event.currentTarget.value as NodeLayout["direction"] })
             }
           >
-            <option value="vertical">Vertical</option>
-            <option value="horizontal">Horizontal</option>
+            <option value="vertical">세로</option>
+            <option value="horizontal">가로</option>
           </select>
         </label>
         <div className="field-grid">
           <label>
-            Gap
+            간격
             <input
               data-testid="inspector-layout-gap"
               type="number"
@@ -444,7 +475,7 @@ function Inspector({
             />
           </label>
           <label>
-            Top
+            위
             <input
               data-testid="inspector-layout-padding-top"
               type="number"
@@ -453,7 +484,7 @@ function Inspector({
             />
           </label>
           <label>
-            Right
+            오른쪽
             <input
               data-testid="inspector-layout-padding-right"
               type="number"
@@ -462,7 +493,7 @@ function Inspector({
             />
           </label>
           <label>
-            Bottom
+            아래
             <input
               data-testid="inspector-layout-padding-bottom"
               type="number"
@@ -471,7 +502,7 @@ function Inspector({
             />
           </label>
           <label>
-            Left
+            왼쪽
             <input
               data-testid="inspector-layout-padding-left"
               type="number"
@@ -481,10 +512,10 @@ function Inspector({
           </label>
         </div>
       </section>
-      <section className="inspector-section" aria-label="Constraints">
-        <h3>Constraints</h3>
+      <section className="inspector-section" aria-label="제약">
+        <h3>제약</h3>
         <label className="stacked-field">
-          Horizontal
+          가로
           <select
             data-testid="inspector-constraint-horizontal"
             value={constraints.horizontal}
@@ -494,15 +525,15 @@ function Inspector({
               })
             }
           >
-            <option value="left">Left</option>
-            <option value="right">Right</option>
-            <option value="left_right">Left + right</option>
-            <option value="center">Center</option>
-            <option value="scale">Scale</option>
+            <option value="left">왼쪽</option>
+            <option value="right">오른쪽</option>
+            <option value="left_right">좌우</option>
+            <option value="center">가운데</option>
+            <option value="scale">비율</option>
           </select>
         </label>
         <label className="stacked-field">
-          Vertical
+          세로
           <select
             data-testid="inspector-constraint-vertical"
             value={constraints.vertical}
@@ -512,11 +543,11 @@ function Inspector({
               })
             }
           >
-            <option value="top">Top</option>
-            <option value="bottom">Bottom</option>
-            <option value="top_bottom">Top + bottom</option>
-            <option value="center">Center</option>
-            <option value="scale">Scale</option>
+            <option value="top">위</option>
+            <option value="bottom">아래</option>
+            <option value="top_bottom">상하</option>
+            <option value="center">가운데</option>
+            <option value="scale">비율</option>
           </select>
         </label>
       </section>
@@ -527,7 +558,7 @@ function Inspector({
 export function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [resizeSession, setResizeSession] = useState<{ nodeId: string } | null>(null);
-  const [teamName, setTeamName] = useState("Design Team");
+  const [teamName, setTeamName] = useState("디자인 팀");
   const [relayUrl, setRelayUrl] = useState("");
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
@@ -725,7 +756,7 @@ export function App() {
       type: "create_component",
       nodeId: selectedNode.id,
       componentId: `component-${components.length + 1}`,
-      name: `${selectedNode.name} Component`
+      name: `${selectedNode.name} 컴포넌트`
     });
   };
 
@@ -766,7 +797,7 @@ export function App() {
     }
     const runtimeEncryptionPassphrase = credentials.encryptionPassphrase?.trim();
     if (team.encryption.mode === "shared-key" && !runtimeEncryptionPassphrase) {
-      throw new Error("encryption passphrase is required for encrypted team sync");
+      throw new Error("암호화 팀 동기화에는 암호 구문이 필요합니다");
     }
 
     await teamStore.saveTeam(team);
@@ -817,12 +848,12 @@ export function App() {
     setCollabStatus(session.status);
     publishPresenceSnapshot(session);
     setEncryptionEnabled(team.encryption.mode === "shared-key");
-    setManifestStatus(`Loaded ${team.name}`);
+    setManifestStatus(`${team.name} 불러옴`);
   };
 
   const setManifestError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : "invalid team manifest";
-    setManifestStatus(`Manifest import failed: ${message}`);
+    const message = error instanceof Error ? error.message : "잘못된 팀 매니페스트입니다";
+    setManifestStatus(`매니페스트 가져오기 실패: ${message}`);
   };
 
   const createLocalTeam = () => {
@@ -831,7 +862,7 @@ export function App() {
         name: teamName,
         currentUser: {
           userId: "local-user",
-          displayName: "Local user",
+          displayName: "로컬 사용자",
           color: LOCAL_USER_COLOR
         }
       })
@@ -844,7 +875,7 @@ export function App() {
     }
     const runtimeEncryptionPassphrase = encryptionPassphrase.trim();
     if (encryptionEnabled && !runtimeEncryptionPassphrase) {
-      setManifestError(new Error("encryption passphrase is required for encrypted team sync"));
+      setManifestError(new Error("암호화 팀 동기화에는 암호 구문이 필요합니다"));
       return;
     }
 
@@ -853,7 +884,7 @@ export function App() {
         name: teamName,
         currentUser: {
           userId: "local-user",
-          displayName: "Local user",
+          displayName: "로컬 사용자",
           color: LOCAL_USER_COLOR
         },
         sync: {
@@ -874,7 +905,7 @@ export function App() {
   const exportCurrentTeam = () => {
     if (collabSession) {
       setManifestText(exportTeamManifest(collabSession.team));
-      setManifestStatus(`Exported ${collabSession.team.name}`);
+      setManifestStatus(`${collabSession.team.name} 내보냄`);
     }
   };
 
@@ -912,7 +943,7 @@ export function App() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    setManifestStatus(`Downloaded ${download.filename}`);
+    setManifestStatus(`${download.filename} 다운로드됨`);
   };
 
   const uploadTeamManifest = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1055,8 +1086,8 @@ export function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <h1>Canvas MCP Editor</h1>
-        <p>{editor ? editor.document.name : "Start the local server to load the sample file."}</p>
+        <h1>캔버스 MCP 에디터</h1>
+        <p>{editor ? editor.document.name : "로컬 서버를 시작하면 샘플 파일을 불러옵니다."}</p>
         <div className="layer-list">
           {nodes.map((node) => (
             <button
@@ -1066,16 +1097,16 @@ export function App() {
               onClick={() => selectNode(node.id)}
             >
               {node.name}
-              {node.kind === "component" ? " · Component" : ""}
-              {node.kind === "component_instance" ? " · Instance" : ""}
+              {node.kind === "component" ? " · 컴포넌트" : ""}
+              {node.kind === "component_instance" ? " · 인스턴스" : ""}
             </button>
           ))}
         </div>
-        <section className="team-panel" aria-label="Team collaboration">
-          <h2>Team</h2>
+        <section className="team-panel" aria-label="팀 협업">
+          <h2>팀</h2>
           <div className="team-fields">
             <label>
-              Name
+              이름
               <input
                 data-testid="team-name"
                 value={teamName}
@@ -1083,7 +1114,7 @@ export function App() {
               />
             </label>
             <label>
-              Relay
+              릴레이
               <input
                 data-testid="relay-url"
                 value={relayUrl}
@@ -1092,7 +1123,7 @@ export function App() {
               />
             </label>
             <label>
-              Relay token
+              릴레이 토큰
               <input
                 data-testid="relay-token"
                 value={relayToken}
@@ -1100,7 +1131,7 @@ export function App() {
               />
             </label>
             <label>
-              Member token
+              멤버 토큰
               <input
                 data-testid="member-token"
                 value={memberToken}
@@ -1117,7 +1148,7 @@ export function App() {
               />
             </label>
             <label>
-              Passphrase
+              암호 구문
               <input
                 data-testid="team-e2ee-passphrase"
                 type="password"
@@ -1126,7 +1157,7 @@ export function App() {
               />
             </label>
             <label>
-              Manifest URL
+              매니페스트 URL
               <input
                 data-testid="team-manifest-url"
                 value={manifestUrl}
@@ -1137,25 +1168,25 @@ export function App() {
           </div>
           <div className="team-actions">
             <button type="button" onClick={createLocalTeam} disabled={!editor}>
-              Local
+              로컬
             </button>
             <button type="button" onClick={createRelayTeam} disabled={!editor || !relayUrl.trim()}>
-              Relay
+              릴레이
             </button>
             <button type="button" onClick={exportCurrentTeam} disabled={!collabSession}>
-              Export
+              내보내기
             </button>
             <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
-              Import
+              가져오기
             </button>
             <button type="button" onClick={downloadCurrentTeam} disabled={!collabSession}>
-              Download
+              다운로드
             </button>
             <button type="button" onClick={() => manifestFileInputRef.current?.click()} disabled={!editor}>
-              Upload
+              업로드
             </button>
             <button type="button" onClick={importTeamFromUrl} disabled={!editor || !manifestUrl.trim()}>
-              Load URL
+              URL 불러오기
             </button>
           </div>
           <input
@@ -1167,10 +1198,10 @@ export function App() {
             onChange={uploadTeamManifest}
           />
           <div className="team-status" data-testid="team-status">
-            {collabSession ? `${collabSession.team.name} · ${collabStatus}` : "No team"}
+            {collabSession ? `${collabSession.team.name} · ${collaborationStatusLabel(collabStatus)}` : "팀 없음"}
           </div>
           <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
-            {manifestStatus || "Manifest idle"}
+            {manifestStatus || "매니페스트 대기 중"}
           </div>
           <div className="presence-list" data-testid="presence-list">
             {presence.map((member, index) => (
@@ -1189,16 +1220,16 @@ export function App() {
         </section>
       </aside>
       <section className="editor-workspace">
-        <div className="toolbar" aria-label="Editor toolbar">
-          <button type="button" aria-label="Create rectangle" onClick={() => createNode("rectangle")}>
+        <div className="toolbar" aria-label="에디터 도구 모음">
+          <button type="button" aria-label="사각형 만들기" onClick={() => createNode("rectangle")}>
             ▭
           </button>
-          <button type="button" aria-label="Create text" onClick={() => createNode("text")}>
+          <button type="button" aria-label="텍스트 만들기" onClick={() => createNode("text")}>
             T
           </button>
           <button
             type="button"
-            aria-label="Create component"
+            aria-label="컴포넌트 만들기"
             disabled={!selectedNode || selectedNode.kind === "component_instance"}
             onClick={createComponent}
           >
@@ -1206,7 +1237,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Create instance"
+            aria-label="인스턴스 만들기"
             disabled={!selectedComponent}
             onClick={createInstance}
           >
@@ -1214,7 +1245,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Detach instance"
+            aria-label="인스턴스 분리"
             disabled={!selectedNode?.component_instance}
             onClick={detachInstance}
           >
@@ -1222,7 +1253,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Undo"
+            aria-label="되돌리기"
             disabled={!editor?.history.past.length}
             onClick={() => setEditor((current) => (current ? undo(current) : current))}
           >
@@ -1230,7 +1261,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Redo"
+            aria-label="다시 실행"
             disabled={!editor?.history.future.length}
             onClick={() => setEditor((current) => (current ? redo(current) : current))}
           >
@@ -1238,7 +1269,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Pan left"
+            aria-label="왼쪽으로 이동"
             onClick={() =>
               setEditor((current) => {
                 if (!current) {
@@ -1255,7 +1286,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Pan right"
+            aria-label="오른쪽으로 이동"
             onClick={() =>
               setEditor((current) => {
                 if (!current) {
@@ -1272,7 +1303,7 @@ export function App() {
           </button>
           <button
             type="button"
-            aria-label="Zoom out"
+            aria-label="축소"
             onClick={() =>
               setEditor((current) => {
                 if (!current) {
@@ -1290,7 +1321,7 @@ export function App() {
           <span className="zoom-readout">{Math.round((editor?.viewport.scale ?? 1) * 100)}%</span>
           <button
             type="button"
-            aria-label="Zoom in"
+            aria-label="확대"
             onClick={() =>
               setEditor((current) => {
                 if (!current) {

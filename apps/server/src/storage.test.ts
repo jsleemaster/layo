@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -23,7 +23,7 @@ describe("FileStorage", () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({
       id: "sample-file",
-      name: "Sample File"
+      name: "샘플 파일"
     });
   });
 
@@ -35,7 +35,73 @@ describe("FileStorage", () => {
 
     expect(document).toMatchObject({
       id: "sample-file",
-      name: "Sample File"
+      name: "샘플 파일"
+    });
+  });
+
+  test("upgrades legacy English sample labels without replacing user geometry", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const filesDir = path.join(tempRoot, "files");
+    await mkdir(filesDir, { recursive: true });
+    await writeFile(
+      path.join(filesDir, "sample-file.json"),
+      `${JSON.stringify(
+        {
+          id: "sample-file",
+          name: "Sample File",
+          version: 1,
+          pages: [
+            {
+              id: "page-1",
+              name: "Page 1",
+              children: [
+                {
+                  id: "frame-1",
+                  kind: "frame",
+                  name: "Landing Frame",
+                  children: [
+                    {
+                      id: "text-1",
+                      kind: "text",
+                      name: "Headline",
+                      children: [],
+                      transform: { x: 321, y: 40, rotation: 0 },
+                      size: { width: 260, height: 48 },
+                      style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
+                      content: {
+                        type: "text",
+                        value: "Canvas MCP Editor",
+                        font_size: 28,
+                        font_family: "Inter"
+                      }
+                    }
+                  ],
+                  transform: { x: 120, y: 80, rotation: 0 },
+                  size: { width: 420, height: 280 },
+                  style: { fill: "#ffffff", stroke: "#d1d5db", stroke_width: 1, opacity: 1 },
+                  content: { type: "empty" }
+                }
+              ]
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    const storage = new FileStorage(tempRoot);
+
+    const document = await storage.readFile("sample-file");
+
+    expect(document.name).toBe("샘플 파일");
+    expect(document.pages[0]?.name).toBe("페이지 1");
+    expect(document.pages[0]?.children[0]?.name).toBe("랜딩 프레임");
+    expect(document.pages[0]?.children[0]?.children[0]?.name).toBe("헤드라인");
+    expect(document.pages[0]?.children[0]?.children[0]?.transform.x).toBe(321);
+    expect(document.pages[0]?.children[0]?.children[0]?.content).toMatchObject({
+      type: "text",
+      value: "캔버스 MCP 에디터"
     });
   });
 
@@ -61,10 +127,10 @@ describe("FileStorage", () => {
     const storage = new FileStorage(tempRoot);
 
     const filled = await storage.setNodeFill("sample-file", "text-1", "#2563eb");
-    const text = await storage.updateText("sample-file", "text-1", "Saved headline");
+    const text = await storage.updateText("sample-file", "text-1", "저장된 헤드라인");
 
     expect(filled.style.fill).toBe("#2563eb");
-    expect(text.content).toMatchObject({ type: "text", value: "Saved headline" });
+    expect(text.content).toMatchObject({ type: "text", value: "저장된 헤드라인" });
   });
 
   test("creates a node under a page parent", async () => {
@@ -74,7 +140,7 @@ describe("FileStorage", () => {
     const node = await storage.createNode("sample-file", "page-1", {
       id: "rectangle-99",
       kind: "rectangle",
-      name: "Rectangle 99",
+      name: "사각형 99",
       transform: { x: 12, y: 24, rotation: 0 },
       size: { width: 100, height: 80 },
       style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
@@ -84,7 +150,7 @@ describe("FileStorage", () => {
     const document = await storage.readFile("sample-file");
 
     expect(node.id).toBe("rectangle-99");
-    expect(JSON.stringify(document)).toContain("Rectangle 99");
+    expect(JSON.stringify(document)).toContain("사각형 99");
   });
 
   test("creates components, instances, and detaches instances", async () => {
@@ -118,18 +184,18 @@ describe("FileStorage", () => {
     const storage = new FileStorage(tempRoot);
 
     const inspection = await storage.inspectCanvas("sample-file");
-    const matches = await storage.findNodes("sample-file", { text: "Canvas" });
+    const matches = await storage.findNodes("sample-file", { text: "캔버스" });
 
     expect(inspection.file.id).toBe("sample-file");
     expect(inspection.nodeCount).toBe(2);
-    expect(inspection.pages[0]).toMatchObject({ id: "page-1", name: "Page 1", nodeCount: 2 });
+    expect(inspection.pages[0]).toMatchObject({ id: "page-1", name: "페이지 1", nodeCount: 2 });
     expect(inspection.componentCount).toBe(0);
     expect(inspection.validation.issueCount).toBe(0);
     expect(matches.map((node) => node.id)).toEqual(["text-1"]);
     expect(matches[0]).toMatchObject({
-      name: "Headline",
+      name: "헤드라인",
       kind: "text",
-      text: "Canvas MCP Editor",
+      text: "캔버스 MCP 에디터",
       path: ["page-1", "frame-1", "text-1"]
     });
   });
@@ -146,8 +212,8 @@ describe("FileStorage", () => {
           type: "create_text",
           parentId: "page-1",
           id: "agent-note",
-          name: "Agent Note",
-          value: "Edited by agent",
+          name: "에이전트 메모",
+          value: "에이전트가 수정함",
           x: 96,
           y: 360,
           width: 240,
@@ -160,8 +226,8 @@ describe("FileStorage", () => {
     });
     const afterDryRun = await storage.readFile("sample-file");
 
-    expect(JSON.stringify(dryRun.preview)).toContain("Edited by agent");
-    expect(JSON.stringify(afterDryRun)).not.toContain("Edited by agent");
+    expect(JSON.stringify(dryRun.preview)).toContain("에이전트가 수정함");
+    expect(JSON.stringify(afterDryRun)).not.toContain("에이전트가 수정함");
     expect(dryRun.audit).toMatchObject({
       fileId: "sample-file",
       dryRun: true,
@@ -177,8 +243,8 @@ describe("FileStorage", () => {
           type: "create_text",
           parentId: "page-1",
           id: "agent-note",
-          name: "Agent Note",
-          value: "Edited by agent",
+          name: "에이전트 메모",
+          value: "에이전트가 수정함",
           x: 96,
           y: 360,
           width: 240,
@@ -193,7 +259,7 @@ describe("FileStorage", () => {
     const validation = await storage.validateDocument("sample-file");
     const summary = await storage.getChangeSummary("sample-file", before, after);
 
-    expect(JSON.stringify(after)).toContain("Edited by agent");
+    expect(JSON.stringify(after)).toContain("에이전트가 수정함");
     expect(persisted.persisted).toBe(true);
     expect(validation.issueCount).toBe(0);
     expect(summary.createdNodeIds).toEqual(["agent-note"]);
@@ -221,7 +287,7 @@ describe("FileStorage", () => {
           type: "create_rectangle",
           parentId: "frame-1",
           id: "layout-rectangle",
-          name: "Layout Rectangle",
+          name: "레이아웃 사각형",
           width: 160,
           height: 96
         }

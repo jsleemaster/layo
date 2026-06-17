@@ -253,7 +253,7 @@ export function createRectangleNode(sequence: number): RendererNode {
   return {
     id: `rectangle-${sequence}`,
     kind: "rectangle",
-    name: `Rectangle ${sequence}`,
+    name: `사각형 ${sequence}`,
     transform: { x: 180, y: 140, rotation: 0 },
     size: { width: 160, height: 96 },
     style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
@@ -266,13 +266,13 @@ export function createTextNode(sequence: number): RendererNode {
   return {
     id: `text-${sequence}`,
     kind: "text",
-    name: `Text ${sequence}`,
+    name: `텍스트 ${sequence}`,
     transform: { x: 220, y: 180, rotation: 0 },
     size: { width: 220, height: 44 },
     style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
     content: {
       type: "text",
-      value: "New text",
+      value: "새 텍스트",
       font_size: 24,
       font_family: "Inter"
     },
@@ -441,7 +441,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       renameInstanceTree(node, command.instanceId);
       node.id = command.instanceId;
       node.kind = "component_instance";
-      node.name = `${definition.name} Instance`;
+      node.name = `${definition.name} 인스턴스`;
       node.transform = { ...node.transform, x: command.x, y: command.y };
       node.component_instance = {
         definition_id: command.definitionId,

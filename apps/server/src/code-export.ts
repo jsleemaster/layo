@@ -383,8 +383,20 @@ function classNameFor(nodeId: string): string {
 }
 
 function componentNameFor(root: DesignNode, explicitName?: string): string {
-  const source = explicitName ?? (root.id.startsWith("tds-") ? root.id : root.name);
-  return pascalCase(source);
+  const sources = [
+    explicitName,
+    root.id.startsWith("tds-") ? root.id : root.name,
+    root.id,
+    "canvas-element"
+  ];
+  for (const source of sources) {
+    const name = source ? pascalCase(source) : "";
+    if (name) {
+      return name;
+    }
+  }
+
+  return "CanvasElement";
 }
 
 function propNameFor(value: string): string {

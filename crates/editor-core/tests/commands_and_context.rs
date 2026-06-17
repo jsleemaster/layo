@@ -77,7 +77,7 @@ fn updating_text_returns_inverse_command() {
         inverse,
         Command::UpdateText {
             node_id: "text-1".to_string(),
-            value: "Canvas MCP Editor".to_string()
+            value: "캔버스 MCP 에디터".to_string()
         }
     );
 }

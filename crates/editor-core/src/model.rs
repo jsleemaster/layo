@@ -183,23 +183,23 @@ impl DesignFile {
     pub fn sample() -> Self {
         Self {
             id: "sample-file".to_string(),
-            name: "Sample File".to_string(),
+            name: "샘플 파일".to_string(),
             version: 1,
             components: vec![],
             pages: vec![Page {
                 id: "page-1".to_string(),
-                name: "Page 1".to_string(),
+                name: "페이지 1".to_string(),
                 children: vec![Node {
                     id: "frame-1".to_string(),
                     kind: NodeKind::Frame,
-                    name: "Landing Frame".to_string(),
+                    name: "랜딩 프레임".to_string(),
                     component_instance: None,
                     layout: None,
                     constraints: None,
                     children: vec![Node {
                         id: "text-1".to_string(),
                         kind: NodeKind::Text,
-                        name: "Headline".to_string(),
+                        name: "헤드라인".to_string(),
                         component_instance: None,
                         layout: None,
                         constraints: None,
@@ -220,7 +220,7 @@ impl DesignFile {
                             opacity: 1.0,
                         },
                         content: NodeContent::Text {
-                            value: "Canvas MCP Editor".to_string(),
+                            value: "캔버스 MCP 에디터".to_string(),
                             font_size: 28.0,
                             font_family: "Inter".to_string(),
                         },

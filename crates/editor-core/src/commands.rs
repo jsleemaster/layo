@@ -174,7 +174,7 @@ impl DesignFile {
                 Ok(Command::CreateComponent {
                     node_id,
                     component_id,
-                    name: "Restored Component".to_string(),
+                    name: "복원된 컴포넌트".to_string(),
                 })
             }
             Command::CreateComponentInstance {
@@ -192,7 +192,7 @@ impl DesignFile {
                 let mut instance = definition.source_node.clone();
                 rename_instance_tree(&mut instance, &instance_id);
                 instance.id = instance_id.clone();
-                instance.name = format!("{} Instance", definition.name);
+                instance.name = format!("{} 인스턴스", definition.name);
                 instance.kind = NodeKind::ComponentInstance;
                 instance.transform = Transform {
                     x,

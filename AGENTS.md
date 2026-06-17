@@ -34,6 +34,7 @@ The app supports these core workflows:
 - Use browser automation only to verify that the local web editor renders the result correctly.
 - Browser debugging and visual verification must use Playwright CLI.
 - Keep design UI changes aligned with `DESIGN.md`, `apps/web/src/design-tokens.css`, and `apps/web/src/design-tokens.ts`.
+- Keep user-facing web UI Korean-first. Product code, API names, protocol fields, and generated code identifiers may remain English where they are developer contracts.
 - Preserve local-first behavior. Do not introduce a maintainer-operated production backend as a requirement.
 - Collaboration must remain team-owned: static web hosting is separate from relay hosting.
 - Treat the Rust relay as experimental and encrypted-room-only unless plain Yjs support is explicitly added.

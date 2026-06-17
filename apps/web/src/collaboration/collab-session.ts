@@ -107,7 +107,7 @@ export function createCollabDocumentSession(
     };
     if (input.team.encryption.mode === "shared-key") {
       if (!input.encryptionPassphrase?.trim()) {
-        throw new Error("encryption passphrase is required for encrypted team sync");
+        throw new Error("암호화 팀 동기화에는 암호 구문이 필요합니다");
       }
       provider = createEncryptedProvider({
         ...providerInput,

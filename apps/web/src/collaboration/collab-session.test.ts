@@ -206,7 +206,7 @@ describe("web collaboration session", () => {
         initialDocument: sampleDocument(),
         enablePersistence: false
       })
-    ).toThrow(/passphrase/i);
+    ).toThrow(/암호 구문/);
   });
 
   test("publishes provider presence changes", () => {

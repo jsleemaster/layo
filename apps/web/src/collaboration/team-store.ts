@@ -25,7 +25,7 @@ const CURRENT_TEAM_KEY = "currentTeamId";
 export function createIndexedDbTeamStore(options: IndexedDbTeamStoreOptions = {}): TeamStore {
   const idb = options.indexedDB ?? globalThis.indexedDB;
   if (!idb) {
-    throw new Error("IndexedDB is not available");
+    throw new Error("IndexedDB를 사용할 수 없습니다");
   }
   const databaseName = options.databaseName ?? DEFAULT_DATABASE_NAME;
 
@@ -125,7 +125,7 @@ export async function readTeamManifestFile(file: Pick<File, "text" | "name">): P
   try {
     return importTeamManifest(await file.text());
   } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid team manifest";
+    const message = error instanceof Error ? error.message : "잘못된 팀 매니페스트입니다";
     throw new Error(`${file.name}: ${message}`);
   }
 }
@@ -137,7 +137,7 @@ export async function fetchTeamManifestFromUrl(
   const parsedUrl = parseAllowedManifestUrl(url);
   const response = await fetcher(parsedUrl.toString());
   if (!response.ok) {
-    throw new Error(`failed to fetch team manifest: ${response.status} ${response.statusText}`.trim());
+    throw new Error(`팀 매니페스트를 가져오지 못했습니다: ${response.status} ${response.statusText}`.trim());
   }
 
   return importTeamManifest(await response.text());
@@ -184,7 +184,7 @@ function parseAllowedManifestUrl(input: string): URL {
   try {
     parsed = new URL(input);
   } catch {
-    throw new Error("unsupported manifest url: invalid URL");
+    throw new Error("지원하지 않는 매니페스트 URL입니다: 잘못된 URL");
   }
 
   const allowedHttpsHosts = new Set(["raw.githubusercontent.com", "gist.githubusercontent.com"]);
@@ -195,5 +195,5 @@ function parseAllowedManifestUrl(input: string): URL {
     return parsed;
   }
 
-  throw new Error("unsupported manifest url: use GitHub raw, gist raw, or localhost");
+  throw new Error("지원하지 않는 매니페스트 URL입니다: GitHub raw, gist raw, 또는 localhost를 사용하세요");
 }

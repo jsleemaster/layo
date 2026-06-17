@@ -52,6 +52,8 @@ MIT
 
 Design rules live in `DESIGN.md`. App UI styles must use the executable tokens in `apps/web/src/design-tokens.css` and runtime canvas constants from `apps/web/src/design-tokens.ts`.
 
+The web app is Korean-first for user-facing labels, status text, error messages, and sample document content. Keep API names, MCP tools, protocol fields, and generated code identifiers stable in English where they are developer-facing contracts.
+
 Install dependencies:
 
 ```bash

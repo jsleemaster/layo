@@ -6,12 +6,12 @@ describe("parseDocumentPayload", () => {
     const document = parseDocumentPayload({
       file: {
         id: "sample-file",
-        name: "Sample File",
+        name: "샘플 파일",
         pages: []
       }
     });
 
     expect(document.id).toBe("sample-file");
-    expect(document.name).toBe("Sample File");
+    expect(document.name).toBe("샘플 파일");
   });
 });
