@@ -146,3 +146,58 @@ test("web editor keeps laptop viewport overflow inside the canvas area", async (
   expect(metrics.stageWidth).toBe(960);
   expect(metrics.stageHeight).toBe(640);
 });
+
+test("component instances drag as a single selected object from nested content", async ({ page }) => {
+  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+
+  await page.goto("http://127.0.0.1:5173/");
+  await page.getByRole("button", { name: "Landing Frame" }).click();
+  await page.getByRole("button", { name: "Create component" }).click();
+  await page.getByRole("button", { name: "Create instance" }).click();
+  await expect(page.getByText("component_instance")).toBeVisible();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("560");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("120");
+
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+
+  await page.mouse.move(stageBox.x + 612, stageBox.y + 178);
+  await page.mouse.down();
+  await page.mouse.move(stageBox.x + 672, stageBox.y + 208);
+  await page.mouse.up();
+
+  await expect(page.getByText("component_instance")).toBeVisible();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("150");
+});
+
+test("unselected component instances move on the first drag gesture", async ({ page }) => {
+  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+
+  await page.goto("http://127.0.0.1:5173/");
+  await page.getByRole("button", { name: "Landing Frame" }).click();
+  await page.getByRole("button", { name: "Create component" }).click();
+  await page.getByRole("button", { name: "Create instance" }).click();
+  await expect(page.getByText("component_instance")).toBeVisible();
+
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+
+  await page.mouse.click(stageBox.x + 60, stageBox.y + 580);
+  await expect(page.getByText("Select a layer or canvas node.")).toBeVisible();
+
+  await page.mouse.move(stageBox.x + 590, stageBox.y + 140);
+  await page.mouse.down();
+  await page.mouse.move(stageBox.x + 650, stageBox.y + 170);
+  await page.mouse.up();
+
+  await expect(page.getByText("component_instance")).toBeVisible();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("150");
+});
