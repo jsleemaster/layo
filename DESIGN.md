@@ -140,6 +140,8 @@ When modifying UI:
 3. Use `apps/web/src/design-tokens.ts` for runtime canvas/UI constants.
 4. Run `pnpm run check:design-rules`.
 5. Do not bypass the checker by adding allowlists unless the design rule itself changes.
+6. If a requested UI change conflicts with this file, stop before editing UI, cite the specific rule that would be violated, and ask the user to confirm whether they still want the exception.
+7. Only after explicit user confirmation, update the design rule first, then implement the UI change against the updated rule.
 
 Quick prompt:
 

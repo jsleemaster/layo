@@ -143,13 +143,13 @@ describe("indexeddb team store", () => {
   test("rejects unsupported manifest URL hosts and failed responses", async () => {
     await expect(
       fetchTeamManifestFromUrl("https://example.com/team.json", async () => new Response("{}", { status: 200 }))
-    ).rejects.toThrow(/지원하지 않는 매니페스트 URL/);
+    ).rejects.toThrow(/지원하지 않는 팀 설정 URL/);
 
     await expect(
       fetchTeamManifestFromUrl(
         "https://gist.githubusercontent.com/jsleemaster/example/raw/team.json",
         async () => new Response("not found", { status: 404, statusText: "Not Found" })
       )
-    ).rejects.toThrow(/팀 매니페스트를 가져오지 못했습니다/);
+    ).rejects.toThrow(/팀 설정을 가져오지 못했습니다/);
   });
 });

@@ -154,6 +154,28 @@ test("web editor fills the available work area with a white canvas", async ({ pa
   expect(metrics.stageHeight).toBe(metrics.canvasClientHeight);
 });
 
+test("left sidebar can collapse from the top toolbar", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toBeVisible();
+  await page.getByRole("button", { name: "왼쪽 사이드바 접기" }).click();
+  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "헤드라인" })).toHaveCount(0);
+  await expect(page.getByTestId("stage-frame")).toBeVisible();
+
+  await page.getByRole("button", { name: "왼쪽 사이드바 펼치기" }).click();
+  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
+});
+
+test("component toolbar actions use component-style icons instead of letter labels", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByRole("button", { name: "컴포넌트 만들기" })).not.toHaveText("C");
+  await expect(page.getByRole("button", { name: "인스턴스 만들기" })).not.toHaveText("I");
+  await expect(page.getByRole("button", { name: "인스턴스 분리" })).not.toHaveText("D");
+});
+
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });

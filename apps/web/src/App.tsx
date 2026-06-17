@@ -80,6 +80,7 @@ const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
 const KEYBOARD_PAN_STEP = 24;
 const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
+type TeamPanelMode = "local" | "relay" | "manifest";
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
@@ -610,6 +611,8 @@ export function App() {
   const [manifestStatus, setManifestStatus] = useState("");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
   const [encryptionPassphrase, setEncryptionPassphrase] = useState("");
+  const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
@@ -1037,7 +1040,7 @@ export function App() {
     }
     const runtimeEncryptionPassphrase = credentials.encryptionPassphrase?.trim();
     if (team.encryption.mode === "shared-key" && !runtimeEncryptionPassphrase) {
-      throw new Error("암호화 팀 동기화에는 암호 구문이 필요합니다");
+      throw new Error("암호화 팀 동기화에는 공유 암호가 필요합니다");
     }
 
     await teamStore.saveTeam(team);
@@ -1092,8 +1095,8 @@ export function App() {
   };
 
   const setManifestError = (error: unknown) => {
-    const message = error instanceof Error ? error.message : "잘못된 팀 매니페스트입니다";
-    setManifestStatus(`매니페스트 가져오기 실패: ${message}`);
+    const message = error instanceof Error ? error.message : "잘못된 팀 설정입니다";
+    setManifestStatus(`팀 설정 가져오기 실패: ${message}`);
   };
 
   const createLocalTeam = () => {
@@ -1115,7 +1118,7 @@ export function App() {
     }
     const runtimeEncryptionPassphrase = encryptionPassphrase.trim();
     if (encryptionEnabled && !runtimeEncryptionPassphrase) {
-      setManifestError(new Error("암호화 팀 동기화에는 암호 구문이 필요합니다"));
+      setManifestError(new Error("암호화 팀 동기화에는 공유 암호가 필요합니다"));
       return;
     }
 
@@ -1372,140 +1375,195 @@ export function App() {
   };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <h1>캔버스 MCP 에디터</h1>
-        <p>{editor ? editor.document.name : "로컬 서버를 시작하면 샘플 파일을 불러옵니다."}</p>
-        <div className="layer-list">
-          {nodes.map((node) => (
-            <button
-              key={node.id}
-              type="button"
-              className={editor?.selection.nodeId === node.id ? "is-selected" : undefined}
-              onClick={() => selectNode(node.id)}
-            >
-              {node.name}
-              {node.kind === "component" ? " · 컴포넌트" : ""}
-              {node.kind === "component_instance" ? " · 인스턴스" : ""}
-            </button>
-          ))}
-        </div>
-        <section className="team-panel" aria-label="팀 협업">
-          <h2>팀</h2>
-          <div className="team-fields">
-            <label>
-              이름
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={isSidebarCollapsed ? "왼쪽 사이드바 펼치기" : "왼쪽 사이드바 접기"}
+          aria-expanded={!isSidebarCollapsed}
+          onClick={() => setIsSidebarCollapsed((current) => !current)}
+        >
+          {isSidebarCollapsed ? "☰" : "‹"}
+        </button>
+        {isSidebarCollapsed ? null : (
+          <>
+            <h1>캔버스 MCP 에디터</h1>
+            <p>{editor ? editor.document.name : "로컬 서버를 시작하면 샘플 파일을 불러옵니다."}</p>
+            <div className="layer-list">
+              {nodes.map((node) => (
+                <button
+                  key={node.id}
+                  type="button"
+                  className={editor?.selection.nodeId === node.id ? "is-selected" : undefined}
+                  onClick={() => selectNode(node.id)}
+                >
+                  {node.name}
+                  {node.kind === "component" ? " · 컴포넌트" : ""}
+                  {node.kind === "component_instance" ? " · 인스턴스" : ""}
+                </button>
+              ))}
+            </div>
+            <section className="team-panel" aria-label="팀 협업">
+              <h2>팀</h2>
+              <div className="team-mode-tabs" role="tablist" aria-label="팀 협업 모드">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={teamPanelMode === "local"}
+                  onClick={() => setTeamPanelMode("local")}
+                >
+                  로컬 작업
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={teamPanelMode === "relay"}
+                  onClick={() => setTeamPanelMode("relay")}
+                >
+                  실시간 협업
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={teamPanelMode === "manifest"}
+                  onClick={() => setTeamPanelMode("manifest")}
+                >
+                  팀 설정
+                </button>
+              </div>
+              <div className="team-fields" role="tabpanel">
+                <label>
+                  이름
+                  <input
+                    data-testid="team-name"
+                    value={teamName}
+                    onChange={(event) => setTeamName(event.currentTarget.value)}
+                  />
+                </label>
+                {teamPanelMode === "relay" ? (
+                  <>
+                    <label>
+                      협업 서버 주소
+                      <input
+                        data-testid="relay-url"
+                        value={relayUrl}
+                        placeholder="ws://127.0.0.1:4327"
+                        onChange={(event) => setRelayUrl(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      서버 접속 토큰
+                      <input
+                        data-testid="relay-token"
+                        value={relayToken}
+                        onChange={(event) => setRelayToken(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label>
+                      멤버 인증 토큰
+                      <input
+                        data-testid="member-token"
+                        value={memberToken}
+                        onChange={(event) => setMemberToken(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label className="team-toggle-field">
+                      종단간 암호화
+                      <input
+                        data-testid="team-e2ee-toggle"
+                        type="checkbox"
+                        checked={encryptionEnabled}
+                        onChange={(event) => setEncryptionEnabled(event.currentTarget.checked)}
+                      />
+                    </label>
+                    <label>
+                      공유 암호
+                      <input
+                        data-testid="team-e2ee-passphrase"
+                        type="password"
+                        value={encryptionPassphrase}
+                        onChange={(event) => setEncryptionPassphrase(event.currentTarget.value)}
+                      />
+                    </label>
+                  </>
+                ) : null}
+                {teamPanelMode === "manifest" ? (
+                  <label>
+                    팀 설정 URL
+                    <input
+                      data-testid="team-manifest-url"
+                      value={manifestUrl}
+                      placeholder="https://raw.githubusercontent.com/..."
+                      onChange={(event) => setManifestUrl(event.currentTarget.value)}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <div className="team-actions">
+                {teamPanelMode === "local" ? (
+                  <button type="button" onClick={createLocalTeam} disabled={!editor}>
+                    로컬 팀 만들기
+                  </button>
+                ) : null}
+                {teamPanelMode === "relay" ? (
+                  <button type="button" onClick={createRelayTeam} disabled={!editor || !relayUrl.trim()}>
+                    협업 팀 만들기
+                  </button>
+                ) : null}
+                {teamPanelMode === "manifest" ? (
+                  <>
+                    <button type="button" onClick={exportCurrentTeam} disabled={!collabSession}>
+                      설정 내보내기
+                    </button>
+                    <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
+                      설정 가져오기
+                    </button>
+                    <button type="button" onClick={downloadCurrentTeam} disabled={!collabSession}>
+                      파일로 저장
+                    </button>
+                    <button type="button" onClick={() => manifestFileInputRef.current?.click()} disabled={!editor}>
+                      파일 불러오기
+                    </button>
+                    <button type="button" onClick={importTeamFromUrl} disabled={!editor || !manifestUrl.trim()}>
+                      URL에서 불러오기
+                    </button>
+                  </>
+                ) : null}
+              </div>
               <input
-                data-testid="team-name"
-                value={teamName}
-                onChange={(event) => setTeamName(event.currentTarget.value)}
+                ref={manifestFileInputRef}
+                data-testid="team-manifest-file"
+                className="visually-hidden"
+                type="file"
+                accept="application/json,.json"
+                onChange={uploadTeamManifest}
               />
-            </label>
-            <label>
-              릴레이
-              <input
-                data-testid="relay-url"
-                value={relayUrl}
-                placeholder="ws://127.0.0.1:4327"
-                onChange={(event) => setRelayUrl(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              릴레이 토큰
-              <input
-                data-testid="relay-token"
-                value={relayToken}
-                onChange={(event) => setRelayToken(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              멤버 토큰
-              <input
-                data-testid="member-token"
-                value={memberToken}
-                onChange={(event) => setMemberToken(event.currentTarget.value)}
-              />
-            </label>
-            <label className="team-toggle-field">
-              E2EE
-              <input
-                data-testid="team-e2ee-toggle"
-                type="checkbox"
-                checked={encryptionEnabled}
-                onChange={(event) => setEncryptionEnabled(event.currentTarget.checked)}
-              />
-            </label>
-            <label>
-              암호 구문
-              <input
-                data-testid="team-e2ee-passphrase"
-                type="password"
-                value={encryptionPassphrase}
-                onChange={(event) => setEncryptionPassphrase(event.currentTarget.value)}
-              />
-            </label>
-            <label>
-              매니페스트 URL
-              <input
-                data-testid="team-manifest-url"
-                value={manifestUrl}
-                placeholder="https://raw.githubusercontent.com/..."
-                onChange={(event) => setManifestUrl(event.currentTarget.value)}
-              />
-            </label>
-          </div>
-          <div className="team-actions">
-            <button type="button" onClick={createLocalTeam} disabled={!editor}>
-              로컬
-            </button>
-            <button type="button" onClick={createRelayTeam} disabled={!editor || !relayUrl.trim()}>
-              릴레이
-            </button>
-            <button type="button" onClick={exportCurrentTeam} disabled={!collabSession}>
-              내보내기
-            </button>
-            <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
-              가져오기
-            </button>
-            <button type="button" onClick={downloadCurrentTeam} disabled={!collabSession}>
-              다운로드
-            </button>
-            <button type="button" onClick={() => manifestFileInputRef.current?.click()} disabled={!editor}>
-              업로드
-            </button>
-            <button type="button" onClick={importTeamFromUrl} disabled={!editor || !manifestUrl.trim()}>
-              URL 불러오기
-            </button>
-          </div>
-          <input
-            ref={manifestFileInputRef}
-            data-testid="team-manifest-file"
-            className="visually-hidden"
-            type="file"
-            accept="application/json,.json"
-            onChange={uploadTeamManifest}
-          />
-          <div className="team-status" data-testid="team-status">
-            {collabSession ? `${collabSession.team.name} · ${collaborationStatusLabel(collabStatus)}` : "팀 없음"}
-          </div>
-          <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
-            {manifestStatus || "매니페스트 대기 중"}
-          </div>
-          <div className="presence-list" data-testid="presence-list">
-            {presence.map((member, index) => (
-              <span key={`${member.userId}-${index}`} className="presence-member">
-                <span style={{ backgroundColor: member.color }} />
-                {member.displayName}
-                {member.selectedNodeId ? ` · ${member.selectedNodeId}` : ""}
-              </span>
-            ))}
-          </div>
-          <textarea
-            data-testid="team-manifest"
-            value={manifestText}
-            onChange={(event) => setManifestText(event.currentTarget.value)}
-          />
-        </section>
+              <div className="team-status" data-testid="team-status">
+                {collabSession ? `${collabSession.team.name} · ${collaborationStatusLabel(collabStatus)}` : "팀 없음"}
+              </div>
+              <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
+                {manifestStatus || "팀 설정 대기 중"}
+              </div>
+              <div className="presence-list" data-testid="presence-list">
+                {presence.map((member, index) => (
+                  <span key={`${member.userId}-${index}`} className="presence-member">
+                    <span style={{ backgroundColor: member.color }} />
+                    {member.displayName}
+                    {member.selectedNodeId ? ` · ${member.selectedNodeId}` : ""}
+                  </span>
+                ))}
+              </div>
+              {teamPanelMode === "manifest" ? (
+                <textarea
+                  data-testid="team-manifest"
+                  value={manifestText}
+                  onChange={(event) => setManifestText(event.currentTarget.value)}
+                />
+              ) : null}
+            </section>
+          </>
+        )}
       </aside>
       <section className="editor-workspace">
         <div className="toolbar" aria-label="에디터 도구 모음">
@@ -1521,7 +1579,9 @@ export function App() {
             disabled={!selectedNode || selectedNode.kind === "component_instance"}
             onClick={createComponent}
           >
-            C
+            <span className="toolbar-icon toolbar-icon-component" aria-hidden="true">
+              ◈
+            </span>
           </button>
           <button
             type="button"
@@ -1529,7 +1589,9 @@ export function App() {
             disabled={!selectedComponent}
             onClick={createInstance}
           >
-            I
+            <span className="toolbar-icon toolbar-icon-instance" aria-hidden="true">
+              ◇
+            </span>
           </button>
           <button
             type="button"
@@ -1537,7 +1599,9 @@ export function App() {
             disabled={!selectedNode?.component_instance}
             onClick={detachInstance}
           >
-            D
+            <span className="toolbar-icon toolbar-icon-detach" aria-hidden="true">
+              ◇
+            </span>
           </button>
           <button
             type="button"

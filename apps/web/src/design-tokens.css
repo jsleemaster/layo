@@ -41,6 +41,7 @@
   --editor-radius-lg: 12px;
 
   --editor-size-sidebar: 280px;
+  --editor-size-sidebar-collapsed: 48px;
   --editor-size-inspector: 300px;
   --editor-size-team-panel: 280px;
   --editor-size-toolbar: 48px;

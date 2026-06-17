@@ -119,6 +119,20 @@ const agentCollaborationSchema = z.object({
   memberToken: z.string().optional().describe("Optional team member token for relay member authorization")
 });
 
+const readOnlyToolAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false
+};
+
+const writeToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false
+};
+
 export function createMcpServer(storage = new FileStorage()) {
   const server = new McpServer({
     name: "canvas-mcp-editor",
@@ -129,6 +143,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "list_files",
     {
       description: "List local Canvas MCP Editor design files available to inspect.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {}
     },
     async () => ({
@@ -145,6 +160,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "get_file_metadata",
     {
       description: "Get page and node counts for a local design file.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files")
       }
@@ -177,6 +193,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "get_design_context",
     {
       description: "Return the raw document JSON for a design file so an agent can inspect pages and nodes.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files")
       }
@@ -196,6 +213,7 @@ export function createMcpServer(storage = new FileStorage()) {
     {
       description:
         "Export a design file as generated CSS, rendered HTML, per-element JS modules, and an index module.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         moduleBasePath: z
@@ -225,6 +243,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "inspect_canvas",
     {
       description: "Return an agent-friendly canvas summary, component summary, node summaries, and validation status.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files")
       }
@@ -250,6 +269,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "find_nodes",
     {
       description: "Find canvas nodes by id, name, kind, text content, or component definition id.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         ...agentFindSchema
@@ -276,6 +296,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "apply_agent_commands",
     {
       description: "Dry-run or persist a batch of deterministic agent edit commands.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         dryRun: z.boolean().default(true).describe("When true, return preview without writing"),
@@ -306,6 +327,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "validate_document",
     {
       description: "Validate a design file for agent-safe structural invariants.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files")
       }
@@ -331,6 +353,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "get_change_summary",
     {
       description: "Compare two design document snapshots and summarize changed node ids.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         before: z.unknown().describe("DesignFile JSON snapshot before edits"),
@@ -362,6 +385,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "update_node_geometry",
     {
       description: "Update a node's x, y, width, and height in a local design file.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Node id to update"),
@@ -393,6 +417,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "set_fill",
     {
       description: "Set a node's fill color in a local design file.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Node id to update"),
@@ -421,6 +446,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "update_text",
     {
       description: "Update a text node's visible string in a local design file.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Text node id to update"),
@@ -449,6 +475,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "create_rectangle",
     {
       description: "Create a rectangle node under a page or frame parent.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         parentId: z.string().describe("Page or frame parent id"),
@@ -496,6 +523,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "create_text",
     {
       description: "Create a text node under a page or frame parent.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         parentId: z.string().describe("Page or frame parent id"),
@@ -546,6 +574,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "list_components",
     {
       description: "List component definitions stored in a local design file.",
+      annotations: readOnlyToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files")
       }
@@ -571,6 +600,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "create_component",
     {
       description: "Convert an existing node into a reusable component definition.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Existing node id to convert into a component"),
@@ -600,6 +630,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "create_component_instance",
     {
       description: "Create a linked component instance from an existing component definition.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         parentId: z.string().describe("Page or frame parent id"),
@@ -637,6 +668,7 @@ export function createMcpServer(storage = new FileStorage()) {
     "detach_instance",
     {
       description: "Detach a component instance node so it becomes a normal editable frame.",
+      annotations: writeToolAnnotations,
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Component instance root node id")

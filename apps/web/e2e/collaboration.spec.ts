@@ -3,6 +3,39 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByTestId("team-name")).toBeVisible();
+  await expect(page.getByTestId("relay-url")).toHaveCount(0);
+  await expect(page.getByTestId("relay-token")).toHaveCount(0);
+  await expect(page.getByTestId("member-token")).toHaveCount(0);
+  await expect(page.getByTestId("team-e2ee-toggle")).toHaveCount(0);
+  await expect(page.getByTestId("team-e2ee-passphrase")).toHaveCount(0);
+  await expect(page.getByTestId("team-manifest-url")).toHaveCount(0);
+  await expect(page.getByTestId("team-manifest")).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "실시간 협업" }).click();
+  await expect(page.getByLabel("협업 서버 주소")).toBeVisible();
+  await expect(page.getByLabel("서버 접속 토큰")).toBeVisible();
+  await expect(page.getByLabel("멤버 인증 토큰")).toBeVisible();
+  await expect(page.getByLabel("종단간 암호화")).toBeVisible();
+  await expect(page.getByLabel("공유 암호")).toBeVisible();
+  await expect(page.getByTestId("relay-url")).toBeVisible();
+  await expect(page.getByTestId("relay-token")).toBeVisible();
+  await expect(page.getByTestId("member-token")).toBeVisible();
+  await expect(page.getByTestId("team-e2ee-toggle")).toBeVisible();
+  await expect(page.getByTestId("team-e2ee-passphrase")).toBeVisible();
+  await expect(page.getByTestId("team-manifest-url")).toHaveCount(0);
+  await expect(page.getByTestId("team-manifest")).toHaveCount(0);
+
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await expect(page.getByTestId("relay-url")).toHaveCount(0);
+  await expect(page.getByLabel("팀 설정 URL")).toBeVisible();
+  await expect(page.getByTestId("team-manifest-url")).toBeVisible();
+  await expect(page.getByTestId("team-manifest")).toBeVisible();
+});
+
 test("relay team syncs document edits between two browser contexts", async ({ browser }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
@@ -18,22 +51,25 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     await pageA.goto("http://127.0.0.1:5173/");
     await pageB.goto("http://127.0.0.1:5173/");
 
+    await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
-    await pageA.getByRole("button", { name: "릴레이" }).click();
+    await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
     await expect(pageA.getByTestId("presence-list")).toContainText("로컬 사용자");
     await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 
-    await pageA.getByRole("button", { name: "내보내기" }).click();
+    await pageA.getByRole("tab", { name: "팀 설정" }).click();
+    await pageA.getByRole("button", { name: "설정 내보내기" }).click();
     const manifest = await pageA.getByTestId("team-manifest").inputValue();
     expect(manifest).toContain("websocket");
     expect(manifest).toContain('"schemaVersion": 1');
 
+    await pageB.getByRole("tab", { name: "팀 설정" }).click();
     await pageB.getByTestId("team-manifest").fill("{ broken");
-    await pageB.getByRole("button", { name: "가져오기" }).click();
-    await expect(pageB.getByTestId("team-manifest-status")).toContainText("매니페스트 가져오기 실패");
+    await pageB.getByRole("button", { name: "설정 가져오기" }).click();
+    await expect(pageB.getByTestId("team-manifest-status")).toContainText("팀 설정 가져오기 실패");
 
     const downloadPromise = pageA.waitForEvent("download");
-    await pageA.getByRole("button", { name: "다운로드" }).click();
+    await pageA.getByRole("button", { name: "파일로 저장" }).click();
     const download = await downloadPromise;
     const downloadedManifestPath = join(downloadDir, download.suggestedFilename());
     await download.saveAs(downloadedManifestPath);
@@ -138,21 +174,25 @@ test("encrypted relay team syncs document edits without exporting the passphrase
     await pageA.goto("http://127.0.0.1:5173/");
     await pageB.goto("http://127.0.0.1:5173/");
 
+    await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
     await pageA.getByTestId("team-e2ee-toggle").check();
     await pageA.getByTestId("team-e2ee-passphrase").fill("correct horse battery staple");
-    await pageA.getByRole("button", { name: "릴레이" }).click();
+    await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
     await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 
-    await pageA.getByRole("button", { name: "내보내기" }).click();
+    await pageA.getByRole("tab", { name: "팀 설정" }).click();
+    await pageA.getByRole("button", { name: "설정 내보내기" }).click();
     const manifest = await pageA.getByTestId("team-manifest").inputValue();
     expect(manifest).toContain('"mode": "shared-key"');
     expect(manifest).toContain('"algorithm": "AES-GCM"');
     expect(manifest).not.toContain("correct horse battery staple");
 
+    await pageB.getByRole("tab", { name: "실시간 협업" }).click();
     await pageB.getByTestId("team-e2ee-passphrase").fill("correct horse battery staple");
+    await pageB.getByRole("tab", { name: "팀 설정" }).click();
     await pageB.getByTestId("team-manifest").fill(manifest);
-    await pageB.getByRole("button", { name: "가져오기" }).click();
+    await pageB.getByRole("button", { name: "설정 가져오기" }).click();
     await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 
     await pageA.getByRole("button", { name: "텍스트 만들기" }).click();
