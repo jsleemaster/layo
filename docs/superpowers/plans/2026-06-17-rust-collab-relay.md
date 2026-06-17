@@ -301,7 +301,7 @@ cargo test -p collab-relay room
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit room hub**
+- [x] **Step 5: Commit room hub**
 
 Run:
 
@@ -321,7 +321,7 @@ git commit -m "feat: add rust relay room hub"
 - Produces: `build_router(config: RelayConfig, hub: RelayHub) -> axum::Router`
 - Produces: `run(config: RelayConfig) -> Result<(), ServerError>`
 
-- [ ] **Step 1: Write failing runtime tests**
+- [x] **Step 1: Write failing runtime tests**
 
 Add tests in `crates/collab-relay/src/server.rs`:
 
@@ -362,7 +362,7 @@ fn parses_upgrade_targets_from_query() {
 }
 ```
 
-- [ ] **Step 2: Verify runtime RED**
+- [x] **Step 2: Verify runtime RED**
 
 Run:
 
@@ -372,11 +372,11 @@ cargo test -p collab-relay server
 
 Expected: FAIL because `server.rs` does not exist.
 
-- [ ] **Step 3: Implement runtime**
+- [x] **Step 3: Implement runtime**
 
 Use Axum `Router`, `State`, `Path`, `Query`, and `WebSocketUpgrade`. `/health` returns `ok`. `/{*room_id}` validates the parsed `UpgradeTarget` before calling `ws.on_upgrade(...)`. The websocket task forwards binary frames from the socket into `RelayHub::handle_frame` and forwards hub outbound frames back to the socket.
 
-- [ ] **Step 4: Verify runtime GREEN**
+- [x] **Step 4: Verify runtime GREEN**
 
 Run:
 
