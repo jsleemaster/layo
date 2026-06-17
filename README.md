@@ -74,6 +74,12 @@ Run the optional team collaboration relay:
 pnpm dev:collab
 ```
 
+Run the experimental Rust encrypted-room relay:
+
+```bash
+pnpm dev:collab:rust
+```
+
 Run checks:
 
 ```bash

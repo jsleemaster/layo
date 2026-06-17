@@ -107,10 +107,16 @@ impl RelayConfig {
         let vars = vars.into_iter().collect::<HashMap<_, _>>();
         let mut config = Self::default();
 
-        if let Some(host) = vars.get("COLLAB_RELAY_HOST").filter(|value| !value.trim().is_empty()) {
+        if let Some(host) = vars
+            .get("COLLAB_RELAY_HOST")
+            .filter(|value| !value.trim().is_empty())
+        {
             config.host = host.trim().to_string();
         }
-        if let Some(port) = vars.get("COLLAB_RELAY_PORT").filter(|value| !value.trim().is_empty()) {
+        if let Some(port) = vars
+            .get("COLLAB_RELAY_PORT")
+            .filter(|value| !value.trim().is_empty())
+        {
             config.port = port.parse::<u16>().map_err(|_| ConfigError::InvalidPort)?;
         }
         if let Some(prefix) = vars
@@ -154,10 +160,7 @@ impl RelayConfig {
         Self::from_env_vars(std::env::vars())
     }
 
-    pub fn validate_upgrade(
-        &self,
-        target: &UpgradeTarget,
-    ) -> Result<Authorization, AuthError> {
+    pub fn validate_upgrade(&self, target: &UpgradeTarget) -> Result<Authorization, AuthError> {
         if !target.encrypted {
             return Err(AuthError::EncryptedRoomsOnly);
         }
@@ -168,7 +171,10 @@ impl RelayConfig {
             return Err(AuthError::RoomPrefixRejected);
         }
         if let Some(expected_hash) = &self.room_token_hash {
-            let token = target.token.as_deref().ok_or(AuthError::RoomTokenRequired)?;
+            let token = target
+                .token
+                .as_deref()
+                .ok_or(AuthError::RoomTokenRequired)?;
             if sha256_hex(token) != *expected_hash {
                 return Err(AuthError::InvalidRoomToken);
             }
@@ -228,7 +234,10 @@ mod tests {
     #[test]
     fn validates_room_prefix_and_plain_room_token() {
         let config = RelayConfig::from_env_vars([
-            ("COLLAB_ALLOWED_ROOM_PREFIX".to_string(), "canvas-mcp-editor".to_string()),
+            (
+                "COLLAB_ALLOWED_ROOM_PREFIX".to_string(),
+                "canvas-mcp-editor".to_string(),
+            ),
             ("COLLAB_ROOM_TOKEN".to_string(), "room-secret".to_string()),
         ])
         .expect("config parses");

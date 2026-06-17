@@ -48,7 +48,10 @@ pub async fn run(config: RelayConfig) -> Result<(), ServerError> {
         .parse::<SocketAddr>()
         .map_err(|_| ServerError::InvalidAddress)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
-    println!("Canvas Rust collaboration relay listening at ws://{}", address);
+    println!(
+        "Canvas Rust collaboration relay listening at ws://{}",
+        address
+    );
     axum::serve(listener, build_router(config, RelayHub::default())).await?;
     Ok(())
 }

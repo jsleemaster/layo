@@ -386,7 +386,7 @@ cargo test -p collab-relay server
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit runtime**
+- [x] **Step 5: Commit runtime**
 
 Run:
 
@@ -403,7 +403,7 @@ git commit -m "feat: add rust relay runtime"
 - Modify: `package.json`
 - Modify: `docs/superpowers/plans/2026-06-17-rust-collab-relay.md`
 
-- [ ] **Step 1: Add scripts and docs**
+- [x] **Step 1: Add scripts and docs**
 
 Add a root script:
 
@@ -413,7 +413,7 @@ Add a root script:
 
 Document that `pnpm dev:collab` remains the default TypeScript full relay, while `pnpm dev:collab:rust` starts the experimental Rust encrypted-room relay.
 
-- [ ] **Step 2: Verify final checks**
+- [x] **Step 2: Verify final checks**
 
 Run:
 
@@ -426,7 +426,7 @@ git diff --check
 
 Expected: all pass.
 
-- [ ] **Step 3: Commit docs and scripts**
+- [x] **Step 3: Commit docs and scripts**
 
 Run:
 

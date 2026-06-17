@@ -49,6 +49,8 @@ pnpm --filter @canvas-mcp-editor/web dev
 pnpm dev:collab
 ```
 
+`pnpm dev:collab` starts the TypeScript relay and remains the default full relay for plain Yjs rooms and encrypted rooms. `pnpm dev:collab:rust` starts the experimental Rust relay, which currently supports encrypted `e2ee=true` rooms only.
+
 Then create a relay-backed team in the web app with:
 
 ```text

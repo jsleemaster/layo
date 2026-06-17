@@ -99,7 +99,9 @@ fn decode_varuint(bytes: &[u8], offset: &mut usize) -> Result<u64, FrameError> {
         if byte < 0x80 {
             return Ok(value);
         }
-        multiplier = multiplier.checked_mul(128).ok_or(FrameError::InvalidVarUint)?;
+        multiplier = multiplier
+            .checked_mul(128)
+            .ok_or(FrameError::InvalidVarUint)?;
     }
     Err(FrameError::InvalidVarUint)
 }
@@ -131,6 +133,9 @@ mod tests {
         let mut frame = encode_payload_frame(RelayFrameType::Awareness, b"abc");
         frame.pop();
 
-        assert!(matches!(decode_frame(&frame), Err(FrameError::TruncatedPayload)));
+        assert!(matches!(
+            decode_frame(&frame),
+            Err(FrameError::TruncatedPayload)
+        ));
     }
 }
