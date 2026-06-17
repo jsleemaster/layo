@@ -196,7 +196,7 @@ cargo test -p collab-relay config
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit config/auth**
+- [x] **Step 5: Commit config/auth**
 
 Run:
 
@@ -216,7 +216,7 @@ git commit -m "feat: add rust relay authorization"
 - Produces: `RelayHub::connect(room_id: String, can_write_document: bool) -> RelayPeer`
 - Produces: `RelayHub::handle_frame(peer: &RelayPeer, frame: Vec<u8>) -> Result<(), RoomError>`
 
-- [ ] **Step 1: Write failing room hub tests**
+- [x] **Step 1: Write failing room hub tests**
 
 Add tests in `crates/collab-relay/src/room.rs`:
 
@@ -277,7 +277,7 @@ async fn broadcasts_awareness_from_viewers() {
 }
 ```
 
-- [ ] **Step 2: Verify room hub RED**
+- [x] **Step 2: Verify room hub RED**
 
 Run:
 
@@ -287,11 +287,11 @@ cargo test -p collab-relay room
 
 Expected: FAIL because `room.rs` does not exist.
 
-- [ ] **Step 3: Implement room hub**
+- [x] **Step 3: Implement room hub**
 
 Use `tokio::sync::mpsc` for per-peer outbound queues and an `Arc<Mutex<HashMap<String, RoomState>>>` for rooms. Broadcast to peers in the same room except the sender. Remove closed peer senders when sending fails.
 
-- [ ] **Step 4: Verify room hub GREEN**
+- [x] **Step 4: Verify room hub GREEN**
 
 Run:
 
