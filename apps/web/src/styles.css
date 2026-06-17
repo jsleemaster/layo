@@ -29,6 +29,15 @@ button:disabled {
   opacity: 0.45;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: var(--editor-border-hairline);
+  height: var(--editor-border-hairline);
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: var(--editor-size-sidebar) minmax(0, 1fr) var(--editor-size-inspector);

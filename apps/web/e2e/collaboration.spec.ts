@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("relay team syncs document edits between two browser contexts", async ({ browser }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+  const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
@@ -23,11 +26,33 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     await pageA.getByRole("button", { name: "Export" }).click();
     const manifest = await pageA.getByTestId("team-manifest").inputValue();
     expect(manifest).toContain("websocket");
+    expect(manifest).toContain('"schemaVersion": 1');
 
-    await pageB.getByTestId("team-manifest").fill(manifest);
+    await pageB.getByTestId("team-manifest").fill("{ broken");
     await pageB.getByRole("button", { name: "Import" }).click();
+    await expect(pageB.getByTestId("team-manifest-status")).toContainText(/manifest import failed/i);
+
+    const downloadPromise = pageA.waitForEvent("download");
+    await pageA.getByRole("button", { name: "Download" }).click();
+    const download = await downloadPromise;
+    const downloadedManifestPath = join(downloadDir, download.suggestedFilename());
+    await download.saveAs(downloadedManifestPath);
+    const downloadedManifest = await readFile(downloadedManifestPath, "utf8");
+    expect(downloadedManifest).toContain('"schemaVersion": 1');
+    const downloadedManifestJson = JSON.parse(downloadedManifest) as {
+      relayToken?: string;
+      memberToken?: string;
+      sync?: { token?: string; memberToken?: string };
+    };
+    expect(downloadedManifestJson.relayToken).toBeUndefined();
+    expect(downloadedManifestJson.memberToken).toBeUndefined();
+    expect(downloadedManifestJson.sync?.token).toBeUndefined();
+    expect(downloadedManifestJson.sync?.memberToken).toBeUndefined();
+
+    await pageB.getByTestId("team-manifest-file").setInputFiles(downloadedManifestPath);
     await expect(pageB.getByTestId("presence-list")).toContainText("Local user");
     await expect(pageB.getByTestId("team-status")).toContainText("synced", { timeout: 8000 });
+    await expect(pageB.getByTestId("team-manifest-status")).toContainText("Loaded");
 
     await pageA.getByRole("button", { name: "Create text" }).click();
     await expect(pageA.getByRole("button", { name: "Text 3" })).toBeVisible();
@@ -96,5 +121,6 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     if (!contextBClosed) {
       await contextB.close();
     }
+    await rm(downloadDir, { force: true, recursive: true });
   }
 });

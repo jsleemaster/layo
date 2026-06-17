@@ -106,6 +106,43 @@ export function importTeamManifest(serialized: string): TeamManifest {
   return parseTeamManifest(JSON.parse(serialized));
 }
 
+export interface TeamManifestDownload {
+  filename: string;
+  contents: string;
+  mimeType: "application/json";
+}
+
+export function createTeamManifestDownload(team: TeamManifest): TeamManifestDownload {
+  const parsed = parseTeamManifest(team);
+  return {
+    filename: `${sanitizeFilename(parsed.teamId)}-manifest.json`,
+    contents: exportTeamManifest(parsed),
+    mimeType: "application/json"
+  };
+}
+
+export async function readTeamManifestFile(file: Pick<File, "text" | "name">): Promise<TeamManifest> {
+  try {
+    return importTeamManifest(await file.text());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid team manifest";
+    throw new Error(`${file.name}: ${message}`);
+  }
+}
+
+export async function fetchTeamManifestFromUrl(
+  url: string,
+  fetcher: typeof fetch = fetch
+): Promise<TeamManifest> {
+  const parsedUrl = parseAllowedManifestUrl(url);
+  const response = await fetcher(parsedUrl.toString());
+  if (!response.ok) {
+    throw new Error(`failed to fetch team manifest: ${response.status} ${response.statusText}`.trim());
+  }
+
+  return importTeamManifest(await response.text());
+}
+
 function openDatabase(idb: IDBFactory, databaseName: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const openRequest = idb.open(databaseName, DATABASE_VERSION);
@@ -136,4 +173,27 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
     transaction.onabort = () => reject(transaction.error);
     transaction.oncomplete = () => resolve();
   });
+}
+
+function sanitizeFilename(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "team";
+}
+
+function parseAllowedManifestUrl(input: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error("unsupported manifest url: invalid URL");
+  }
+
+  const allowedHttpsHosts = new Set(["raw.githubusercontent.com", "gist.githubusercontent.com"]);
+  const isLocalDev =
+    (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+    ["localhost", "127.0.0.1"].includes(parsed.hostname);
+  if ((parsed.protocol === "https:" && allowedHttpsHosts.has(parsed.hostname)) || isLocalDev) {
+    return parsed;
+  }
+
+  throw new Error("unsupported manifest url: use GitHub raw, gist raw, or localhost");
 }

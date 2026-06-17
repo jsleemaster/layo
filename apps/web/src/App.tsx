@@ -18,9 +18,12 @@ import {
   type CollabDocumentSession
 } from "./collaboration/collab-session";
 import {
+  createTeamManifestDownload,
   createIndexedDbTeamStore,
   exportTeamManifest,
-  importTeamManifest
+  fetchTeamManifestFromUrl,
+  importTeamManifest,
+  readTeamManifestFile
 } from "./collaboration/team-store";
 import {
   createEditorState,
@@ -345,6 +348,8 @@ export function App() {
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
   const [manifestText, setManifestText] = useState("");
+  const [manifestUrl, setManifestUrl] = useState("");
+  const [manifestStatus, setManifestStatus] = useState("");
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
@@ -354,6 +359,7 @@ export function App() {
   const publishedCursorRef = useRef<PublishedCursor | null>(null);
   const remotePresenceSignatureRef = useRef(new Map<string, string>());
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
+  const manifestFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     fetch("http://127.0.0.1:4317/files/sample-file")
@@ -603,6 +609,12 @@ export function App() {
     setCollabSession(session);
     setCollabStatus(session.status);
     publishPresenceSnapshot(session);
+    setManifestStatus(`Loaded ${team.name}`);
+  };
+
+  const setManifestError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : "invalid team manifest";
+    setManifestStatus(`Manifest import failed: ${message}`);
   };
 
   const createLocalTeam = () => {
@@ -647,6 +659,7 @@ export function App() {
   const exportCurrentTeam = () => {
     if (collabSession) {
       setManifestText(exportTeamManifest(collabSession.team));
+      setManifestStatus(`Exported ${collabSession.team.name}`);
     }
   };
 
@@ -655,7 +668,62 @@ export function App() {
       return;
     }
 
-    void activateTeam(importTeamManifest(manifestText));
+    try {
+      void activateTeam(importTeamManifest(manifestText));
+    } catch (error) {
+      setManifestError(error);
+    }
+  };
+
+  const downloadCurrentTeam = () => {
+    if (!collabSession) {
+      return;
+    }
+
+    const download = createTeamManifestDownload(collabSession.team);
+    const url = URL.createObjectURL(
+      new Blob([download.contents], {
+        type: download.mimeType
+      })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = download.filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setManifestStatus(`Downloaded ${download.filename}`);
+  };
+
+  const uploadTeamManifest = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) {
+      return;
+    }
+
+    try {
+      const team = await readTeamManifestFile(file);
+      setManifestText(exportTeamManifest(team));
+      await activateTeam(team);
+    } catch (error) {
+      setManifestError(error);
+    }
+  };
+
+  const importTeamFromUrl = async () => {
+    if (!manifestUrl.trim()) {
+      return;
+    }
+
+    try {
+      const team = await fetchTeamManifestFromUrl(manifestUrl.trim());
+      setManifestText(exportTeamManifest(team));
+      await activateTeam(team);
+    } catch (error) {
+      setManifestError(error);
+    }
   };
 
   const finishResize = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
@@ -814,6 +882,15 @@ export function App() {
                 onChange={(event) => setMemberToken(event.currentTarget.value)}
               />
             </label>
+            <label>
+              Manifest URL
+              <input
+                data-testid="team-manifest-url"
+                value={manifestUrl}
+                placeholder="https://raw.githubusercontent.com/..."
+                onChange={(event) => setManifestUrl(event.currentTarget.value)}
+              />
+            </label>
           </div>
           <div className="team-actions">
             <button type="button" onClick={createLocalTeam} disabled={!editor}>
@@ -828,9 +905,29 @@ export function App() {
             <button type="button" onClick={importTeam} disabled={!editor || !manifestText.trim()}>
               Import
             </button>
+            <button type="button" onClick={downloadCurrentTeam} disabled={!collabSession}>
+              Download
+            </button>
+            <button type="button" onClick={() => manifestFileInputRef.current?.click()} disabled={!editor}>
+              Upload
+            </button>
+            <button type="button" onClick={importTeamFromUrl} disabled={!editor || !manifestUrl.trim()}>
+              Load URL
+            </button>
           </div>
+          <input
+            ref={manifestFileInputRef}
+            data-testid="team-manifest-file"
+            className="visually-hidden"
+            type="file"
+            accept="application/json,.json"
+            onChange={uploadTeamManifest}
+          />
           <div className="team-status" data-testid="team-status">
             {collabSession ? `${collabSession.team.name} · ${collabStatus}` : "No team"}
+          </div>
+          <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
+            {manifestStatus || "Manifest idle"}
           </div>
           <div className="presence-list" data-testid="presence-list">
             {presence.map((member, index) => (

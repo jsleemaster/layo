@@ -2,6 +2,9 @@ import { describe, expect, test } from "vitest";
 import {
   createTeamManifest,
   parseTeamManifest,
+  migrateTeamManifest,
+  validateTeamManifest,
+  TEAM_MANIFEST_SCHEMA_VERSION,
   type TeamManifest
 } from "./team-manifest";
 
@@ -185,5 +188,117 @@ describe("team manifests", () => {
     };
 
     expect(parseTeamManifest(imported)).toEqual(imported);
+  });
+
+  test("migrates legacy manifests without schema metadata to the current schema", () => {
+    const legacyManifest = {
+      teamId: "team-legacy",
+      name: "Legacy Team",
+      createdAt: "2026-06-16T00:00:00.000Z",
+      currentUserId: "user-legacy",
+      members: [
+        {
+          userId: "user-legacy",
+          displayName: "Legacy",
+          color: "#2563eb"
+        }
+      ],
+      documents: [],
+      sync: {
+        mode: "websocket",
+        roomPrefix: "canvas-mcp-editor",
+        relayUrl: "ws://127.0.0.1:4327",
+        token: "plain-relay-token",
+        memberToken: "plain-member-token"
+      }
+    };
+
+    expect(migrateTeamManifest(legacyManifest)).toEqual({
+      schemaVersion: TEAM_MANIFEST_SCHEMA_VERSION,
+      teamId: "team-legacy",
+      name: "Legacy Team",
+      createdAt: "2026-06-16T00:00:00.000Z",
+      currentUserId: "user-legacy",
+      members: [
+        {
+          userId: "user-legacy",
+          displayName: "Legacy",
+          color: "#2563eb",
+          role: "owner"
+        }
+      ],
+      documents: [],
+      sync: {
+        mode: "websocket",
+        roomPrefix: "canvas-mcp-editor",
+        relayUrl: "ws://127.0.0.1:4327"
+      },
+      permissions: {
+        canEdit: true,
+        canInvite: true
+      },
+      auth: {
+        relay: {
+          memberTokenHashes: [],
+          inviteTokenHashes: []
+        }
+      }
+    });
+    expect(JSON.stringify(parseTeamManifest(legacyManifest))).not.toContain("plain-relay-token");
+    expect(JSON.stringify(parseTeamManifest(legacyManifest))).not.toContain("plain-member-token");
+  });
+
+  test("returns validation issues without throwing", () => {
+    const result = validateTeamManifest({
+      schemaVersion: TEAM_MANIFEST_SCHEMA_VERSION,
+      teamId: "",
+      name: "",
+      createdAt: "",
+      currentUserId: "",
+      members: [],
+      documents: [],
+      sync: {
+        mode: "websocket",
+        roomPrefix: "",
+        relayUrl: ""
+      },
+      permissions: {
+        canEdit: true,
+        canInvite: false
+      },
+      auth: {
+        relay: {
+          memberTokenHashes: [],
+          inviteTokenHashes: []
+        }
+      }
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message: expect.stringContaining("invalid team manifest"),
+      issues: expect.arrayContaining(["teamId", "name", "members"])
+    });
+  });
+
+  test("rejects future manifest schemas with a clear validation result", () => {
+    const result = validateTeamManifest({
+      schemaVersion: TEAM_MANIFEST_SCHEMA_VERSION + 1,
+      teamId: "team-future",
+      name: "Future Team"
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      message: "unsupported team manifest schema version: 2",
+      issues: ["schemaVersion"]
+    });
+    expect(() =>
+      parseTeamManifest({
+        schemaVersion: TEAM_MANIFEST_SCHEMA_VERSION + 1,
+        teamId: "team-future",
+        name: "Future Team"
+      })
+    ).toThrow(/unsupported team manifest schema version: 2/);
   });
 });
