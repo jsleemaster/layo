@@ -7,6 +7,14 @@ import type {
 
 export interface EditorSelection {
   nodeId: string | null;
+  nodeIds: string[];
+}
+
+export interface SelectionBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface EditorViewport {
@@ -111,7 +119,7 @@ const DEFAULT_CONSTRAINTS: NodeConstraints = { horizontal: "left", vertical: "to
 export function createEditorState(document: RendererDocument): EditorState {
   return {
     document,
-    selection: { nodeId: null },
+    selection: { nodeId: null, nodeIds: [] },
     viewport: { scale: 1, x: 0, y: 0 },
     history: { past: [], future: [] }
   };
@@ -155,9 +163,10 @@ export function executeEditorCommand(state: EditorState, command: EditorCommand)
   return {
     ...state,
     document: result.document,
-    selection: {
-      nodeId: result.selectedNodeId === undefined ? state.selection.nodeId : result.selectedNodeId
-    },
+    selection:
+      result.selectedNodeId === undefined
+        ? retainExistingSelection(result.document, state.selection)
+        : normalizeSelection(result.document, result.selectedNodeId ? [result.selectedNodeId] : [], result.selectedNodeId),
     history: {
       past: [...state.history.past, result.inverse],
       future: []
@@ -179,12 +188,7 @@ export function undo(state: EditorState): EditorState {
   return {
     ...state,
     document: result.document,
-    selection: {
-      nodeId:
-        state.selection.nodeId && findNodeById(result.document, state.selection.nodeId)
-          ? state.selection.nodeId
-          : null
-    },
+    selection: retainExistingSelection(result.document, state.selection),
     history: {
       past: state.history.past.slice(0, -1),
       future: [result.inverse, ...state.history.future]
@@ -206,9 +210,10 @@ export function redo(state: EditorState): EditorState {
   return {
     ...state,
     document: result.document,
-    selection: {
-      nodeId: result.selectedNodeId === undefined ? state.selection.nodeId : result.selectedNodeId
-    },
+    selection:
+      result.selectedNodeId === undefined
+        ? retainExistingSelection(result.document, state.selection)
+        : normalizeSelection(result.document, result.selectedNodeId ? [result.selectedNodeId] : [], result.selectedNodeId),
     history: {
       past: [...state.history.past, result.inverse],
       future: state.history.future.slice(1)
@@ -217,12 +222,56 @@ export function redo(state: EditorState): EditorState {
 }
 
 export function setSelection(state: EditorState, nodeId: string | null): EditorState {
+  return setMultiSelection(state, nodeId ? [nodeId] : [], nodeId);
+}
+
+export function setMultiSelection(
+  state: EditorState,
+  nodeIds: string[],
+  primaryNodeId: string | null = nodeIds.at(-1) ?? null
+): EditorState {
   return {
     ...state,
-    selection: {
-      nodeId: nodeId && findNodeById(state.document, nodeId) ? nodeId : null
-    }
+    selection: normalizeSelection(state.document, nodeIds, primaryNodeId)
   };
+}
+
+export function toggleSelection(state: EditorState, nodeId: string): EditorState {
+  if (!findNodeById(state.document, nodeId)) {
+    return state;
+  }
+
+  const currentNodeIds = selectionNodeIds(state.selection);
+  if (currentNodeIds.includes(nodeId)) {
+    const nextNodeIds = currentNodeIds.filter((selectedNodeId) => selectedNodeId !== nodeId);
+    const nextPrimaryNodeId =
+      state.selection.nodeId === nodeId ? nextNodeIds.at(-1) ?? null : state.selection.nodeId;
+    return setMultiSelection(state, nextNodeIds, nextPrimaryNodeId);
+  }
+
+  return setMultiSelection(state, [...currentNodeIds, nodeId], nodeId);
+}
+
+export function selectNodesInBounds(
+  state: EditorState,
+  bounds: SelectionBounds,
+  mode: "replace" | "add" = "replace"
+): EditorState {
+  const normalizedBounds = normalizeBounds(bounds);
+  const selectedNodeIds: string[] = [];
+
+  for (const page of state.document.pages) {
+    for (const node of page.children) {
+      selectedNodeIds.push(...collectNodeIdsInBounds(node, normalizedBounds, { x: 0, y: 0 }));
+    }
+  }
+
+  if (mode === "add") {
+    const nextNodeIds = [...selectionNodeIds(state.selection), ...selectedNodeIds];
+    return setMultiSelection(state, nextNodeIds, selectedNodeIds.at(-1) ?? state.selection.nodeId);
+  }
+
+  return setMultiSelection(state, selectedNodeIds, selectedNodeIds.at(-1) ?? null);
 }
 
 export function setViewport(state: EditorState, patch: Partial<EditorViewport>): EditorState {
@@ -798,6 +847,90 @@ function absolutePositionInNode(
   }
 
   return null;
+}
+
+function selectionNodeIds(selection: EditorSelection): string[] {
+  return selection.nodeIds.length ? selection.nodeIds : selection.nodeId ? [selection.nodeId] : [];
+}
+
+function retainExistingSelection(document: RendererDocument, selection: EditorSelection): EditorSelection {
+  return normalizeSelection(document, selectionNodeIds(selection), selection.nodeId);
+}
+
+function normalizeSelection(
+  document: RendererDocument,
+  nodeIds: string[],
+  primaryNodeId: string | null = nodeIds.at(-1) ?? null
+): EditorSelection {
+  const existingNodeIds: string[] = [];
+  for (const nodeId of nodeIds) {
+    if (!existingNodeIds.includes(nodeId) && findNodeById(document, nodeId)) {
+      existingNodeIds.push(nodeId);
+    }
+  }
+
+  const nodeId =
+    primaryNodeId && existingNodeIds.includes(primaryNodeId)
+      ? primaryNodeId
+      : existingNodeIds.at(-1) ?? null;
+
+  return { nodeId, nodeIds: existingNodeIds };
+}
+
+function normalizeBounds(bounds: SelectionBounds): SelectionBounds {
+  const left = Math.min(bounds.x, bounds.x + bounds.width);
+  const top = Math.min(bounds.y, bounds.y + bounds.height);
+  const right = Math.max(bounds.x, bounds.x + bounds.width);
+  const bottom = Math.max(bounds.y, bounds.y + bounds.height);
+
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top
+  };
+}
+
+function collectNodeIdsInBounds(
+  node: RendererNode,
+  bounds: SelectionBounds,
+  parent: { x: number; y: number }
+): string[] {
+  const absolute = {
+    x: parent.x + node.transform.x,
+    y: parent.y + node.transform.y
+  };
+  const childMatches =
+    node.kind === "component_instance"
+      ? []
+      : node.children.flatMap((child) => collectNodeIdsInBounds(child, bounds, absolute));
+
+  if (childMatches.length) {
+    return childMatches;
+  }
+
+  const nodeBounds = {
+    x: absolute.x,
+    y: absolute.y,
+    width: node.size.width,
+    height: node.size.height
+  };
+
+  return containsBounds(bounds, nodeBounds) ? [node.id] : [];
+}
+
+function containsBounds(container: SelectionBounds, candidate: SelectionBounds): boolean {
+  const containerRight = container.x + container.width;
+  const containerBottom = container.y + container.height;
+  const candidateRight = candidate.x + candidate.width;
+  const candidateBottom = candidate.y + candidate.height;
+
+  return (
+    candidate.x >= container.x &&
+    candidate.y >= container.y &&
+    candidateRight <= containerRight &&
+    candidateBottom <= containerBottom
+  );
 }
 
 function findParentChildren(

@@ -22,7 +22,7 @@ This document records the Figma Design interaction rules that Canvas MCP Editor 
 | --- | --- | --- | --- |
 | Default tool | Move is the default tool; Hand pans without selecting or moving objects; holding Space temporarily activates Hand. | Move/select exists; Space-drag pan landed in PR #20. | Adopted for Space hand mode. Keep explicit hand tool for later. |
 | Single selection | Click selects a canvas layer. Nested children inside frames/groups are selected one level down with double-click or Enter. | Click selects rendered node; nested component instances defer to parent. No double-click/Enter drill-down yet. | Adopt. Add explicit nested-selection navigation after multi-select. |
-| Multi-selection | Shift-click adds/removes canvas objects. Marquee selects objects in an area. Cmd/Ctrl marquee can select nested layers. | Single `nodeId` selection only. | Adopt next lane. Requires selection model change to `nodeIds`. |
+| Multi-selection | Shift-click adds/removes canvas objects. Marquee selects objects in an area. Cmd/Ctrl marquee can select nested layers. | Shift-click add/remove and drag area selection use `nodeIds`; `nodeId` remains the primary selected node. | Adopted for Shift-click and 영역 선택. Cmd/Ctrl nested marquee remains deferred. |
 | Parent selection | Selecting a parent object also selects child content for movement. | Parent drag moves its rendered group. | Mostly adopted. Preserve when adding multi-selection. |
 | Keyboard selection navigation | Enter selects child, Shift+Enter selects parent, Tab/Shift+Tab moves across siblings. | Not implemented. | Adopt after multi-selection model is stable. |
 | View navigation | Plain wheel pans; modifier-wheel zooms; keyboard zoom/reset use platform command modifiers. | Adopted in PR #20. | Keep covered by Playwright. |
@@ -40,17 +40,17 @@ This document records the Figma Design interaction rules that Canvas MCP Editor 
 ## Immediate Adoption Order
 
 1. Keep PR #20 behavior as the navigation baseline: wheel pan, modifier zoom, 1/10 nudge, Space hand pan.
-2. Add selected-layer Delete/Backspace and Cmd/Ctrl+D duplicate because these are basic editing expectations and map to existing command architecture.
-3. Change selection to support `nodeIds` for Shift-click and marquee.
-4. Add alignment/distribute commands after multi-selection exists.
+2. Keep selected-layer Delete/Backspace and Cmd/Ctrl+D duplicate green.
+3. Keep Shift-click multi-selection and drag 영역 선택 green.
+4. Add alignment/distribute commands now that multi-selection exists.
 5. Add live snap guides after drag preview and multi-selection bounds are stable.
 6. Add copy/paste and paste-here after duplicate helper establishes clone/id/parent behavior.
 
-## Non-Goals For The Current Slice
+## Remaining Non-Goals
 
-- Multi-selection data-model migration.
+- Multi-node drag movement.
+- Multi-node delete/duplicate.
 - Clipboard integration.
 - Snap guide rendering.
 - All resize handles, rotate, flip, and aspect-ratio resize.
 - Nested layer keyboard navigation.
-

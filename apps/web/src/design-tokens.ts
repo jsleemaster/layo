@@ -8,6 +8,7 @@ export const editorTokenNames = {
     "--editor-color-border",
     "--editor-color-focus",
     "--editor-color-selection",
+    "--editor-color-selection-soft",
     "--editor-color-mcp",
     "--editor-color-warning"
   ],

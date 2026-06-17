@@ -246,6 +246,14 @@ button:disabled {
   z-index: 2;
 }
 
+.area-selection-box {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+  border: var(--editor-border-hairline) solid var(--editor-color-selection);
+  background: var(--editor-color-selection-soft);
+}
+
 .remote-cursor,
 .remote-selection {
   position: absolute;

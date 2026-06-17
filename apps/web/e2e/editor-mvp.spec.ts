@@ -254,6 +254,46 @@ test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ 
   await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
 });
 
+test("Figma-like multi-selection supports Shift-click and area selection", async ({ page }) => {
+  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+
+  await page.goto("http://127.0.0.1:5173/");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  const headlineLayer = page.getByRole("button", { name: "헤드라인" });
+  const rectangleLayer = page.getByRole("button", { name: "사각형 3" });
+  await expect(rectangleLayer).toBeVisible();
+
+  await page.keyboard.down("Shift");
+  await headlineLayer.click();
+  await page.keyboard.up("Shift");
+  await expect(headlineLayer).toHaveClass(/is-selected/);
+  await expect(rectangleLayer).toHaveClass(/is-selected/);
+  await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+
+  await page.mouse.move(stageBox.x + 100, stageBox.y + 70);
+  await page.mouse.down();
+  await page.mouse.move(stageBox.x + 240, stageBox.y + 180);
+  await expect(page.getByTestId("area-selection-box")).toBeVisible();
+  await page.mouse.move(stageBox.x + 455, stageBox.y + 262);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("area-selection-box")).toHaveCount(0);
+  await expect(headlineLayer).toHaveClass(/is-selected/);
+  await expect(rectangleLayer).toHaveClass(/is-selected/);
+  await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
+});
+
 test("component instances drag as a single selected object from nested content", async ({ page }) => {
   await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
   await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });

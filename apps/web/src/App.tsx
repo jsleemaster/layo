@@ -46,10 +46,14 @@ import {
   nudgeSelectedNode,
   panViewport,
   redo,
+  selectNodesInBounds,
   setSelection,
+  setMultiSelection,
   setViewport,
+  toggleSelection,
   type EditorState,
   type GeometryPatch,
+  type SelectionBounds,
   undo,
   zoomViewport,
   zoomViewportAtPoint
@@ -82,7 +86,15 @@ const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
 const KEYBOARD_PAN_STEP = 24;
 const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
+const AREA_SELECTION_DRAG_THRESHOLD = 4;
 type TeamPanelMode = "local" | "relay" | "manifest";
+
+interface AreaSelectionSession {
+  start: { x: number; y: number };
+  current: { x: number; y: number };
+  mode: "replace" | "add";
+  hasDragged: boolean;
+}
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
@@ -147,9 +159,37 @@ function pointerClientPoint(event: MouseEvent | TouchEvent): { x: number; y: num
   return { x: event.clientX, y: event.clientY };
 }
 
+function documentPointFromStagePointer(
+  pointer: { x: number; y: number },
+  viewport: EditorState["viewport"]
+): { x: number; y: number } {
+  return {
+    x: (pointer.x - viewport.x) / viewport.scale,
+    y: (pointer.y - viewport.y) / viewport.scale
+  };
+}
+
+function selectionBoundsFromPoints(
+  start: { x: number; y: number },
+  current: { x: number; y: number }
+): SelectionBounds {
+  const left = Math.min(start.x, current.x);
+  const top = Math.min(start.y, current.y);
+  const right = Math.max(start.x, current.x);
+  const bottom = Math.max(start.y, current.y);
+
+  return {
+    x: left,
+    y: top,
+    width: right - left,
+    height: bottom - top
+  };
+}
+
 function renderNode({
   node,
   selectedNodeId,
+  selectedNodeIds,
   hasSelectedAncestor = false,
   hasComponentInstanceAncestor = false,
   isCanvasPanning = false,
@@ -159,15 +199,18 @@ function renderNode({
 }: {
   node: RendererNode;
   selectedNodeId: string | null;
+  selectedNodeIds: string[];
   hasSelectedAncestor?: boolean;
   hasComponentInstanceAncestor?: boolean;
   isCanvasPanning?: boolean;
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, additive: boolean) => void;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onResizeStart: (nodeId: string) => void;
 }) {
-  const isSelected = node.id === selectedNodeId;
+  const isSelected = selectedNodeIds.includes(node.id);
+  const isPrimarySelected = node.id === selectedNodeId;
   const shouldDeferToAncestor = hasSelectedAncestor || hasComponentInstanceAncestor;
+  const canResize = isPrimarySelected && selectedNodeIds.length === 1;
   const handleSize = editorKonvaTokens.selection.handleSize;
   const resizeHitSize = editorKonvaTokens.selection.resizeHitSize;
   const startResize = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
@@ -183,8 +226,11 @@ function renderNode({
     }
 
     event.cancelBubble = true;
-    if (!isSelected) {
-      onSelect(node.id);
+    const additive = "shiftKey" in event.evt ? event.evt.shiftKey : false;
+    if (additive || !isPrimarySelected) {
+      onSelect(node.id, additive);
+    }
+    if (!additive && !isPrimarySelected) {
       event.currentTarget.draggable(true);
       event.currentTarget.startDrag();
     }
@@ -198,7 +244,8 @@ function renderNode({
     }
 
     event.cancelBubble = true;
-    onSelect(node.id);
+    const additive = "shiftKey" in event.evt ? event.evt.shiftKey : false;
+    onSelect(node.id, additive);
   };
 
   const body =
@@ -229,7 +276,7 @@ function renderNode({
       x={node.transform.x}
       y={node.transform.y}
       rotation={node.transform.rotation}
-      draggable={isSelected && !isCanvasPanning}
+      draggable={isPrimarySelected && !isCanvasPanning}
       onMouseDown={selectAndPrimeDrag}
       onTouchStart={selectAndPrimeDrag}
       onClick={selectFromClick}
@@ -251,33 +298,38 @@ function renderNode({
             strokeWidth={editorKonvaTokens.selection.strokeWidth}
             listening={false}
           />
-          <Rect
-            x={node.size.width - resizeHitSize}
-            y={node.size.height - resizeHitSize}
-            width={resizeHitSize}
-            height={resizeHitSize}
-            fill={editorKonvaTokens.selection.handleFill}
-            opacity={0.01}
-            onMouseDown={startResize}
-            onTouchStart={startResize}
-          />
-          <Rect
-            x={node.size.width - handleSize}
-            y={node.size.height - handleSize}
-            width={handleSize}
-            height={handleSize}
-            fill={editorKonvaTokens.selection.handleFill}
-            stroke={editorKonvaTokens.selection.stroke}
-            strokeWidth={editorKonvaTokens.selection.strokeWidth}
-            onMouseDown={startResize}
-            onTouchStart={startResize}
-          />
+          {canResize ? (
+            <>
+              <Rect
+                x={node.size.width - resizeHitSize}
+                y={node.size.height - resizeHitSize}
+                width={resizeHitSize}
+                height={resizeHitSize}
+                fill={editorKonvaTokens.selection.handleFill}
+                opacity={0.01}
+                onMouseDown={startResize}
+                onTouchStart={startResize}
+              />
+              <Rect
+                x={node.size.width - handleSize}
+                y={node.size.height - handleSize}
+                width={handleSize}
+                height={handleSize}
+                fill={editorKonvaTokens.selection.handleFill}
+                stroke={editorKonvaTokens.selection.stroke}
+                strokeWidth={editorKonvaTokens.selection.strokeWidth}
+                onMouseDown={startResize}
+                onTouchStart={startResize}
+              />
+            </>
+          ) : null}
         </>
       ) : null}
       {node.children.map((child) =>
         renderNode({
           node: child,
           selectedNodeId,
+          selectedNodeIds,
           hasSelectedAncestor: hasSelectedAncestor || isSelected,
           hasComponentInstanceAncestor: hasComponentInstanceAncestor || node.kind === "component_instance",
           isCanvasPanning,
@@ -360,6 +412,7 @@ function RemotePresenceOverlay({
 
 function Inspector({
   selectedNode,
+  selectedNodeCount,
   onGeometryChange,
   onFillChange,
   onTextChange,
@@ -367,12 +420,25 @@ function Inspector({
   onConstraintsChange
 }: {
   selectedNode: RendererNode | null;
+  selectedNodeCount: number;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onFillChange: (nodeId: string, fill: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onLayoutChange: (nodeId: string, layout: NodeLayout) => void;
   onConstraintsChange: (nodeId: string, constraints: NodeConstraints) => void;
 }) {
+  if (selectedNodeCount > 1) {
+    return (
+      <aside className="inspector">
+        <h2>검사기</h2>
+        <div className="node-summary">
+          <strong>{selectedNodeCount}개 레이어 선택됨</strong>
+          <span>다중 선택</span>
+        </div>
+      </aside>
+    );
+  }
+
   if (!selectedNode) {
     return (
       <aside className="inspector">
@@ -619,7 +685,9 @@ export function App() {
   const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
   const [presenceClock, setPresenceClock] = useState(() => Date.now());
+  const [areaSelection, setAreaSelection] = useState<AreaSelectionSession | null>(null);
   const resizeSessionRef = useRef<{ nodeId: string } | null>(null);
+  const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const panSessionRef = useRef<{
     clientX: number;
     clientY: number;
@@ -688,6 +756,22 @@ export function App() {
     () => (editor?.selection.nodeId ? findNodeById(editor.document, editor.selection.nodeId) : null),
     [editor]
   );
+  const selectedNodeIds = editor?.selection.nodeIds ?? [];
+  const areaSelectionBox = useMemo(() => {
+    if (!editor || !areaSelection?.hasDragged) {
+      return null;
+    }
+
+    const bounds = selectionBoundsFromPoints(areaSelection.start, areaSelection.current);
+    const topLeft = documentPointToViewport({ x: bounds.x, y: bounds.y, space: "document" }, editor.viewport);
+
+    return {
+      left: topLeft.x,
+      top: topLeft.y,
+      width: bounds.width * editor.viewport.scale,
+      height: bounds.height * editor.viewport.scale
+    };
+  }, [areaSelection, editor]);
   const components = editor?.document.components ?? [];
   const selectedComponent = selectedNode
     ? components.find((component) => component.source_node.id === selectedNode.id)
@@ -950,13 +1034,13 @@ export function App() {
     setEditor(nextState);
   };
 
-  const selectNode = (nodeId: string) => {
+  const selectNode = (nodeId: string, additive = false) => {
     setEditor((current) => {
       if (!current) {
         return current;
       }
 
-      const nextState = setSelection(current, nodeId);
+      const nextState = additive ? toggleSelection(current, nodeId) : setSelection(current, nodeId);
       publishEditorPresence(nextState, { activeTool: "select" });
       return nextState;
     });
@@ -1076,12 +1160,11 @@ export function App() {
         return {
           ...current,
           document,
-          selection: {
-            nodeId:
-              current.selection.nodeId && findNodeById(document, current.selection.nodeId)
-                ? current.selection.nodeId
-                : null
-          }
+          selection: setMultiSelection(
+            { ...current, document },
+            current.selection.nodeIds,
+            current.selection.nodeId
+          ).selection
         };
       });
       setPresence(session.getPresence());
@@ -1338,6 +1421,88 @@ export function App() {
     return false;
   };
 
+  const startAreaSelectionFromPointer = (event: KonvaEventObject<MouseEvent>) => {
+    if (!editor || event.evt.button !== 0) {
+      return false;
+    }
+
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) {
+      return false;
+    }
+
+    event.evt.preventDefault();
+    const documentPoint = documentPointFromStagePointer(pointer, editor.viewport);
+    const nextAreaSelection: AreaSelectionSession = {
+      start: documentPoint,
+      current: documentPoint,
+      mode: event.evt.shiftKey ? "add" : "replace",
+      hasDragged: false
+    };
+    areaSelectionRef.current = nextAreaSelection;
+    setAreaSelection(nextAreaSelection);
+    return true;
+  };
+
+  const continueAreaSelection = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    const activeAreaSelection = areaSelectionRef.current;
+    if (!editor || !activeAreaSelection) {
+      return false;
+    }
+
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) {
+      return false;
+    }
+
+    event.evt.preventDefault();
+    const documentPoint = documentPointFromStagePointer(pointer, editor.viewport);
+    const distance = Math.hypot(
+      documentPoint.x - activeAreaSelection.start.x,
+      documentPoint.y - activeAreaSelection.start.y
+    );
+    const nextAreaSelection = {
+      ...activeAreaSelection,
+      current: documentPoint,
+      hasDragged: activeAreaSelection.hasDragged || distance >= AREA_SELECTION_DRAG_THRESHOLD
+    };
+    areaSelectionRef.current = nextAreaSelection;
+    setAreaSelection(nextAreaSelection);
+    return true;
+  };
+
+  const finishAreaSelection = () => {
+    const activeAreaSelection = areaSelectionRef.current;
+    if (!activeAreaSelection) {
+      return false;
+    }
+
+    areaSelectionRef.current = null;
+    setAreaSelection(null);
+
+    if (activeAreaSelection.hasDragged) {
+      const bounds = selectionBoundsFromPoints(activeAreaSelection.start, activeAreaSelection.current);
+      setEditor((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const nextState = selectNodesInBounds(current, bounds, activeAreaSelection.mode);
+        publishEditorPresence(nextState, { activeTool: "select" });
+        return nextState;
+      });
+      return true;
+    }
+
+    if (activeAreaSelection.mode === "replace") {
+      clearSelectionFromInteraction();
+    }
+
+    return true;
+  };
+
   const startCanvasPan = (event: MouseEvent | TouchEvent) => {
     if (!isSpacePanningRef.current || !editor) {
       return false;
@@ -1407,8 +1572,8 @@ export function App() {
                 <button
                   key={node.id}
                   type="button"
-                  className={editor?.selection.nodeId === node.id ? "is-selected" : undefined}
-                  onClick={() => selectNode(node.id)}
+                  className={editor?.selection.nodeIds.includes(node.id) ? "is-selected" : undefined}
+                  onClick={(event) => selectNode(node.id, event.shiftKey)}
                 >
                   {node.name}
                   {node.kind === "component" ? " · 컴포넌트" : ""}
@@ -1686,19 +1851,7 @@ export function App() {
                 }
 
                 if (event.target === event.target.getStage()) {
-                  setEditor((current) => {
-                    if (!current) {
-                      return current;
-                    }
-
-                    const nextState = setSelection(current, null);
-                    publishEditorPresence(nextState, {
-                      activeTool: "select",
-                      selectedNodeId: null,
-                      selectedNodeBounds: null
-                    });
-                    return nextState;
-                  });
+                  startAreaSelectionFromPointer(event);
                 }
               }}
               onTouchStart={(event) => {
@@ -1708,6 +1861,10 @@ export function App() {
               }}
               onMouseMove={(event) => {
                 if (continueCanvasPan(event.evt)) {
+                  return;
+                }
+
+                if (continueAreaSelection(event)) {
                   return;
                 }
 
@@ -1722,6 +1879,10 @@ export function App() {
               }}
               onMouseUp={(event) => {
                 if (endCanvasPan()) {
+                  return;
+                }
+
+                if (finishAreaSelection()) {
                   return;
                 }
 
@@ -1740,6 +1901,7 @@ export function App() {
                   renderNode({
                     node,
                     selectedNodeId: editor.selection.nodeId,
+                    selectedNodeIds: editor.selection.nodeIds,
                     isCanvasPanning: isSpacePanning,
                     onSelect: selectNode,
                     onGeometryChange: updateGeometry,
@@ -1760,11 +1922,24 @@ export function App() {
                 viewport={editor.viewport}
               />
             ) : null}
+            {areaSelectionBox ? (
+              <div
+                className="area-selection-box"
+                data-testid="area-selection-box"
+                style={{
+                  left: areaSelectionBox.left,
+                  top: areaSelectionBox.top,
+                  width: areaSelectionBox.width,
+                  height: areaSelectionBox.height
+                }}
+              />
+            ) : null}
           </div>
         </div>
       </section>
       <Inspector
         selectedNode={selectedNode}
+        selectedNodeCount={selectedNodeIds.length}
         onGeometryChange={updateGeometry}
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onTextChange={(nodeId, value) => dispatch({ type: "update_text", nodeId, value })}

@@ -12,7 +12,9 @@ import {
   nudgeSelectedNode,
   panViewport,
   redo,
+  selectNodesInBounds,
   setSelection,
+  toggleSelection,
   setViewport,
   undo,
   zoomViewportAtPoint,
@@ -58,6 +60,21 @@ function sampleDocument(): RendererDocument {
       }
     ]
   };
+}
+
+function sampleDocumentWithTopLevelRectangle(): RendererDocument {
+  const document = sampleDocument();
+  document.pages[0]?.children.push({
+    id: "rectangle-1",
+    kind: "rectangle",
+    name: "사각형",
+    transform: { x: 180, y: 140, rotation: 0 },
+    size: { width: 160, height: 96 },
+    style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
+    content: { type: "empty" },
+    children: []
+  });
+  return document;
 }
 
 describe("editor state commands", () => {
@@ -229,8 +246,33 @@ describe("editor state commands", () => {
     const clamped = setViewport(zoomed, { scale: 0.05 });
 
     expect(selected.selection.nodeId).toBe("text-1");
+    expect(selected.selection.nodeIds).toEqual(["text-1"]);
     expect(zoomed.viewport).toEqual({ scale: 2.4, x: 80, y: -40 });
     expect(clamped.viewport.scale).toBe(0.25);
+  });
+
+  test("toggles nodes into and out of multi-selection", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const added = toggleSelection(initial, "frame-1");
+    expect(added.selection.nodeId).toBe("frame-1");
+    expect(added.selection.nodeIds).toEqual(["text-1", "frame-1"]);
+
+    const removed = toggleSelection(added, "frame-1");
+    expect(removed.selection.nodeId).toBe("text-1");
+    expect(removed.selection.nodeIds).toEqual(["text-1"]);
+  });
+
+  test("selects fully enclosed nodes in document bounds without selecting their parent frame", () => {
+    const selected = selectNodesInBounds(createEditorState(sampleDocumentWithTopLevelRectangle()), {
+      x: 150,
+      y: 110,
+      width: 300,
+      height: 150
+    });
+
+    expect(selected.selection.nodeId).toBe("rectangle-1");
+    expect(selected.selection.nodeIds).toEqual(["text-1", "rectangle-1"]);
   });
 
   test("creates predictable default rectangle and text nodes for toolbar actions", () => {

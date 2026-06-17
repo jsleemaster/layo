@@ -154,7 +154,8 @@ Implementation shape:
 ## Immediate Implementation Order
 
 1. Keep the landed Lane 1 layout foundation and PR #20 navigation fixes green.
-2. Implement the first core interaction shortcut slice from `docs/product/figma-core-interaction-rules.md`: selected-layer Delete/Backspace and Cmd/Ctrl+D duplicate.
-3. Move to multi-selection and marquee before alignment/distribute, because those commands require multiple selected layers.
-4. Add snap guides only after live drag preview and multi-selection bounds are stable.
-5. Merge only after `pnpm test`, `pnpm typecheck`, web build, and relevant Playwright suites pass.
+2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace and Cmd/Ctrl+D duplicate.
+3. Keep Shift-click multi-selection and drag 영역 선택 green.
+4. Implement alignment/distribute commands next, because those commands now have multiple selected layers to operate on.
+5. Add snap guides only after live drag preview and multi-selection bounds are stable.
+6. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.
