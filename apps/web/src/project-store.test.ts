@@ -17,4 +17,17 @@ describe("indexeddb project store", () => {
 
     await expect(store.getCurrentProjectId()).resolves.toBe("project-web");
   });
+
+  test("tracks recently opened projects newest first without duplicates", async () => {
+    const store = createIndexedDbProjectStore({
+      databaseName: "canvas-mcp-editor-projects-test",
+      indexedDB
+    });
+
+    await store.setCurrentProjectId("project-alpha");
+    await store.setCurrentProjectId("project-beta");
+    await store.setCurrentProjectId("project-alpha");
+
+    await expect(store.getRecentProjectIds()).resolves.toEqual(["project-alpha", "project-beta"]);
+  });
 });

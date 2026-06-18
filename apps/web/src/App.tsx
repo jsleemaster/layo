@@ -43,6 +43,7 @@ import {
   updateProject,
   type ProjectManifest
 } from "./project-api";
+import { getVisibleProjects, promoteRecentProject } from "./project-list";
 import { createIndexedDbProjectStore } from "./project-store";
 import {
   alignSelectedNodes,
@@ -765,6 +766,8 @@ export function App() {
   const [projects, setProjects] = useState<ProjectManifest[]>([]);
   const [currentProject, setCurrentProject] = useState<ProjectManifest | null>(null);
   const [projectNameDraft, setProjectNameDraft] = useState("");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [recentProjectIds, setRecentProjectIds] = useState<string[]>([]);
   const [projectStatus, setProjectStatus] = useState("프로젝트 불러오는 중");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
   const [encryptionPassphrase, setEncryptionPassphrase] = useState("");
@@ -794,6 +797,15 @@ export function App() {
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [stageSize, setStageSize] = useState<{ width: number; height: number }>(editorKonvaTokens.stage);
+  const visibleProjects = useMemo(
+    () => getVisibleProjects(projects, recentProjectIds, projectSearch),
+    [projects, projectSearch, recentProjectIds]
+  );
+  const projectFilterSummary = projectSearch.trim()
+    ? visibleProjects.length === 0
+      ? "검색 결과 없음"
+      : `${visibleProjects.length}개 프로젝트`
+    : `${projects.length}개 프로젝트`;
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
     const response = await fetch(`http://127.0.0.1:4317/files/${project.currentDocumentId}`);
@@ -805,6 +817,7 @@ export function App() {
     setCurrentProject(project);
     setProjectNameDraft(project.name);
     await projectStore.setCurrentProjectId(project.projectId);
+    setRecentProjectIds((current) => promoteRecentProject(project.projectId, current));
     setEditor(createEditorState(parseDocumentPayload(payload)));
     setProjectStatus(`${project.name} 불러옴`);
   };
@@ -814,14 +827,20 @@ export function App() {
 
     const loadInitialProject = async () => {
       try {
-        const [projectList, storedProjectId] = await Promise.all([
+        const [projectList, storedProjectId, storedRecentProjectIds] = await Promise.all([
           fetchProjects(),
-          projectStore.getCurrentProjectId()
+          projectStore.getCurrentProjectId(),
+          projectStore.getRecentProjectIds()
         ]);
+        const orderedProjectList = getVisibleProjects(projectList, storedRecentProjectIds, "");
         const selectedProject =
-          projectList.find((project) => project.projectId === storedProjectId) ?? projectList[0] ?? null;
+          orderedProjectList.find((project) => project.projectId === storedProjectId) ??
+          orderedProjectList[0] ??
+          null;
         if (!selectedProject) {
           if (!cancelled) {
+            setProjects(projectList);
+            setRecentProjectIds(storedRecentProjectIds);
             setProjectStatus("저장된 프로젝트 없음");
             setEditor(null);
           }
@@ -840,6 +859,7 @@ export function App() {
         setCurrentProject(selectedProject);
         setProjectNameDraft(selectedProject.name);
         await projectStore.setCurrentProjectId(selectedProject.projectId);
+        setRecentProjectIds(promoteRecentProject(selectedProject.projectId, storedRecentProjectIds));
         setEditor(createEditorState(parseDocumentPayload(payload)));
         setProjectStatus(`${selectedProject.name} 불러옴`);
       } catch {
@@ -2040,13 +2060,25 @@ export function App() {
                   value={currentProject?.projectId ?? ""}
                   onChange={(event) => void openProject(event.currentTarget.value)}
                 >
-                  {projects.map((project) => (
+                  {visibleProjects.map((project) => (
                     <option key={project.projectId} value={project.projectId}>
                       {project.name}
                     </option>
                   ))}
                 </select>
               </label>
+              <label>
+                검색
+                <input
+                  data-testid="project-search"
+                  value={projectSearch}
+                  placeholder="프로젝트 또는 문서 이름"
+                  onChange={(event) => setProjectSearch(event.currentTarget.value)}
+                />
+              </label>
+              <div className="project-status" data-testid="project-filter-summary">
+                {projectFilterSummary}
+              </div>
               <label>
                 이름
                 <input

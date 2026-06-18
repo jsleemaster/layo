@@ -1,6 +1,9 @@
+import { promoteRecentProject } from "./project-list";
+
 export interface ProjectStore {
   setCurrentProjectId(projectId: string): Promise<void>;
   getCurrentProjectId(): Promise<string | null>;
+  getRecentProjectIds(): Promise<string[]>;
 }
 
 export interface IndexedDbProjectStoreOptions {
@@ -12,6 +15,7 @@ const DEFAULT_DATABASE_NAME = "canvas-mcp-editor-projects";
 const DATABASE_VERSION = 1;
 const SETTINGS_STORE = "settings";
 const CURRENT_PROJECT_KEY = "currentProjectId";
+const RECENT_PROJECTS_KEY = "recentProjectIds";
 
 export function createIndexedDbProjectStore(options: IndexedDbProjectStoreOptions = {}): ProjectStore {
   const idb = options.indexedDB ?? globalThis.indexedDB;
@@ -23,10 +27,15 @@ export function createIndexedDbProjectStore(options: IndexedDbProjectStoreOption
 
   return {
     async setCurrentProjectId(projectId) {
+      const recentProjectIds = projectId ? promoteRecentProject(projectId, await readRecentProjectIds()) : [];
       const database = await open();
       try {
         const transaction = database.transaction(SETTINGS_STORE, "readwrite");
-        transaction.objectStore(SETTINGS_STORE).put(projectId, CURRENT_PROJECT_KEY);
+        const store = transaction.objectStore(SETTINGS_STORE);
+        store.put(projectId, CURRENT_PROJECT_KEY);
+        if (projectId) {
+          store.put(recentProjectIds, RECENT_PROJECTS_KEY);
+        }
         await transactionDone(transaction);
       } finally {
         database.close();
@@ -42,8 +51,23 @@ export function createIndexedDbProjectStore(options: IndexedDbProjectStoreOption
       } finally {
         database.close();
       }
+    },
+    async getRecentProjectIds() {
+      return readRecentProjectIds();
     }
   };
+
+  async function readRecentProjectIds() {
+    const database = await open();
+    try {
+      const value = await request<unknown>(
+        database.transaction(SETTINGS_STORE, "readonly").objectStore(SETTINGS_STORE).get(RECENT_PROJECTS_KEY)
+      );
+      return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+    } finally {
+      database.close();
+    }
+  }
 }
 
 function openDatabase(idb: IDBFactory, databaseName: string): Promise<IDBDatabase> {

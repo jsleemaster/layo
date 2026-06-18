@@ -28,6 +28,16 @@ async function createProjectFromEmptyState(page: Page) {
   };
 }
 
+async function createNamedProject(page: Page, name: string) {
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  const projectId = await page.getByTestId("project-switcher").inputValue();
+  await page.getByTestId("project-name").fill(name);
+  await page.getByRole("button", { name: "이름 저장" }).click();
+  await expect(page.getByTestId("project-status")).toContainText(`${name} 저장됨`);
+  return projectId;
+}
+
 test("creates, reopens, and team-links a saved project", async ({ page }) => {
   await openEmptyEditor(page);
 
@@ -55,6 +65,26 @@ test("creates, reopens, and team-links a saved project", async ({ page }) => {
   const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${createdProjectId}`);
   expect(projectResponse.ok()).toBeTruthy();
   expect((await projectResponse.json()).project.sharing).toMatchObject({ mode: "team" });
+});
+
+test("filters projects and keeps recently opened projects first", async ({ page }) => {
+  await openEmptyEditor(page);
+  const alphaProjectId = await createNamedProject(page, "검색 알파");
+  const betaProjectId = await createNamedProject(page, "검색 베타");
+  await createNamedProject(page, "검색 감마");
+
+  await page.getByTestId("project-search").fill("베타");
+  await expect(page.getByTestId("project-filter-summary")).toContainText("1개 프로젝트");
+  await expect(page.getByTestId("project-switcher").locator("option")).toHaveText(["검색 베타"]);
+  await page.getByTestId("project-switcher").selectOption(betaProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("검색 베타 불러옴");
+
+  await page.getByTestId("project-search").fill("");
+  await page.getByTestId("project-switcher").selectOption(alphaProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("검색 알파 불러옴");
+  await page.reload();
+  await expect(page.getByTestId("project-switcher")).toHaveValue(alphaProjectId);
+  await expect(page.getByTestId("project-switcher").locator("option").first()).toHaveText("검색 알파");
 });
 
 test("duplicates and deletes a saved project from the project panel", async ({ page }) => {
