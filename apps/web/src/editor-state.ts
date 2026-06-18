@@ -609,6 +609,29 @@ export function createTextNode(sequence: number): RendererNode {
   };
 }
 
+export function createImageNode(
+  sequence: number,
+  input: {
+    assetId: string;
+    name?: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+): RendererNode {
+  return {
+    id: `image-${sequence}`,
+    kind: "image",
+    name: input.name?.trim() || `이미지 ${sequence}`,
+    transform: { x: Math.round(input.x), y: Math.round(input.y), rotation: 0 },
+    size: { width: clampSize(input.width), height: clampSize(input.height) },
+    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+    content: { type: "image", asset_id: input.assetId },
+    children: []
+  };
+}
+
 function applyCommand(document: RendererDocument, command: EditorCommand): CommandResult {
   const next = structuredClone(document);
 
