@@ -14,8 +14,20 @@ afterEach(async () => {
   }
 });
 
+async function createServerWithDocument() {
+  tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+  const storage = new FileStorage(tempRoot);
+  await storage.createProject({
+    projectId: "test-project",
+    name: "테스트 프로젝트",
+    documentId: "sample-file",
+    documentName: "테스트 문서"
+  });
+  return createHttpServer(storage);
+}
+
 describe("HTTP server", () => {
-  test("serves health, file list, and sample file", async () => {
+  test("serves health and starts with an empty file list", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
@@ -25,11 +37,7 @@ describe("HTTP server", () => {
 
     const files = await server.inject({ method: "GET", url: "/files" });
     expect(files.statusCode).toBe(200);
-    expect(files.json().files[0].id).toBe("sample-file");
-
-    const file = await server.inject({ method: "GET", url: "/files/sample-file" });
-    expect(file.statusCode).toBe(200);
-    expect(file.json().file.name).toBe("샘플 파일");
+    expect(files.json().files).toEqual([]);
   });
 
   test("serves project create, read, update, document, and sharing routes", async () => {
@@ -38,10 +46,7 @@ describe("HTTP server", () => {
 
     const projects = await server.inject({ method: "GET", url: "/projects" });
     expect(projects.statusCode).toBe(200);
-    expect(projects.json().projects[0]).toMatchObject({
-      projectId: "sample-project",
-      currentDocumentId: "sample-file"
-    });
+    expect(projects.json().projects).toEqual([]);
 
     const created = await server.inject({
       method: "POST",
@@ -143,8 +148,7 @@ describe("HTTP server", () => {
   });
 
   test("updates node geometry, fill, text, and creates nodes", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const server = createHttpServer(new FileStorage(tempRoot));
+    const server = await createServerWithDocument();
 
     const geometry = await server.inject({
       method: "PATCH",
@@ -192,8 +196,7 @@ describe("HTTP server", () => {
   });
 
   test("serves component creation, instancing, listing, and detach routes", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const server = createHttpServer(new FileStorage(tempRoot));
+    const server = await createServerWithDocument();
 
     const component = await server.inject({
       method: "POST",
@@ -230,8 +233,7 @@ describe("HTTP server", () => {
   });
 
   test("serves agent inspect, find, command, validate, and change-summary routes", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const server = createHttpServer(new FileStorage(tempRoot));
+    const server = await createServerWithDocument();
 
     const before = await server.inject({ method: "GET", url: "/files/sample-file" });
     const inspect = await server.inject({ method: "GET", url: "/files/sample-file/agent/inspect" });
@@ -313,8 +315,7 @@ describe("HTTP server", () => {
   });
 
   test("exports a design file as CSS, HTML, and importable element modules", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const server = createHttpServer(new FileStorage(tempRoot));
+    const server = await createServerWithDocument();
 
     const response = await server.inject({
       method: "GET",

@@ -1,14 +1,24 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 test.beforeEach(async () => {
-  await rm(".canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm(".canvas-mcp-editor/files", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/files", { recursive: true, force: true });
+  await rm(".canvas-mcp-editor", { recursive: true, force: true });
+  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
 });
+
+async function createProjectFromEmptyState(page: Page) {
+  await page.goto("http://127.0.0.1:5173/");
+  await expect(page.getByTestId("project-status")).toContainText("저장된 프로젝트 없음");
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  const projectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${projectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const projectPayload = await projectResponse.json();
+  return projectPayload.project.currentDocumentId as string;
+}
 
 test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
@@ -44,8 +54,6 @@ test("team panel shows live collaboration controls only in the collaboration tab
 });
 
 test("relay team syncs document edits between two browser contexts", async ({ browser }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
   const contextA = await browser.newContext();
@@ -55,8 +63,9 @@ test("relay team syncs document edits between two browser contexts", async ({ br
   const pageB = await contextB.newPage();
 
   try {
-    await pageA.goto("http://127.0.0.1:5173/");
+    const documentId = await createProjectFromEmptyState(pageA);
     await pageB.goto("http://127.0.0.1:5173/");
+    await expect(pageB.getByRole("button", { name: "헤드라인" })).toBeVisible();
 
     await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
@@ -125,13 +134,13 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     const agentNodeId = `agent-collab-${Date.now()}`;
     const agentNodeName = `에이전트 협업 ${Date.now()}`;
     const agentResponse = await pageA.request.post(
-      "http://127.0.0.1:4317/files/sample-file/agent/commands",
+      `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
       {
         data: {
           dryRun: false,
           collaboration: {
             teamId: team.teamId,
-            documentId: "sample-file",
+            documentId,
             relayUrl: "ws://127.0.0.1:4327"
           },
           commands: [
@@ -169,17 +178,15 @@ test("relay team syncs document edits between two browser contexts", async ({ br
 });
 
 test("encrypted relay team syncs document edits without exporting the passphrase", async ({ browser }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
   const pageA = await contextA.newPage();
   const pageB = await contextB.newPage();
 
   try {
-    await pageA.goto("http://127.0.0.1:5173/");
+    await createProjectFromEmptyState(pageA);
     await pageB.goto("http://127.0.0.1:5173/");
+    await expect(pageB.getByRole("button", { name: "헤드라인" })).toBeVisible();
 
     await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");

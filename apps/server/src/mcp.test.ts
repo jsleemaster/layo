@@ -65,10 +65,7 @@ describe("MCP AI editing workflow", () => {
         arguments: {}
       })
     );
-    expect(listed.projects[0]).toMatchObject({
-      projectId: "sample-project",
-      currentDocumentId: "sample-file"
-    });
+    expect(listed.projects).toEqual([]);
 
     const created = parseToolJson(
       await client.callTool({
@@ -138,6 +135,16 @@ describe("MCP AI editing workflow", () => {
 
   test("lets an MCP client inspect, edit, find, and validate a design file", async () => {
     const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "sample-project",
+        name: "테스트 프로젝트",
+        documentId: "sample-file",
+        documentName: "테스트 문서"
+      }
+    });
 
     const inspection = parseToolJson(
       await client.callTool({

@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   applyAgentCommandsToDocument,
@@ -167,39 +167,42 @@ export class FileStorage {
     return path.join(this.projectsDir, `${projectId}.json`);
   }
 
-  async ensureSeedFile() {
+  async prepareFiles() {
     await mkdir(this.filesDir, { recursive: true });
-    const filePath = this.filePathFor(sampleDocument.id);
-
-    let exists = true;
-    try {
-      await stat(filePath);
-    } catch {
-      exists = false;
-    }
-
-    if (!exists) {
-      await writeFile(filePath, `${JSON.stringify(sampleDocument, null, 2)}\n`, "utf8");
-      return;
-    }
-
-    await this.localizeLegacySeedFile(filePath);
+    await this.removeStockSampleDocument();
   }
 
-  private async localizeLegacySeedFile(filePath: string) {
-    const raw = await readFile(filePath, "utf8");
-    const document = JSON.parse(raw) as DesignFile;
-    if (document.id !== sampleDocument.id) {
+  async prepareProjects() {
+    await this.prepareFiles();
+    await mkdir(this.projectsDir, { recursive: true });
+    await this.removeStockSampleProject();
+  }
+
+  private async removeStockSampleDocument() {
+    const filePath = this.filePathFor(sampleDocument.id);
+    if (!(await isStockSampleDocument(filePath))) {
       return;
     }
 
-    if (localizeLegacySampleLabels(document)) {
-      await writeFile(filePath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    await unlink(filePath);
+  }
+
+  private async removeStockSampleProject() {
+    const projectPath = this.projectPathFor("sample-project");
+    if (!(await isStockSampleProject(projectPath))) {
+      return;
     }
+    const sampleFilePath = this.filePathFor(sampleDocument.id);
+    const sampleFileExists = await pathExists(sampleFilePath);
+    if (sampleFileExists && !(await isStockSampleDocument(sampleFilePath))) {
+      return;
+    }
+
+    await unlink(projectPath);
   }
 
   async listFiles(): Promise<StoredFileSummary[]> {
-    await this.ensureSeedFile();
+    await this.prepareFiles();
     const entries = await readdir(this.filesDir);
     const files = entries.filter((entry) => entry.endsWith(".json"));
 
@@ -220,37 +223,8 @@ export class FileStorage {
     );
   }
 
-  async ensureSeedProject() {
-    await this.ensureSeedFile();
-    await mkdir(this.projectsDir, { recursive: true });
-    const entries = await readdir(this.projectsDir);
-    if (entries.some((entry) => entry.endsWith(".json"))) {
-      return;
-    }
-
-    const sample = await this.readFile(sampleDocument.id);
-    const now = new Date().toISOString();
-    await this.writeProject({
-      schemaVersion: 1,
-      projectId: "sample-project",
-      name: "샘플 프로젝트",
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: sample.id,
-      documents: [
-        {
-          documentId: sample.id,
-          name: sample.name,
-          createdAt: now,
-          updatedAt: now
-        }
-      ],
-      sharing: { mode: "private" }
-    });
-  }
-
   async listProjects(): Promise<ProjectManifest[]> {
-    await this.ensureSeedProject();
+    await this.prepareProjects();
     const entries = await readdir(this.projectsDir);
     const projects = await Promise.all(
       entries
@@ -265,7 +239,6 @@ export class FileStorage {
   }
 
   async readProject(projectId: string): Promise<ProjectManifest> {
-    await this.ensureSeedProject();
     const raw = await readFile(this.projectPathFor(projectId), "utf8");
     return parseProjectManifest(JSON.parse(raw));
   }
@@ -424,10 +397,13 @@ export class FileStorage {
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
-    await this.ensureSeedFile();
     const filePath = this.filePathFor(fileId);
     const raw = await readFile(filePath, "utf8");
-    return JSON.parse(raw) as DesignFile;
+    const document = JSON.parse(raw) as DesignFile;
+    if (document.id === sampleDocument.id && localizeLegacySampleLabels(document)) {
+      await writeFile(filePath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    }
+    return document;
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
@@ -665,10 +641,49 @@ function normalizeName(value: string | undefined, fallback: string) {
   return normalized;
 }
 
+async function isStockSampleDocument(filePath: string) {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf8");
+  } catch {
+    return false;
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(raw)) === JSON.stringify(sampleDocument);
+  } catch {
+    return false;
+  }
+}
+
 async function pathExists(filePath: string) {
   try {
     await stat(filePath);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isStockSampleProject(projectPath: string) {
+  let raw: string;
+  try {
+    raw = await readFile(projectPath, "utf8");
+  } catch {
+    return false;
+  }
+
+  try {
+    const project = parseProjectManifest(JSON.parse(raw));
+    return (
+      project.projectId === "sample-project" &&
+      project.name === "샘플 프로젝트" &&
+      project.currentDocumentId === sampleDocument.id &&
+      project.documents.length === 1 &&
+      project.documents[0]?.documentId === sampleDocument.id &&
+      project.documents[0]?.name === "샘플 파일" &&
+      project.sharing.mode === "private"
+    );
   } catch {
     return false;
   }

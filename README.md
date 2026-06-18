@@ -113,13 +113,18 @@ The structured export is intended for agent-driven implementation work. `structu
 HTTP:
 
 ```bash
-curl "http://127.0.0.1:4317/files/sample-file/export/code?moduleBasePath=./elements"
+curl -X POST "http://127.0.0.1:4317/projects" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"새 프로젝트","documentName":"새 문서"}'
+
+curl "http://127.0.0.1:4317/files/<document-id>/export/code?moduleBasePath=./elements"
 ```
 
 MCP:
 
 ```text
-export_code({ "fileId": "sample-file", "moduleBasePath": "./elements" })
+create_project({ "name": "새 프로젝트", "documentName": "새 문서" })
+export_code({ "fileId": "<document-id>", "moduleBasePath": "./elements" })
 ```
 
 ## Agent Control Workflow
@@ -173,7 +178,7 @@ For an active team-owned relay room, `apply_agent_commands` also accepts:
   "dryRun": false,
   "collaboration": {
     "teamId": "team-id-from-manifest",
-    "documentId": "sample-file",
+    "documentId": "<document-id>",
     "relayUrl": "ws://127.0.0.1:4327"
   },
   "commands": []
@@ -188,6 +193,8 @@ Projects are saved as local-first manifests under `.canvas-mcp-editor/projects`.
 Each `ProjectManifest` records the project name, current document, document
 membership, and sharing reference. Canvas contents remain in
 `.canvas-mcp-editor/files` as `DesignFile` JSON.
+Fresh local stores start empty; create a project before editing or exporting a
+document.
 
 HTTP:
 

@@ -7,8 +7,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 test("stdio MCP edits move a node, create a component instance, and render in the editor", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm(".canvas-mcp-editor", { recursive: true, force: true });
+  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
 
   const result = await runStdioMcpEdit();
 
@@ -44,7 +44,7 @@ async function runStdioMcpEdit() {
     import { Client } from "@modelcontextprotocol/sdk/client/index.js";
     import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-    const fileId = "sample-file";
+    const fileId = "mcp-stdio-file";
     const sourceNodeId = "mcp-stdio-source";
     const componentId = "mcp-stdio-component";
     const instanceId = "mcp-stdio-instance";
@@ -68,6 +68,15 @@ async function runStdioMcpEdit() {
 
     try {
       await client.connect(transport);
+      parseToolJson(await client.callTool({
+        name: "create_project",
+        arguments: {
+          projectId: "mcp-stdio-project",
+          name: "MCP stdio 프로젝트",
+          documentId: fileId,
+          documentName: "MCP stdio 문서"
+        }
+      }));
       parseToolJson(await client.callTool({
         name: "apply_agent_commands",
         arguments: {

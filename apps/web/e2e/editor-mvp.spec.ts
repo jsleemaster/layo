@@ -1,19 +1,35 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { rm } from "node:fs/promises";
 
 test.beforeEach(async () => {
-  await rm(".canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/projects", { recursive: true, force: true });
+  await rm(".canvas-mcp-editor", { recursive: true, force: true });
+  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
 });
 
-test("creates, reopens, and team-links a saved project", async ({ page }) => {
-  await rm(".canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm(".canvas-mcp-editor/files", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/files", { recursive: true, force: true });
-
+async function openEmptyEditor(page: Page) {
   await page.goto("http://127.0.0.1:5173/");
-  await expect(page.getByTestId("project-switcher")).toHaveValue("sample-project");
+  await expect(page.getByTestId("project-switcher")).toHaveValue("");
+  await expect(page.getByTestId("project-status")).toContainText("저장된 프로젝트 없음");
+}
+
+async function createProjectFromEmptyState(page: Page) {
+  await openEmptyEditor(page);
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  const projectId = await page.getByTestId("project-switcher").inputValue();
+  expect(projectId).not.toBe("");
+  expect(projectId).not.toBe("sample-project");
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${projectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const projectPayload = await projectResponse.json();
+  return {
+    projectId,
+    documentId: projectPayload.project.currentDocumentId as string
+  };
+}
+
+test("creates, reopens, and team-links a saved project", async ({ page }) => {
+  await openEmptyEditor(page);
 
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
@@ -77,10 +93,7 @@ test("duplicates and deletes a saved project from the project panel", async ({ p
 });
 
 test("canvas editor MVP supports Korean-first select, inspect, edit, undo, create, and zoom", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  const { documentId } = await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("32");
@@ -152,7 +165,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
   const agentName = `에이전트 메모 ${Date.now()}`;
   const agentValue = "에이전트가 만든 검증 텍스트";
   const agentResponse = await page.request.post(
-    "http://127.0.0.1:4317/files/sample-file/agent/commands",
+    `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
     {
       data: {
         dryRun: false,
@@ -189,7 +202,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
 
 test("web editor fills the available work area with a white canvas", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto("http://127.0.0.1:5173/");
+  await openEmptyEditor(page);
   await expect(page.getByTestId("stage-frame")).toBeVisible();
 
   const metrics = await page.evaluate(() => {
@@ -230,7 +243,7 @@ test("web editor fills the available work area with a white canvas", async ({ pa
 });
 
 test("left sidebar can collapse from the top toolbar", async ({ page }) => {
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
 
   await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toBeVisible();
   await page.getByRole("button", { name: "왼쪽 사이드바 접기" }).click();
@@ -244,7 +257,7 @@ test("left sidebar can collapse from the top toolbar", async ({ page }) => {
 });
 
 test("component toolbar actions use component-style icons instead of letter labels", async ({ page }) => {
-  await page.goto("http://127.0.0.1:5173/");
+  await openEmptyEditor(page);
 
   await expect(page.getByRole("button", { name: "컴포넌트 만들기" })).not.toHaveText("C");
   await expect(page.getByRole("button", { name: "인스턴스 만들기" })).not.toHaveText("I");
@@ -252,10 +265,7 @@ test("component toolbar actions use component-style icons instead of letter labe
 });
 
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
   const stageBox = await page.locator("canvas").first().boundingBox();
   if (!stageBox) {
     throw new Error("stage canvas was not visible");
@@ -311,10 +321,7 @@ test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with
 });
 
 test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await page.keyboard.press("Control+D");
@@ -330,10 +337,7 @@ test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ 
 });
 
 test("Figma-like multi-selection supports Shift-click and area selection", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await page.getByRole("button", { name: "사각형 만들기" }).click();
@@ -370,10 +374,7 @@ test("Figma-like multi-selection supports Shift-click and area selection", async
 });
 
 test("Figma-like alignment and distribution toolbar controls selected layers", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "사각형 만들기" }).click();
   await page.getByRole("button", { name: "텍스트 만들기" }).click();
@@ -414,10 +415,7 @@ test("Figma-like alignment and distribution toolbar controls selected layers", a
 });
 
 test("component instances drag as a single selected object from nested content", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
   await page.getByRole("button", { name: "인스턴스 만들기" }).click();
@@ -441,10 +439,7 @@ test("component instances drag as a single selected object from nested content",
 });
 
 test("unselected component instances move on the first drag gesture", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
   await page.getByRole("button", { name: "인스턴스 만들기" }).click();
@@ -469,10 +464,7 @@ test("unselected component instances move on the first drag gesture", async ({ p
 });
 
 test("inspector auto layout stacks children inside a selected frame", async ({ page }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
-
-  await page.goto("http://127.0.0.1:5173/");
+  await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByTestId("inspector-layout-mode").selectOption("auto");
   await page.getByTestId("inspector-layout-direction").selectOption("vertical");

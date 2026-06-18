@@ -138,7 +138,7 @@ Agents can keep using file-backed HTTP/MCP commands. To mutate an active relay r
   "dryRun": false,
   "collaboration": {
     "teamId": "team-id-from-manifest",
-    "documentId": "sample-file",
+    "documentId": "<document-id>",
     "relayUrl": "ws://127.0.0.1:4327"
   },
   "commands": [

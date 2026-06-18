@@ -14,51 +14,58 @@ afterEach(async () => {
 });
 
 describe("FileStorage", () => {
-  test("seeds and lists the sample document", async () => {
+  test("starts without a generated sample document", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
     const storage = new FileStorage(tempRoot);
 
     const files = await storage.listFiles();
 
-    expect(files).toHaveLength(1);
-    expect(files[0]).toMatchObject({
-      id: "sample-file",
-      name: "샘플 파일"
-    });
+    expect(files).toEqual([]);
   });
 
-  test("reads a stored document by file id", async () => {
+  test("reads an explicitly created document by file id", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
     const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "project-alpha",
+      name: "알파 프로젝트",
+      documentId: "document-alpha",
+      documentName: "알파 문서"
+    });
 
-    const document = await storage.readFile("sample-file");
+    const document = await storage.readFile("document-alpha");
 
     expect(document).toMatchObject({
-      id: "sample-file",
-      name: "샘플 파일"
+      id: "document-alpha",
+      name: "알파 문서"
     });
   });
 
-  test("seeds a default project for the sample document", async () => {
+  test("starts without a generated sample project", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
     const storage = new FileStorage(tempRoot);
 
     const projects = await storage.listProjects();
 
-    expect(projects).toHaveLength(1);
-    expect(projects[0]).toMatchObject({
-      schemaVersion: 1,
+    expect(projects).toEqual([]);
+  });
+
+  test("preserves legacy sample ids when the document was user-modified", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
       projectId: "sample-project",
       name: "샘플 프로젝트",
-      currentDocumentId: "sample-file",
-      sharing: { mode: "private" },
-      documents: [
-        {
-          documentId: "sample-file",
-          name: "샘플 파일"
-        }
-      ]
+      documentId: "sample-file",
+      documentName: "샘플 파일"
     });
+    await storage.updateText("sample-file", "text-1", "사용자가 수정한 문서");
+
+    const projects = await storage.listProjects();
+    const files = await storage.listFiles();
+
+    expect(projects.map((project) => project.projectId)).toEqual(["sample-project"]);
+    expect(files.map((file) => file.id)).toEqual(["sample-file"]);
   });
 
   test("creates, reads, renames, shares, and appends documents to projects", async () => {
@@ -276,7 +283,7 @@ describe("FileStorage", () => {
 
   test("updates node geometry and persists the document", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const node = await storage.updateNodeGeometry("sample-file", "text-1", {
       x: 88,
@@ -293,7 +300,7 @@ describe("FileStorage", () => {
 
   test("updates fill and text content", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const filled = await storage.setNodeFill("sample-file", "text-1", "#2563eb");
     const text = await storage.updateText("sample-file", "text-1", "저장된 헤드라인");
@@ -304,7 +311,7 @@ describe("FileStorage", () => {
 
   test("creates a node under a page parent", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const node = await storage.createNode("sample-file", "page-1", {
       id: "rectangle-99",
@@ -324,7 +331,7 @@ describe("FileStorage", () => {
 
   test("creates components, instances, and detaches instances", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const component = await storage.createComponent("sample-file", "frame-1", {
       componentId: "component-1",
@@ -350,7 +357,7 @@ describe("FileStorage", () => {
 
   test("inspects and searches canvas nodes for agent workflows", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const inspection = await storage.inspectCanvas("sample-file");
     const matches = await storage.findNodes("sample-file", { text: "캔버스" });
@@ -371,7 +378,7 @@ describe("FileStorage", () => {
 
   test("dry-runs and persists agent command batches with audit summaries", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const before = await storage.readFile("sample-file");
     const dryRun = await storage.applyAgentCommands("sample-file", {
@@ -437,7 +444,7 @@ describe("FileStorage", () => {
 
   test("agent commands apply auto layout and constraints deterministically", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
-    const storage = new FileStorage(tempRoot);
+    const storage = await storageWithDocument(tempRoot);
 
     const autoLayout = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
@@ -508,3 +515,14 @@ describe("FileStorage", () => {
     });
   });
 });
+
+async function storageWithDocument(root: string) {
+  const storage = new FileStorage(root);
+  await storage.createProject({
+    projectId: "test-project",
+    name: "테스트 프로젝트",
+    documentId: "sample-file",
+    documentName: "테스트 문서"
+  });
+  return storage;
+}
