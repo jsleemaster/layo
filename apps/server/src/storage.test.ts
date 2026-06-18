@@ -50,7 +50,7 @@ describe("FileStorage", () => {
     expect(projects).toEqual([]);
   });
 
-  test("preserves legacy sample ids when the document was user-modified", async () => {
+  test("removes the legacy sample project and its orphaned document even when modified", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
     const storage = new FileStorage(tempRoot);
     await storage.createProject({
@@ -64,7 +64,26 @@ describe("FileStorage", () => {
     const projects = await storage.listProjects();
     const files = await storage.listFiles();
 
-    expect(projects.map((project) => project.projectId)).toEqual(["sample-project"]);
+    expect(projects).toEqual([]);
+    expect(files).toEqual([]);
+    await expect(storage.readProject("sample-project")).rejects.toThrow();
+    await expect(storage.readFile("sample-file")).rejects.toThrow();
+  });
+
+  test("preserves a sample-id document when it belongs to a real project", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "project-real",
+      name: "실제 프로젝트",
+      documentId: "sample-file",
+      documentName: "실제 문서"
+    });
+
+    const projects = await storage.listProjects();
+    const files = await storage.listFiles();
+
+    expect(projects.map((project) => project.projectId)).toEqual(["project-real"]);
     expect(files.map((file) => file.id)).toEqual(["sample-file"]);
   });
 

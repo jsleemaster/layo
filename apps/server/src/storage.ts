@@ -27,6 +27,8 @@ import {
 } from "./layout.js";
 import { sampleDocument } from "./sample-document.js";
 
+const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
+
 export interface NodeLayout {
   mode: "none" | "auto";
   direction: "horizontal" | "vertical";
@@ -169,36 +171,64 @@ export class FileStorage {
 
   async prepareFiles() {
     await mkdir(this.filesDir, { recursive: true });
-    await this.removeStockSampleDocument();
+    await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
-    await this.prepareFiles();
+    await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
-    await this.removeStockSampleProject();
+    await this.removeLegacySampleProject();
+    await this.removeUnreferencedLegacySampleDocument();
   }
 
-  private async removeStockSampleDocument() {
+  private async removeUnreferencedLegacySampleDocument() {
     const filePath = this.filePathFor(sampleDocument.id);
-    if (!(await isStockSampleDocument(filePath))) {
+    if (!(await pathExists(filePath)) || (await this.isSampleDocumentReferencedByRealProject())) {
       return;
     }
 
     await unlink(filePath);
   }
 
-  private async removeStockSampleProject() {
-    const projectPath = this.projectPathFor("sample-project");
-    if (!(await isStockSampleProject(projectPath))) {
-      return;
-    }
-    const sampleFilePath = this.filePathFor(sampleDocument.id);
-    const sampleFileExists = await pathExists(sampleFilePath);
-    if (sampleFileExists && !(await isStockSampleDocument(sampleFilePath))) {
+  private async removeLegacySampleProject() {
+    const projectPath = this.projectPathFor(LEGACY_SAMPLE_PROJECT_ID);
+    const project = await readProjectIfPresent(projectPath);
+    if (!project || !isLegacySampleProject(project)) {
       return;
     }
 
     await unlink(projectPath);
+  }
+
+  private async isSampleDocumentReferencedByRealProject() {
+    let entries: string[];
+    try {
+      entries = await readdir(this.projectsDir);
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (!entry.endsWith(".json")) {
+        continue;
+      }
+
+      const project = await readProjectIfPresent(path.join(this.projectsDir, entry));
+      if (!project) {
+        return true;
+      }
+      if (isLegacySampleProject(project)) {
+        continue;
+      }
+      if (
+        project.currentDocumentId === sampleDocument.id ||
+        project.documents.some((document) => document.documentId === sampleDocument.id)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   async listFiles(): Promise<StoredFileSummary[]> {
@@ -641,18 +671,18 @@ function normalizeName(value: string | undefined, fallback: string) {
   return normalized;
 }
 
-async function isStockSampleDocument(filePath: string) {
+async function readProjectIfPresent(projectPath: string): Promise<ProjectManifest | null> {
   let raw: string;
   try {
-    raw = await readFile(filePath, "utf8");
+    raw = await readFile(projectPath, "utf8");
   } catch {
-    return false;
+    return null;
   }
 
   try {
-    return JSON.stringify(JSON.parse(raw)) === JSON.stringify(sampleDocument);
+    return parseProjectManifest(JSON.parse(raw));
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -665,28 +695,13 @@ async function pathExists(filePath: string) {
   }
 }
 
-async function isStockSampleProject(projectPath: string) {
-  let raw: string;
-  try {
-    raw = await readFile(projectPath, "utf8");
-  } catch {
-    return false;
-  }
-
-  try {
-    const project = parseProjectManifest(JSON.parse(raw));
-    return (
-      project.projectId === "sample-project" &&
-      project.name === "샘플 프로젝트" &&
-      project.currentDocumentId === sampleDocument.id &&
-      project.documents.length === 1 &&
-      project.documents[0]?.documentId === sampleDocument.id &&
-      project.documents[0]?.name === "샘플 파일" &&
-      project.sharing.mode === "private"
-    );
-  } catch {
-    return false;
-  }
+function isLegacySampleProject(project: ProjectManifest) {
+  return (
+    project.projectId === LEGACY_SAMPLE_PROJECT_ID &&
+    project.currentDocumentId === sampleDocument.id &&
+    project.documents.length === 1 &&
+    project.documents[0]?.documentId === sampleDocument.id
+  );
 }
 
 function createInitialDesignFile(documentId: string, name: string): DesignFile {
