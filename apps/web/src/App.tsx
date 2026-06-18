@@ -3,10 +3,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type WheelEvent as ReactWheelEvent
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
-import { Group, Layer, Rect, Stage, Text } from "react-konva";
+import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
   type NodeConstraints,
@@ -22,6 +23,7 @@ import {
 } from "@canvas-mcp-editor/collaboration";
 import { parseDocumentPayload } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
+import { uploadImageAsset, type UploadedAsset } from "./asset-api";
 import {
   createCollabDocumentSession,
   type CollabDocumentSession
@@ -50,6 +52,7 @@ import {
   alignSelectedNodes,
   calculateSnapForMovingBounds,
   createEditorState,
+  createImageNode,
   createRectangleNode,
   createTextNode,
   deleteSelectedNode,
@@ -183,6 +186,8 @@ interface FrameSpacingOverlay {
 
 const RESIZE_CORNERS: ResizeCorner[] = ["top-left", "top-right", "bottom-left", "bottom-right"];
 const MIN_RESIZE_SIZE = 1;
+const IMPORTED_IMAGE_MIN_DIMENSION = 96;
+const IMPORTED_IMAGE_MAX_DIMENSION = 480;
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
@@ -209,6 +214,109 @@ function nodeKindLabel(kind: RendererNode["kind"]): string {
     case "component_instance":
       return "컴포넌트 인스턴스";
   }
+}
+
+function assetUrlForId(assetId: string) {
+  return `http://127.0.0.1:4317/assets/${encodeURIComponent(assetId)}`;
+}
+
+function imageFilesFromList(files: FileList | File[]): File[] {
+  return Array.from(files).filter((file) => file.type.startsWith("image/"));
+}
+
+function fitImportedImageSize(size: { width: number; height: number }) {
+  const safeWidth = Math.max(1, size.width);
+  const safeHeight = Math.max(1, size.height);
+  const shrinkScale = Math.min(1, IMPORTED_IMAGE_MAX_DIMENSION / Math.max(safeWidth, safeHeight));
+  const shrunk = {
+    width: safeWidth * shrinkScale,
+    height: safeHeight * shrinkScale
+  };
+  const growScale =
+    Math.max(shrunk.width, shrunk.height) < IMPORTED_IMAGE_MIN_DIMENSION
+      ? IMPORTED_IMAGE_MIN_DIMENSION / Math.max(shrunk.width, shrunk.height)
+      : 1;
+
+  return {
+    width: Math.max(1, Math.round(shrunk.width * growScale)),
+    height: Math.max(1, Math.round(shrunk.height * growScale))
+  };
+}
+
+async function readImageFileSize(file: File): Promise<{ width: number; height: number }> {
+  if ("createImageBitmap" in window) {
+    const bitmap = await createImageBitmap(file);
+    const size = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return size;
+  }
+
+  return new Promise((resolve, reject) => {
+    const image = new window.Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("이미지 크기를 읽지 못했습니다"));
+    };
+    image.src = url;
+  });
+}
+
+async function persistCreatedNode(fileId: string, parentId: string, node: RendererNode) {
+  const response = await fetch(`http://127.0.0.1:4317/files/${fileId}/nodes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parentId, node })
+  });
+
+  if (!response.ok) {
+    throw new Error(`이미지 노드 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+function CanvasImageBody({
+  assetId,
+  width,
+  height,
+  opacity
+}: {
+  assetId: string;
+  width: number;
+  height: number;
+  opacity: number;
+}) {
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const nextImage = new window.Image();
+    nextImage.onload = () => {
+      if (!cancelled) {
+        setImage(nextImage);
+      }
+    };
+    nextImage.onerror = () => {
+      if (!cancelled) {
+        setImage(null);
+      }
+    };
+    nextImage.src = assetUrlForId(assetId);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId]);
+
+  return (
+    <>
+      <Rect width={width} height={height} fill="#f3f4f6" opacity={opacity} />
+      {image ? <KonvaImage image={image} width={width} height={height} opacity={opacity} /> : null}
+    </>
+  );
 }
 
 function collaborationStatusLabel(status: string): string {
@@ -255,6 +363,25 @@ function documentPointFromStagePointer(
     x: (pointer.x - viewport.x) / viewport.scale,
     y: (pointer.y - viewport.y) / viewport.scale
   };
+}
+
+function documentPointFromClientPoint(
+  point: { x: number; y: number },
+  viewport: EditorState["viewport"],
+  stageFrame: HTMLDivElement | null
+): { x: number; y: number } | null {
+  if (!stageFrame) {
+    return null;
+  }
+
+  const bounds = stageFrame.getBoundingClientRect();
+  return documentPointFromStagePointer(
+    {
+      x: point.x - bounds.left,
+      y: point.y - bounds.top
+    },
+    viewport
+  );
 }
 
 function documentPointFromKonvaEvent(
@@ -822,7 +949,14 @@ function renderNode({
   };
 
   const body =
-    node.kind === "text" && node.content.type === "text" ? (
+    node.kind === "image" && node.content.type === "image" ? (
+      <CanvasImageBody
+        assetId={node.content.asset_id}
+        width={node.size.width}
+        height={node.size.height}
+        opacity={node.style.opacity}
+      />
+    ) : node.kind === "text" && node.content.type === "text" ? (
       <Text
         width={node.size.width}
         height={node.size.height}
@@ -2216,6 +2350,82 @@ export function App() {
     });
   };
 
+  const insertImageFiles = async (
+    files: File[],
+    insertionPoint: { x: number; y: number } | null
+  ) => {
+    if (!editor || !currentProject || files.length === 0) {
+      return;
+    }
+
+    const firstPage = editor.document.pages[0];
+    if (!firstPage) {
+      return;
+    }
+
+    const selectedContainer =
+      selectedNode && (selectedNode.kind === "frame" || selectedNode.kind === "component")
+        ? selectedNode
+        : null;
+    const parentId = selectedContainer?.id ?? firstPage.id;
+    const parentOrigin = selectedContainer
+      ? (getNodeAbsolutePosition(editor.document, selectedContainer.id) ?? { x: 0, y: 0 })
+      : { x: 0, y: 0 };
+    const baseSequence = nodes.length;
+    const point = insertionPoint ?? {
+      x: (stageSize.width / 2 - editor.viewport.x) / editor.viewport.scale,
+      y: (stageSize.height / 2 - editor.viewport.y) / editor.viewport.scale
+    };
+
+    try {
+      for (const [index, file] of files.entries()) {
+        const [asset, naturalSize]: [UploadedAsset, { width: number; height: number }] =
+          await Promise.all([uploadImageAsset(file), readImageFileSize(file)]);
+        const imageSize = fitImportedImageSize(naturalSize);
+        const node = createImageNode(baseSequence + index + 1, {
+          assetId: asset.assetId,
+          x: point.x - parentOrigin.x - imageSize.width / 2 + index * 24,
+          y: point.y - parentOrigin.y - imageSize.height / 2 + index * 24,
+          width: imageSize.width,
+          height: imageSize.height
+        });
+
+        await persistCreatedNode(currentProject.currentDocumentId, parentId, node);
+        dispatch({ type: "create_node", parentId, node });
+        setProjectStatus(`${node.name} 추가됨`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "이미지를 가져오지 못했습니다";
+      setProjectStatus(message);
+    }
+  };
+
+  const handleImageDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (imageFilesFromList(event.dataTransfer.files).length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleImageDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    const imageFiles = imageFilesFromList(event.dataTransfer.files);
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const point = editor
+      ? documentPointFromClientPoint(
+          { x: event.clientX, y: event.clientY },
+          editor.viewport,
+          stageFrameRef.current
+        )
+      : null;
+    void insertImageFiles(imageFiles, point);
+  };
+
   const createComponent = () => {
     if (!selectedNode || selectedNode.kind === "component_instance") {
       return;
@@ -2695,6 +2905,25 @@ export function App() {
     return true;
   };
 
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      if (isEditableKeyboardTarget(event.target) || isEditableKeyboardTarget(document.activeElement)) {
+        return;
+      }
+
+      const imageFiles = event.clipboardData ? imageFilesFromList(event.clipboardData.files) : [];
+      if (imageFiles.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      void insertImageFiles(imageFiles, null);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [editor, currentProject, selectedNode, nodes.length, stageSize.height, stageSize.width]);
+
   return (
     <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -3021,6 +3250,8 @@ export function App() {
             className={`stage-frame${isSpacePanning ? " is-panning" : ""}`}
             data-testid="stage-frame"
             onWheel={handleCanvasWheel}
+            onDragOver={handleImageDragOver}
+            onDrop={handleImageDrop}
             onMouseLeave={clearCursorPresence}
           >
             <Stage
