@@ -188,6 +188,27 @@ export function getNodeAbsolutePosition(
   return null;
 }
 
+export function getNodeBounds(document: RendererDocument, nodeId: string): SelectionBounds | null {
+  return findNodeGeometry(document, nodeId)?.bounds ?? null;
+}
+
+export function getTopmostNodeIdAtPoint(
+  document: RendererDocument,
+  point: { x: number; y: number },
+  excludedNodeIds = new Set<string>()
+): string | null {
+  for (const page of document.pages) {
+    for (let index = page.children.length - 1; index >= 0; index -= 1) {
+      const found = topmostNodeIdAtPointInTree(page.children[index], point, { x: 0, y: 0 }, excludedNodeIds);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
 export function executeEditorCommand(state: EditorState, command: EditorCommand): EditorState {
   const result = applyCommand(state.document, command);
   if (!result.inverse) {
@@ -468,6 +489,22 @@ export function alignSelectedNodes(state: EditorState, mode: AlignmentMode): Edi
   });
 
   return executeBatchGeometryCommand(state, patches);
+}
+
+export function alignSelectedNodeToParent(state: EditorState, mode: AlignmentMode): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected) {
+    return state;
+  }
+
+  const geometry = findNodeGeometry(state.document, selected.node.id);
+  const parentBounds = getNodeBounds(state.document, selected.parentId);
+  if (!geometry || !parentBounds) {
+    return state;
+  }
+
+  const patch = alignmentPatch(geometry, parentBounds, mode);
+  return patch ? executeBatchGeometryCommand(state, [{ nodeId: selected.node.id, patch }]) : state;
 }
 
 export function distributeSelectedNodes(state: EditorState, mode: DistributionMode): EditorState {
@@ -1061,6 +1098,38 @@ function absolutePositionInNode(
   return null;
 }
 
+function topmostNodeIdAtPointInTree(
+  node: RendererNode,
+  point: { x: number; y: number },
+  parent: { x: number; y: number },
+  excludedNodeIds: Set<string>
+): string | null {
+  if (excludedNodeIds.has(node.id)) {
+    return null;
+  }
+
+  const absolute = {
+    x: parent.x + node.transform.x,
+    y: parent.y + node.transform.y
+  };
+
+  for (let index = node.children.length - 1; index >= 0; index -= 1) {
+    const found = topmostNodeIdAtPointInTree(node.children[index], point, absolute, excludedNodeIds);
+    if (found) {
+      return found;
+    }
+  }
+
+  const bounds = {
+    x: absolute.x,
+    y: absolute.y,
+    width: node.size.width,
+    height: node.size.height
+  };
+
+  return containsPoint(bounds, point) ? node.id : null;
+}
+
 interface NodeGeometry {
   node: RendererNode;
   parentAbsolutePosition: { x: number; y: number };
@@ -1381,6 +1450,15 @@ function containsBounds(container: SelectionBounds, candidate: SelectionBounds):
     candidate.y >= container.y &&
     candidateRight <= containerRight &&
     candidateBottom <= containerBottom
+  );
+}
+
+function containsPoint(bounds: SelectionBounds, point: { x: number; y: number }): boolean {
+  return (
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.height
   );
 }
 

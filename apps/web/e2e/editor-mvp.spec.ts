@@ -489,6 +489,33 @@ test("Figma-like alignment and distribution toolbar controls selected layers", a
   await expect(page.getByTestId("inspector-x")).toHaveValue("506");
 });
 
+test("Figma-like measurement overlay and inspector alignment controls selected layers", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  const headlineLayer = page.getByRole("button", { name: "헤드라인" });
+  const rectangleLayer = page.getByRole("button", { name: "사각형 3" });
+  await expect(rectangleLayer).toBeVisible();
+
+  await page.getByTestId("inspector-x").fill("620");
+  await page.getByTestId("inspector-y").fill("130");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+
+  await headlineLayer.click();
+  await page.getByRole("button", { name: "검사기 오른쪽 맞춤" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("160");
+
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+
+  await page.mouse.move(stageBox.x + 640, stageBox.y + 150);
+  await expect(page.getByTestId("measurement-overlay")).toBeVisible();
+  await expect(page.getByTestId("measurement-size-label")).toHaveText("160 x 96");
+  await expect(page.getByTestId("measurement-distance-horizontal")).toContainText("80");
+});
+
 test("component instances drag as a single selected object from nested content", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

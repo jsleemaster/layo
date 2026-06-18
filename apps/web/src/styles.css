@@ -142,6 +142,7 @@ button:disabled {
 
 .layer-list button,
 .toolbar button,
+.inspector-action-grid button,
 .team-actions button,
 .project-actions button {
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
@@ -168,6 +169,7 @@ button:disabled {
 .layer-list button:focus-visible,
 .sidebar-toggle:focus-visible,
 .toolbar button:focus-visible,
+.inspector-action-grid button:focus-visible,
 .inspector input:focus-visible,
 .inspector select:focus-visible,
 .inspector textarea:focus-visible,
@@ -292,6 +294,53 @@ button:disabled {
   height: var(--editor-border-hairline);
 }
 
+.measurement-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.measurement-target-outline {
+  position: absolute;
+  border: var(--editor-border-hairline) solid var(--editor-color-mcp);
+}
+
+.measurement-line {
+  position: absolute;
+  background: var(--editor-color-mcp);
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-stage);
+}
+
+.measurement-line-horizontal {
+  height: var(--editor-border-hairline);
+}
+
+.measurement-line-vertical {
+  width: var(--editor-border-hairline);
+}
+
+.measurement-label {
+  position: absolute;
+  min-width: var(--editor-space-xl);
+  transform: translate(-50%, -50%);
+  border: var(--editor-border-hairline) solid var(--editor-color-mcp);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-panel);
+  color: var(--editor-color-mcp);
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: var(--editor-text-small-line);
+  letter-spacing: var(--editor-letter-spacing);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.measurement-size-label {
+  transform: translate(0, -50%);
+}
+
 .remote-cursor,
 .remote-selection {
   position: absolute;
@@ -392,6 +441,17 @@ button:disabled {
   margin-top: var(--editor-space-lg);
   padding-top: var(--editor-space-md);
   border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.inspector-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--editor-space-xxs);
+}
+
+.inspector-action-grid button {
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xxs);
 }
 
 .inspector input,

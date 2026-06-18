@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { RendererDocument } from "@canvas-mcp-editor/renderer";
 import {
+  alignSelectedNodeToParent,
   alignSelectedNodes,
   calculateSnapForMovingBounds,
   createEditorState,
@@ -11,7 +12,9 @@ import {
   findNodeById,
   createRectangleNode,
   createTextNode,
+  getNodeBounds,
   getNodeAbsolutePosition,
+  getTopmostNodeIdAtPoint,
   getSelectionBoundsForNodeIds,
   moveSelectedNodesBy,
   nudgeSelectedNode,
@@ -300,6 +303,26 @@ describe("editor state commands", () => {
       x: 180,
       y: 140
     });
+  });
+
+  test("aligns a single selected child inside its parent bounds", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const aligned = alignSelectedNodeToParent(initial, "right");
+
+    expect(findNodeById(aligned.document, "text-1")?.transform.x).toBe(160);
+    expect(aligned.selection.nodeId).toBe("text-1");
+    expect(findNodeById(undo(aligned).document, "text-1")?.transform.x).toBe(32);
+  });
+
+  test("finds absolute node bounds and topmost hover targets", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+
+    expect(getNodeBounds(document, "text-1")).toEqual({ x: 152, y: 120, width: 260, height: 48 });
+    expect(getTopmostNodeIdAtPoint(document, { x: 190, y: 150 }, new Set(["text-1"]))).toBe(
+      "rectangle-1"
+    );
+    expect(getTopmostNodeIdAtPoint(document, { x: 160, y: 130 }, new Set(["frame-1"]))).toBeNull();
   });
 
   test("distributes selected nodes horizontally while keeping outer layers fixed", () => {

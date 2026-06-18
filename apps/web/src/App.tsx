@@ -46,6 +46,7 @@ import {
 import { getVisibleProjects, promoteRecentProject } from "./project-list";
 import { createIndexedDbProjectStore } from "./project-store";
 import {
+  alignSelectedNodeToParent,
   alignSelectedNodes,
   calculateSnapForMovingBounds,
   createEditorState,
@@ -58,7 +59,9 @@ import {
   findNodeById,
   getNodeDragGeometriesForNodeIds,
   getNodeAbsolutePosition,
+  getNodeBounds,
   getSelectionBoundsForNodeIds,
+  getTopmostNodeIdAtPoint,
   moveSelectedNodesBy,
   nudgeSelectedNode,
   panViewport,
@@ -68,6 +71,8 @@ import {
   setMultiSelection,
   setViewport,
   toggleSelection,
+  type AlignmentMode,
+  type DistributionMode,
   type EditorState,
   type GeometryPatch,
   type SelectionBounds,
@@ -128,6 +133,23 @@ interface NodeDragPreview {
   primaryNodeId: string;
   nodeIds: string[];
   delta: { x: number; y: number };
+}
+
+interface MeasurementLineOverlay {
+  left: number;
+  top: number;
+  width?: number;
+  height?: number;
+  labelLeft: number;
+  labelTop: number;
+  text: string;
+}
+
+interface MeasurementOverlay {
+  target: { left: number; top: number; width: number; height: number };
+  size: { left: number; top: number; text: string };
+  horizontal: MeasurementLineOverlay | null;
+  vertical: MeasurementLineOverlay | null;
 }
 
 function remotePresenceSignature(member: CollaborationPresence) {
@@ -242,6 +264,166 @@ function selectionBoundsFromPoints(
     y: top,
     width: right - left,
     height: bottom - top
+  };
+}
+
+function translateBounds(bounds: SelectionBounds, delta: { x: number; y: number }): SelectionBounds {
+  return {
+    ...bounds,
+    x: bounds.x + delta.x,
+    y: bounds.y + delta.y
+  };
+}
+
+function viewportBounds(bounds: SelectionBounds, viewport: EditorState["viewport"]) {
+  const topLeft = documentPointToViewport({ x: bounds.x, y: bounds.y, space: "document" }, viewport);
+  return {
+    left: Math.round(topLeft.x),
+    top: Math.round(topLeft.y),
+    width: Math.round(bounds.width * viewport.scale),
+    height: Math.round(bounds.height * viewport.scale)
+  };
+}
+
+function rangeGap(firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) {
+  if (firstEnd <= secondStart) {
+    return { start: firstEnd, end: secondStart, distance: secondStart - firstEnd };
+  }
+  if (secondEnd <= firstStart) {
+    return { start: secondEnd, end: firstStart, distance: firstStart - secondEnd };
+  }
+
+  return null;
+}
+
+function midpointOfOverlapOrCenters(
+  firstStart: number,
+  firstEnd: number,
+  secondStart: number,
+  secondEnd: number
+) {
+  const overlapStart = Math.max(firstStart, secondStart);
+  const overlapEnd = Math.min(firstEnd, secondEnd);
+  if (overlapStart <= overlapEnd) {
+    return (overlapStart + overlapEnd) / 2;
+  }
+
+  return (firstStart + firstEnd + secondStart + secondEnd) / 4;
+}
+
+function createMeasurementOverlay(
+  sourceBounds: SelectionBounds,
+  targetBounds: SelectionBounds,
+  viewport: EditorState["viewport"]
+): MeasurementOverlay {
+  const target = viewportBounds(targetBounds, viewport);
+  const sizeTop = Math.max(0, target.top - 26);
+  const horizontalGap = rangeGap(
+    sourceBounds.x,
+    sourceBounds.x + sourceBounds.width,
+    targetBounds.x,
+    targetBounds.x + targetBounds.width
+  );
+  const verticalGap = rangeGap(
+    sourceBounds.y,
+    sourceBounds.y + sourceBounds.height,
+    targetBounds.y,
+    targetBounds.y + targetBounds.height
+  );
+  const horizontal = horizontalGap
+    ? (() => {
+        const start = documentPointToViewport(
+          {
+            x: horizontalGap.start,
+            y: midpointOfOverlapOrCenters(
+              sourceBounds.y,
+              sourceBounds.y + sourceBounds.height,
+              targetBounds.y,
+              targetBounds.y + targetBounds.height
+            ),
+            space: "document"
+          },
+          viewport
+        );
+        const end = documentPointToViewport(
+          {
+            x: horizontalGap.end,
+            y: midpointOfOverlapOrCenters(
+              sourceBounds.y,
+              sourceBounds.y + sourceBounds.height,
+              targetBounds.y,
+              targetBounds.y + targetBounds.height
+            ),
+            space: "document"
+          },
+          viewport
+        );
+        const left = Math.round(Math.min(start.x, end.x));
+        const top = Math.round(start.y);
+        const width = Math.max(1, Math.round(Math.abs(end.x - start.x)));
+
+        return {
+          left,
+          top,
+          width,
+          labelLeft: Math.round(left + width / 2),
+          labelTop: top - 18,
+          text: String(Math.round(horizontalGap.distance))
+        };
+      })()
+    : null;
+  const vertical = verticalGap
+    ? (() => {
+        const start = documentPointToViewport(
+          {
+            x: midpointOfOverlapOrCenters(
+              sourceBounds.x,
+              sourceBounds.x + sourceBounds.width,
+              targetBounds.x,
+              targetBounds.x + targetBounds.width
+            ),
+            y: verticalGap.start,
+            space: "document"
+          },
+          viewport
+        );
+        const end = documentPointToViewport(
+          {
+            x: midpointOfOverlapOrCenters(
+              sourceBounds.x,
+              sourceBounds.x + sourceBounds.width,
+              targetBounds.x,
+              targetBounds.x + targetBounds.width
+            ),
+            y: verticalGap.end,
+            space: "document"
+          },
+          viewport
+        );
+        const left = Math.round(start.x);
+        const top = Math.round(Math.min(start.y, end.y));
+        const height = Math.max(1, Math.round(Math.abs(end.y - start.y)));
+
+        return {
+          left,
+          top,
+          height,
+          labelLeft: left + 8,
+          labelTop: Math.round(top + height / 2),
+          text: String(Math.round(verticalGap.distance))
+        };
+      })()
+    : null;
+
+  return {
+    target,
+    size: {
+      left: target.left,
+      top: sizeTop,
+      text: `${Math.round(targetBounds.width)} x ${Math.round(targetBounds.height)}`
+    },
+    horizontal,
+    vertical
   };
 }
 
@@ -496,22 +678,114 @@ function RemotePresenceOverlay({
   );
 }
 
+function InspectorAlignmentControls({
+  canAlign,
+  canDistribute,
+  onAlign,
+  onDistribute
+}: {
+  canAlign: boolean;
+  canDistribute: boolean;
+  onAlign: (mode: AlignmentMode) => void;
+  onDistribute: (mode: DistributionMode) => void;
+}) {
+  return (
+    <section className="inspector-section" aria-label="정렬">
+      <h3>정렬</h3>
+      <div className="inspector-action-grid">
+        <button
+          type="button"
+          aria-label="검사기 왼쪽 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("left")}
+        >
+          ⇤
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 가로 가운데 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("center")}
+        >
+          ↔
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 오른쪽 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("right")}
+        >
+          ⇥
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 위쪽 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("top")}
+        >
+          ↥
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 세로 가운데 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("middle")}
+        >
+          ↕
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 아래쪽 맞춤"
+          disabled={!canAlign}
+          onClick={() => onAlign("bottom")}
+        >
+          ↧
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 가로 간격 균등"
+          disabled={!canDistribute}
+          onClick={() => onDistribute("horizontal")}
+        >
+          ⟷
+        </button>
+        <button
+          type="button"
+          aria-label="검사기 세로 간격 균등"
+          disabled={!canDistribute}
+          onClick={() => onDistribute("vertical")}
+        >
+          ↕
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function Inspector({
   selectedNode,
   selectedNodeCount,
+  canAlign,
+  canDistribute,
   onGeometryChange,
   onFillChange,
   onTextChange,
   onLayoutChange,
-  onConstraintsChange
+  onConstraintsChange,
+  onAlign,
+  onDistribute
 }: {
   selectedNode: RendererNode | null;
   selectedNodeCount: number;
+  canAlign: boolean;
+  canDistribute: boolean;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onFillChange: (nodeId: string, fill: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onLayoutChange: (nodeId: string, layout: NodeLayout) => void;
   onConstraintsChange: (nodeId: string, constraints: NodeConstraints) => void;
+  onAlign: (mode: AlignmentMode) => void;
+  onDistribute: (mode: DistributionMode) => void;
 }) {
   if (selectedNodeCount > 1) {
     return (
@@ -521,6 +795,12 @@ function Inspector({
           <strong>{selectedNodeCount}개 레이어 선택됨</strong>
           <span>다중 선택</span>
         </div>
+        <InspectorAlignmentControls
+          canAlign={canAlign}
+          canDistribute={canDistribute}
+          onAlign={onAlign}
+          onDistribute={onDistribute}
+        />
       </aside>
     );
   }
@@ -572,6 +852,12 @@ function Inspector({
         <strong>{selectedNode.name}</strong>
         <span>{nodeKindLabel(selectedNode.kind)}</span>
       </div>
+      <InspectorAlignmentControls
+        canAlign={canAlign}
+        canDistribute={canDistribute}
+        onAlign={onAlign}
+        onDistribute={onDistribute}
+      />
       <div className="field-grid">
         <label>
           X
@@ -797,6 +1083,7 @@ export function App() {
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [stageSize, setStageSize] = useState<{ width: number; height: number }>(editorKonvaTokens.stage);
+  const [measurementTargetNodeId, setMeasurementTargetNodeId] = useState<string | null>(null);
   const visibleProjects = useMemo(
     () => getVisibleProjects(projects, recentProjectIds, projectSearch),
     [projects, projectSearch, recentProjectIds]
@@ -925,6 +1212,7 @@ export function App() {
   const selectedNodeIds = editor?.selection.nodeIds ?? [];
   const canAlignSelection = selectedNodeIds.length >= 2;
   const canDistributeSelection = selectedNodeIds.length >= 3;
+  const canAlignInspectorSelection = selectedNodeIds.length === 1 ? true : canAlignSelection;
   const areaSelectionBox = useMemo(() => {
     if (!editor || !areaSelection?.hasDragged) {
       return null;
@@ -940,6 +1228,24 @@ export function App() {
       height: bounds.height * editor.viewport.scale
     };
   }, [areaSelection, editor]);
+  const measurementOverlay = useMemo(() => {
+    if (!editor || !measurementTargetNodeId || !selectedNodeIds.length) {
+      return null;
+    }
+
+    const selectedBounds = getSelectionBoundsForNodeIds(editor.document, selectedNodeIds);
+    const targetBounds = getNodeBounds(editor.document, measurementTargetNodeId);
+    if (!selectedBounds || !targetBounds) {
+      return null;
+    }
+
+    const sourceBounds =
+      dragPreview && selectedNodeIds.every((nodeId) => dragPreview.nodeIds.includes(nodeId))
+        ? translateBounds(selectedBounds, dragPreview.delta)
+        : selectedBounds;
+
+    return createMeasurementOverlay(sourceBounds, targetBounds, editor.viewport);
+  }, [dragPreview, editor, measurementTargetNodeId, selectedNodeIds]);
   const snapGuideOverlays = useMemo(() => {
     if (!editor || !snapGuides.length) {
       return [];
@@ -1246,6 +1552,7 @@ export function App() {
   };
 
   const selectNode = (nodeId: string, additive = false, preserveMultiSelection = false) => {
+    setMeasurementTargetNodeId(null);
     if (dragSessionRef.current && !dragSessionRef.current.hasMoved) {
       dragSessionRef.current = null;
       setDragPreview(null);
@@ -1859,8 +2166,31 @@ export function App() {
     publishEditorPresence(editor, { cursor });
   };
 
+  const updateMeasurementTargetFromPointer = (
+    event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>
+  ) => {
+    if (!editor || !editor.selection.nodeIds.length || areaSelectionRef.current || panSessionRef.current) {
+      setMeasurementTargetNodeId(null);
+      return;
+    }
+
+    const documentPoint = documentPointFromKonvaEvent(event, editor.viewport, stageFrameRef.current);
+    if (!documentPoint) {
+      setMeasurementTargetNodeId(null);
+      return;
+    }
+
+    const targetNodeId = getTopmostNodeIdAtPoint(
+      editor.document,
+      documentPoint,
+      new Set(editor.selection.nodeIds)
+    );
+    setMeasurementTargetNodeId((current) => (current === targetNodeId ? current : targetNodeId));
+  };
+
   const clearCursorPresence = () => {
     const activeSession = collabSessionRef.current;
+    setMeasurementTargetNodeId(null);
     if (!activeSession) {
       return;
     }
@@ -2483,6 +2813,7 @@ export function App() {
                   return;
                 }
 
+                updateMeasurementTargetFromPointer(event);
                 updateCursorFromPointer(event);
               }}
               onTouchMove={(event) => {
@@ -2490,6 +2821,7 @@ export function App() {
                   return;
                 }
 
+                updateMeasurementTargetFromPointer(event);
                 updateCursorFromPointer(event);
               }}
               onMouseUp={(event) => {
@@ -2566,6 +2898,73 @@ export function App() {
                 }
               />
             ))}
+            {measurementOverlay ? (
+              <div className="measurement-overlay" data-testid="measurement-overlay" aria-hidden="true">
+                <div
+                  className="measurement-target-outline"
+                  style={{
+                    left: measurementOverlay.target.left,
+                    top: measurementOverlay.target.top,
+                    width: measurementOverlay.target.width,
+                    height: measurementOverlay.target.height
+                  }}
+                />
+                <div
+                  className="measurement-label measurement-size-label"
+                  data-testid="measurement-size-label"
+                  style={{
+                    left: measurementOverlay.size.left,
+                    top: measurementOverlay.size.top
+                  }}
+                >
+                  {measurementOverlay.size.text}
+                </div>
+                {measurementOverlay.horizontal ? (
+                  <>
+                    <div
+                      className="measurement-line measurement-line-horizontal"
+                      style={{
+                        left: measurementOverlay.horizontal.left,
+                        top: measurementOverlay.horizontal.top,
+                        width: measurementOverlay.horizontal.width
+                      }}
+                    />
+                    <div
+                      className="measurement-label"
+                      data-testid="measurement-distance-horizontal"
+                      style={{
+                        left: measurementOverlay.horizontal.labelLeft,
+                        top: measurementOverlay.horizontal.labelTop
+                      }}
+                    >
+                      {measurementOverlay.horizontal.text}
+                    </div>
+                  </>
+                ) : null}
+                {measurementOverlay.vertical ? (
+                  <>
+                    <div
+                      className="measurement-line measurement-line-vertical"
+                      style={{
+                        left: measurementOverlay.vertical.left,
+                        top: measurementOverlay.vertical.top,
+                        height: measurementOverlay.vertical.height
+                      }}
+                    />
+                    <div
+                      className="measurement-label"
+                      data-testid="measurement-distance-vertical"
+                      style={{
+                        left: measurementOverlay.vertical.labelLeft,
+                        top: measurementOverlay.vertical.labelTop
+                      }}
+                    >
+                      {measurementOverlay.vertical.text}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {areaSelectionBox ? (
               <div
                 className="area-selection-box"
@@ -2584,11 +2983,23 @@ export function App() {
       <Inspector
         selectedNode={selectedNode}
         selectedNodeCount={selectedNodeIds.length}
+        canAlign={canAlignInspectorSelection}
+        canDistribute={canDistributeSelection}
         onGeometryChange={updateGeometry}
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onTextChange={(nodeId, value) => dispatch({ type: "update_text", nodeId, value })}
         onLayoutChange={updateLayout}
         onConstraintsChange={updateConstraints}
+        onAlign={(mode) =>
+          updateViewportFromInteraction((current) =>
+            current.selection.nodeIds.length === 1
+              ? alignSelectedNodeToParent(current, mode)
+              : alignSelectedNodes(current, mode)
+          )
+        }
+        onDistribute={(mode) =>
+          updateViewportFromInteraction((current) => distributeSelectedNodes(current, mode))
+        }
       />
     </main>
   );
