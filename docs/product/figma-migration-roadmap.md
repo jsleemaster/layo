@@ -20,6 +20,7 @@ The current main branch already has:
 
 - Rust/TypeScript document primitives for pages, frames, rectangles, text, images, components, instances, and geometry.
 - Browser editor shell with creation, selection, dragging, four corner resizing, selection size badges, inspector geometry, inspector alignment/distribution, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, and selected-frame padding/child-spacing guides.
+- Local image asset storage with browser clipboard paste and file drag/drop insertion for image nodes.
 - Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, and transient snap guides for page-level peer bounds/centers.
 - Component definitions, instances, and detach.
 - HTTP and MCP agent control for inspect, find, command application, validation, change summaries, components, and code export.
@@ -137,6 +138,7 @@ Figma capabilities to bring over:
 - Code Connect-like component mapping.
 - Figma REST/MCP import paths for real Figma files, where credentials are provided by the user.
 - Asset export formats and image download handling.
+- Clipboard paste and file drag/drop image insertion are already local-first asset flows; full Figma file import should reuse the same asset storage path.
 
 Implementation shape:
 
@@ -162,4 +164,5 @@ Implementation shape:
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands green for multi-selected layers.
 5. Extend the landed grouped drag, measurement, frame-spacing, and corner-resize slices with edge resize handles, rotation, rulers, manual guides, and snap settings.
-6. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.
+6. Build full Figma file import separately on top of the local asset pipeline, starting with frames, rectangles, text, and exported image assets before variants or advanced effects.
+7. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.

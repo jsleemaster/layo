@@ -10,6 +10,7 @@ import {
   duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
+  createImageNode,
   createRectangleNode,
   createTextNode,
   getNodeBounds,
@@ -70,6 +71,27 @@ function sampleDocument(): RendererDocument {
     ]
   };
 }
+
+test("creates image nodes backed by asset ids", () => {
+  const node = createImageNode(3, {
+    assetId: "asset-test",
+    name: "붙여넣은 이미지",
+    x: 24,
+    y: 36,
+    width: 120,
+    height: 80
+  });
+
+  expect(node).toMatchObject({
+    id: "image-3",
+    kind: "image",
+    name: "붙여넣은 이미지",
+    transform: { x: 24, y: 36, rotation: 0 },
+    size: { width: 120, height: 80 },
+    content: { type: "image", asset_id: "asset-test" },
+    children: []
+  });
+});
 
 function sampleDocumentWithTopLevelRectangle(): RendererDocument {
   const document = sampleDocument();

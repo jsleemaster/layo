@@ -38,6 +38,42 @@ async function createNamedProject(page: Page, name: string) {
   return projectId;
 }
 
+async function createImageDataTransfer(page: Page, name: string) {
+  return page.evaluateHandle(async (fileName) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 12;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas context missing");
+    }
+    context.fillStyle = "#2563eb";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#ffffff";
+    context.fillRect(4, 3, 8, 6);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("png blob missing"));
+        }
+      }, "image/png");
+    });
+    const file = new File([blob], fileName, { type: "image/png" });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    return dataTransfer;
+  }, name);
+}
+
+function flattenNodeKinds(nodes: Array<{ kind: string; children: unknown[] }>): string[] {
+  return nodes.flatMap((node) => [
+    node.kind,
+    ...flattenNodeKinds(node.children as Array<{ kind: string; children: unknown[] }>)
+  ]);
+}
+
 test("creates, reopens, and team-links a saved project", async ({ page }) => {
   await openEmptyEditor(page);
 
@@ -120,6 +156,46 @@ test("duplicates and deletes a saved project from the project panel", async ({ p
     `http://127.0.0.1:4317/projects/${duplicatedProjectId}`
   );
   expect(deletedProject.status()).toBe(404);
+});
+
+test("inserts image files from drop and clipboard paste", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  const dropTransfer = await createImageDataTransfer(page, "drop-image.png");
+  await stageFrame.dispatchEvent("dragover", {
+    dataTransfer: dropTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: dropTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await expect(page.locator(".node-summary span")).toHaveText("이미지");
+  await expect(page.getByTestId("selection-size-badge")).toBeVisible();
+
+  const pasteTransfer = await createImageDataTransfer(page, "paste-image.png");
+  await page.evaluate((dataTransfer) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: dataTransfer });
+    window.dispatchEvent(event);
+  }, pasteTransfer);
+
+  await expect(page.getByRole("button", { name: "이미지 4" })).toBeVisible();
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const nodeKinds = flattenNodeKinds(filePayload.file.pages[0].children);
+  expect(nodeKinds.filter((kind) => kind === "image")).toHaveLength(2);
 });
 
 test("canvas editor MVP supports Korean-first select, inspect, edit, undo, create, and zoom", async ({ page }) => {

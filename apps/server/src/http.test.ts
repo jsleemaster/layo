@@ -147,6 +147,57 @@ describe("HTTP server", () => {
     expect(response.headers["access-control-allow-headers"]).toContain("Content-Type");
   });
 
+  test("stores and serves image assets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const server = createHttpServer(new FileStorage(tempRoot));
+
+    const uploaded = await server.inject({
+      method: "POST",
+      url: "/assets",
+      payload: {
+        name: "pixel.png",
+        mimeType: "image/png",
+        dataBase64:
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+      }
+    });
+
+    expect(uploaded.statusCode).toBe(200);
+    const asset = uploaded.json().asset as {
+      assetId: string;
+      mimeType: string;
+      url: string;
+      byteLength: number;
+    };
+    expect(asset.assetId).toMatch(/^asset-/);
+    expect(asset.mimeType).toBe("image/png");
+    expect(asset.byteLength).toBeGreaterThan(0);
+    expect(asset.url).toBe(`/assets/${asset.assetId}`);
+
+    const served = await server.inject({ method: "GET", url: asset.url });
+    expect(served.statusCode).toBe(200);
+    expect(served.headers["content-type"]).toContain("image/png");
+    expect(served.rawPayload.length).toBe(asset.byteLength);
+  });
+
+  test("rejects image assets whose bytes do not match the declared mime type", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    const server = createHttpServer(new FileStorage(tempRoot));
+
+    const rejected = await server.inject({
+      method: "POST",
+      url: "/assets",
+      payload: {
+        name: "fake.png",
+        mimeType: "image/png",
+        dataBase64: Buffer.from("not a png").toString("base64")
+      }
+    });
+
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toEqual({ error: "asset data does not match image/png" });
+  });
+
   test("updates node geometry, fill, text, and creates nodes", async () => {
     const server = await createServerWithDocument();
 

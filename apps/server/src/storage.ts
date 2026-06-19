@@ -28,6 +28,8 @@ import {
 import { sampleDocument } from "./sample-document.js";
 
 const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
+export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface NodeLayout {
   mode: "none" | "auto";
@@ -148,11 +150,33 @@ export interface DuplicateProjectInput {
   documentIdPrefix?: string;
 }
 
+export interface CreateAssetInput {
+  name?: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export interface StoredAsset {
+  assetId: string;
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  url: string;
+}
+
+export interface StoredAssetData extends StoredAsset {
+  data: Buffer;
+}
+
 export class FileStorage {
   constructor(private readonly rootDir = path.join(process.cwd(), ".canvas-mcp-editor")) {}
 
   private get filesDir() {
     return path.join(this.rootDir, "files");
+  }
+
+  private get assetsDir() {
+    return path.join(this.rootDir, "assets");
   }
 
   private get projectsDir() {
@@ -167,6 +191,16 @@ export class FileStorage {
   private projectPathFor(projectId: string) {
     assertSafeStorageId(projectId);
     return path.join(this.projectsDir, `${projectId}.json`);
+  }
+
+  private assetPathFor(assetId: string) {
+    assertSafeStorageId(assetId);
+    return path.join(this.assetsDir, assetId);
+  }
+
+  private assetMetadataPathFor(assetId: string) {
+    assertSafeStorageId(assetId);
+    return path.join(this.assetsDir, `${assetId}.json`);
   }
 
   async prepareFiles() {
@@ -509,6 +543,35 @@ export class FileStorage {
     return node;
   }
 
+  async createAsset(input: CreateAssetInput): Promise<StoredAsset> {
+    const mimeType = normalizeImageMimeType(input.mimeType);
+    const data = Buffer.from(input.dataBase64, "base64");
+    if (data.length === 0) {
+      throw new Error("asset data is required");
+    }
+    assertImageBytesMatchMimeType(data, mimeType);
+
+    await mkdir(this.assetsDir, { recursive: true });
+    const assetId = createStorageId("asset");
+    const asset: StoredAsset = {
+      assetId,
+      name: normalizeName(input.name, "이미지"),
+      mimeType,
+      byteLength: data.length,
+      url: `/assets/${assetId}`
+    };
+    await writeFile(this.assetPathFor(assetId), data);
+    await writeFile(this.assetMetadataPathFor(assetId), `${JSON.stringify(asset, null, 2)}\n`, "utf8");
+    return asset;
+  }
+
+  async readAsset(assetId: string): Promise<StoredAssetData> {
+    const raw = await readFile(this.assetMetadataPathFor(assetId), "utf8");
+    const asset = parseStoredAsset(JSON.parse(raw));
+    const data = await readFile(this.assetPathFor(asset.assetId));
+    return { ...asset, data };
+  }
+
   async listComponents(fileId: string): Promise<ComponentDefinition[]> {
     const document = await this.readFile(fileId);
     return document.components ?? [];
@@ -669,6 +732,64 @@ function normalizeName(value: string | undefined, fallback: string) {
     throw new Error("name is required");
   }
   return normalized;
+}
+
+function normalizeImageMimeType(value: string) {
+  const mimeType = value.trim().toLowerCase();
+  if (
+    mimeType !== "image/png" &&
+    mimeType !== "image/jpeg" &&
+    mimeType !== "image/webp" &&
+    mimeType !== "image/gif"
+  ) {
+    throw new Error(`unsupported image mime type: ${value}`);
+  }
+
+  return mimeType;
+}
+
+function assertImageBytesMatchMimeType(data: Buffer, mimeType: string) {
+  if (mimeType === "image/png" && data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    return;
+  }
+
+  if (mimeType === "image/jpeg" && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) {
+    return;
+  }
+
+  const header = data.subarray(0, 12).toString("ascii");
+  if (mimeType === "image/gif" && (header.startsWith("GIF87a") || header.startsWith("GIF89a"))) {
+    return;
+  }
+
+  if (mimeType === "image/webp" && header.startsWith("RIFF") && header.slice(8, 12) === "WEBP") {
+    return;
+  }
+
+  throw inputValidationError(`asset data does not match ${mimeType}`);
+}
+
+function inputValidationError(message: string) {
+  const error = new Error(message) as Error & { code: string; statusCode: number };
+  error.code = INPUT_VALIDATION_ERROR_CODE;
+  error.statusCode = 400;
+  return error;
+}
+
+function parseStoredAsset(input: unknown): StoredAsset {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid asset metadata");
+  }
+
+  const candidate = input as StoredAsset;
+  assertSafeStorageId(candidate.assetId);
+  return {
+    assetId: candidate.assetId,
+    name: normalizeName(candidate.name, "이미지"),
+    mimeType: normalizeImageMimeType(candidate.mimeType),
+    byteLength: Math.max(0, Math.round(Number(candidate.byteLength) || 0)),
+    url: `/assets/${candidate.assetId}`
+  };
 }
 
 async function readProjectIfPresent(projectPath: string): Promise<ProjectManifest | null> {

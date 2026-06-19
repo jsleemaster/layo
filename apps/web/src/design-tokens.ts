@@ -38,5 +38,8 @@ export const editorKonvaTokens = {
     resizeHitSize: 64,
     stroke: "#6d5efc",
     handleFill: "#ffffff"
+  },
+  image: {
+    placeholderFill: "#eef2f6"
   }
 } as const;
