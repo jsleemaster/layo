@@ -288,9 +288,18 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
   await expect(page.getByTestId("inspector-x")).toHaveValue("72");
   await expect(page.getByTestId("inspector-y")).toHaveValue("70");
 
-  await page.mouse.move(stageBox.x + 400, stageBox.y + 160);
+  const bottomRightHandleBox = await page.getByTestId("resize-handle-bottom-right").boundingBox();
+  if (!bottomRightHandleBox) {
+    throw new Error("bottom-right resize handle was not visible");
+  }
+  const bottomRightHandleCenter = {
+    x: bottomRightHandleBox.x + bottomRightHandleBox.width / 2,
+    y: bottomRightHandleBox.y + bottomRightHandleBox.height / 2
+  };
+
+  await page.mouse.move(bottomRightHandleCenter.x, bottomRightHandleCenter.y);
   await page.mouse.down();
-  await page.mouse.move(stageBox.x + 470, stageBox.y + 220);
+  await page.mouse.move(bottomRightHandleCenter.x + 70, bottomRightHandleCenter.y + 60);
   await page.mouse.up();
   await expect
     .poll(async () => Number(await page.getByTestId("inspector-width").inputValue()))
@@ -757,6 +766,58 @@ test("selected layers expose four corner resize handles and an immediate size ba
   await expect(page.getByTestId("inspector-width")).toHaveValue("280");
   await expect(page.getByTestId("inspector-height")).toHaveValue("68");
   await expect(page.getByTestId("selection-size-badge")).toHaveText("280 x 68");
+});
+
+test("selected layers expose edge resize handles that resize one axis", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+
+  await expect(page.getByTestId("resize-handle-top")).toBeVisible();
+  await expect(page.getByTestId("resize-handle-right")).toBeVisible();
+  await expect(page.getByTestId("resize-handle-bottom")).toBeVisible();
+  await expect(page.getByTestId("resize-handle-left")).toBeVisible();
+
+  const rightHandleBox = await page.getByTestId("resize-handle-right").boundingBox();
+  if (!rightHandleBox) {
+    throw new Error("right resize handle was not visible");
+  }
+
+  const rightHandleCenter = {
+    x: rightHandleBox.x + rightHandleBox.width / 2,
+    y: rightHandleBox.y + rightHandleBox.height / 2
+  };
+
+  await page.mouse.move(rightHandleCenter.x, rightHandleCenter.y);
+  await page.mouse.down();
+  await page.mouse.move(rightHandleCenter.x + 30, rightHandleCenter.y);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-x")).toHaveValue("32");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("40");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("290");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("48");
+
+  const topHandleBox = await page.getByTestId("resize-handle-top").boundingBox();
+  if (!topHandleBox) {
+    throw new Error("top resize handle was not visible");
+  }
+
+  const topHandleCenter = {
+    x: topHandleBox.x + topHandleBox.width / 2,
+    y: topHandleBox.y + topHandleBox.height / 2
+  };
+
+  await page.mouse.move(topHandleCenter.x, topHandleCenter.y);
+  await page.mouse.down();
+  await page.mouse.move(topHandleCenter.x, topHandleCenter.y - 12);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-x")).toHaveValue("32");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("28");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("290");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("60");
+  await expect(page.getByTestId("selection-size-badge")).toHaveText("290 x 60");
 });
 
 test("selected frames show thin padding and child spacing guides", async ({ page }) => {

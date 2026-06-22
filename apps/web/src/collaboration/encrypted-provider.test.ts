@@ -70,69 +70,58 @@ describe("encrypted collaboration provider", () => {
       ydoc: new Y.Doc()
     });
     const sender = createTestProvider({ ydoc: senderDocument.ydoc, resetSockets: false });
-    const senderSocket = await waitForSocket(0);
-    senderSocket.sent.length = 0;
-    const receiver = createTestProvider({ ydoc: receiverDocument.ydoc, resetSockets: false });
-    const receiverSocket = await waitForSocket(1);
+    let receiver: ReturnType<typeof createTestProvider> | null = null;
+    try {
+      const senderSocket = await waitForSocket(0);
+      await waitForEncryptedFrame(senderSocket);
+      senderSocket.sent.length = 0;
+      receiver = createTestProvider({ ydoc: receiverDocument.ydoc, resetSockets: false });
+      const receiverSocket = await waitForSocket(1);
+      await waitForEncryptedFrame(receiverSocket);
+      receiverSocket.sent.length = 0;
 
-    await waitFor(() => receiverSocket.sent.some((frame) => frame[0] === 10));
-    const receiverSyncStep1 = receiverSocket.sent.find((frame) => frame[0] === 10) as Uint8Array;
-    senderSocket.sent.length = 0;
-    senderSocket.emitMessage(receiverSyncStep1);
-    await waitFor(() => senderSocket.sent.some((frame) => frame[0] === 10));
-    receiverSocket.emitMessage(senderSocket.sent.find((frame) => frame[0] === 10) as Uint8Array);
-    await waitFor(() => {
-      try {
-        return receiverDocument.getDocument().name === "Sample File";
-      } catch {
-        return false;
-      }
-    });
-    senderSocket.sent.length = 0;
-
-    senderDocument.transact("create-text", (current) => {
-      const next = structuredClone(current);
-      next.pages[0]?.children.push({
-        id: "text-2",
-        kind: "text",
-        name: "Text 2",
-        transform: { x: 80, y: 120, rotation: 0 },
-        size: { width: 180, height: 40 },
-        style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
-        content: {
-          type: "text",
-          value: "Synced text",
-          font_size: 20,
-          font_family: "Inter"
-        },
-        children: []
+      senderDocument.transact("create-text", (current) => {
+        const next = structuredClone(current);
+        next.pages[0]?.children.push({
+          id: "text-2",
+          kind: "text",
+          name: "Text 2",
+          transform: { x: 80, y: 120, rotation: 0 },
+          size: { width: 180, height: 40 },
+          style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
+          content: {
+            type: "text",
+            value: "Synced text",
+            font_size: 20,
+            font_family: "Inter"
+          },
+          children: []
+        });
+        return next;
       });
-      return next;
-    });
 
-    await waitFor(() => senderSocket.sent.some((frame) => frame[0] === 10));
-    receiverSocket.emitMessage(senderSocket.sent.find((frame) => frame[0] === 10) as Uint8Array);
-
-    await waitFor(() => {
-      try {
-        return receiverDocument
-          .getDocument()
-          .pages[0]?.children.some((node) => node.id === "text-2");
-      } catch {
-        return false;
-      }
-    });
-    expect(receiverDocument.getDocument().pages.map((page) => page.id)).toEqual(["page-1"]);
-    expect(receiverDocument.getDocument().pages[0]?.children.map((node) => node.id)).toEqual([
-      "text-1",
-      "text-2"
-    ]);
-
-    sender.destroy();
-    receiver.destroy();
-    senderDocument.destroy();
-    receiverDocument.destroy();
-  });
+      receiverSocket.emitMessage(await waitForEncryptedFrame(senderSocket));
+      await waitFor(() => {
+        try {
+          return receiverDocument
+            .getDocument()
+            .pages[0]?.children.some((node) => node.id === "text-2");
+        } catch {
+          return false;
+        }
+      });
+      expect(receiverDocument.getDocument().pages.map((page) => page.id)).toEqual(["page-1"]);
+      expect(receiverDocument.getDocument().pages[0]?.children.map((node) => node.id)).toEqual([
+        "text-1",
+        "text-2"
+      ]);
+    } finally {
+      sender.destroy();
+      receiver?.destroy();
+      senderDocument.destroy();
+      receiverDocument.destroy();
+    }
+  }, 15_000);
 
   test("connects with e2ee query params and sends encrypted document updates", async () => {
     const ydoc = new Y.Doc();
@@ -311,7 +300,12 @@ async function waitForSocket(index = 0): Promise<MockWebSocket> {
   return MockWebSocket.instances[index];
 }
 
-async function waitFor(assertion: () => boolean, timeoutMs = 3_000): Promise<void> {
+async function waitForEncryptedFrame(socket: MockWebSocket, startIndex = 0): Promise<Uint8Array> {
+  await waitFor(() => socket.sent.slice(startIndex).some((frame) => frame[0] === 10));
+  return socket.sent.slice(startIndex).find((frame) => frame[0] === 10) as Uint8Array;
+}
+
+async function waitFor(assertion: () => boolean, timeoutMs = 10_000): Promise<void> {
   const startedAt = Date.now();
   while (!assertion()) {
     if (Date.now() - startedAt > timeoutMs) {

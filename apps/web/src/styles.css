@@ -348,11 +348,9 @@ button:disabled {
   z-index: 6;
 }
 
-.selection-corner-handle {
+.selection-resize-handle {
   position: absolute;
   box-sizing: border-box;
-  width: var(--editor-size-selection-handle);
-  height: var(--editor-size-selection-handle);
   border: var(--editor-border-hairline) solid var(--editor-color-selection);
   background: var(--editor-color-control);
 }

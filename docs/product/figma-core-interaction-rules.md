@@ -31,7 +31,7 @@ This document records the Figma Design interaction rules that Canvas MCP Editor 
 | Duplicate | Cmd/Ctrl+D duplicates selection. Top-level frames appear to the right; other objects are placed on top of the original. Option/Alt-drag duplicates while moving. | No keyboard duplicate helper. | Adopt now for selected node duplication. Start with non-top-level object duplicate in place. |
 | Copy/paste | Cmd/Ctrl+C copies selected object; Cmd/Ctrl+V pastes to page/frame; paste here uses pointer location. | Single selected object copy/paste uses an in-app session clipboard, deterministic copy ids/names, 24 px paste offsets, and the existing undoable create-node command path. | Adopted first slice. Multi-node copy/paste, paste-here, and OS clipboard object interchange remain later. |
 | Drag move | Move tool drags selected objects. Option/Alt-drag duplicates while dragging. Auto layout children reorder instead of free-moving inside layout flow. | Single drag, component-instance drag, and grouped selected-layer drag exist. Auto layout relayout can override direct child position. No Alt-drag duplicate/reorder. | Adopted for grouped drag. Alt-drag duplicate and auto-layout reorder remain later. |
-| Resize | Objects resize through handles; Shift preserves aspect ratio; constraints can be ignored while resizing with platform command modifier. | Four corner resize handles and an immediate selection size badge are implemented for a single selected layer. | Adopted first slice. Edge handles, aspect-ratio resize, and transform modifiers remain later. |
+| Resize | Objects resize through handles; Shift preserves aspect ratio; constraints can be ignored while resizing with platform command modifier. | Four corner handles, four edge handles, and an immediate selection size badge are implemented for a single selected layer. Edge handles resize one axis. | Adopted first slices. Aspect-ratio resize, rotation, multi-selected bounding-box resize, and transform modifiers remain later. |
 | Alignment/distribution | Align controls align selected layers; distribute requires multiple selected layers and keeps outer objects fixed; tidy up adds stricter row/column/grid logic. | Inspector alignment and distribution controls operate on `selection.nodeIds` through one batch geometry command. Selection-specific toolbar duplicates were removed. | Adopted for selected-layer alignment/distribution. Tidy up remains deferred. |
 | Snap/guides | Snap settings help align centers and bounds; rulers are required before creating guides; guides can be canvas-level or frame-level. | Live transient snap guides render while dragging selected layers. Hover measurement overlays and selected-frame padding/child-spacing guides are implemented. | Adopted first slices. Rulers, manual guides, nested target tuning, and configurable snap settings remain later. |
 | Constraints | Constraints apply only to layers inside frames, not outside frames or inside auto layout frames. | Constraints implemented broadly in inspector. | Adjust later: disable/ignore constraints controls for auto-layout children. |
@@ -43,7 +43,7 @@ This document records the Figma Design interaction rules that Canvas MCP Editor 
 2. Keep selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, and single-object Cmd/Ctrl+C/V copy/paste green.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands green for multi-selected layers.
-5. Extend the landed live snap/measurement guide slices with edge resize handles, rulers, manual guides, and snap settings.
+5. Extend the landed live snap/measurement and resize slices with rotation, rulers, manual guides, and snap settings.
 6. Extend copy/paste with multi-node selection and paste-here after the single-object session clipboard stays green.
 
 ## Remaining Non-Goals
@@ -53,5 +53,5 @@ This document records the Figma Design interaction rules that Canvas MCP Editor 
 - Manual guide creation and rulers.
 - Configurable snap settings and nested snap-target controls.
 - Tidy-up grid or smart spacing controls.
-- Edge resize handles, rotate, flip, and aspect-ratio resize.
+- Rotate, flip, aspect-ratio resize, and multi-selected bounding-box resize.
 - Nested layer keyboard navigation.

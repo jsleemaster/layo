@@ -163,6 +163,6 @@ Implementation shape:
 2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, and single-object Cmd/Ctrl+C/V copy/paste.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands green for multi-selected layers.
-5. Extend the landed grouped drag, measurement, frame-spacing, and corner-resize slices with edge resize handles, rotation, rulers, manual guides, and snap settings.
+5. Extend the landed grouped drag, measurement, frame-spacing, corner-resize, and edge-resize slices with rotation, rulers, manual guides, and snap settings.
 6. Build full Figma file import separately on top of the local asset pipeline, starting with frames, rectangles, text, and exported image assets before variants or advanced effects.
 7. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.
