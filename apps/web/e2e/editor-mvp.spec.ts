@@ -912,7 +912,7 @@ test("component instances drag as a single selected object from nested content",
   await expect(page.getByTestId("inspector-y")).toHaveValue("150");
 });
 
-test("unselected component instances move on the first drag gesture", async ({ page }) => {
+test("unselected component instances select first and move only after a selected drag", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByRole("button", { name: "컴포넌트 만들기" }).click();
@@ -933,6 +933,14 @@ test("unselected component instances move on the first drag gesture", async ({ p
   await page.mouse.up();
 
   await expect(page.locator(".node-summary span")).toHaveText("컴포넌트 인스턴스");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("560");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("120");
+
+  await page.mouse.move(stageBox.x + 590, stageBox.y + 140);
+  await page.mouse.down();
+  await page.mouse.move(stageBox.x + 650, stageBox.y + 170);
+  await page.mouse.up();
+
   await expect(page.getByTestId("inspector-x")).toHaveValue("620");
   await expect(page.getByTestId("inspector-y")).toHaveValue("150");
 });

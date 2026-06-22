@@ -1016,9 +1016,6 @@ function renderNode({
     }
 
     onSelect(node.id, false);
-    onDragStart(node.id, event);
-    event.currentTarget.draggable(true);
-    event.currentTarget.startDrag();
   };
   const selectFromClick = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
     if (isCanvasPanning) {
