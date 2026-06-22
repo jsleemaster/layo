@@ -1,6 +1,6 @@
 # Figma To Canvas MCP Editor Migration Roadmap
 
-Last checked: 2026-06-18
+Last checked: 2026-06-22
 
 This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Canvas MCP Editor. It does not change the product position: this project remains a local-first, AI-operable design editor, not a feature-for-feature Figma clone.
 
@@ -19,9 +19,9 @@ This roadmap translates `docs/product/figma-feature-inventory.md` into implement
 The current main branch already has:
 
 - Rust/TypeScript document primitives for pages, frames, rectangles, text, images, components, instances, and geometry.
-- Browser editor shell with creation, selection, dragging, four corner resizing, selection size badges, inspector geometry, inspector alignment/distribution, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, and selected-frame padding/child-spacing guides.
+- Browser editor shell with creation, selection, dragging, four corner resizing, selection size badges, inspector geometry, inspector alignment/distribution, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
 - Local image asset storage with browser clipboard paste and file drag/drop insertion for image nodes.
-- Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, and transient snap guides for page-level peer bounds/centers.
+- Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, transient snap guides for page-level peer bounds/centers, and combined multi-selection group feedback.
 - Component definitions, instances, and detach.
 - HTTP and MCP agent control for inspect, find, command application, validation, change summaries, components, and code export.
 - Structured code export with implementation specs and token candidates.
@@ -59,6 +59,7 @@ Non-goals for the first slice:
 Figma capabilities to bring over:
 
 - Edge resize handles, with the four corner handles already landed.
+- Multi-selection group affordance before multi-selected bounding-box resize behavior.
 - Rotate and flip.
 - Align left/center/right/top/middle/bottom through the right inspector.
 - Distribute spacing through the right inspector.
@@ -163,6 +164,7 @@ Implementation shape:
 2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, and single-object Cmd/Ctrl+C/V copy/paste.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands green for multi-selected layers.
-5. Extend the landed grouped drag, measurement, frame-spacing, corner-resize, and edge-resize slices with rotation, rulers, manual guides, and snap settings.
-6. Build full Figma file import separately on top of the local asset pipeline, starting with frames, rectangles, text, and exported image assets before variants or advanced effects.
-7. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.
+5. Keep the multi-selection group outline and combined size badge green while deferring multi-selected bounding-box resize behavior to a separate slice.
+6. Extend the landed grouped drag, measurement, frame-spacing, corner-resize, and edge-resize slices with rotation, rulers, manual guides, and snap settings.
+7. Build full Figma file import separately on top of the local asset pipeline, starting with frames, rectangles, text, and exported image assets before variants or advanced effects.
+8. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.

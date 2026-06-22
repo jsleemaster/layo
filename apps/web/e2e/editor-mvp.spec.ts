@@ -708,6 +708,28 @@ test("Figma-like alignment and distribution inspector controls selected layers",
   await expect(page.getByTestId("inspector-x")).toHaveValue("506");
 });
 
+test("multi-selection group bounds show combined dimensions without resize handles", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "텍스트 만들기" }).click();
+  const headlineLayer = page.getByRole("button", { name: "헤드라인" });
+  const rectangleLayer = page.getByRole("button", { name: "사각형 3" });
+  const helperTextLayer = page.getByRole("button", { name: "텍스트 4" });
+  await expect(rectangleLayer).toBeVisible();
+  await expect(helperTextLayer).toBeVisible();
+
+  await headlineLayer.click();
+  await rectangleLayer.click({ modifiers: ["Shift"] });
+  await helperTextLayer.click({ modifiers: ["Shift"] });
+
+  await expect(page.getByText("3개 레이어 선택됨")).toBeVisible();
+  await expect(page.getByTestId("multi-selection-bounds")).toBeVisible();
+  await expect(page.getByTestId("selection-size-badge")).toHaveText("288 x 116");
+  await expect(page.getByTestId("resize-handle-top-left")).toHaveCount(0);
+  await expect(page.getByTestId("resize-handle-bottom-right")).toHaveCount(0);
+});
+
 test("Figma-like measurement overlay and inspector alignment controls selected layers", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

@@ -355,6 +355,14 @@ button:disabled {
   background: var(--editor-color-control);
 }
 
+.multi-selection-bounds {
+  position: absolute;
+  box-sizing: border-box;
+  border: var(--editor-border-hairline) solid var(--editor-color-selection);
+  background: transparent;
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-selection-soft);
+}
+
 .selection-size-badge {
   position: absolute;
   min-width: var(--editor-space-xl);

@@ -174,7 +174,9 @@ interface MeasurementOverlay {
 }
 
 interface SelectionChromeOverlay {
+  bounds: { left: number; top: number; width: number; height: number };
   badge: { left: number; top: number; text: string };
+  isMultiSelection: boolean;
   handles: Array<{
     handle: ResizeHandle;
     left: number;
@@ -625,7 +627,8 @@ function createMeasurementOverlay(
 
 function createSelectionChromeOverlay(
   bounds: SelectionBounds,
-  viewport: EditorState["viewport"]
+  viewport: EditorState["viewport"],
+  isMultiSelection = false
 ): SelectionChromeOverlay {
   const viewportRect = viewportBounds(bounds, viewport);
   const viewportSelectionBounds = {
@@ -637,22 +640,26 @@ function createSelectionChromeOverlay(
   const centerX = viewportRect.left + viewportRect.width / 2;
 
   return {
+    bounds: viewportRect,
     badge: {
       left: Math.round(centerX),
       top: Math.round(viewportRect.top + viewportRect.height + 20),
       text: `${Math.round(bounds.width)} x ${Math.round(bounds.height)}`
     },
-    handles: RESIZE_HANDLES.map((handle) => {
-      const size = resizeHandleVisualSize(handle);
-      const anchor = resizeHandlePoint(viewportSelectionBounds, handle);
-      return {
-        handle,
-        left: Math.round(anchor.x - size.width / 2),
-        top: Math.round(anchor.y - size.height / 2),
-        width: size.width,
-        height: size.height
-      };
-    })
+    isMultiSelection,
+    handles: isMultiSelection
+      ? []
+      : RESIZE_HANDLES.map((handle) => {
+          const size = resizeHandleVisualSize(handle);
+          const anchor = resizeHandlePoint(viewportSelectionBounds, handle);
+          return {
+            handle,
+            left: Math.round(anchor.x - size.width / 2),
+            top: Math.round(anchor.y - size.height / 2),
+            width: size.width,
+            height: size.height
+          };
+        })
   };
 }
 
@@ -1772,7 +1779,7 @@ export function App() {
     return createMeasurementOverlay(sourceBounds, targetBounds, editor.viewport);
   }, [dragPreview, editor, measurementTargetNodeId, selectedNodeIds]);
   const selectionChromeOverlay = useMemo(() => {
-    if (!editor || selectedNodeIds.length !== 1) {
+    if (!editor || !selectedNodeIds.length) {
       return null;
     }
 
@@ -1786,7 +1793,7 @@ export function App() {
         ? translateBounds(selectedBounds, dragPreview.delta)
         : selectedBounds;
 
-    return createSelectionChromeOverlay(chromeBounds, editor.viewport);
+    return createSelectionChromeOverlay(chromeBounds, editor.viewport, selectedNodeIds.length > 1);
   }, [dragPreview, editor, selectedNodeIds]);
   const frameSpacingOverlay = useMemo(() => {
     if (!editor || selectedNodeIds.length !== 1 || !selectedNode || selectedNode.kind !== "frame") {
@@ -3535,6 +3542,18 @@ export function App() {
             ) : null}
             {selectionChromeOverlay ? (
               <div className="selection-chrome-overlay" aria-hidden="true">
+                {selectionChromeOverlay.isMultiSelection ? (
+                  <div
+                    className="multi-selection-bounds"
+                    data-testid="multi-selection-bounds"
+                    style={{
+                      left: selectionChromeOverlay.bounds.left,
+                      top: selectionChromeOverlay.bounds.top,
+                      width: selectionChromeOverlay.bounds.width,
+                      height: selectionChromeOverlay.bounds.height
+                    }}
+                  />
+                ) : null}
                 {selectionChromeOverlay.handles.map((handle) => (
                   <div
                     key={handle.handle}
