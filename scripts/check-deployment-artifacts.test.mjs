@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 async function readText(path) {
   return readFile(path, "utf8");
 }
 
-test("web static GitHub Pages workflow is not installed", async () => {
-  await assert.rejects(stat(".github/workflows/web-static.yml"), {
-    code: "ENOENT",
-  });
+test("web static GitHub Pages workflow deploys the web artifact", async () => {
+  const workflow = await readText(".github/workflows/deploy-pages.yml");
+
+  assert.match(workflow, /push:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pnpm --filter @canvas-mcp-editor\/web typecheck/);
+  assert.match(
+    workflow,
+    /pnpm --dir apps\/web exec vite build --base=\/canvas-mcp-editor\//,
+  );
+  assert.match(workflow, /actions\/upload-pages-artifact@v3/);
+  assert.match(workflow, /path: apps\/web\/dist/);
+  assert.match(workflow, /actions\/deploy-pages@v4/);
 });
 
 test("relay Docker artifacts expose team-owned relay configuration", async () => {

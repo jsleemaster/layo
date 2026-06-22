@@ -32,10 +32,11 @@ relay: ws://127.0.0.1:4327
 The web app can be built and served without a central collaboration backend. This is the default public deployment mode because it keeps the project open-source friendly and avoids a maintainer-operated collaboration service:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --dir apps/web exec vite build --base=/canvas-mcp-editor/
 ```
 
-Serve `apps/web/dist` from GitHub Pages, Vercel static output, Netlify, nginx, or any static host. This repository does not install an automatic GitHub Pages deployment workflow; choose and configure the static host explicitly when publishing the web app.
+This repository publishes the static web app to GitHub Pages at `https://jsleemaster.github.io/canvas-mcp-editor/` through `.github/workflows/deploy-pages.yml` on every `main` push and through manual workflow dispatch. Serve the same `apps/web/dist` output from Vercel static output, Netlify, nginx, or another static host when a different URL or base path is needed.
 
 Teams that need real-time editing configure their own relay URL inside the team manifest. Local-only teams continue to work without a relay.
 
