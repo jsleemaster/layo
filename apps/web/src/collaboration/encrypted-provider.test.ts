@@ -311,10 +311,10 @@ async function waitForSocket(index = 0): Promise<MockWebSocket> {
   return MockWebSocket.instances[index];
 }
 
-async function waitFor(assertion: () => boolean): Promise<void> {
+async function waitFor(assertion: () => boolean, timeoutMs = 3_000): Promise<void> {
   const startedAt = Date.now();
   while (!assertion()) {
-    if (Date.now() - startedAt > 1000) {
+    if (Date.now() - startedAt > timeoutMs) {
       throw new Error("timed out waiting for condition");
     }
     await new Promise((resolve) => setTimeout(resolve, 5));

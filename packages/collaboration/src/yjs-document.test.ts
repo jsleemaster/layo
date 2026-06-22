@@ -143,6 +143,46 @@ describe("collaborative design document", () => {
     second.destroy();
   });
 
+  test("merges concurrent edits to different geometry axes on the same node", () => {
+    const first = createCollaborativeDesignDocument({ document: sampleDocument() });
+    const second = createCollaborativeDesignDocument({ document: sampleDocument() });
+
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
+
+    first.transact("move-node-x", (current) => {
+      const next = structuredClone(current);
+      const textNode = next.pages[0]?.children[0];
+      if (!textNode) {
+        throw new Error("missing text node");
+      }
+      textNode.transform.x = 96;
+      return next;
+    });
+
+    second.transact("move-node-y", (current) => {
+      const next = structuredClone(current);
+      const textNode = next.pages[0]?.children[0];
+      if (!textNode) {
+        throw new Error("missing text node");
+      }
+      textNode.transform.y = 72;
+      return next;
+    });
+
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
+
+    const mergedFromFirst = first.getDocument().pages[0]?.children[0];
+    const mergedFromSecond = second.getDocument().pages[0]?.children[0];
+
+    expect(mergedFromFirst?.transform).toMatchObject({ x: 96, y: 72, rotation: 0 });
+    expect(mergedFromSecond).toEqual(mergedFromFirst);
+
+    first.destroy();
+    second.destroy();
+  });
+
   test("keeps seeded page identity stable when a synced collaborator adds a node", () => {
     const first = createCollaborativeDesignDocument({ document: sampleDocument() });
     const second = createCollaborativeDesignDocument({ document: sampleDocument() });

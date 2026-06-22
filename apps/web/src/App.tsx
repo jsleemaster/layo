@@ -2117,10 +2117,7 @@ export function App() {
           x: event.target.x() - activeDrag.startPosition.x,
           y: event.target.y() - activeDrag.startPosition.y
         };
-    const rawDelta = {
-      x: Math.round(pointerDelta.x),
-      y: Math.round(pointerDelta.y)
-    };
+    const rawDelta = pointerDelta;
     activeDrag.hasMoved = true;
     const snapped = calculateSnapForMovingBounds(
       editor.document,

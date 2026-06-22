@@ -74,6 +74,71 @@ function flattenNodeKinds(nodes: Array<{ kind: string; children: unknown[] }>): 
   ]);
 }
 
+async function findCanvasColorBounds(page: Page, color: { r: number; g: number; b: number }) {
+  return page.evaluate((targetColor) => {
+    const colorDistance = (red: number, green: number, blue: number) =>
+      Math.abs(red - targetColor.r) + Math.abs(green - targetColor.g) + Math.abs(blue - targetColor.b);
+    let bestBounds: {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+      count: number;
+    } | null = null;
+
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context || canvas.width === 0 || canvas.height === 0) {
+        continue;
+      }
+
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      let count = 0;
+
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+          const index = (y * canvas.width + x) * 4;
+          if (pixels[index + 3] < 200) {
+            continue;
+          }
+          if (colorDistance(pixels[index], pixels[index + 1], pixels[index + 2]) > 8) {
+            continue;
+          }
+
+          minX = Math.min(minX, x);
+          minY = Math.min(minY, y);
+          maxX = Math.max(maxX, x);
+          maxY = Math.max(maxY, y);
+          count += 1;
+        }
+      }
+
+      if (!count || (bestBounds && bestBounds.count >= count)) {
+        continue;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      bestBounds = {
+        left: rect.left + minX / (canvas.width / rect.width),
+        top: rect.top + minY / (canvas.height / rect.height),
+        right: rect.left + maxX / (canvas.width / rect.width),
+        bottom: rect.top + maxY / (canvas.height / rect.height),
+        count
+      };
+    }
+
+    if (!bestBounds) {
+      throw new Error("target canvas color was not visible");
+    }
+
+    return bestBounds;
+  }, color);
+}
+
 test("creates, reopens, and team-links a saved project", async ({ page }) => {
   await openEmptyEditor(page);
 
@@ -525,6 +590,44 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
   await expect(page.getByTestId("inspector-x")).toHaveValue("248");
   await headlineLayer.click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("100");
+});
+
+test("multi-selection drag preview preserves sub-pixel movement while zoomed", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  const rectangleLayer = page.getByRole("button", { name: "사각형 3" });
+  const headlineLayer = page.getByRole("button", { name: "헤드라인" });
+  await expect(rectangleLayer).toBeVisible();
+
+  await page.getByTestId("inspector-x").fill("40");
+  await page.getByTestId("inspector-y").fill("40");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("40");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("40");
+
+  for (let index = 0; index < 12; index += 1) {
+    await page.getByRole("button", { name: "확대" }).click();
+  }
+  await expect(page.getByText("400%")).toBeVisible();
+
+  await rectangleLayer.click();
+  await page.keyboard.down("Shift");
+  await headlineLayer.click();
+  await page.keyboard.up("Shift");
+  await expect(rectangleLayer).toHaveClass(/is-selected/);
+  await expect(headlineLayer).toHaveClass(/is-selected/);
+
+  const beforeDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  await page.mouse.move(beforeDrag.left + 80, beforeDrag.top + 80);
+  await page.mouse.down();
+  await page.mouse.move(beforeDrag.left + 83, beforeDrag.top + 80);
+  await page.waitForTimeout(100);
+
+  const duringDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  expect(duringDrag.left).toBeGreaterThanOrEqual(beforeDrag.left + 2.75);
+  expect(duringDrag.left).toBeLessThan(beforeDrag.left + 3.25);
+
+  await page.mouse.up();
 });
 
 test("Figma-like alignment and distribution inspector controls selected layers", async ({ page }) => {

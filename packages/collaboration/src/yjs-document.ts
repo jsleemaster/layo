@@ -182,10 +182,10 @@ function writeNode(nodes: Y.Map<YNodeMap>, node: RendererNode, seenNodeIds = new
   setOptionalValue(nodeMap, "component_instance", node.component_instance);
   setOptionalValue(nodeMap, "layout", node.layout);
   setOptionalValue(nodeMap, "constraints", node.constraints);
-  nodeMap.set("transform", structuredClone(node.transform));
-  nodeMap.set("size", structuredClone(node.size));
-  nodeMap.set("style", structuredClone(node.style));
-  nodeMap.set("content", structuredClone(node.content));
+  writeObjectMap(nodeMap, "transform", node.transform);
+  writeObjectMap(nodeMap, "size", node.size);
+  writeObjectMap(nodeMap, "style", node.style);
+  writeObjectMap(nodeMap, "content", node.content);
   nodeMap.set("children", node.children.map((child) => child.id));
   for (const child of node.children) {
     writeNode(nodes, child, seenNodeIds);
@@ -199,10 +199,10 @@ function patchNode(nodes: Y.Map<YNodeMap>, before: RendererNode, next: RendererN
   setOptionalIfChanged(nodeMap, "component_instance", before.component_instance, next.component_instance);
   setOptionalIfChanged(nodeMap, "layout", before.layout, next.layout);
   setOptionalIfChanged(nodeMap, "constraints", before.constraints, next.constraints);
-  setIfChanged(nodeMap, "transform", before.transform, next.transform);
-  setIfChanged(nodeMap, "size", before.size, next.size);
-  setIfChanged(nodeMap, "style", before.style, next.style);
-  setIfChanged(nodeMap, "content", before.content, next.content);
+  patchObjectMap(nodeMap, "transform", before.transform, next.transform);
+  patchObjectMap(nodeMap, "size", before.size, next.size);
+  patchObjectMap(nodeMap, "style", before.style, next.style);
+  patchObjectMap(nodeMap, "content", before.content, next.content);
   const beforeChildren = before.children.map((child) => child.id);
   const nextChildren = next.children.map((child) => child.id);
   setIfChanged(nodeMap, "children", beforeChildren, nextChildren);
@@ -243,10 +243,10 @@ function readNode(nodes: Y.Map<YNodeMap>, nodeId: string): RendererNode {
     id: String(nodeMap.get("id") ?? nodeId),
     kind: nodeMap.get("kind") as RendererNode["kind"],
     name: String(nodeMap.get("name") ?? ""),
-    transform: structuredClone(nodeMap.get("transform") as RendererNode["transform"]),
-    size: structuredClone(nodeMap.get("size") as RendererNode["size"]),
-    style: structuredClone(nodeMap.get("style") as RendererNode["style"]),
-    content: structuredClone(nodeMap.get("content") as RendererNode["content"]),
+    transform: readObjectValue<RendererNode["transform"]>(nodeMap.get("transform")),
+    size: readObjectValue<RendererNode["size"]>(nodeMap.get("size")),
+    style: readObjectValue<RendererNode["style"]>(nodeMap.get("style")),
+    content: readObjectValue<RendererNode["content"]>(nodeMap.get("content")),
     children: childIds.map((childId) => readNode(nodes, childId))
   };
   if (nodeMap.has("component_instance")) {
@@ -321,6 +321,83 @@ function getOrCreateNodeMap(nodes: Y.Map<YNodeMap>, nodeId: string): YNodeMap {
   return next;
 }
 
+function writeObjectMap<T extends Record<string, unknown>>(nodeMap: Y.Map<unknown>, key: string, value: T): void {
+  const valueMap = getOrCreateObjectMap(nodeMap, key, value);
+  syncObjectMap(valueMap, value);
+}
+
+function patchObjectMap<T extends Record<string, unknown>>(
+  nodeMap: Y.Map<unknown>,
+  key: string,
+  before: T,
+  next: T
+): void {
+  if (deepEqual(before, next)) {
+    return;
+  }
+
+  const valueMap = getOrCreateObjectMap(nodeMap, key, before);
+  for (const objectKey of new Set([...Object.keys(before), ...Object.keys(next)])) {
+    if (!(objectKey in next)) {
+      valueMap.delete(objectKey);
+      continue;
+    }
+
+    const nextValue = next[objectKey];
+    if (!deepEqual(before[objectKey], nextValue)) {
+      valueMap.set(objectKey, structuredClone(nextValue));
+    }
+  }
+}
+
+function getOrCreateObjectMap<T extends Record<string, unknown>>(
+  nodeMap: Y.Map<unknown>,
+  key: string,
+  fallback: T
+): Y.Map<unknown> {
+  const existing = nodeMap.get(key);
+  if (existing instanceof Y.Map) {
+    return existing;
+  }
+
+  const next = new Y.Map<unknown>();
+  nodeMap.set(key, next);
+  syncObjectMap(next, isRecord(existing) ? existing : fallback);
+  return next;
+}
+
+function syncObjectMap<T extends Record<string, unknown>>(valueMap: Y.Map<unknown>, value: T): void {
+  for (const key of Array.from(valueMap.keys())) {
+    if (!(key in value)) {
+      valueMap.delete(key);
+    }
+  }
+  for (const [key, nextValue] of Object.entries(value)) {
+    if (!deepEqual(readPlainValue(valueMap.get(key)), nextValue)) {
+      valueMap.set(key, structuredClone(nextValue));
+    }
+  }
+}
+
+function readObjectValue<T>(input: unknown): T {
+  return readPlainValue(input) as T;
+}
+
+function readPlainValue(input: unknown): unknown {
+  if (input instanceof Y.Map) {
+    const output: Record<string, unknown> = {};
+    for (const [key, value] of input.entries()) {
+      output[key] = readPlainValue(value);
+    }
+    return output;
+  }
+  if (input instanceof Y.Array) {
+    return input.toArray().map(readPlainValue);
+  }
+
+  return structuredClone(input);
+}
+
 function setIfChanged<T>(nodeMap: Y.Map<unknown>, key: string, before: T, next: T): void {
   if (!deepEqual(before, next)) {
     nodeMap.set(key, structuredClone(next));
@@ -378,6 +455,10 @@ function indexNodes(document: RendererDocument): Map<string, RendererNode> {
 
 function readStringArray(input: unknown): string[] {
   return Array.isArray(input) ? input.map(String) : [];
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
 function deepEqual(first: unknown, second: unknown): boolean {

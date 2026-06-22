@@ -228,6 +228,96 @@ test("two editors keep independent node move and text edits", async ({ browser }
   }
 });
 
+test("five team members join a relay room and observe concurrent edits", async ({ browser }) => {
+  const contexts = await Promise.all(Array.from({ length: 5 }, () => browser.newContext()));
+  const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  const members = [
+    { userId: "member-1", displayName: "팀원 1", color: "#2563eb", role: "owner" },
+    { userId: "member-2", displayName: "팀원 2", color: "#059669", role: "editor" },
+    { userId: "member-3", displayName: "팀원 3", color: "#d97706", role: "editor" },
+    { userId: "member-4", displayName: "팀원 4", color: "#7c3aed", role: "editor" },
+    { userId: "member-5", displayName: "팀원 5", color: "#dc2626", role: "editor" }
+  ] as const;
+
+  try {
+    await createProjectFromEmptyState(pages[0]);
+    await Promise.all(
+      pages.slice(1).map(async (page) => {
+        await page.goto("http://127.0.0.1:5173/");
+        await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
+      })
+    );
+
+    await pages[0].getByRole("tab", { name: "실시간 협업" }).click();
+    await pages[0].getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+    await pages[0].getByRole("button", { name: "협업 팀 만들기" }).click();
+    await expect(pages[0].getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await pages[0].getByRole("tab", { name: "팀 설정" }).click();
+    await pages[0].getByRole("button", { name: "설정 내보내기" }).click();
+    const baseManifest = JSON.parse(await pages[0].getByTestId("team-manifest").inputValue()) as Record<
+      string,
+      unknown
+    >;
+    const memberManifests = members.map((member) =>
+      JSON.stringify({
+        ...baseManifest,
+        currentUserId: member.userId,
+        members,
+        permissions: {
+          canEdit: true,
+          canInvite: member.role === "owner"
+        }
+      })
+    );
+
+    await Promise.all(
+      pages.map(async (page, index) => {
+        await page.getByRole("tab", { name: "팀 설정" }).click();
+        await page.getByTestId("team-manifest").fill(memberManifests[index]);
+        await page.getByRole("button", { name: "설정 가져오기" }).click();
+        await expect(page.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+        await expect(page.getByTestId("presence-list")).toContainText(members[index].displayName, {
+          timeout: 8000
+        });
+      })
+    );
+
+    for (const member of members) {
+      await expect(pages[0].getByTestId("presence-list")).toContainText(member.displayName, {
+        timeout: 8000
+      });
+    }
+
+    await Promise.all([
+      pages[0].getByRole("button", { name: "헤드라인" }).click(),
+      pages[1].getByRole("button", { name: "헤드라인" }).click(),
+      pages[4].getByRole("button", { name: "헤드라인" }).click()
+    ]);
+
+    await Promise.all([
+      pages[0].getByTestId("inspector-x").fill("96"),
+      pages[1].getByTestId("inspector-text").fill("5인 동시 편집"),
+      pages[2].getByRole("button", { name: "사각형 만들기" }).click(),
+      pages[3].getByRole("button", { name: "텍스트 만들기" }).click(),
+      pages[4].getByTestId("inspector-y").fill("72")
+    ]);
+
+    for (const page of pages) {
+      await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toHaveCount(1, { timeout: 8000 });
+      await expect(page.getByRole("button", { name: /^텍스트 \d+$/ })).toHaveCount(1, { timeout: 8000 });
+      await page.getByRole("button", { name: "헤드라인" }).click();
+      await expect(page.getByTestId("inspector-x")).toHaveValue("96", { timeout: 8000 });
+      await expect(page.getByTestId("inspector-y")).toHaveValue("72", { timeout: 8000 });
+      await expect(page.getByTestId("inspector-text")).toHaveValue("5인 동시 편집", {
+        timeout: 8000
+      });
+    }
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});
+
 test("encrypted relay team syncs document edits without exporting the passphrase", async ({ browser }) => {
   const contextA = await browser.newContext();
   const contextB = await browser.newContext();
