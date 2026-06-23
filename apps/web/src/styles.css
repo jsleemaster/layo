@@ -1007,6 +1007,8 @@ button:disabled {
   display: grid;
   gap: var(--editor-space-xxs);
   min-width: calc(var(--editor-size-sidebar-collapsed) * 4);
+  max-height: calc(100vh - (var(--editor-space-xl) * 2));
+  overflow-y: auto;
   padding: var(--editor-space-xs);
   border: var(--editor-border-hairline) solid var(--editor-color-border);
   border-radius: var(--editor-radius-md);

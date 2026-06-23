@@ -48,3 +48,12 @@ Ship a Figma-like shell baseline plus object context menu:
 - dev-start guard so the local server runs without prebuilt workspace packages
 
 This is not the full Figma parity endpoint. It is the foundation needed before deeper object menu groups, asset libraries, file tabs, and inspector redesign can land without fighting the current layout.
+
+## Follow-up Implementation Notes
+
+2026-06-23 context menu expansion:
+
+- Added real `잘라내기` behavior by copying the scoped object and deleting it through the undoable editor-state path.
+- Added `여기에 붙여넣기` using the context-menu document point, so pasted objects can land at the right-click location instead of only using the default offset paste.
+- Added layer stack order actions for `맨 앞으로 가져오기`, `앞으로 가져오기`, `뒤로 보내기`, and `맨 뒤로 보내기` through an undoable document command.
+- Covered the behavior with editor-state unit tests and the right-click object/image Playwright flow.

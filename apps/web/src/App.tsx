@@ -72,7 +72,9 @@ import {
   nudgeSelectedNode,
   panViewport,
   pasteCopiedNode,
+  pasteCopiedNodeAt,
   redo,
+  reorderSelectedNode,
   selectNodesInBounds,
   setSelection,
   setMultiSelection,
@@ -227,6 +229,7 @@ interface ObjectContextMenuState {
   left: number;
   top: number;
   nodeId: string | null;
+  documentPoint: { x: number; y: number } | null;
 }
 
 const RESIZE_HANDLES: ResizeHandle[] = [
@@ -2135,6 +2138,33 @@ export function App() {
     setObjectContextMenu(null);
   };
 
+  const cutContextSelection = () => {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const scopedState = scopeStateToContextNode(current);
+      const clipboard = copySelectedNode(scopedState);
+      if (!clipboard) {
+        publishEditorPresence(scopedState);
+        return scopedState;
+      }
+
+      objectClipboardRef.current = clipboard;
+      const nextState = deleteSelectedNode(scopedState);
+      publishEditorPresence(nextState);
+      return nextState;
+    });
+    setObjectContextMenu(null);
+  };
+
+  const pasteContextSelectionAtMenuPoint = () => {
+    runContextMenuStateAction((state) =>
+      pasteCopiedNodeAt(state, objectClipboardRef.current, objectContextMenu?.documentPoint ?? null)
+    );
+  };
+
   const createContextComponent = () => {
     runContextMenuStateAction((state) => {
       const nodeId = state.selection.nodeId;
@@ -2197,6 +2227,10 @@ export function App() {
     runContextMenuStateAction((state) => distributeSelectedNodes(state, mode));
   };
 
+  const reorderContextSelection = (direction: Parameters<typeof reorderSelectedNode>[1]) => {
+    runContextMenuStateAction((state) => reorderSelectedNode(state, direction));
+  };
+
   const clearSelectionFromInteraction = () => {
     setEditor((current) => {
       if (!current) {
@@ -2246,7 +2280,8 @@ export function App() {
     setObjectContextMenu({
       left: event.evt.clientX,
       top: event.evt.clientY,
-      nodeId: targetNodeId
+      nodeId: targetNodeId,
+      documentPoint
     });
   };
 
@@ -4201,6 +4236,14 @@ export function App() {
             type="button"
             role="menuitem"
             disabled={!contextMenuNode}
+            onClick={cutContextSelection}
+          >
+            잘라내기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
             onClick={copyContextSelection}
           >
             복사
@@ -4212,6 +4255,14 @@ export function App() {
             onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
           >
             붙여넣기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!objectClipboardRef.current || !objectContextMenu.documentPoint}
+            onClick={pasteContextSelectionAtMenuPoint}
+          >
+            여기에 붙여넣기
           </button>
           <button
             type="button"
@@ -4228,6 +4279,39 @@ export function App() {
             onClick={() => runContextMenuStateAction(deleteSelectedNode)}
           >
             삭제
+          </button>
+          <div className="object-context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => reorderContextSelection("front")}
+          >
+            맨 앞으로 가져오기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => reorderContextSelection("forward")}
+          >
+            앞으로 가져오기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => reorderContextSelection("backward")}
+          >
+            뒤로 보내기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => reorderContextSelection("back")}
+          >
+            맨 뒤로 보내기
           </button>
           <div className="object-context-menu-separator" role="separator" />
           <button

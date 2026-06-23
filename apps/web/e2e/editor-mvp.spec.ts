@@ -523,10 +523,16 @@ test("right-click objects and images expose common context menu commands", async
   await page.mouse.click(stageBox.x + 170, stageBox.y + 135, { button: "right" });
   const menu = page.getByTestId("object-context-menu");
   await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "잘라내기" })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "복사" })).toBeEnabled();
-  await expect(menu.getByRole("menuitem", { name: "붙여넣기" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "붙여넣기", exact: true })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "여기에 붙여넣기" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "복제" })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "삭제" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "맨 앞으로 가져오기" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "앞으로 가져오기", exact: true })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "뒤로 보내기", exact: true })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "맨 뒤로 보내기" })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "컴포넌트 만들기" })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "인스턴스 만들기" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "인스턴스 분리" })).toBeDisabled();
@@ -546,8 +552,14 @@ test("right-click objects and images expose common context menu commands", async
 
   await page.mouse.click(stageBox.x + 320, stageBox.y + 260, { button: "right" });
   await expect(menu).toBeVisible();
-  await menu.getByRole("menuitem", { name: "삭제" }).click();
+  await menu.getByRole("menuitem", { name: "잘라내기" }).click();
   await expect(page.getByRole("button", { name: "이미지 4" })).toHaveCount(0);
+
+  await page.mouse.click(stageBox.x + 380, stageBox.y + 320, { button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "여기에 붙여넣기" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "여기에 붙여넣기" }).click();
+  await expect(page.getByRole("button", { name: /이미지 4 복사본/ })).toBeVisible();
 });
 
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {

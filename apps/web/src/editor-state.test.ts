@@ -22,7 +22,9 @@ import {
   nudgeSelectedNode,
   panViewport,
   pasteCopiedNode,
+  pasteCopiedNodeAt,
   redo,
+  reorderSelectedNode,
   selectNodesInBounds,
   setMultiSelection,
   setSelection,
@@ -534,6 +536,32 @@ describe("editor state commands", () => {
     expect(secondPaste?.name).toBe("헤드라인 복사본 2");
     expect(secondPaste?.transform).toMatchObject({ x: 80, y: 88 });
     expect(pastedAgain.selection.nodeId).toBe("text-1-copy-2");
+  });
+
+  test("pastes copied nodes at the requested document point", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+    const clipboard = copySelectedNode(initial);
+
+    const pasted = pasteCopiedNodeAt(initial, clipboard, { x: 220, y: 240 });
+    const pastedNode = findNodeById(pasted.document, "text-1-copy-1");
+
+    expect(pastedNode?.name).toBe("헤드라인 복사본");
+    expect(pastedNode?.transform).toMatchObject({ x: 100, y: 160 });
+    expect(pasted.selection.nodeId).toBe("text-1-copy-1");
+    expect(findNodeById(undo(pasted).document, "text-1-copy-1")).toBeNull();
+  });
+
+  test("reorders selected sibling layers with undo", () => {
+    const initial = setSelection(createEditorState(sampleDocumentWithTopLevelRectangle()), "frame-1");
+
+    const front = reorderSelectedNode(initial, "front");
+    expect(front.document.pages[0]?.children.map((node) => node.id)).toEqual(["rectangle-1", "frame-1"]);
+    expect(front.selection.nodeId).toBe("frame-1");
+    expect(undo(front).document.pages[0]?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
+
+    const backward = reorderSelectedNode(front, "backward");
+    expect(backward.document.pages[0]?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
+    expect(backward.selection.nodeId).toBe("frame-1");
   });
 
   test("calculates absolute node position through parent transforms", () => {

@@ -45,6 +45,7 @@ export interface SnapResult {
 
 export type AlignmentMode = "left" | "center" | "right" | "top" | "middle" | "bottom";
 export type DistributionMode = "horizontal" | "vertical";
+export type ReorderDirection = "front" | "forward" | "backward" | "back";
 
 export interface EditorViewport {
   scale: number;
@@ -106,6 +107,12 @@ export type EditorCommand =
       type: "delete_node";
       parentId: string;
       node: RendererNode;
+    }
+  | {
+      type: "reorder_node";
+      parentId: string;
+      nodeId: string;
+      toIndex: number;
     }
   | {
       type: "create_component";
@@ -606,20 +613,26 @@ export function pasteCopiedNode(
     return state;
   }
 
-  const copyIndex = nextCopyIndex(state.document, clipboard.sourceNodeId);
-  const copiedNode = structuredClone(clipboard.node);
-  const copiedNodeId = `${clipboard.sourceNodeId}-copy-${copyIndex}`;
-  renameNodeTreeForCopy(copiedNode, clipboard.sourceNodeId, copiedNodeId);
-  copiedNode.name =
-    copyIndex === 1
-      ? `${clipboard.node.name} 복사본`
-      : `${clipboard.node.name} 복사본 ${copyIndex}`;
+  const { copiedNode, copyIndex } = createClipboardNodeCopy(state.document, clipboard);
   copiedNode.transform = {
     ...copiedNode.transform,
     x: copiedNode.transform.x + PASTE_OFFSET * copyIndex,
     y: copiedNode.transform.y + PASTE_OFFSET * copyIndex
   };
 
+  return insertCopiedNode(state, clipboard, copiedNode);
+}
+
+export function pasteCopiedNodeAt(
+  state: EditorState,
+  clipboard: EditorNodeClipboard | null,
+  point: { x: number; y: number } | null
+): EditorState {
+  if (!clipboard || !point) {
+    return state;
+  }
+
+  const { copiedNode } = createClipboardNodeCopy(state.document, clipboard);
   const parentId = findParentChildren(state.document, clipboard.parentId)
     ? clipboard.parentId
     : state.document.pages[0]?.id;
@@ -627,10 +640,53 @@ export function pasteCopiedNode(
     return state;
   }
 
+  const parentAbsolute = getParentAbsolutePosition(state.document, parentId);
+  copiedNode.transform = {
+    ...copiedNode.transform,
+    x: Math.round(point.x - parentAbsolute.x),
+    y: Math.round(point.y - parentAbsolute.y)
+  };
+
   return executeEditorCommand(state, {
     type: "create_node",
     parentId,
     node: copiedNode
+  });
+}
+
+export function reorderSelectedNode(state: EditorState, direction: ReorderDirection): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected) {
+    return state;
+  }
+
+  const parent = findParentChildren(state.document, selected.parentId);
+  if (!parent) {
+    return state;
+  }
+
+  const currentIndex = parent.children.findIndex((node) => node.id === selected.node.id);
+  const lastIndex = parent.children.length - 1;
+  if (currentIndex === -1 || lastIndex < 1) {
+    return state;
+  }
+
+  const targetIndex = {
+    front: lastIndex,
+    forward: Math.min(lastIndex, currentIndex + 1),
+    backward: Math.max(0, currentIndex - 1),
+    back: 0
+  }[direction];
+
+  if (targetIndex === currentIndex) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "reorder_node",
+    parentId: selected.parentId,
+    nodeId: selected.node.id,
+    toIndex: targetIndex
   });
 }
 
@@ -833,6 +889,40 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         document: next,
         inverse: { type: "create_node", parentId: command.parentId, node },
         selectedNodeId: null
+      };
+    }
+    case "reorder_node": {
+      const parent = findParentChildren(next, command.parentId);
+      if (!parent) {
+        return { document, inverse: null };
+      }
+
+      const fromIndex = parent.children.findIndex((node) => node.id === command.nodeId);
+      if (fromIndex === -1 || parent.children.length < 2) {
+        return { document, inverse: null };
+      }
+
+      const toIndex = clamp(Math.trunc(command.toIndex), 0, parent.children.length - 1);
+      if (fromIndex === toIndex) {
+        return { document, inverse: null };
+      }
+
+      const [node] = parent.children.splice(fromIndex, 1);
+      if (!node) {
+        return { document, inverse: null };
+      }
+      parent.children.splice(toIndex, 0, node);
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "reorder_node",
+          parentId: command.parentId,
+          nodeId: command.nodeId,
+          toIndex: fromIndex
+        },
+        selectedNodeId: command.nodeId
       };
     }
     case "create_component": {
@@ -1446,6 +1536,50 @@ function executeBatchGeometryCommand(
   }
 
   return executeEditorCommand(state, { type: "update_nodes_geometry", patches });
+}
+
+function createClipboardNodeCopy(
+  document: RendererDocument,
+  clipboard: EditorNodeClipboard
+): { copiedNode: RendererNode; copyIndex: number } {
+  const copyIndex = nextCopyIndex(document, clipboard.sourceNodeId);
+  const copiedNode = structuredClone(clipboard.node);
+  const copiedNodeId = `${clipboard.sourceNodeId}-copy-${copyIndex}`;
+  renameNodeTreeForCopy(copiedNode, clipboard.sourceNodeId, copiedNodeId);
+  copiedNode.name =
+    copyIndex === 1
+      ? `${clipboard.node.name} 복사본`
+      : `${clipboard.node.name} 복사본 ${copyIndex}`;
+
+  return { copiedNode, copyIndex };
+}
+
+function insertCopiedNode(
+  state: EditorState,
+  clipboard: EditorNodeClipboard,
+  copiedNode: RendererNode
+): EditorState {
+  const parentId = findParentChildren(state.document, clipboard.parentId)
+    ? clipboard.parentId
+    : state.document.pages[0]?.id;
+  if (!parentId) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "create_node",
+    parentId,
+    node: copiedNode
+  });
+}
+
+function getParentAbsolutePosition(
+  document: RendererDocument,
+  parentId: string
+): { x: number; y: number } {
+  return document.pages.some((page) => page.id === parentId)
+    ? { x: 0, y: 0 }
+    : getNodeAbsolutePosition(document, parentId) ?? { x: 0, y: 0 };
 }
 
 function selectionNodeIds(selection: EditorSelection): string[] {
