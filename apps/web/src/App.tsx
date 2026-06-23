@@ -119,6 +119,7 @@ const KEYBOARD_PAN_STEP = 24;
 const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
 const AREA_SELECTION_DRAG_THRESHOLD = 4;
+const RULER_MARKS = [0, 160, 320, 480, 640, 800, 960, 1120, 1280];
 type TeamPanelMode = "local" | "relay" | "manifest";
 
 interface AreaSelectionSession {
@@ -219,6 +220,12 @@ interface FrameSpacingSegment {
 
 interface FrameSpacingOverlay {
   segments: FrameSpacingSegment[];
+}
+
+interface ObjectContextMenuState {
+  left: number;
+  top: number;
+  nodeId: string | null;
 }
 
 const RESIZE_HANDLES: ResizeHandle[] = [
@@ -1313,6 +1320,50 @@ function InspectorAlignmentControls({
   );
 }
 
+function InspectorHeader() {
+  return (
+    <>
+      <h2>검사기</h2>
+      <div className="inspector-tabs" data-testid="inspector-tabs" role="tablist" aria-label="검사기 모드">
+        <button type="button" role="tab" aria-selected="true">
+          디자인
+        </button>
+        <button type="button" role="tab" aria-selected="false">
+          프로토타입
+        </button>
+      </div>
+    </>
+  );
+}
+
+function InspectorEmptySections() {
+  return (
+    <>
+      <section className="inspector-section" data-testid="inspector-section-frame" aria-label="프레임">
+        <h3>프레임</h3>
+        <p className="empty-state">프레임을 만들거나 레이어를 선택하세요.</p>
+      </section>
+      <section className="inspector-section" data-testid="inspector-section-presets" aria-label="프리셋">
+        <h3>프리셋</h3>
+        <ul className="inspector-preset-list">
+          <li>
+            <span>스마트폰</span>
+            <span>390 x 844</span>
+          </li>
+          <li>
+            <span>태블릿</span>
+            <span>768 x 1024</span>
+          </li>
+          <li>
+            <span>데스크톱</span>
+            <span>1440 x 1024</span>
+          </li>
+        </ul>
+      </section>
+    </>
+  );
+}
+
 function Inspector({
   selectedNode,
   selectedNodeCount,
@@ -1341,7 +1392,7 @@ function Inspector({
   if (selectedNodeCount > 1) {
     return (
       <aside className="inspector">
-        <h2>검사기</h2>
+        <InspectorHeader />
         <div className="node-summary">
           <strong>{selectedNodeCount}개 레이어 선택됨</strong>
           <span>다중 선택</span>
@@ -1359,8 +1410,9 @@ function Inspector({
   if (!selectedNode) {
     return (
       <aside className="inspector">
-        <h2>검사기</h2>
+        <InspectorHeader />
         <p className="empty-state">레이어 또는 캔버스 요소를 선택하세요.</p>
+        <InspectorEmptySections />
       </aside>
     );
   }
@@ -1398,7 +1450,7 @@ function Inspector({
 
   return (
     <aside className="inspector">
-      <h2>검사기</h2>
+      <InspectorHeader />
       <div className="node-summary">
         <strong>{selectedNode.name}</strong>
         <span>{nodeKindLabel(selectedNode.kind)}</span>
@@ -1620,6 +1672,7 @@ export function App() {
   const [dragPreview, setDragPreview] = useState<NodeDragPreview | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [inlineTextEditingNodeId, setInlineTextEditingNodeId] = useState<string | null>(null);
+  const [objectContextMenu, setObjectContextMenu] = useState<ObjectContextMenuState | null>(null);
   const editorRef = useRef<EditorState | null>(null);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
@@ -1769,6 +1822,13 @@ export function App() {
   const selectedNode = useMemo(
     () => (editor?.selection.nodeId ? findNodeById(editor.document, editor.selection.nodeId) : null),
     [editor]
+  );
+  const contextMenuNode = useMemo(
+    () =>
+      objectContextMenu?.nodeId && editor
+        ? findNodeById(editor.document, objectContextMenu.nodeId)
+        : selectedNode,
+    [editor, objectContextMenu, selectedNode]
   );
   const selectedNodeIds = editor?.selection.nodeIds ?? [];
   const canAlignSelection = selectedNodeIds.length >= 2;
@@ -1929,6 +1989,35 @@ export function App() {
     }
   }, [inlineTextEditingNodeId, inlineTextEditorOverlay]);
 
+  useEffect(() => {
+    if (!objectContextMenu) {
+      return undefined;
+    }
+
+    const closeFromPointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('[data-testid="object-context-menu"]')
+      ) {
+        return;
+      }
+
+      setObjectContextMenu(null);
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setObjectContextMenu(null);
+      }
+    };
+
+    window.addEventListener("pointerdown", closeFromPointer);
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeFromPointer);
+      window.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [objectContextMenu]);
+
   const normalizePresenceForOverlay = (
     nextPresence: CollaborationPresence[],
     nextLocalSessionId: string | null
@@ -2001,6 +2090,101 @@ export function App() {
     });
   };
 
+  const scopeStateToContextNode = (state: EditorState) => {
+    const nodeId = objectContextMenu?.nodeId;
+    if (!nodeId) {
+      return state;
+    }
+
+    return state.selection.nodeIds.includes(nodeId) && state.selection.nodeIds.length > 1
+      ? setMultiSelection(state, state.selection.nodeIds, nodeId)
+      : setSelection(state, nodeId);
+  };
+
+  const runContextMenuStateAction = (deriveNextState: (state: EditorState) => EditorState) => {
+    updateViewportFromInteraction((state) => deriveNextState(scopeStateToContextNode(state)));
+    setObjectContextMenu(null);
+  };
+
+  const copyContextSelection = () => {
+    setEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const scopedState = scopeStateToContextNode(current);
+      const clipboard = copySelectedNode(scopedState);
+      if (clipboard) {
+        objectClipboardRef.current = clipboard;
+      }
+      publishEditorPresence(scopedState);
+      return scopedState;
+    });
+    setObjectContextMenu(null);
+  };
+
+  const createContextComponent = () => {
+    runContextMenuStateAction((state) => {
+      const nodeId = state.selection.nodeId;
+      const node = nodeId ? findNodeById(state.document, nodeId) : null;
+      if (!node || node.kind === "component_instance") {
+        return state;
+      }
+
+      return executeEditorCommand(state, {
+        type: "create_component",
+        nodeId: node.id,
+        componentId: `component-${(state.document.components ?? []).length + 1}`,
+        name: `${node.name} 컴포넌트`
+      });
+    });
+  };
+
+  const createContextInstance = () => {
+    runContextMenuStateAction((state) => {
+      const nodeId = state.selection.nodeId;
+      const node = nodeId ? findNodeById(state.document, nodeId) : null;
+      const definition = node
+        ? (state.document.components ?? []).find((component) => component.source_node.id === node.id)
+        : null;
+      const firstPage = state.document.pages[0];
+      if (!node || !definition || !firstPage) {
+        return state;
+      }
+
+      return executeEditorCommand(state, {
+        type: "create_component_instance",
+        parentId: firstPage.id,
+        definitionId: definition.id,
+        instanceId: `instance-${flattenRendererNodes(state.document).length + 1}`,
+        x: node.transform.x + 440,
+        y: node.transform.y + 40
+      });
+    });
+  };
+
+  const detachContextInstance = () => {
+    runContextMenuStateAction((state) => {
+      const nodeId = state.selection.nodeId;
+      const node = nodeId ? findNodeById(state.document, nodeId) : null;
+      return node?.component_instance
+        ? executeEditorCommand(state, { type: "detach_instance", nodeId: node.id })
+        : state;
+    });
+  };
+
+  const alignContextSelection = (mode: AlignmentMode) => {
+    runContextMenuStateAction((state) =>
+      state.selection.nodeIds.length === 1
+        ? alignSelectedNodeToParent(state, mode)
+        : alignSelectedNodes(state, mode)
+    );
+  };
+
+  const distributeContextSelection = (mode: DistributionMode) => {
+    runContextMenuStateAction((state) => distributeSelectedNodes(state, mode));
+  };
+
   const clearSelectionFromInteraction = () => {
     setEditor((current) => {
       if (!current) {
@@ -2014,6 +2198,43 @@ export function App() {
         selectedNodeBounds: null
       });
       return nextState;
+    });
+  };
+
+  const openObjectContextMenuFromPointer = (event: KonvaEventObject<MouseEvent>) => {
+    event.evt.preventDefault();
+    event.cancelBubble = true;
+    setInlineTextEditingNodeId(null);
+    setMeasurementTargetNodeId(null);
+
+    if (!editor) {
+      return;
+    }
+
+    const documentPoint = documentPointFromKonvaEvent(event, editor.viewport, stageFrameRef.current);
+    const targetNodeId = documentPoint
+      ? getTopmostNodeIdAtPoint(editor.document, documentPoint)
+      : null;
+
+    if (targetNodeId) {
+      setEditor((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const nextState =
+          current.selection.nodeIds.includes(targetNodeId) && current.selection.nodeIds.length > 1
+            ? setMultiSelection(current, current.selection.nodeIds, targetNodeId)
+            : setSelection(current, targetNodeId);
+        publishEditorPresence(nextState, { activeTool: "select" });
+        return nextState;
+      });
+    }
+
+    setObjectContextMenu({
+      left: event.evt.clientX,
+      top: event.evt.clientY,
+      nodeId: targetNodeId
     });
   };
 
@@ -3181,6 +3402,30 @@ export function App() {
 
   return (
     <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
+      <nav className="editor-rail" data-testid="editor-rail" aria-label="편집기 탐색">
+        <div className="editor-rail-brand" aria-hidden="true">
+          L
+        </div>
+        <div className="editor-rail-group">
+          <button type="button" aria-label="파일" aria-pressed="true" title="파일">
+            ▦
+          </button>
+          <button type="button" aria-label="에셋" aria-pressed="false" title="에셋">
+            ◇
+          </button>
+          <button type="button" aria-label="레이어" aria-pressed="false" title="레이어">
+            ☰
+          </button>
+          <button type="button" aria-label="팀" aria-pressed="false" title="팀">
+            ◎
+          </button>
+        </div>
+        <div className="editor-rail-group">
+          <button type="button" aria-label="도움말" aria-pressed="false" title="도움말">
+            ?
+          </button>
+        </div>
+      </nav>
       <aside className="sidebar">
         <button
           type="button"
@@ -3432,7 +3677,22 @@ export function App() {
         )}
       </aside>
       <section className="editor-workspace">
-        <div className="toolbar" aria-label="에디터 도구 모음">
+        <div className="canvas-ruler-corner" aria-hidden="true" />
+        <div className="canvas-ruler canvas-ruler-horizontal" data-testid="canvas-ruler-horizontal" aria-hidden="true">
+          {RULER_MARKS.map((mark) => (
+            <span key={`x-${mark}`} style={{ left: mark }}>
+              {mark}
+            </span>
+          ))}
+        </div>
+        <div className="canvas-ruler canvas-ruler-vertical" data-testid="canvas-ruler-vertical" aria-hidden="true">
+          {RULER_MARKS.map((mark) => (
+            <span key={`y-${mark}`} style={{ top: mark }}>
+              {mark}
+            </span>
+          ))}
+        </div>
+        <div className="toolbar" data-testid="floating-toolbar" aria-label="에디터 도구 모음">
           <button type="button" aria-label="사각형 만들기" onClick={() => createNode("rectangle")}>
             ▭
           </button>
@@ -3534,6 +3794,7 @@ export function App() {
                   return;
                 }
               }}
+              onContextMenu={openObjectContextMenuFromPointer}
               onMouseMove={(event) => {
                 if (continueCanvasPan(event.evt)) {
                   return;
@@ -3836,6 +4097,144 @@ export function App() {
           updateViewportFromInteraction((current) => distributeSelectedNodes(current, mode))
         }
       />
+      {objectContextMenu ? (
+        <div
+          className="object-context-menu"
+          data-testid="object-context-menu"
+          role="menu"
+          aria-label="객체 메뉴"
+          onContextMenu={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: objectContextMenu.left, top: objectContextMenu.top }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={copyContextSelection}
+          >
+            복사
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!objectClipboardRef.current}
+            onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
+          >
+            붙여넣기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => runContextMenuStateAction(duplicateSelectedNode)}
+          >
+            복제
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => runContextMenuStateAction(deleteSelectedNode)}
+          >
+            삭제
+          </button>
+          <div className="object-context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode || contextMenuNode.kind === "component_instance"}
+            onClick={createContextComponent}
+          >
+            컴포넌트 만들기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={
+              !contextMenuNode ||
+              !components.some((component) => component.source_node.id === contextMenuNode.id)
+            }
+            onClick={createContextInstance}
+          >
+            인스턴스 만들기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode?.component_instance}
+            onClick={detachContextInstance}
+          >
+            인스턴스 분리
+          </button>
+          <div className="object-context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("left")}
+          >
+            왼쪽 맞춤
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("center")}
+          >
+            가운데 맞춤
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("right")}
+          >
+            오른쪽 맞춤
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("top")}
+          >
+            위쪽 맞춤
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("middle")}
+          >
+            세로 가운데 맞춤
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={() => alignContextSelection("bottom")}
+          >
+            아래쪽 맞춤
+          </button>
+          <div className="object-context-menu-separator" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            disabled={selectedNodeIds.length < 3}
+            onClick={() => distributeContextSelection("horizontal")}
+          >
+            가로 간격 균등
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={selectedNodeIds.length < 3}
+            onClick={() => distributeContextSelection("vertical")}
+          >
+            세로 간격 균등
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }

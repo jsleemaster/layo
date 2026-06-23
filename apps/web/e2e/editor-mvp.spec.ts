@@ -383,7 +383,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
   await page.screenshot({ path: "/tmp/layo-mvp-verified.png", fullPage: true });
 });
 
-test("web editor fills the available work area with a white canvas", async ({ page }) => {
+test("web editor fills the available work area with a neutral infinite canvas", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await openEmptyEditor(page);
   await expect(page.getByTestId("stage-frame")).toBeVisible();
@@ -419,8 +419,8 @@ test("web editor fills the available work area with a white canvas", async ({ pa
   expect(metrics.documentScrollWidth).toBe(metrics.viewportWidth);
   expect(metrics.canvasScrollWidth).toBe(metrics.canvasClientWidth);
   expect(metrics.canvasScrollHeight).toBe(metrics.canvasClientHeight);
-  expect(metrics.canvasBackground).toBe("rgb(255, 255, 255)");
-  expect(metrics.stageBackground).toBe("rgb(255, 255, 255)");
+  expect(metrics.canvasBackground).toBe("rgb(238, 242, 246)");
+  expect(metrics.stageBackground).toBe("rgba(0, 0, 0, 0)");
   expect(metrics.stageWidth).toBe(metrics.canvasClientWidth);
   expect(metrics.stageHeight).toBe(metrics.canvasClientHeight);
 });
@@ -445,6 +445,78 @@ test("component toolbar actions use component-style icons instead of letter labe
   await expect(page.getByRole("button", { name: "컴포넌트 만들기" })).not.toHaveText("C");
   await expect(page.getByRole("button", { name: "인스턴스 만들기" })).not.toHaveText("I");
   await expect(page.getByRole("button", { name: "인스턴스 분리" })).not.toHaveText("D");
+});
+
+test("Figma-like editor shell separates rail, rulers, floating toolbar, and inspector sections", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openEmptyEditor(page);
+
+  await expect(page.getByTestId("editor-rail")).toBeVisible();
+  await expect(page.getByTestId("editor-rail").getByRole("button", { name: "파일" })).toBeVisible();
+  await expect(page.getByTestId("editor-rail").getByRole("button", { name: "에셋" })).toBeVisible();
+  await expect(page.getByTestId("editor-rail").getByRole("button", { name: "레이어" })).toBeVisible();
+
+  await expect(page.getByTestId("canvas-ruler-horizontal")).toBeVisible();
+  await expect(page.getByTestId("canvas-ruler-vertical")).toBeVisible();
+
+  const floatingToolbar = page.getByTestId("floating-toolbar");
+  await expect(floatingToolbar).toBeVisible();
+  const toolbarBox = await floatingToolbar.boundingBox();
+  const workspaceBox = await page.locator(".editor-workspace").boundingBox();
+  if (!toolbarBox || !workspaceBox) {
+    throw new Error("editor shell geometry was not visible");
+  }
+  const toolbarCenterX = toolbarBox.x + toolbarBox.width / 2;
+  const workspaceCenterX = workspaceBox.x + workspaceBox.width / 2;
+  expect(toolbarBox?.y).toBeGreaterThan(760);
+  expect(Math.abs(toolbarCenterX - workspaceCenterX)).toBeLessThan(4);
+
+  await expect(page.getByTestId("inspector-tabs")).toBeVisible();
+  await expect(page.getByTestId("inspector-section-frame")).toBeVisible();
+  await expect(page.getByTestId("inspector-section-presets")).toBeVisible();
+
+  const canvasBackground = await page.getByTestId("canvas-area").evaluate((node) =>
+    getComputedStyle(node).backgroundColor
+  );
+  expect(canvasBackground).not.toBe("rgb(255, 255, 255)");
+});
+
+test("right-click objects and images expose common context menu commands", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  await page.mouse.click(stageBox.x + 170, stageBox.y + 135, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "복사" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "붙여넣기" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "복제" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "삭제" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "컴포넌트 만들기" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "인스턴스 만들기" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "인스턴스 분리" })).toBeDisabled();
+  await expect(menu.getByRole("menuitem", { name: "왼쪽 맞춤" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "아래쪽 맞춤" })).toBeEnabled();
+
+  await menu.getByRole("menuitem", { name: "복제" }).click();
+  await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
+
+  const imageTransfer = await createImageDataTransfer(page, "context-image.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 320,
+    clientY: stageBox.y + 260
+  });
+  await expect(page.getByRole("button", { name: "이미지 4" })).toBeVisible();
+
+  await page.mouse.click(stageBox.x + 320, stageBox.y + 260, { button: "right" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "삭제" }).click();
+  await expect(page.getByRole("button", { name: "이미지 4" })).toHaveCount(0);
 });
 
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {
