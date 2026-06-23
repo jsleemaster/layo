@@ -309,7 +309,8 @@ describe("HTTP server", () => {
             type: "image",
             asset_id: "asset-before",
             natural_width: 720,
-            natural_height: 480
+            natural_height: 480,
+            fit_mode: "fit"
           },
           children: []
         }
@@ -331,13 +332,61 @@ describe("HTTP server", () => {
       type: "image",
       asset_id: "asset-after",
       natural_width: 300,
-      natural_height: 900
+      natural_height: 900,
+      fit_mode: "fit"
     });
 
     const file = await server.inject({ method: "GET", url: "/files/sample-file" });
     const image = file.json().file.pages[0].children.find((node: { id: string }) => node.id === "image-1");
     expect(image.content.asset_id).toBe("asset-after");
+    expect(image.content.fit_mode).toBe("fit");
     expect(image.size).toEqual({ width: 480, height: 320 });
+  });
+
+  test("updates image fit mode without changing geometry", async () => {
+    const server = await createServerWithDocument();
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/nodes",
+      payload: {
+        parentId: "page-1",
+        node: {
+          id: "image-1",
+          kind: "image",
+          name: "이미지 1",
+          transform: { x: 120, y: 140, rotation: 0 },
+          size: { width: 480, height: 320 },
+          style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+          content: {
+            type: "image",
+            asset_id: "asset-before",
+            natural_width: 720,
+            natural_height: 480,
+            fit_mode: "fill"
+          },
+          children: []
+        }
+      }
+    });
+    expect(created.statusCode).toBe(200);
+
+    const fitted = await server.inject({
+      method: "PATCH",
+      url: "/files/sample-file/nodes/image-1/image-fit",
+      payload: { fitMode: "fit" }
+    });
+    expect(fitted.statusCode).toBe(200);
+    expect(fitted.json().node.content).toMatchObject({
+      type: "image",
+      asset_id: "asset-before",
+      fit_mode: "fit"
+    });
+    expect(fitted.json().node.size).toEqual({ width: 480, height: 320 });
+
+    const file = await server.inject({ method: "GET", url: "/files/sample-file" });
+    const image = file.json().file.pages[0].children.find((node: { id: string }) => node.id === "image-1");
+    expect(image.content.fit_mode).toBe("fit");
   });
 
   test("serves component creation, instancing, listing, and detach routes", async () => {

@@ -92,3 +92,9 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Added undoable `이미지 바꾸기` for image nodes in the object context menu, preserving the selected layer's geometry while replacing the backing uploaded asset and its natural-size metadata.
 - Browser coverage verifies the actual right-click menu, file chooser replacement, preserved fitted size, reload persistence, and follow-up `원본 크기로 맞춤` using the replacement image dimensions.
 - This closes the highest-friction missing image context-menu action; crop/image-fill controls remain next in the imagery lane.
+
+2026-06-23 image fill/fit context-menu slice:
+
+- Added undoable image fit metadata with `이미지 채우기` and `이미지 맞춤` right-click actions for image nodes, preserving geometry while switching between cover-crop and contain rendering.
+- Persisted the mode through local file storage, Rust model round-trip, and code-export structure so agent handoff can inspect the selected sizing behavior.
+- Browser coverage verifies the right-click flow, server persistence, reload persistence, and returning from fit back to fill; pure rendering tests cover the cover/contain draw math.

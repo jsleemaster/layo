@@ -697,6 +697,64 @@ test("right-click image menu replaces the image asset while keeping geometry", a
   await expect(page.getByTestId("selection-size-badge")).toHaveText("300 x 900");
 });
 
+test("right-click image menu switches between fill and fit sizing modes", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  const imageTransfer = await createImageDataTransfer(
+    page,
+    "wide-fill-fit.png",
+    { width: 900, height: 300 },
+    "#2563eb"
+  );
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 420,
+    clientY: stageBox.y + 320
+  });
+
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await page.getByTestId("inspector-width").fill("300");
+  await page.getByTestId("inspector-height").fill("300");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("300");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("300");
+
+  await page.mouse.click(stageBox.x + 420, stageBox.y + 320, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "이미지 맞춤" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "이미지 맞춤" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("이미지 3 이미지 맞춤");
+
+  const fittedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fittedResponse.ok()).toBeTruthy();
+  const fittedPayload = await fittedResponse.json();
+  const fittedImage = fittedPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
+  expect(fittedImage.content.fit_mode).toBe("fit");
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await page.getByRole("button", { name: "이미지 3" }).click();
+
+  const reloadedStageBox = await stageFrame.boundingBox();
+  if (!reloadedStageBox) {
+    throw new Error("stage frame was not visible after reload");
+  }
+  await page.mouse.click(reloadedStageBox.x + 420, reloadedStageBox.y + 320, { button: "right" });
+  await expect(menu.getByRole("menuitem", { name: "이미지 채우기" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "이미지 채우기" }).click();
+
+  const filledResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(filledResponse.ok()).toBeTruthy();
+  const filledPayload = await filledResponse.json();
+  const filledImage = filledPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
+  expect(filledImage.content.fit_mode).toBe("fill");
+});
+
 test("right-click menu locks and hides objects while layer state remains recoverable", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const stageFrame = page.getByTestId("stage-frame");

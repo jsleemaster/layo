@@ -180,6 +180,23 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
+  server.patch<{
+    Params: { fileId: string; nodeId: string };
+    Body: { fitMode: "fill" | "fit" };
+  }>("/files/:fileId/nodes/:nodeId/image-fit", async (request, reply) => {
+    if (request.body.fitMode !== "fill" && request.body.fitMode !== "fit") {
+      return reply.code(400).send({ error: "invalid image fit mode" });
+    }
+
+    return {
+      node: await storage.setImageFitMode(
+        request.params.fileId,
+        request.params.nodeId,
+        request.body.fitMode
+      )
+    };
+  });
+
   server.post<{ Params: { fileId: string }; Body: { parentId: string; node: DesignNode } }>(
     "/files/:fileId/nodes",
     async (request) => {

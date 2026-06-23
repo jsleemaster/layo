@@ -49,6 +49,8 @@ export interface NodeConstraints {
   vertical: "top" | "bottom" | "top_bottom" | "center" | "scale";
 }
 
+export type ImageFitMode = "fill" | "fit";
+
 export interface DesignNode {
   id: string;
   kind: "frame" | "group" | "rectangle" | "text" | "image" | "component" | "component_instance";
@@ -69,7 +71,13 @@ export interface DesignNode {
   content:
     | { type: "empty" }
     | { type: "text"; value: string; font_size: number; font_family: string }
-    | { type: "image"; asset_id: string; natural_width?: number; natural_height?: number };
+    | {
+        type: "image";
+        asset_id: string;
+        natural_width?: number;
+        natural_height?: number;
+        fit_mode?: ImageFitMode;
+      };
   children: DesignNode[];
 }
 
@@ -569,7 +577,11 @@ export class FileStorage {
       throw new Error(`node is not image: ${nodeId}`);
     }
 
-    const content: DesignNode["content"] = { type: "image", asset_id: input.assetId };
+    const content: DesignNode["content"] = {
+      type: "image",
+      asset_id: input.assetId,
+      fit_mode: node.content.fit_mode ?? "fill"
+    };
     if (input.naturalWidth) {
       content.natural_width = Math.max(1, input.naturalWidth);
     }
@@ -578,6 +590,27 @@ export class FileStorage {
     }
 
     node.content = content;
+    relayoutDesignFile(document);
+    await this.writeFile(fileId, document);
+    return node;
+  }
+
+  async setImageFitMode(
+    fileId: string,
+    nodeId: string,
+    fitMode: ImageFitMode
+  ): Promise<DesignNode> {
+    const document = await this.readFile(fileId);
+    const node = findNodeById(document, nodeId);
+    if (!node) {
+      throw new Error(`node not found: ${nodeId}`);
+    }
+
+    if (node.content.type !== "image") {
+      throw new Error(`node is not image: ${nodeId}`);
+    }
+
+    node.content = { ...node.content, fit_mode: fitMode };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
     return node;

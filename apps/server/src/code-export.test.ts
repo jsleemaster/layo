@@ -142,6 +142,45 @@ describe("code export", () => {
     });
   });
 
+  test("exports image fit mode for agent handoff", () => {
+    const result = exportDesignToCode({
+      id: "image-file",
+      name: "Image File",
+      version: 1,
+      components: [],
+      pages: [
+        {
+          id: "page-1",
+          name: "Page 1",
+          children: [
+            {
+              id: "hero-image",
+              kind: "image",
+              name: "Hero Image",
+              transform: { x: 24, y: 40, rotation: 0 },
+              size: { width: 300, height: 300 },
+              style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+              content: {
+                type: "image",
+                asset_id: "asset-hero",
+                natural_width: 900,
+                natural_height: 300,
+                fit_mode: "fit"
+              },
+              children: []
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.elements[0]?.structure.content).toEqual({
+      type: "image",
+      assetId: "asset-hero",
+      fitMode: "fit"
+    });
+  });
+
   test("exports separate element modules that can be imported directly", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-code-export-"));
     const result = exportDesignToCode(tossFixture(), { moduleBasePath: "./elements" });

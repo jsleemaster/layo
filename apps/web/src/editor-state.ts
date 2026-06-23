@@ -1,4 +1,5 @@
 import type {
+  ImageFitMode,
   NodeConstraints,
   NodeLayout,
   RendererDocument,
@@ -104,6 +105,11 @@ export type EditorCommand =
       assetId: string;
       naturalWidth?: number;
       naturalHeight?: number;
+    }
+  | {
+      type: "set_image_fit_mode";
+      nodeId: string;
+      fitMode: ImageFitMode;
     }
   | {
       type: "create_node";
@@ -897,13 +903,18 @@ export function createImageNode(
     name?: string;
     naturalWidth?: number;
     naturalHeight?: number;
+    fitMode?: ImageFitMode;
     x: number;
     y: number;
     width: number;
     height: number;
   }
 ): RendererNode {
-  const content: RendererNode["content"] = { type: "image", asset_id: input.assetId };
+  const content: RendererNode["content"] = {
+    type: "image",
+    asset_id: input.assetId,
+    fit_mode: input.fitMode ?? "fill"
+  };
   if (input.naturalWidth) {
     content.natural_width = clampSize(input.naturalWidth);
   }
@@ -966,6 +977,22 @@ export function replaceSelectedImageAsset(
     assetId: input.assetId,
     naturalWidth: input.naturalWidth,
     naturalHeight: input.naturalHeight
+  });
+}
+
+export function setSelectedImageFitMode(state: EditorState, fitMode: ImageFitMode): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected || selected.node.kind !== "image" || selected.node.content.type !== "image") {
+    return state;
+  }
+  if (isNodeLocked(selected.node)) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "set_image_fit_mode",
+    nodeId: selected.node.id,
+    fitMode
   });
 }
 
@@ -1088,7 +1115,11 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       }
 
       const previousContent = node.content;
-      const nextContent: RendererNode["content"] = { type: "image", asset_id: command.assetId };
+      const nextContent: RendererNode["content"] = {
+        type: "image",
+        asset_id: command.assetId,
+        fit_mode: previousContent.fit_mode ?? "fill"
+      };
       if (command.naturalWidth) {
         nextContent.natural_width = clampSize(command.naturalWidth);
       }
@@ -1098,7 +1129,8 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       if (
         previousContent.asset_id === nextContent.asset_id &&
         previousContent.natural_width === nextContent.natural_width &&
-        previousContent.natural_height === nextContent.natural_height
+        previousContent.natural_height === nextContent.natural_height &&
+        (previousContent.fit_mode ?? "fill") === (nextContent.fit_mode ?? "fill")
       ) {
         return { document, inverse: null };
       }
@@ -1114,6 +1146,30 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           assetId: previousContent.asset_id,
           naturalWidth: previousContent.natural_width,
           naturalHeight: previousContent.natural_height
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_image_fit_mode": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node) || node.kind !== "image" || node.content.type !== "image") {
+        return { document, inverse: null };
+      }
+
+      const previousFitMode = node.content.fit_mode ?? "fill";
+      if (previousFitMode === command.fitMode) {
+        return { document, inverse: null };
+      }
+
+      node.content = { ...node.content, fit_mode: command.fitMode };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_image_fit_mode",
+          nodeId: command.nodeId,
+          fitMode: previousFitMode
         },
         selectedNodeId: command.nodeId
       };

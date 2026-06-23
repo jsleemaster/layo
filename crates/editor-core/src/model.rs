@@ -189,6 +189,8 @@ pub enum NodeContent {
         natural_width: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         natural_height: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fit_mode: Option<String>,
     },
 }
 

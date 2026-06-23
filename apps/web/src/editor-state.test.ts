@@ -31,6 +31,7 @@ import {
   replaceSelectedImageAsset,
   resizeSelectedImageToNaturalSize,
   selectNodesInBounds,
+  setSelectedImageFitMode,
   setSelectedNodeLocked,
   setSelectedNodeVisible,
   setMultiSelection,
@@ -621,6 +622,45 @@ describe("editor state commands", () => {
       asset_id: "asset-before",
       natural_width: 640,
       natural_height: 480
+    });
+  });
+
+  test("sets selected image fit mode without changing geometry and supports undo", () => {
+    const document = sampleDocument();
+    document.pages[0]?.children.push(
+      createImageNode(2, {
+        assetId: "asset-before",
+        naturalWidth: 640,
+        naturalHeight: 480,
+        x: 240,
+        y: 180,
+        width: 320,
+        height: 180
+      })
+    );
+    const initial = setSelection(createEditorState(document), "image-2");
+
+    const fitted = setSelectedImageFitMode(initial, "fit");
+    const image = findNodeById(fitted.document, "image-2");
+    expect(image?.content).toMatchObject({
+      type: "image",
+      asset_id: "asset-before",
+      natural_width: 640,
+      natural_height: 480,
+      fit_mode: "fit"
+    });
+    expect(image?.size).toEqual({ width: 320, height: 180 });
+    expect(image?.transform).toMatchObject({ x: 240, y: 180 });
+    expect(fitted.selection.nodeId).toBe("image-2");
+
+    const filled = setSelectedImageFitMode(fitted, "fill");
+    expect(findNodeById(filled.document, "image-2")?.content).toMatchObject({
+      fit_mode: "fill"
+    });
+
+    const undone = undo(filled);
+    expect(findNodeById(undone.document, "image-2")?.content).toMatchObject({
+      fit_mode: "fit"
     });
   });
 

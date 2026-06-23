@@ -15,6 +15,8 @@ export interface NodeConstraints {
   vertical: "top" | "bottom" | "top_bottom" | "center" | "scale";
 }
 
+export type ImageFitMode = "fill" | "fit";
+
 export interface RendererNode {
   id: string;
   kind: "frame" | "group" | "rectangle" | "text" | "image" | "component" | "component_instance";
@@ -35,7 +37,13 @@ export interface RendererNode {
   content:
     | { type: "empty" }
     | { type: "text"; value: string; font_size: number; font_family: string }
-    | { type: "image"; asset_id: string; natural_width?: number; natural_height?: number };
+    | {
+        type: "image";
+        asset_id: string;
+        natural_width?: number;
+        natural_height?: number;
+        fit_mode?: ImageFitMode;
+      };
   children: RendererNode[];
 }
 

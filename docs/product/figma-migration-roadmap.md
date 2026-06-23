@@ -20,7 +20,7 @@ The current main branch already has:
 
 - Rust/TypeScript document primitives for pages, frames, rectangles, text, images, components, instances, and geometry.
 - Browser editor shell with creation, selection, dragging, corner-only resizing, direct double-click text editing, selection size badges, inspector geometry, grouped Inspector alignment/distribution controls, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
-- Local image asset storage with browser clipboard paste, file drag/drop insertion for image nodes, context-menu image replacement, original image dimensions, and context-menu original-size restore.
+- Local image asset storage with browser clipboard paste, file drag/drop insertion for image nodes, context-menu image replacement, image fill/fit sizing modes, original image dimensions, and context-menu original-size restore.
 - Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, transient snap guides for page-level peer bounds/centers, and combined multi-selection group feedback.
 - Component definitions, instances, and detach.
 - HTTP and MCP agent control for inspect, find, command application, validation, change summaries, components, and code export.
