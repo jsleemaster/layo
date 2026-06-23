@@ -618,7 +618,7 @@ test("right-click objects and images expose common context menu commands", async
   const menu = page.getByTestId("object-context-menu");
   await expect(menu).toBeVisible();
   await expect(menu.getByRole("menuitem", { name: "잘라내기" })).toBeEnabled();
-  await expect(menu.getByRole("menuitem", { name: "복사" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "복사", exact: true })).toBeEnabled();
   await expect(menu.getByRole("menuitem", { name: "붙여넣기", exact: true })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "여기에 붙여넣기" })).toBeDisabled();
   await expect(menu.getByRole("menuitem", { name: "복제" })).toBeEnabled();
@@ -997,6 +997,50 @@ test("right-click menu supports expanded selection, transform, zoom, and export 
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/^layo-code-export-.*\.json$/);
   await expect(page.getByTestId("project-status")).toContainText("코드 내보내기 완료");
+});
+
+test("right-click menu copies object styles and exports the selected object as PNG", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+  const blankMenuPoint = {
+    x: stageBox.x + Math.max(24, stageBox.width - 36),
+    y: stageBox.y + Math.max(24, stageBox.height - 36)
+  };
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-fill").fill("#f97316");
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-fill").fill("#38bdf8");
+
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "스타일 복사" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "스타일 복사" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("사각형 3 스타일 복사됨");
+
+  await page.getByRole("button", { name: "사각형 4" }).click();
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "스타일 붙여넣기" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "스타일 붙여넣기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("사각형 4 스타일 적용됨");
+
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#f97316");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "PNG로 내보내기" })).toBeEnabled();
+  const downloadPromise = page.waitForEvent("download");
+  await menu.getByRole("menuitem", { name: "PNG로 내보내기" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("rectangle-4.png");
+  await expect(page.getByTestId("project-status")).toContainText("사각형 4 PNG 내보내기 완료");
 });
 
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {

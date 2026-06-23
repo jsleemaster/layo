@@ -73,6 +73,8 @@ export interface EditorNodeClipboard {
   node: RendererNode;
 }
 
+export type EditorNodeStyle = RendererNode["style"];
+
 export type GeometryPatch = Partial<{
   x: number;
   y: number;
@@ -94,6 +96,11 @@ export type EditorCommand =
       type: "set_fill";
       nodeId: string;
       fill: string;
+    }
+  | {
+      type: "set_node_style";
+      nodeId: string;
+      style: EditorNodeStyle;
     }
   | {
       type: "update_text";
@@ -862,6 +869,19 @@ export function copySelectedNode(state: EditorState): EditorNodeClipboard | null
   };
 }
 
+export function setSelectedNodeStyle(state: EditorState, style: EditorNodeStyle): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected || isNodeLocked(selected.node)) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "set_node_style",
+    nodeId: selected.node.id,
+    style
+  });
+}
+
 export function pasteCopiedNode(
   state: EditorState,
   clipboard: EditorNodeClipboard | null
@@ -1173,6 +1193,34 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       relayoutDocument(next);
 
       return { document: next, inverse };
+    }
+    case "set_node_style": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node)) {
+        return { document, inverse: null };
+      }
+
+      const previousStyle = { ...node.style };
+      if (
+        previousStyle.fill === command.style.fill &&
+        previousStyle.stroke === command.style.stroke &&
+        previousStyle.stroke_width === command.style.stroke_width &&
+        previousStyle.opacity === command.style.opacity
+      ) {
+        return { document, inverse: null };
+      }
+
+      node.style = { ...command.style };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_node_style",
+          nodeId: command.nodeId,
+          style: previousStyle
+        }
+      };
     }
     case "update_text": {
       const node = findNodeById(next, command.nodeId);

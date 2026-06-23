@@ -8,6 +8,7 @@ import {
   type WheelEvent as ReactWheelEvent
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
+import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
@@ -90,12 +91,14 @@ import {
   setSelection,
   setMultiSelection,
   setSelectedNodeLocked,
+  setSelectedNodeStyle,
   setSelectedNodeVisible,
   setViewport,
   toggleSelection,
   ungroupSelectedNode,
   type AlignmentMode,
   type DistributionMode,
+  type EditorNodeStyle,
   type EditorNodeClipboard,
   type EditorState,
   type FlipAxis,
@@ -123,7 +126,7 @@ function numericInputValue(value: number) {
 const OBJECT_CONTEXT_MENU_MARGIN = 8;
 const OBJECT_CONTEXT_MENU_ESTIMATED_SIZE = {
   width: 280,
-  height: 560
+  height: 640
 };
 
 function objectContextMenuPosition(left: number, top: number) {
@@ -147,6 +150,15 @@ function objectContextMenuPosition(left: number, top: number) {
       )
     )
   };
+}
+
+function downloadDataUrl(dataUrl: string, filename: string) {
+  const anchor = document.createElement("a");
+  anchor.href = dataUrl;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 const teamStore = createIndexedDbTeamStore();
@@ -1318,6 +1330,7 @@ function renderNode({
       {isSelected ? (
         <>
           <Rect
+            name="selection-export-overlay"
             width={node.size.width}
             height={node.size.height}
             stroke={editorKonvaTokens.selection.stroke}
@@ -1330,7 +1343,7 @@ function renderNode({
                 const hitRect = konvaResizeHandleRect(node, handle, resizeHandleHitSize(handle));
                 const visualRect = konvaResizeHandleRect(node, handle, resizeHandleVisualSize(handle));
                 return (
-                  <Group key={handle}>
+                  <Group key={handle} name="selection-export-overlay">
                     <Rect
                       {...hitRect}
                       fill={editorKonvaTokens.selection.handleFill}
@@ -1921,6 +1934,7 @@ export function App() {
   const [objectContextMenu, setObjectContextMenu] = useState<ObjectContextMenuState | null>(null);
   const editorRef = useRef<EditorState | null>(null);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
+  const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
@@ -1938,6 +1952,7 @@ export function App() {
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementNodeIdRef = useRef<string | null>(null);
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
+  const konvaStageRef = useRef<KonvaStage | null>(null);
   const inlineTextEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const [isSpacePanning, setIsSpacePanning] = useState(false);
   const [stageSize, setStageSize] = useState<{ width: number; height: number }>(editorKonvaTokens.stage);
@@ -2082,6 +2097,7 @@ export function App() {
   const contextMenuNodeIsLocked = isNodeLocked(contextMenuNode);
   const contextMenuNodeIsHidden = contextMenuNode ? !isNodeVisible(contextMenuNode) : false;
   const canMutateContextMenuNode = Boolean(contextMenuNode && !contextMenuNodeIsLocked);
+  const canPasteContextStyle = Boolean(styleClipboardRef.current && canMutateContextMenuNode);
   const canReplaceContextImage = Boolean(
     contextMenuNode?.kind === "image" &&
       contextMenuNode.content.type === "image" &&
@@ -2430,6 +2446,30 @@ export function App() {
     setObjectContextMenu(null);
   };
 
+  const copyContextStyle = () => {
+    if (contextMenuNode) {
+      styleClipboardRef.current = { ...contextMenuNode.style };
+      setProjectStatus(`${contextMenuNode.name} 스타일 복사됨`);
+    }
+    setObjectContextMenu(null);
+  };
+
+  const pasteContextStyle = () => {
+    const style = styleClipboardRef.current;
+    const currentEditor = editorRef.current;
+    const scopedState = currentEditor ? scopeStateToContextNode(currentEditor) : null;
+    const targetNodeId = scopedState?.selection.nodeId ?? null;
+    const targetNode = targetNodeId && scopedState ? findNodeById(scopedState.document, targetNodeId) : null;
+    if (!style || !targetNode || isNodeLocked(targetNode)) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    updateViewportFromInteraction((state) => setSelectedNodeStyle(scopeStateToContextNode(state), style));
+    setProjectStatus(`${targetNode.name} 스타일 적용됨`);
+    setObjectContextMenu(null);
+  };
+
   const cutContextSelection = () => {
     setEditor((current) => {
       if (!current) {
@@ -2516,6 +2556,56 @@ export function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : "코드 내보내기에 실패했습니다";
       setProjectStatus(message);
+    }
+  };
+
+  const downloadContextSelectionPng = () => {
+    const stage = konvaStageRef.current;
+    const currentEditor = editorRef.current;
+    if (!stage || !currentEditor) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    const scopedState = scopeStateToContextNode(currentEditor);
+    const nodeId = scopedState.selection.nodeId;
+    const node = nodeId ? findNodeById(scopedState.document, nodeId) : null;
+    const bounds = nodeId ? getNodeBounds(scopedState.document, nodeId) : null;
+    if (!node || !bounds) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    const viewportRect = viewportBounds(bounds, scopedState.viewport);
+    const padding = 2;
+    const x = Math.max(0, viewportRect.left - padding);
+    const y = Math.max(0, viewportRect.top - padding);
+    const width = Math.max(1, Math.min(stageSize.width - x, viewportRect.width + padding * 2));
+    const height = Math.max(1, Math.min(stageSize.height - y, viewportRect.height + padding * 2));
+    const selectionOverlays = stage.find(".selection-export-overlay");
+
+    try {
+      selectionOverlays.forEach((overlay) => overlay.visible(false));
+      stage.draw();
+      downloadDataUrl(
+        stage.toDataURL({
+          x,
+          y,
+          width,
+          height,
+          pixelRatio: 2,
+          mimeType: "image/png"
+        }),
+        `${node.id}.png`
+      );
+      setProjectStatus(`${node.name} PNG 내보내기 완료`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "PNG 내보내기에 실패했습니다";
+      setProjectStatus(message);
+    } finally {
+      selectionOverlays.forEach((overlay) => overlay.visible(true));
+      stage.draw();
+      setObjectContextMenu(null);
     }
   };
 
@@ -4426,6 +4516,7 @@ export function App() {
             onMouseLeave={clearCursorPresence}
           >
             <Stage
+              ref={konvaStageRef}
               width={stageSize.width}
               height={stageSize.height}
               scaleX={editor?.viewport.scale ?? 1}
@@ -4785,6 +4876,22 @@ export function App() {
           <button
             type="button"
             role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={copyContextStyle}
+          >
+            스타일 복사
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canPasteContextStyle}
+            onClick={pasteContextStyle}
+          >
+            스타일 붙여넣기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             disabled={!objectClipboardRef.current}
             onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
           >
@@ -4824,6 +4931,14 @@ export function App() {
             onClick={() => void downloadContextCodeExport()}
           >
             코드로 내보내기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={downloadContextSelectionPng}
+          >
+            PNG로 내보내기
           </button>
           <button
             type="button"

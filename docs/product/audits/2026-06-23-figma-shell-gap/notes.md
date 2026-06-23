@@ -126,3 +126,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Expanded the starter kit list to six Figma-like library cards, including `visionOS 26`, richer component/template metadata, accessible preview labels, and token-based miniature thumbnails.
 - Adjusted long kit names to wrap inside the card instead of truncating, so library labels remain inspectable in the dense sidebar.
 - Verification started with a RED Playwright expectation for the missing `visionOS 26` card and richer thumbnail metadata; the focused e2e now passes and visual proof is stored in `/tmp/layo-asset-library-card-polish-final2.png`.
+
+2026-06-23 context-menu style/export slice:
+
+- Rechecked the object/image context menu against the Figma parity inventory after the broader menu expansion and found two still-missing common design-tool actions: copying/pasting visual style and exporting the selected object as an image.
+- Added undoable `set_node_style` editor-state support so context-menu style paste applies fill, stroke, stroke width, and opacity through the same command/history path as other object edits.
+- Added right-click menu actions for `스타일 복사`, `스타일 붙여넣기`, and `PNG로 내보내기`; PNG export crops the current Konva stage to the selected object bounds and hides selection chrome during export.
+- Verification started with a RED Playwright expectation for the missing `스타일 복사` menu item; the focused e2e now passes for style paste and PNG download.

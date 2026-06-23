@@ -37,6 +37,7 @@ import {
   selectNodesWithSameKind,
   setSelectedImageFitMode,
   setSelectedNodeLocked,
+  setSelectedNodeStyle,
   setSelectedNodeVisible,
   setMultiSelection,
   setSelection,
@@ -182,6 +183,30 @@ describe("editor state commands", () => {
     expect(findNodeById(undone.document, "text-1")?.content).toMatchObject({
       type: "text",
       value: "Layo"
+    });
+  });
+
+  test("applies copied object style with undo support", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const styled = setSelectedNodeStyle(initial, {
+      fill: "#f97316",
+      stroke: "#7c2d12",
+      stroke_width: 2,
+      opacity: 0.7
+    });
+
+    expect(findNodeById(styled.document, "text-1")?.style).toEqual({
+      fill: "#f97316",
+      stroke: "#7c2d12",
+      stroke_width: 2,
+      opacity: 0.7
+    });
+    expect(findNodeById(undo(styled).document, "text-1")?.style).toEqual({
+      fill: "#111827",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1
     });
   });
 
