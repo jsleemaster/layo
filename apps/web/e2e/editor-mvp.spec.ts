@@ -7,11 +7,38 @@ test.beforeEach(async () => {
   await rm("apps/server/.layo", { recursive: true, force: true });
 });
 
+async function openFilePanel(page: Page) {
+  await page.getByRole("button", { name: "파일" }).click();
+}
+
 async function openEmptyEditor(page: Page) {
   await page.goto("http://127.0.0.1:5173/");
+  await openFilePanel(page);
   await expect(page.getByTestId("project-switcher")).toHaveValue("");
   await expect(page.getByTestId("project-status")).toContainText("저장된 프로젝트 없음");
 }
+
+test("opens with a Figma-like assets panel and keeps project controls behind the file rail", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByTestId("asset-panel")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "에셋" })).toBeVisible();
+  await expect(page.getByTestId("asset-search")).toHaveAttribute("placeholder", "모든 라이브러리 검색");
+  await expect(page.getByText("아직 라이브러리가 없습니다.")).toBeVisible();
+  await expect(page.getByText("iOS 18 and iPadOS 18")).toBeVisible();
+  await expect(page.getByTestId("layer-panel")).toBeHidden();
+  await expect(page.getByTestId("project-panel")).toBeHidden();
+  await expect(page.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "파일" }).click();
+  await expect(page.getByTestId("project-panel")).toBeVisible();
+  await expect(page.getByTestId("layer-panel")).toBeVisible();
+  await expect(page.getByTestId("asset-panel")).toBeHidden();
+
+  await page.getByRole("button", { name: "에셋" }).click();
+  await expect(page.getByTestId("asset-panel")).toBeVisible();
+  await expect(page.getByTestId("project-panel")).toBeHidden();
+});
 
 async function createProjectFromEmptyState(page: Page) {
   await openEmptyEditor(page);
@@ -200,6 +227,7 @@ test("creates, reopens, and team-links a saved project", async ({ page }) => {
   );
 
   await page.reload();
+  await openFilePanel(page);
   await expect(page.getByTestId("project-switcher")).toHaveValue(createdProjectId);
 
   await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
@@ -228,6 +256,7 @@ test("filters projects and keeps recently opened projects first", async ({ page 
   await page.getByTestId("project-switcher").selectOption(alphaProjectId);
   await expect(page.getByTestId("project-status")).toContainText("검색 알파 불러옴");
   await page.reload();
+  await openFilePanel(page);
   await expect(page.getByTestId("project-switcher")).toHaveValue(alphaProjectId);
   await expect(page.getByTestId("project-switcher").locator("option").first()).toHaveText("검색 알파");
 });
@@ -238,7 +267,7 @@ test("duplicates and deletes a saved project from the project panel", async ({ p
   await rm("apps/server/.layo/projects", { recursive: true, force: true });
   await rm("apps/server/.layo/files", { recursive: true, force: true });
 
-  await page.goto("http://127.0.0.1:5173/");
+  await openEmptyEditor(page);
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
   const sourceProjectId = await page.getByTestId("project-switcher").inputValue();
@@ -419,6 +448,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
   expect(agentResult.result.audit.changedNodeIds).toEqual([agentId]);
 
   await page.reload();
+  await openFilePanel(page);
   await expect(page.getByRole("button", { name: agentName })).toBeVisible();
   await page.getByRole("button", { name: agentName }).click();
   await expect(page.getByTestId("inspector-text")).toHaveValue(agentValue);
@@ -471,14 +501,14 @@ test("web editor fills the available work area with a neutral infinite canvas", 
 test("left sidebar can collapse from the top toolbar", async ({ page }) => {
   await createProjectFromEmptyState(page);
 
-  await expect(page.getByRole("heading", { name: "Layo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "파일" })).toBeVisible();
   await page.getByRole("button", { name: "왼쪽 사이드바 접기" }).click();
-  await expect(page.getByRole("heading", { name: "Layo" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "파일" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "헤드라인" })).toHaveCount(0);
   await expect(page.getByTestId("stage-frame")).toBeVisible();
 
   await page.getByRole("button", { name: "왼쪽 사이드바 펼치기" }).click();
-  await expect(page.getByRole("heading", { name: "Layo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "파일" })).toBeVisible();
   await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
 });
 
@@ -679,6 +709,7 @@ test("right-click image menu replaces the image asset while keeping geometry", a
   await expect(page.getByTestId("inspector-height")).toHaveValue("320");
 
   await page.reload();
+  await openFilePanel(page);
   await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
   await page.getByRole("button", { name: "이미지 3" }).click();
   await expect(page.getByTestId("inspector-width")).toHaveValue("480");
@@ -737,6 +768,7 @@ test("right-click image menu switches between fill and fit sizing modes", async 
   expect(fittedImage.content.fit_mode).toBe("fit");
 
   await page.reload();
+  await openFilePanel(page);
   await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
   await page.getByRole("button", { name: "이미지 3" }).click();
 

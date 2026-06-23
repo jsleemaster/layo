@@ -98,3 +98,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Added undoable image fit metadata with `이미지 채우기` and `이미지 맞춤` right-click actions for image nodes, preserving geometry while switching between cover-crop and contain rendering.
 - Persisted the mode through local file storage, Rust model round-trip, and code-export structure so agent handoff can inspect the selected sizing behavior.
 - Browser coverage verifies the right-click flow, server persistence, reload persistence, and returning from fit back to fill; pure rendering tests cover the cover/contain draw math.
+
+2026-06-23 Figma-like left asset panel slice:
+
+- Compared the referenced Figma screenshot against the live Layo shell and found the biggest first-viewport mismatch was the left panel: Figma opens a mode-specific `에셋` library/search panel, while Layo opened a project/team management surface.
+- Changed the default left rail mode to `에셋`, kept project management behind the `파일` rail button, and made the active panel heading follow the selected rail mode.
+- Rebuilt the asset panel around a Figma-like library search field, empty library state, team-library CTA, and compact UI kit list so the first screen reads as a design editor instead of an admin form.
+- Added Playwright coverage for default asset panel visibility, hidden project controls, file-rail switching, and returning to the asset panel.

@@ -133,6 +133,33 @@ const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
 const AREA_SELECTION_DRAG_THRESHOLD = 4;
 const RULER_MARKS = [0, 160, 320, 480, 640, 800, 960, 1120, 1280];
+const ASSET_LIBRARY_KITS = [
+  {
+    name: "iOS 18 and iPadOS 18",
+    count: "156개의 컴포넌트",
+    swatches: ["mcp", "focus", "selection"]
+  },
+  {
+    name: "iOS and iPadOS 26",
+    count: "175개의 컴포넌트",
+    swatches: ["mcp", "selection", "ink"]
+  },
+  {
+    name: "Simple Design System",
+    count: "184개의 컴포넌트",
+    swatches: ["ink", "focus", "surface"]
+  },
+  {
+    name: "macOS 26",
+    count: "71개의 컴포넌트",
+    swatches: ["panel", "focus", "surface"]
+  },
+  {
+    name: "Material 3 Design Kit",
+    count: "357개의 컴포넌트",
+    swatches: ["warning", "selection", "surface"]
+  }
+];
 type TeamPanelMode = "local" | "relay" | "manifest";
 type LeftPanelMode = "files" | "assets" | "layers" | "team";
 
@@ -1782,7 +1809,7 @@ export function App() {
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
   const [encryptionPassphrase, setEncryptionPassphrase] = useState("");
   const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
-  const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("files");
+  const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("assets");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [collabStatus, setCollabStatus] = useState("offline");
@@ -2141,6 +2168,14 @@ export function App() {
   const showAssetPanel = leftPanelMode === "assets";
   const showLayerPanel = leftPanelMode === "files" || leftPanelMode === "layers";
   const showTeamPanel = leftPanelMode === "files" || leftPanelMode === "team";
+  const leftPanelTitle =
+    leftPanelMode === "files"
+      ? "파일"
+      : leftPanelMode === "assets"
+        ? "에셋"
+        : leftPanelMode === "layers"
+          ? "레이어"
+          : "팀";
 
   useEffect(() => {
     if (!inlineTextEditingNodeId) {
@@ -3818,9 +3853,9 @@ export function App() {
         </button>
         {isSidebarCollapsed ? null : (
           <>
-            <h1>Layo</h1>
+            <h1>{leftPanelTitle}</h1>
             {showProjectPanel ? (
-              <section className="project-panel" aria-label="프로젝트">
+              <section className="project-panel" data-testid="project-panel" aria-label="프로젝트">
                 <label>
                   프로젝트
                   <select
@@ -3882,27 +3917,36 @@ export function App() {
             ) : null}
             {showAssetPanel ? (
               <section className="asset-panel" data-testid="asset-panel" aria-label="에셋">
-                <div className="panel-header">
-                  <span className="panel-eyebrow">에셋</span>
-                  <h2>팀 라이브러리</h2>
-                </div>
                 <label>
-                  검색
-                  <input data-testid="asset-search" placeholder="컴포넌트, 이미지, 스타일" />
+                  <span className="visually-hidden">라이브러리 검색</span>
+                  <input data-testid="asset-search" placeholder="모든 라이브러리 검색" />
                 </label>
+                <div className="asset-empty-card">
+                  <span className="asset-empty-icon" aria-hidden="true">
+                    ◧
+                  </span>
+                  <strong>아직 라이브러리가 없습니다.</strong>
+                  <span>팀에서 생성한 에셋을 찾아 이 파일에 추가해 사용할 수 있습니다.</span>
+                  <button type="button">팀 라이브러리 탐색하기</button>
+                </div>
+                <p className="asset-kit-intro">또는 사전 제작된 UI 키트로 시작하세요</p>
                 <div className="asset-library-list">
-                  <div className="asset-library-item">
-                    <strong>로컬 컴포넌트</strong>
-                    <span>{components.length}개 컴포넌트</span>
-                  </div>
-                  <div className="asset-library-item">
-                    <strong>이미지 에셋</strong>
-                    <span>드롭 또는 붙여넣기로 추가</span>
-                  </div>
-                  <div className="asset-library-item">
-                    <strong>팀 라이브러리</strong>
-                    <span>{collabSession ? collabSession.team.name : "팀 연결 대기"}</span>
-                  </div>
+                  {ASSET_LIBRARY_KITS.map((kit) => (
+                    <div className="asset-library-item" key={kit.name}>
+                      <span className="asset-library-thumbnail" aria-hidden="true">
+                        {kit.swatches.map((swatch) => (
+                          <span
+                            key={`${kit.name}-${swatch}`}
+                            className={`asset-library-swatch asset-library-swatch-${swatch}`}
+                          />
+                        ))}
+                      </span>
+                      <span className="asset-library-copy">
+                        <strong>{kit.name}</strong>
+                        <span>{kit.count}</span>
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </section>
             ) : null}
