@@ -47,6 +47,13 @@ The app supports these core workflows:
 - Treat the Rust relay as experimental and encrypted-room-only unless plain Yjs support is explicitly added.
 - Do not store relay passphrases or derived encryption keys in exported team manifests.
 - Treat `docs/superpowers/PLAN_STATUS.md` as the source of truth for historical plan completion. Individual plan files may contain stale unchecked boxes from earlier execution.
+- Use the Failure Learning Loop in `docs/process/failure-learning-loop.md` whenever
+  the user points out a missed detail, visual regression, incorrect assumption,
+  weak verification, or repeated failure. This is mandatory, not optional.
+- A failure-learning follow-up must leave durable evidence: root cause, focused e2e
+  or unit regression coverage where applicable, a direct Playwright CLI check for
+  UI issues, a memory note when the miss reflects an agent process gap, and a PR
+  body that names the failure mode and verification performed.
 
 ## Common Commands
 
