@@ -133,3 +133,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Added undoable `set_node_style` editor-state support so context-menu style paste applies fill, stroke, stroke width, and opacity through the same command/history path as other object edits.
 - Added right-click menu actions for `스타일 복사`, `스타일 붙여넣기`, and `PNG로 내보내기`; PNG export crops the current Konva stage to the selected object bounds and hides selection chrome during export.
 - Verification started with a RED Playwright expectation for the missing `스타일 복사` menu item; the focused e2e now passes for style paste and PNG download.
+
+2026-06-23 context-menu scanability slice:
+
+- The context menu had gained many actions but still rendered as one long undifferentiated list, unlike Figma-style menus that rely on thin section breaks and right-aligned shortcut hints for scanning.
+- Reworked the menu into accessible grouped sections for clipboard, selection/export, edit, status, layer ordering, components, and alignment/distribution, with image-specific actions still shown only for image nodes.
+- Added right-aligned shortcut hints for the core Figma-like object actions, while keeping each menu item's accessible name on the action label so existing command tests remain stable.
+- Verification started with a RED Playwright expectation for missing grouped sections and shortcut hints; the focused e2e now passes for section count, section labeling, and shortcut rendering.

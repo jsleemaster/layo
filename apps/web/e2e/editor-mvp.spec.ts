@@ -656,6 +656,38 @@ test("right-click objects and images expose common context menu commands", async
   await expect(page.getByRole("button", { name: /이미지 4 복사본/ })).toBeVisible();
 });
 
+test("right-click menu presents Figma-like shortcut hints and grouped sections", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  await page.mouse.click(stageBox.x + 170, stageBox.y + 135, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+
+  await expect(menu.getByTestId("object-context-menu-section")).toHaveCount(7);
+  await expect(menu.getByTestId("object-context-menu-section").first()).toHaveAttribute(
+    "aria-label",
+    "클립보드"
+  );
+  await expect(menu.getByRole("menuitem", { name: "복사", exact: true })).toContainText("⌘C");
+  await expect(menu.getByRole("menuitem", { name: "붙여넣기", exact: true })).toContainText("⌘V");
+  await expect(menu.getByRole("menuitem", { name: "복제" })).toContainText("⌘D");
+  await expect(menu.getByRole("menuitem", { name: "삭제" })).toContainText("Delete");
+  await expect(menu.getByRole("menuitem", { name: "그룹으로 묶기" })).toContainText("⌘G");
+  await expect(menu.getByRole("menuitem", { name: "그룹 해제" })).toContainText("⇧⌘G");
+  await expect(menu.getByRole("menuitem", { name: "왼쪽 맞춤" })).toContainText("⌥A");
+  await expect(menu.getByRole("menuitem", { name: "가운데 맞춤", exact: true })).toContainText("⌥H");
+  await expect(menu.getByRole("menuitem", { name: "오른쪽 맞춤" })).toContainText("⌥D");
+  await expect(menu.getByRole("menuitem", { name: "위쪽 맞춤" })).toContainText("⌥W");
+  await expect(menu.getByRole("menuitem", { name: "세로 가운데 맞춤" })).toContainText("⌥V");
+  await expect(menu.getByRole("menuitem", { name: "아래쪽 맞춤" })).toContainText("⌥S");
+  await expect(menu.getByTestId("context-menu-shortcut")).toHaveCount(19);
+});
+
 test("right-click image menu restores the uploaded original size", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const stageFrame = page.getByTestId("stage-frame");

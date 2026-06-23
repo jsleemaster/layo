@@ -5,6 +5,7 @@ import {
   useState,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type WheelEvent as ReactWheelEvent
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
@@ -159,6 +160,48 @@ function downloadDataUrl(dataUrl: string, filename: string) {
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function ContextMenuSection({
+  label,
+  children
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="object-context-menu-section"
+      data-testid="object-context-menu-section"
+      role="group"
+      aria-label={label}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ContextMenuItem({
+  label,
+  shortcut,
+  disabled,
+  onClick
+}: {
+  label: string;
+  shortcut?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" role="menuitem" aria-label={label} disabled={disabled} onClick={onClick}>
+      <span className="object-context-menu-label">{label}</span>
+      {shortcut ? (
+        <span className="object-context-menu-shortcut" data-testid="context-menu-shortcut" aria-hidden="true">
+          {shortcut}
+        </span>
+      ) : null}
+    </button>
+  );
 }
 
 const teamStore = createIndexedDbTeamStore();
@@ -4857,332 +4900,241 @@ export function App() {
           onMouseDown={(event) => event.stopPropagation()}
           style={{ left: objectContextMenu.left, top: objectContextMenu.top }}
         >
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={cutContextSelection}
-          >
-            잘라내기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={copyContextSelection}
-          >
-            복사
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={copyContextStyle}
-          >
-            스타일 복사
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canPasteContextStyle}
-            onClick={pasteContextStyle}
-          >
-            스타일 붙여넣기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!objectClipboardRef.current}
-            onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
-          >
-            붙여넣기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!objectClipboardRef.current || !objectContextMenu.documentPoint}
-            onClick={pasteContextSelectionAtMenuPoint}
-          >
-            여기에 붙여넣기
-          </button>
-          <button type="button" role="menuitem" disabled={!editor} onClick={selectAllContextNodes}>
-            전체 선택
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={selectSameKindContextNodes}
-          >
-            같은 종류 선택
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={fitContextSelectionToViewport}
-          >
-            선택 영역 확대
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!currentProject}
-            onClick={() => void downloadContextCodeExport()}
-          >
-            코드로 내보내기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={downloadContextSelectionPng}
-          >
-            PNG로 내보내기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => runContextMenuStateAction(duplicateSelectedNode)}
-          >
-            복제
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => runContextMenuStateAction(deleteSelectedNode)}
-          >
-            삭제
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={renameContextSelection}
-          >
-            이름 변경
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canGroupContextSelection}
-            onClick={groupContextSelection}
-          >
-            그룹으로 묶기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canFrameContextSelection}
-            onClick={frameContextSelection}
-          >
-            선택 영역 프레임 만들기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canUngroupContextSelection}
-            onClick={ungroupContextSelection}
-          >
-            그룹 해제
-          </button>
+          <ContextMenuSection label="클립보드">
+            <ContextMenuItem
+              label="잘라내기"
+              shortcut="⌘X"
+              disabled={!canMutateContextMenuNode}
+              onClick={cutContextSelection}
+            />
+            <ContextMenuItem
+              label="복사"
+              shortcut="⌘C"
+              disabled={!contextMenuNode}
+              onClick={copyContextSelection}
+            />
+            <ContextMenuItem
+              label="스타일 복사"
+              shortcut="⌥⌘C"
+              disabled={!contextMenuNode}
+              onClick={copyContextStyle}
+            />
+            <ContextMenuItem
+              label="스타일 붙여넣기"
+              shortcut="⌥⌘V"
+              disabled={!canPasteContextStyle}
+              onClick={pasteContextStyle}
+            />
+            <ContextMenuItem
+              label="붙여넣기"
+              shortcut="⌘V"
+              disabled={!objectClipboardRef.current}
+              onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
+            />
+            <ContextMenuItem
+              label="여기에 붙여넣기"
+              disabled={!objectClipboardRef.current || !objectContextMenu.documentPoint}
+              onClick={pasteContextSelectionAtMenuPoint}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="선택 및 내보내기">
+            <ContextMenuItem label="전체 선택" shortcut="⌘A" disabled={!editor} onClick={selectAllContextNodes} />
+            <ContextMenuItem
+              label="같은 종류 선택"
+              shortcut="⇧⌘A"
+              disabled={!contextMenuNode}
+              onClick={selectSameKindContextNodes}
+            />
+            <ContextMenuItem
+              label="선택 영역 확대"
+              shortcut="⇧1"
+              disabled={!contextMenuNode}
+              onClick={fitContextSelectionToViewport}
+            />
+            <ContextMenuItem
+              label="코드로 내보내기"
+              disabled={!currentProject}
+              onClick={() => void downloadContextCodeExport()}
+            />
+            <ContextMenuItem
+              label="PNG로 내보내기"
+              disabled={!contextMenuNode}
+              onClick={downloadContextSelectionPng}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="편집">
+            <ContextMenuItem
+              label="복제"
+              shortcut="⌘D"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => runContextMenuStateAction(duplicateSelectedNode)}
+            />
+            <ContextMenuItem
+              label="삭제"
+              shortcut="Delete"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => runContextMenuStateAction(deleteSelectedNode)}
+            />
+            <ContextMenuItem
+              label="이름 변경"
+              shortcut="⌘R"
+              disabled={!canMutateContextMenuNode}
+              onClick={renameContextSelection}
+            />
+            <ContextMenuItem
+              label="그룹으로 묶기"
+              shortcut="⌘G"
+              disabled={!canGroupContextSelection}
+              onClick={groupContextSelection}
+            />
+            <ContextMenuItem
+              label="선택 영역 프레임 만들기"
+              disabled={!canFrameContextSelection}
+              onClick={frameContextSelection}
+            />
+            <ContextMenuItem
+              label="그룹 해제"
+              shortcut="⇧⌘G"
+              disabled={!canUngroupContextSelection}
+              onClick={ungroupContextSelection}
+            />
+          </ContextMenuSection>
           {contextMenuNode?.kind === "image" ? (
-            <>
-              <button
-                type="button"
-                role="menuitem"
+            <ContextMenuSection label="이미지">
+              <ContextMenuItem
+                label="이미지 바꾸기"
                 disabled={!canReplaceContextImage}
                 onClick={startContextImageReplacement}
-              >
-                이미지 바꾸기
-              </button>
-              <button
-                type="button"
-                role="menuitem"
+              />
+              <ContextMenuItem
+                label="원본 크기로 맞춤"
                 disabled={!canResizeContextImageToNaturalSize}
                 onClick={resizeContextImageToNaturalSize}
-              >
-                원본 크기로 맞춤
-              </button>
-              <button
-                type="button"
-                role="menuitem"
+              />
+              <ContextMenuItem
+                label="이미지 채우기"
                 disabled={!canReplaceContextImage || contextImageFitMode === "fill"}
                 onClick={() => void setContextImageFitMode("fill")}
-              >
-                이미지 채우기
-              </button>
-              <button
-                type="button"
-                role="menuitem"
+              />
+              <ContextMenuItem
+                label="이미지 맞춤"
                 disabled={!canReplaceContextImage || contextImageFitMode === "fit"}
                 onClick={() => void setContextImageFitMode("fit")}
-              >
-                이미지 맞춤
-              </button>
-            </>
+              />
+            </ContextMenuSection>
           ) : null}
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={toggleContextNodeLocked}
-          >
-            {contextMenuNodeIsLocked ? "잠금 해제" : "잠그기"}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!contextMenuNode}
-            onClick={toggleContextNodeVisible}
-          >
-            {contextMenuNodeIsHidden ? "표시" : "숨기기"}
-          </button>
-          <div className="object-context-menu-separator" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => reorderContextSelection("front")}
-          >
-            맨 앞으로 가져오기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => reorderContextSelection("forward")}
-          >
-            앞으로 가져오기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => reorderContextSelection("backward")}
-          >
-            뒤로 보내기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => reorderContextSelection("back")}
-          >
-            맨 뒤로 보내기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => flipContextSelection("horizontal")}
-          >
-            가로 뒤집기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => flipContextSelection("vertical")}
-          >
-            세로 뒤집기
-          </button>
-          <div className="object-context-menu-separator" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode || contextMenuNode?.kind === "component_instance"}
-            onClick={createContextComponent}
-          >
-            컴포넌트 만들기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={
-              !canMutateContextMenuNode ||
-              !components.some((component) => component.source_node.id === contextMenuNode?.id)
-            }
-            onClick={createContextInstance}
-          >
-            인스턴스 만들기
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode || !contextMenuNode?.component_instance}
-            onClick={detachContextInstance}
-          >
-            인스턴스 분리
-          </button>
-          <div className="object-context-menu-separator" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("left")}
-          >
-            왼쪽 맞춤
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("center")}
-          >
-            가운데 맞춤
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("right")}
-          >
-            오른쪽 맞춤
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("top")}
-          >
-            위쪽 맞춤
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("middle")}
-          >
-            세로 가운데 맞춤
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!canMutateContextMenuNode}
-            onClick={() => alignContextSelection("bottom")}
-          >
-            아래쪽 맞춤
-          </button>
-          <div className="object-context-menu-separator" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
-            onClick={() => distributeContextSelection("horizontal")}
-          >
-            가로 간격 균등
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
-            onClick={() => distributeContextSelection("vertical")}
-          >
-            세로 간격 균등
-          </button>
+          <ContextMenuSection label="상태">
+            <ContextMenuItem
+              label={contextMenuNodeIsLocked ? "잠금 해제" : "잠그기"}
+              disabled={!contextMenuNode}
+              onClick={toggleContextNodeLocked}
+            />
+            <ContextMenuItem
+              label={contextMenuNodeIsHidden ? "표시" : "숨기기"}
+              disabled={!contextMenuNode}
+              onClick={toggleContextNodeVisible}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="레이어 순서">
+            <ContextMenuItem
+              label="맨 앞으로 가져오기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("front")}
+            />
+            <ContextMenuItem
+              label="앞으로 가져오기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("forward")}
+            />
+            <ContextMenuItem
+              label="뒤로 보내기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("backward")}
+            />
+            <ContextMenuItem
+              label="맨 뒤로 보내기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("back")}
+            />
+            <ContextMenuItem
+              label="가로 뒤집기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => flipContextSelection("horizontal")}
+            />
+            <ContextMenuItem
+              label="세로 뒤집기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => flipContextSelection("vertical")}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="컴포넌트">
+            <ContextMenuItem
+              label="컴포넌트 만들기"
+              disabled={!canMutateContextMenuNode || contextMenuNode?.kind === "component_instance"}
+              onClick={createContextComponent}
+            />
+            <ContextMenuItem
+              label="인스턴스 만들기"
+              disabled={
+                !canMutateContextMenuNode ||
+                !components.some((component) => component.source_node.id === contextMenuNode?.id)
+              }
+              onClick={createContextInstance}
+            />
+            <ContextMenuItem
+              label="인스턴스 분리"
+              disabled={!canMutateContextMenuNode || !contextMenuNode?.component_instance}
+              onClick={detachContextInstance}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="정렬 및 배치">
+            <ContextMenuItem
+              label="왼쪽 맞춤"
+              shortcut="⌥A"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("left")}
+            />
+            <ContextMenuItem
+              label="가운데 맞춤"
+              shortcut="⌥H"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("center")}
+            />
+            <ContextMenuItem
+              label="오른쪽 맞춤"
+              shortcut="⌥D"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("right")}
+            />
+            <ContextMenuItem
+              label="위쪽 맞춤"
+              shortcut="⌥W"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("top")}
+            />
+            <ContextMenuItem
+              label="세로 가운데 맞춤"
+              shortcut="⌥V"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("middle")}
+            />
+            <ContextMenuItem
+              label="아래쪽 맞춤"
+              shortcut="⌥S"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("bottom")}
+            />
+            <ContextMenuItem
+              label="가로 간격 균등"
+              disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
+              onClick={() => distributeContextSelection("horizontal")}
+            />
+            <ContextMenuItem
+              label="세로 간격 균등"
+              disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
+              onClick={() => distributeContextSelection("vertical")}
+            />
+          </ContextMenuSection>
         </div>
       ) : null}
       <input
