@@ -14,6 +14,7 @@ import {
   createImageNode,
   createRectangleNode,
   createTextNode,
+  groupSelectedNodes,
   getNodeBounds,
   getNodeAbsolutePosition,
   getTopmostNodeIdAtPoint,
@@ -24,6 +25,7 @@ import {
   pasteCopiedNode,
   pasteCopiedNodeAt,
   redo,
+  renameSelectedNode,
   reorderSelectedNode,
   selectNodesInBounds,
   setSelectedNodeLocked,
@@ -31,6 +33,7 @@ import {
   setMultiSelection,
   setSelection,
   toggleSelection,
+  ungroupSelectedNode,
   setViewport,
   undo,
   zoomViewportAtPoint,
@@ -564,6 +567,97 @@ describe("editor state commands", () => {
     const backward = reorderSelectedNode(front, "backward");
     expect(backward.document.pages[0]?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
     expect(backward.selection.nodeId).toBe("frame-1");
+  });
+
+  test("renames the selected layer with undo support", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const renamed = renameSelectedNode(initial, "검사기 제목");
+    expect(findNodeById(renamed.document, "text-1")?.name).toBe("검사기 제목");
+    expect(renamed.selection.nodeId).toBe("text-1");
+
+    const undone = undo(renamed);
+    expect(findNodeById(undone.document, "text-1")?.name).toBe("헤드라인");
+  });
+
+  test("groups selected sibling layers into one transparent layer and supports undo", () => {
+    const initial = setMultiSelection(
+      createEditorState(sampleDocumentWithTopLevelRectangle()),
+      ["frame-1", "rectangle-1"],
+      "rectangle-1"
+    );
+
+    const grouped = groupSelectedNodes(initial, "group-1", "그룹 1");
+    const group = findNodeById(grouped.document, "group-1");
+
+    expect(group).toMatchObject({
+      id: "group-1",
+      kind: "group",
+      name: "그룹 1",
+      transform: { x: 120, y: 80, rotation: 0 },
+      size: { width: 420, height: 280 },
+      style: { fill: "transparent", stroke: null, stroke_width: 0, opacity: 1 }
+    });
+    expect(group?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
+    expect(group?.children[0]?.transform).toMatchObject({ x: 0, y: 0 });
+    expect(group?.children[1]?.transform).toMatchObject({ x: 60, y: 60 });
+    expect(grouped.document.pages[0]?.children.map((node) => node.id)).toEqual(["group-1"]);
+    expect(grouped.selection).toEqual({ nodeId: "group-1", nodeIds: ["group-1"] });
+
+    const undone = undo(grouped);
+    expect(findNodeById(undone.document, "group-1")).toBeNull();
+    expect(undone.document.pages[0]?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
+    expect(findNodeById(undone.document, "rectangle-1")?.transform).toMatchObject({ x: 180, y: 140 });
+  });
+
+  test("groups selected sibling layers inside a frame without losing the parent relationship", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1");
+    frame?.children.push({
+      id: "rectangle-1",
+      kind: "rectangle",
+      name: "사각형",
+      transform: { x: 160, y: 140, rotation: 0 },
+      size: { width: 120, height: 80 },
+      style: { fill: "#e0f2fe", stroke: "#0284c7", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    const initial = setMultiSelection(createEditorState(document), ["text-1", "rectangle-1"], "rectangle-1");
+
+    const grouped = groupSelectedNodes(initial, "group-1", "그룹 1");
+    const parentFrame = findNodeById(grouped.document, "frame-1");
+    const group = findNodeById(grouped.document, "group-1");
+
+    expect(parentFrame?.children.map((node) => node.id)).toEqual(["group-1"]);
+    expect(group?.children.map((node) => node.id)).toEqual(["text-1", "rectangle-1"]);
+    expect(group?.transform).toMatchObject({ x: 32, y: 40 });
+    expect(findNodeById(grouped.document, "rectangle-1")?.transform).toMatchObject({ x: 128, y: 100 });
+  });
+
+  test("ungroups a selected group back into sibling layers and supports undo", () => {
+    const initial = setMultiSelection(
+      createEditorState(sampleDocumentWithTopLevelRectangle()),
+      ["frame-1", "rectangle-1"],
+      "rectangle-1"
+    );
+    const grouped = groupSelectedNodes(initial, "group-1", "그룹 1");
+
+    const ungrouped = ungroupSelectedNode(grouped);
+    expect(findNodeById(ungrouped.document, "group-1")).toBeNull();
+    expect(ungrouped.document.pages[0]?.children.map((node) => node.id)).toEqual(["frame-1", "rectangle-1"]);
+    expect(findNodeById(ungrouped.document, "frame-1")?.transform).toMatchObject({ x: 120, y: 80 });
+    expect(findNodeById(ungrouped.document, "rectangle-1")?.transform).toMatchObject({ x: 180, y: 140 });
+    expect(ungrouped.selection).toEqual({
+      nodeId: "rectangle-1",
+      nodeIds: ["frame-1", "rectangle-1"]
+    });
+
+    const undone = undo(ungrouped);
+    expect(findNodeById(undone.document, "group-1")?.children.map((node) => node.id)).toEqual([
+      "frame-1",
+      "rectangle-1"
+    ]);
   });
 
   test("locks selected nodes and prevents direct mutation commands until unlocked", () => {

@@ -615,6 +615,55 @@ test("right-click menu locks and hides objects while layer state remains recover
   await expect(page.getByRole("button", { name: /^사각형 3$/ })).toBeVisible();
 });
 
+test("right-click menu groups, renames, and ungroups selected objects", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+  const blankMenuPoint = {
+    x: stageBox.x + Math.max(24, stageBox.width - 36),
+    y: stageBox.y + Math.max(24, stageBox.height - 36)
+  };
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+
+  const firstRectangle = page.getByRole("button", { name: "사각형 3" });
+  const secondRectangle = page.getByRole("button", { name: "사각형 4" });
+  await firstRectangle.click();
+  await page.keyboard.down("Shift");
+  await secondRectangle.click();
+  await page.keyboard.up("Shift");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "그룹으로 묶기" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "그룹으로 묶기" }).click();
+
+  await expect(page.getByRole("button", { name: /그룹 5/ })).toBeVisible();
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await expect(menu).toBeVisible();
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("레이어 이름");
+    await dialog.accept("헤더 그룹");
+  });
+  await menu.getByRole("menuitem", { name: "이름 변경" }).click();
+  await expect(page.getByRole("button", { name: /^헤더 그룹/ })).toBeVisible();
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "그룹 해제" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "그룹 해제" }).click();
+
+  await expect(page.getByRole("button", { name: /^헤더 그룹/ })).toHaveCount(0);
+  await expect(firstRectangle).toBeVisible();
+  await expect(secondRectangle).toBeVisible();
+});
+
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const stageBox = await page.locator("canvas").first().boundingBox();

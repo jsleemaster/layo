@@ -51,7 +51,7 @@ export interface NodeConstraints {
 
 export interface DesignNode {
   id: string;
-  kind: "frame" | "rectangle" | "text" | "image" | "component" | "component_instance";
+  kind: "frame" | "group" | "rectangle" | "text" | "image" | "component" | "component_instance";
   name: string;
   component_instance?: ComponentInstance | null;
   layout?: NodeLayout | null;

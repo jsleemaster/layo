@@ -66,3 +66,11 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Hidden nodes are not rendered or canvas-selectable, remain visible in the layer list with `숨김`, and can be restored by selecting the layer and opening the context menu on blank canvas.
 - Hidden children are excluded from spacing overlays and code export recursion so invisible design layers do not create visible export or measurement artifacts.
 - Verification: editor-state unit tests, Yjs concurrent metadata merge test, Rust JSON round-trip test, full `pnpm test`, `pnpm typecheck`, web build, design-rule check, full `editor-mvp` Playwright run, and headed Playwright lock/visibility interaction pass.
+
+2026-06-23 context menu structure slice:
+
+- Added `group` as a first-class transparent node kind across renderer types, server storage, Rust model, and generated TypeScript bindings.
+- Added undoable `이름 변경`, `그룹으로 묶기`, and `그룹 해제` context-menu actions.
+- Grouping currently supports selected sibling layers under one parent; it preserves visual positions by converting child transforms into group-relative coordinates and restores them on ungroup.
+- Group layers render as transparent containers with selection chrome and layer-list status, not as visible filled boxes.
+- Verification: editor-state rename/group/ungroup unit tests, Rust group JSON round-trip test, full `pnpm typecheck`, full `pnpm test`, web build, design-rule check, full `editor-mvp` Playwright run, and headed Playwright group/rename/ungroup interaction pass.

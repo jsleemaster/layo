@@ -63,6 +63,7 @@ import {
   duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
+  groupSelectedNodes,
   getNodeDragGeometriesForNodeIds,
   getNodeAbsolutePosition,
   getNodeBounds,
@@ -76,6 +77,7 @@ import {
   pasteCopiedNode,
   pasteCopiedNodeAt,
   redo,
+  renameSelectedNode,
   reorderSelectedNode,
   selectNodesInBounds,
   setSelection,
@@ -84,6 +86,7 @@ import {
   setSelectedNodeVisible,
   setViewport,
   toggleSelection,
+  ungroupSelectedNode,
   type AlignmentMode,
   type DistributionMode,
   type EditorNodeClipboard,
@@ -261,6 +264,8 @@ function nodeKindLabel(kind: RendererNode["kind"]): string {
   switch (kind) {
     case "frame":
       return "프레임";
+    case "group":
+      return "그룹";
     case "rectangle":
       return "사각형";
     case "text":
@@ -278,6 +283,9 @@ function nodeLayerLabel(node: RendererNode): string {
   const details: string[] = [];
   if (node.kind === "component") {
     details.push("컴포넌트");
+  }
+  if (node.kind === "group") {
+    details.push("그룹");
   }
   if (node.kind === "component_instance") {
     details.push("인스턴스");
@@ -1110,7 +1118,7 @@ function renderNode({
   };
 
   const body =
-    node.kind === "image" && node.content.type === "image" ? (
+    node.kind === "group" ? null : node.kind === "image" && node.content.type === "image" ? (
       <CanvasImageBody
         assetId={node.content.asset_id}
         width={node.size.width}
@@ -1884,6 +1892,10 @@ export function App() {
   const contextMenuNodeIsLocked = isNodeLocked(contextMenuNode);
   const contextMenuNodeIsHidden = contextMenuNode ? !isNodeVisible(contextMenuNode) : false;
   const canMutateContextMenuNode = Boolean(contextMenuNode && !contextMenuNodeIsLocked);
+  const canGroupContextSelection = selectedNodeIds.length >= 2 && canMutateContextMenuNode;
+  const canUngroupContextSelection = Boolean(
+    contextMenuNode && contextMenuNode.kind === "group" && !contextMenuNodeIsLocked
+  );
   const canAlignSelection = selectedNodeIds.length >= 2;
   const canDistributeSelection = selectedNodeIds.length >= 3;
   const canAlignInspectorSelection = selectedNodeIds.length === 1 ? true : canAlignSelection;
@@ -2294,6 +2306,28 @@ export function App() {
 
   const reorderContextSelection = (direction: Parameters<typeof reorderSelectedNode>[1]) => {
     runContextMenuStateAction((state) => reorderSelectedNode(state, direction));
+  };
+
+  const renameContextSelection = () => {
+    const currentName = contextMenuNode?.name ?? "";
+    const nextName = window.prompt("레이어 이름", currentName);
+    if (nextName === null || !nextName.trim()) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    runContextMenuStateAction((state) => renameSelectedNode(state, nextName));
+  };
+
+  const groupContextSelection = () => {
+    runContextMenuStateAction((state) => {
+      const sequence = flattenRendererNodes(state.document).length + 1;
+      return groupSelectedNodes(state, `group-${sequence}`, `그룹 ${sequence}`);
+    });
+  };
+
+  const ungroupContextSelection = () => {
+    runContextMenuStateAction((state) => ungroupSelectedNode(state));
   };
 
   const toggleContextNodeLocked = () => {
@@ -4376,6 +4410,30 @@ export function App() {
             onClick={() => runContextMenuStateAction(deleteSelectedNode)}
           >
             삭제
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canMutateContextMenuNode}
+            onClick={renameContextSelection}
+          >
+            이름 변경
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canGroupContextSelection}
+            onClick={groupContextSelection}
+          >
+            그룹으로 묶기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canUngroupContextSelection}
+            onClick={ungroupContextSelection}
+          >
+            그룹 해제
           </button>
           <button
             type="button"

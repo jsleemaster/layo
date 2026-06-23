@@ -115,6 +115,29 @@ export type EditorCommand =
       toIndex: number;
     }
   | {
+      type: "set_node_name";
+      nodeId: string;
+      name: string;
+    }
+  | {
+      type: "group_nodes";
+      parentId: string;
+      nodeIds: string[];
+      groupId: string;
+      name: string;
+    }
+  | {
+      type: "ungroup_node";
+      parentId: string;
+      groupId: string;
+      previousGroup?: RendererNode;
+    }
+  | {
+      type: "restore_group_node";
+      parentId: string;
+      group: RendererNode;
+    }
+  | {
       type: "set_node_locked";
       nodeId: string;
       locked: boolean;
@@ -363,6 +386,59 @@ export function setSelectedNodeVisible(state: EditorState, visible: boolean): Ed
     nodeId: selectedNodeId,
     visible
   });
+}
+
+export function renameSelectedNode(state: EditorState, name: string): EditorState {
+  const selectedNodeId = state.selection.nodeId;
+  const nextName = name.trim();
+  if (!selectedNodeId || !nextName) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "set_node_name",
+    nodeId: selectedNodeId,
+    name: nextName
+  });
+}
+
+export function groupSelectedNodes(
+  state: EditorState,
+  groupId: string,
+  name: string
+): EditorState {
+  const nodeIds = selectionNodeIds(state.selection);
+  if (nodeIds.length < 2 || findNodeById(state.document, groupId)) {
+    return state;
+  }
+
+  const siblings = findSiblingSelection(state.document, nodeIds);
+  if (!siblings || siblings.nodes.some(isNodeLocked)) {
+    return state;
+  }
+
+  return executeEditorCommand(state, {
+    type: "group_nodes",
+    parentId: siblings.parentId,
+    nodeIds: siblings.nodes.map((node) => node.id),
+    groupId,
+    name: name.trim() || "그룹"
+  });
+}
+
+export function ungroupSelectedNode(state: EditorState): EditorState {
+  const selected = findSelectedNodeWithParent(state);
+  if (!selected || selected.node.kind !== "group" || isNodeLocked(selected.node)) {
+    return state;
+  }
+
+  const childNodeIds = selected.node.children.map((child) => child.id);
+  const nextState = executeEditorCommand(state, {
+    type: "ungroup_node",
+    parentId: selected.parentId,
+    groupId: selected.node.id
+  });
+  return nextState === state ? state : setMultiSelection(nextState, childNodeIds, childNodeIds.at(-1) ?? null);
 }
 
 export function selectNodesInBounds(
@@ -977,6 +1053,152 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         selectedNodeId: command.nodeId
       };
     }
+    case "set_node_name": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node)) {
+        return { document, inverse: null };
+      }
+
+      const nextName = command.name.trim();
+      if (!nextName || node.name === nextName) {
+        return { document, inverse: null };
+      }
+
+      const previousName = node.name;
+      node.name = nextName;
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_node_name",
+          nodeId: command.nodeId,
+          name: previousName
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "group_nodes": {
+      const parent = findParentChildren(next, command.parentId);
+      if (!parent || isParentNodeLocked(next, command.parentId) || findNodeById(next, command.groupId)) {
+        return { document, inverse: null };
+      }
+
+      const selectedNodes = command.nodeIds
+        .map((nodeId) => parent.children.find((node) => node.id === nodeId))
+        .filter((node): node is RendererNode => Boolean(node));
+      if (selectedNodes.length < 2 || selectedNodes.length !== new Set(command.nodeIds).size) {
+        return { document, inverse: null };
+      }
+      if (selectedNodes.some(isNodeLocked)) {
+        return { document, inverse: null };
+      }
+
+      const selectedIds = new Set(selectedNodes.map((node) => node.id));
+      const firstIndex = parent.children.findIndex((node) => selectedIds.has(node.id));
+      const bounds = relativeBoundsForNodes(selectedNodes);
+      const group: RendererNode = {
+        id: command.groupId,
+        kind: "group",
+        name: command.name.trim() || "그룹",
+        transform: { x: bounds.x, y: bounds.y, rotation: 0 },
+        size: { width: bounds.width, height: bounds.height },
+        style: { fill: "transparent", stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: selectedNodes.map((node) => {
+          const child = structuredClone(node);
+          child.transform = {
+            ...child.transform,
+            x: child.transform.x - bounds.x,
+            y: child.transform.y - bounds.y
+          };
+          return child;
+        })
+      };
+
+      parent.children.splice(0, parent.children.length, ...[
+        ...parent.children.slice(0, firstIndex).filter((node) => !selectedIds.has(node.id)),
+        group,
+        ...parent.children.slice(firstIndex).filter((node) => !selectedIds.has(node.id))
+      ]);
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "ungroup_node",
+          parentId: command.parentId,
+          groupId: group.id,
+          previousGroup: structuredClone(group)
+        },
+        selectedNodeId: group.id
+      };
+    }
+    case "ungroup_node": {
+      const parent = findParentChildren(next, command.parentId);
+      if (!parent) {
+        return { document, inverse: null };
+      }
+
+      const groupIndex = parent.children.findIndex((node) => node.id === command.groupId);
+      const group = parent.children[groupIndex];
+      if (groupIndex === -1 || !group || group.kind !== "group" || isNodeLocked(group)) {
+        return { document, inverse: null };
+      }
+
+      const previousGroup = command.previousGroup ?? structuredClone(group);
+      const children = group.children.map((child) => {
+        const nextChild = structuredClone(child);
+        nextChild.transform = {
+          ...nextChild.transform,
+          x: nextChild.transform.x + group.transform.x,
+          y: nextChild.transform.y + group.transform.y
+        };
+        return nextChild;
+      });
+      parent.children.splice(groupIndex, 1, ...children);
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "restore_group_node",
+          parentId: command.parentId,
+          group: previousGroup
+        },
+        selectedNodeId: children.at(-1)?.id ?? null
+      };
+    }
+    case "restore_group_node": {
+      const parent = findParentChildren(next, command.parentId);
+      if (!parent || isParentNodeLocked(next, command.parentId)) {
+        return { document, inverse: null };
+      }
+
+      const childIds = command.group.children.map((child) => child.id);
+      const childIdSet = new Set(childIds);
+      const firstIndex = parent.children.findIndex((node) => childIdSet.has(node.id));
+      if (firstIndex === -1 || childIds.some((childId) => !parent.children.some((node) => node.id === childId))) {
+        return { document, inverse: null };
+      }
+
+      parent.children.splice(0, parent.children.length, ...[
+        ...parent.children.slice(0, firstIndex).filter((node) => !childIdSet.has(node.id)),
+        structuredClone(command.group),
+        ...parent.children.slice(firstIndex).filter((node) => !childIdSet.has(node.id))
+      ]);
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "ungroup_node",
+          parentId: command.parentId,
+          groupId: command.group.id,
+          previousGroup: structuredClone(command.group)
+        },
+        selectedNodeId: command.group.id
+      };
+    }
     case "set_node_locked": {
       const node = findNodeById(next, command.nodeId);
       if (!node) {
@@ -1483,6 +1705,15 @@ function geometryBounds(geometries: NodeGeometry[]): SelectionBounds {
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+function relativeBoundsForNodes(nodes: RendererNode[]): SelectionBounds {
+  const left = Math.min(...nodes.map((node) => node.transform.x));
+  const top = Math.min(...nodes.map((node) => node.transform.y));
+  const right = Math.max(...nodes.map((node) => node.transform.x + node.size.width));
+  const bottom = Math.max(...nodes.map((node) => node.transform.y + node.size.height));
+
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 function toNodeDragGeometry(geometry: NodeGeometry): NodeDragGeometry {
   return {
     nodeId: geometry.node.id,
@@ -1825,6 +2056,57 @@ function findSelectedNodeWithParent(
   }
 
   return null;
+}
+
+function findSiblingSelection(
+  document: RendererDocument,
+  nodeIds: string[]
+): { parentId: string; nodes: RendererNode[] } | null {
+  const uniqueNodeIds = Array.from(new Set(nodeIds));
+  if (uniqueNodeIds.length < 2) {
+    return null;
+  }
+
+  for (const page of document.pages) {
+    const nodes = siblingsFromChildren(page.children, uniqueNodeIds);
+    if (nodes) {
+      return { parentId: page.id, nodes };
+    }
+
+    for (const node of page.children) {
+      const found = siblingSelectionInTree(node, uniqueNodeIds);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function siblingSelectionInTree(
+  parent: RendererNode,
+  nodeIds: string[]
+): { parentId: string; nodes: RendererNode[] } | null {
+  const nodes = siblingsFromChildren(parent.children, nodeIds);
+  if (nodes) {
+    return { parentId: parent.id, nodes };
+  }
+
+  for (const child of parent.children) {
+    const found = siblingSelectionInTree(child, nodeIds);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function siblingsFromChildren(children: RendererNode[], nodeIds: string[]): RendererNode[] | null {
+  const nodeIdSet = new Set(nodeIds);
+  const nodes = children.filter((node) => nodeIdSet.has(node.id));
+  return nodes.length === nodeIds.length ? nodes : null;
 }
 
 function findNodeParentInTree(

@@ -156,6 +156,7 @@ pub enum VerticalConstraint {
 #[ts(export)]
 pub enum NodeKind {
     Frame,
+    Group,
     Rectangle,
     Text,
     Image,

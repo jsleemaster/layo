@@ -153,3 +153,53 @@ fn node_interaction_metadata_round_trips_through_json() {
     assert!(json.contains("\"locked\":true"));
     assert!(json.contains("\"visible\":false"));
 }
+
+#[test]
+fn group_nodes_round_trip_through_json() {
+    let raw = r##"
+    {
+      "id": "group-file",
+      "name": "Group File",
+      "version": 1,
+      "components": [],
+      "pages": [
+        {
+          "id": "page-1",
+          "name": "페이지 1",
+          "children": [
+            {
+              "id": "group-1",
+              "kind": "group",
+              "name": "그룹 1",
+              "transform": { "x": 120, "y": 80, "rotation": 0 },
+              "size": { "width": 420, "height": 280 },
+              "style": { "fill": "transparent", "stroke": null, "stroke_width": 0, "opacity": 1 },
+              "content": { "type": "empty" },
+              "children": [
+                {
+                  "id": "rectangle-1",
+                  "kind": "rectangle",
+                  "name": "사각형",
+                  "transform": { "x": 0, "y": 0, "rotation": 0 },
+                  "size": { "width": 160, "height": 96 },
+                  "style": { "fill": "#e0f2fe", "stroke": null, "stroke_width": 0, "opacity": 1 },
+                  "content": { "type": "empty" },
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let group = &parsed.pages[0].children[0];
+
+    assert_eq!(group.kind, editor_core::NodeKind::Group);
+    assert_eq!(group.subtree_count(), 2);
+
+    let json = serde_json::to_string(&parsed).unwrap();
+    assert!(json.contains("\"kind\":\"group\""));
+}
