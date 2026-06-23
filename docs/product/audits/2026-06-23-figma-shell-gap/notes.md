@@ -112,3 +112,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Added an Inspector action strip with account affordance, preview, code view, real share action wiring, and current zoom readout while keeping the design/prototype tabs underneath.
 - Expanded the empty-state frame presets into Figma-like categories including presentation, watch, paper, social media, FigJam community, and archive rows.
 - Added Playwright coverage for the new action strip, zoom readout, preview/share buttons, and expanded preset categories.
+
+2026-06-23 expanded object context-menu slice:
+
+- Reviewed the current object/image right-click menu against common Figma object workflows and found the next gap was not only missing image actions, but missing broad selection, transform, viewport, and export commands.
+- Added undoable/editor-state-backed actions for `전체 선택`, `같은 종류 선택`, `가로 뒤집기`, `세로 뒤집기`, and `선택 영역 확대`, plus a real `코드로 내보내기` JSON download backed by the existing code-export HTTP route.
+- Fixed the long context-menu positioning bug discovered by Playwright: menus opened near the bottom of the viewport now clamp back into view so long command lists remain scrollable and clickable.
+- Verification started with RED editor-state failures for missing selection/flip/fit functions and a RED Playwright failure for missing `전체 선택`; the focused unit and e2e tests now pass.

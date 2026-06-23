@@ -46,6 +46,7 @@ export interface SnapResult {
 
 export type AlignmentMode = "left" | "center" | "right" | "top" | "middle" | "bottom";
 export type DistributionMode = "horizontal" | "vertical";
+export type FlipAxis = "horizontal" | "vertical";
 export type ReorderDirection = "front" | "forward" | "backward" | "back";
 
 export interface EditorViewport {
@@ -518,6 +519,36 @@ export function selectNodesInBounds(
   return setMultiSelection(state, selectedNodeIds, selectedNodeIds.at(-1) ?? null);
 }
 
+export function selectAllPageNodes(state: EditorState): EditorState {
+  const firstPage = state.document.pages[0];
+  if (!firstPage) {
+    return state;
+  }
+
+  const nodeIds = firstPage.children
+    .filter((node) => !isNodeLocked(node) && isNodeVisible(node))
+    .map((node) => node.id);
+
+  return setMultiSelection(state, nodeIds, nodeIds.at(-1) ?? null);
+}
+
+export function selectNodesWithSameKind(state: EditorState): EditorState {
+  const selectedNodeId = state.selection.nodeId;
+  const selectedNode = selectedNodeId ? findNodeById(state.document, selectedNodeId) : null;
+  if (!selectedNode) {
+    return state;
+  }
+
+  const nodeIds: string[] = [];
+  for (const page of state.document.pages) {
+    for (const node of page.children) {
+      collectNodeIdsByKind(node, selectedNode.kind, nodeIds);
+    }
+  }
+
+  return setMultiSelection(state, nodeIds, nodeIds.at(-1) ?? null);
+}
+
 export function setViewport(state: EditorState, patch: Partial<EditorViewport>): EditorState {
   return {
     ...state,
@@ -617,6 +648,57 @@ export function moveSelectedNodesBy(
   });
 
   return executeBatchGeometryCommand(state, patches);
+}
+
+export function flipSelectedNodes(state: EditorState, axis: FlipAxis): EditorState {
+  const geometries = selectedNodeGeometries(state.document, selectionNodeIds(state.selection));
+  if (geometries.length < 2 || geometries.some((geometry) => isNodeLocked(geometry.node))) {
+    return state;
+  }
+
+  const bounds = geometryBounds(geometries);
+  const patches = geometries.flatMap((geometry) => {
+    if (axis === "horizontal") {
+      const targetX = bounds.x + bounds.width - (geometry.bounds.x - bounds.x) - geometry.bounds.width;
+      const patch = xPatch(geometry, targetX);
+      return patch ? [{ nodeId: geometry.node.id, patch }] : [];
+    }
+
+    const targetY = bounds.y + bounds.height - (geometry.bounds.y - bounds.y) - geometry.bounds.height;
+    const patch = yPatch(geometry, targetY);
+    return patch ? [{ nodeId: geometry.node.id, patch }] : [];
+  });
+
+  return executeBatchGeometryCommand(state, patches);
+}
+
+export function fitViewportToSelection(
+  state: EditorState,
+  viewportSize: { width: number; height: number },
+  padding = 64
+): EditorState {
+  const bounds = getSelectionBoundsForNodeIds(state.document, selectionNodeIds(state.selection));
+  if (!bounds) {
+    return state;
+  }
+
+  const availableWidth = Math.max(1, viewportSize.width - padding * 2);
+  const availableHeight = Math.max(1, viewportSize.height - padding * 2);
+  const scale = clamp(
+    Math.min(availableWidth / Math.max(1, bounds.width), availableHeight / Math.max(1, bounds.height)),
+    MIN_ZOOM,
+    MAX_ZOOM
+  );
+  const center = {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2
+  };
+
+  return setViewport(state, {
+    scale,
+    x: viewportSize.width / 2 - center.x * scale,
+    y: viewportSize.height / 2 - center.y * scale
+  });
 }
 
 export function calculateSnapForMovingBounds(
@@ -2307,6 +2389,20 @@ function collectNodeIdsInBounds(
   };
 
   return containsBounds(bounds, nodeBounds) ? [node.id] : [];
+}
+
+function collectNodeIdsByKind(node: RendererNode, kind: RendererNode["kind"], nodeIds: string[]): void {
+  if (isNodeLocked(node) || !isNodeVisible(node)) {
+    return;
+  }
+
+  if (node.kind === kind) {
+    nodeIds.push(node.id);
+  }
+
+  for (const child of node.children) {
+    collectNodeIdsByKind(child, kind, nodeIds);
+  }
 }
 
 function containsBounds(container: SelectionBounds, candidate: SelectionBounds): boolean {

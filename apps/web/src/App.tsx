@@ -64,6 +64,8 @@ import {
   duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
+  fitViewportToSelection,
+  flipSelectedNodes,
   frameSelectedNodes,
   groupSelectedNodes,
   getNodeDragGeometriesForNodeIds,
@@ -82,7 +84,9 @@ import {
   renameSelectedNode,
   reorderSelectedNode,
   resizeSelectedImageToNaturalSize,
+  selectAllPageNodes,
   selectNodesInBounds,
+  selectNodesWithSameKind,
   setSelection,
   setMultiSelection,
   setSelectedNodeLocked,
@@ -94,6 +98,7 @@ import {
   type DistributionMode,
   type EditorNodeClipboard,
   type EditorState,
+  type FlipAxis,
   type GeometryPatch,
   type SelectionBounds,
   type SnapGuide,
@@ -113,6 +118,35 @@ import {
 
 function numericInputValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+const OBJECT_CONTEXT_MENU_MARGIN = 8;
+const OBJECT_CONTEXT_MENU_ESTIMATED_SIZE = {
+  width: 280,
+  height: 560
+};
+
+function objectContextMenuPosition(left: number, top: number) {
+  if (typeof window === "undefined") {
+    return { left, top };
+  }
+
+  return {
+    left: Math.max(
+      OBJECT_CONTEXT_MENU_MARGIN,
+      Math.min(
+        left,
+        window.innerWidth - OBJECT_CONTEXT_MENU_ESTIMATED_SIZE.width - OBJECT_CONTEXT_MENU_MARGIN
+      )
+    ),
+    top: Math.max(
+      OBJECT_CONTEXT_MENU_MARGIN,
+      Math.min(
+        top,
+        window.innerHeight - OBJECT_CONTEXT_MENU_ESTIMATED_SIZE.height - OBJECT_CONTEXT_MENU_MARGIN
+      )
+    )
+  };
 }
 
 const teamStore = createIndexedDbTeamStore();
@@ -2406,6 +2440,68 @@ export function App() {
     );
   };
 
+  const selectAllContextNodes = () => {
+    runContextMenuStateAction(selectAllPageNodes);
+  };
+
+  const selectSameKindContextNodes = () => {
+    runContextMenuStateAction(selectNodesWithSameKind);
+  };
+
+  const flipContextSelection = (axis: FlipAxis) => {
+    runContextMenuStateAction((state) => flipSelectedNodes(state, axis));
+  };
+
+  const fitContextSelectionToViewport = () => {
+    const stageFrame = stageFrameRef.current;
+    if (!stageFrame) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    const bounds = stageFrame.getBoundingClientRect();
+    updateViewportFromInteraction((state) =>
+      fitViewportToSelection(scopeStateToContextNode(state), {
+        width: bounds.width,
+        height: bounds.height
+      })
+    );
+    setObjectContextMenu(null);
+  };
+
+  const downloadContextCodeExport = async () => {
+    if (!currentProject) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    const documentId = currentProject.currentDocumentId;
+    setObjectContextMenu(null);
+    try {
+      const response = await fetch(apiUrl(`/files/${documentId}/export/code`));
+      if (!response.ok) {
+        throw new Error(`코드 내보내기 실패: ${response.status} ${response.statusText}`.trim());
+      }
+      const payload = await response.json();
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(payload, null, 2)], {
+          type: "application/json"
+        })
+      );
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `layo-code-export-${documentId}.json`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setProjectStatus("코드 내보내기 완료");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "코드 내보내기에 실패했습니다";
+      setProjectStatus(message);
+    }
+  };
+
   const createContextComponent = () => {
     runContextMenuStateAction((state) => {
       const nodeId = state.selection.nodeId;
@@ -2650,8 +2746,7 @@ export function App() {
     }
 
     setObjectContextMenu({
-      left: event.evt.clientX,
-      top: event.evt.clientY,
+      ...objectContextMenuPosition(event.evt.clientX, event.evt.clientY),
       nodeId: targetNodeId,
       documentPoint
     });
@@ -4666,6 +4761,33 @@ export function App() {
           >
             여기에 붙여넣기
           </button>
+          <button type="button" role="menuitem" disabled={!editor} onClick={selectAllContextNodes}>
+            전체 선택
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={selectSameKindContextNodes}
+          >
+            같은 종류 선택
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!contextMenuNode}
+            onClick={fitContextSelectionToViewport}
+          >
+            선택 영역 확대
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!currentProject}
+            onClick={() => void downloadContextCodeExport()}
+          >
+            코드로 내보내기
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -4798,6 +4920,22 @@ export function App() {
             onClick={() => reorderContextSelection("back")}
           >
             맨 뒤로 보내기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canMutateContextMenuNode}
+            onClick={() => flipContextSelection("horizontal")}
+          >
+            가로 뒤집기
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canMutateContextMenuNode}
+            onClick={() => flipContextSelection("vertical")}
+          >
+            세로 뒤집기
           </button>
           <div className="object-context-menu-separator" role="separator" />
           <button

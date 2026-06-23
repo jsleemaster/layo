@@ -11,6 +11,8 @@ import {
   duplicateSelectedNode,
   executeEditorCommand,
   findNodeById,
+  fitViewportToSelection,
+  flipSelectedNodes,
   frameSelectedNodes,
   createImageNode,
   createRectangleNode,
@@ -30,7 +32,9 @@ import {
   reorderSelectedNode,
   replaceSelectedImageAsset,
   resizeSelectedImageToNaturalSize,
+  selectAllPageNodes,
   selectNodesInBounds,
+  selectNodesWithSameKind,
   setSelectedImageFitMode,
   setSelectedNodeLocked,
   setSelectedNodeVisible,
@@ -319,6 +323,65 @@ describe("editor state commands", () => {
 
     expect(selected.selection.nodeId).toBe("rectangle-1");
     expect(selected.selection.nodeIds).toEqual(["text-1", "rectangle-1"]);
+  });
+
+  test("selects page-level nodes and nodes with the same kind from context menu commands", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages[0]?.children.push({
+      id: "rectangle-2",
+      kind: "rectangle",
+      name: "보조 사각형",
+      transform: { x: 460, y: 180, rotation: 0 },
+      size: { width: 120, height: 80 },
+      style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const all = selectAllPageNodes(createEditorState(document));
+    expect(all.selection.nodeIds).toEqual(["frame-1", "rectangle-1", "rectangle-2"]);
+    expect(all.selection.nodeId).toBe("rectangle-2");
+
+    const sameKind = selectNodesWithSameKind(setSelection(createEditorState(document), "rectangle-1"));
+    expect(sameKind.selection.nodeIds).toEqual(["rectangle-1", "rectangle-2"]);
+    expect(sameKind.selection.nodeId).toBe("rectangle-2");
+  });
+
+  test("flips selected sibling nodes around the selection bounds with undo support", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages[0]?.children.push({
+      id: "rectangle-2",
+      kind: "rectangle",
+      name: "보조 사각형",
+      transform: { x: 460, y: 180, rotation: 0 },
+      size: { width: 120, height: 80 },
+      style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    const selected = setMultiSelection(createEditorState(document), ["rectangle-1", "rectangle-2"], "rectangle-2");
+
+    const flipped = flipSelectedNodes(selected, "horizontal");
+
+    expect(findNodeById(flipped.document, "rectangle-1")?.transform.x).toBe(420);
+    expect(findNodeById(flipped.document, "rectangle-2")?.transform.x).toBe(180);
+    expect(flipped.selection.nodeIds).toEqual(["rectangle-1", "rectangle-2"]);
+    expect(findNodeById(undo(flipped).document, "rectangle-1")?.transform.x).toBe(180);
+  });
+
+  test("fits the viewport around the current selection bounds", () => {
+    const selected = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const fitted = fitViewportToSelection(selected, { width: 1000, height: 600 }, 40);
+    const bounds = getSelectionBoundsForNodeIds(fitted.document, fitted.selection.nodeIds);
+
+    expect(fitted.viewport.scale).toBeCloseTo(3.538, 2);
+    expect(bounds).not.toBeNull();
+    if (!bounds) {
+      return;
+    }
+    expect((bounds.x + bounds.width / 2) * fitted.viewport.scale + fitted.viewport.x).toBeCloseTo(500, 1);
+    expect((bounds.y + bounds.height / 2) * fitted.viewport.scale + fitted.viewport.y).toBeCloseTo(300, 1);
   });
 
   test("aligns selected nodes by document-space left edge across parents", () => {

@@ -936,6 +936,60 @@ test("right-click menu frames the selected objects", async ({ page }) => {
   await expect(selectedFrame).toHaveClass(/is-selected/);
 });
 
+test("right-click menu supports expanded selection, transform, zoom, and export actions", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+  const blankMenuPoint = {
+    x: stageBox.x + Math.max(24, stageBox.width - 36),
+    y: stageBox.y + Math.max(24, stageBox.height - 36)
+  };
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-x").fill("420");
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "사각형 4" })).toBeVisible();
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "전체 선택" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "같은 종류 선택" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "선택 영역 확대" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "가로 뒤집기" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "세로 뒤집기" })).toBeEnabled();
+  await expect(menu.getByRole("menuitem", { name: "코드로 내보내기" })).toBeEnabled();
+
+  await menu.getByRole("menuitem", { name: "같은 종류 선택" }).click();
+  await expect(page.locator(".node-summary strong")).toHaveText("2개 레이어 선택됨");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await menu.getByRole("menuitem", { name: "가로 뒤집기" }).click();
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("180");
+  await page.getByRole("button", { name: "사각형 4" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("420");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await menu.getByRole("menuitem", { name: "전체 선택" }).click();
+  await expect(page.locator(".node-summary strong")).toHaveText("3개 레이어 선택됨");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  await menu.getByRole("menuitem", { name: "선택 영역 확대" }).click();
+  await expect(page.getByTestId("floating-toolbar").locator(".zoom-readout")).not.toHaveText("100%");
+
+  await page.mouse.click(blankMenuPoint.x, blankMenuPoint.y, { button: "right" });
+  const downloadPromise = page.waitForEvent("download");
+  await menu.getByRole("menuitem", { name: "코드로 내보내기" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^layo-code-export-.*\.json$/);
+  await expect(page.getByTestId("project-status")).toContainText("코드 내보내기 완료");
+});
+
 test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with modifiers", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const stageBox = await page.locator("canvas").first().boundingBox();
