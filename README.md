@@ -1,6 +1,6 @@
-# Canvas MCP Editor
+# Layo
 
-Canvas MCP Editor is an open-source, local-first design editor experiment built around a Rust document engine, a TypeScript editor shell, and a Model Context Protocol interface for AI tools.
+Layo is an open-source, local-first design editor experiment built around a Rust document engine, a TypeScript editor shell, and a Model Context Protocol interface for AI tools.
 
 The project goal is not to clone Figma feature-for-feature. The first milestone is a small personal design editor with a stable document model that AI agents can inspect and edit through deterministic MCP and HTTP tools.
 
@@ -63,13 +63,13 @@ pnpm install
 Run the local server:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
+pnpm --filter @layo/server dev
 ```
 
 Run the web editor:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/web dev
 ```
 
 Run the optional team collaboration relay:
@@ -95,7 +95,7 @@ cargo test --workspace
 Run the MCP server over stdio:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server mcp
+pnpm --filter @layo/server mcp
 ```
 
 ## Code Export
@@ -189,10 +189,10 @@ When `collaboration` is present, the server connects to the relay room, applies 
 
 ## Projects
 
-Projects are saved as local-first manifests under `.canvas-mcp-editor/projects`.
+Projects are saved as local-first manifests under `.layo/projects`.
 Each `ProjectManifest` records the project name, current document, document
 membership, and sharing reference. Canvas contents remain in
-`.canvas-mcp-editor/files` as `DesignFile` JSON.
+`.layo/files` as `DesignFile` JSON.
 Fresh local stores start empty; create a project before editing or exporting a
 document.
 
@@ -224,17 +224,17 @@ The web app can be shared as a static build. Real-time collaboration is optional
 
 - The browser stores team manifests and local document state in IndexedDB.
 - `packages/collaboration` stores document state in a Yjs map and uses awareness for presence and selected-node state.
-- `apps/collab-relay` relays Yjs sync and awareness messages for rooms named `canvas-mcp-editor:{teamId}:{documentId}`.
+- `apps/collab-relay` relays Yjs sync and awareness messages for rooms named `layo:{teamId}:{documentId}`.
 - Relay teams can enable passphrase-based E2EE for document updates. The exported team manifest stores only encryption metadata, never the passphrase or derived key. Encrypted v1 sync sends whole-document snapshots for editor document changes.
 - The project does not require a maintainer-operated production collaboration server.
 
 ## Deployment
 
-Canvas MCP Editor keeps the project API, static web shell, and real-time relay as separate deployment concerns. For a remote editor that can create, save, upload assets, and reload projects, deploy `apps/server` and build `apps/web` with the `/app/` base path so the Node server serves the web shell and same-origin API together:
+Layo keeps the project API, static web shell, and real-time relay as separate deployment concerns. For a remote editor that can create, save, upload assets, and reload projects, deploy `apps/server` and build `apps/web` with the `/app/` base path so the Node server serves the web shell and same-origin API together:
 
 ```bash
 pnpm build:fullstack
-HOST=0.0.0.0 PORT=4317 pnpm --filter @canvas-mcp-editor/server start
+HOST=0.0.0.0 PORT=4317 pnpm --filter @layo/server start
 ```
 
 The browser API base can also be pointed at a separate server with `VITE_API_BASE_URL`. A web-only static host is only a shell unless that API server is reachable. Each team runs its own team-owned collaboration relay only when it needs live collaboration.
@@ -246,7 +246,7 @@ Relay environment variables:
 ```bash
 COLLAB_RELAY_HOST=127.0.0.1
 COLLAB_RELAY_PORT=4327
-COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:
+COLLAB_ALLOWED_ROOM_PREFIX=layo:
 COLLAB_ROOM_TOKEN=
 COLLAB_MEMBER_TOKENS=[]
 ```

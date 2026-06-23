@@ -7,8 +7,8 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 test("stdio MCP edits move a node, create a component instance, and render in the editor", async ({ page }) => {
-  await rm(".canvas-mcp-editor", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
+  await rm(".layo", { recursive: true, force: true });
+  await rm("apps/server/.layo", { recursive: true, force: true });
 
   const result = await runStdioMcpEdit();
 

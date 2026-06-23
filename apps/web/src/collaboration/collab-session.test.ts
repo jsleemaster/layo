@@ -1,11 +1,11 @@
 import { describe, expect, test } from "vitest";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument } from "@layo/renderer";
 import {
   createDocumentRoomId,
   createPresenceState,
   createSharedKeyEncryptionConfig,
   createTeamManifest
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 import {
   createCollabDocumentSession,
   type CollaborationProviderFactory
@@ -100,7 +100,7 @@ describe("web collaboration session", () => {
       },
       sync: {
         mode: "websocket",
-        roomPrefix: "canvas-mcp-editor",
+        roomPrefix: "layo",
         relayUrl: "ws://127.0.0.1:4327"
       }
     });
@@ -244,7 +244,7 @@ describe("web collaboration session", () => {
       },
       sync: {
         mode: "websocket",
-        roomPrefix: "canvas-mcp-editor",
+        roomPrefix: "layo",
         relayUrl: "ws://127.0.0.1:4327"
       }
     });

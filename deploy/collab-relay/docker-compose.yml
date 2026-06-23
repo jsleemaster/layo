@@ -3,11 +3,11 @@ services:
     build:
       context: ../..
       dockerfile: apps/collab-relay/Dockerfile
-    image: canvas-mcp-editor-collab-relay:latest
+    image: layo-collab-relay:latest
     environment:
       COLLAB_RELAY_HOST: ${COLLAB_RELAY_HOST:-0.0.0.0}
       COLLAB_RELAY_PORT: ${COLLAB_RELAY_PORT:-4327}
-      COLLAB_ALLOWED_ROOM_PREFIX: ${COLLAB_ALLOWED_ROOM_PREFIX:-canvas-mcp-editor:}
+      COLLAB_ALLOWED_ROOM_PREFIX: ${COLLAB_ALLOWED_ROOM_PREFIX:-layo:}
       COLLAB_ROOM_TOKEN: ${COLLAB_ROOM_TOKEN:-}
       COLLAB_MEMBER_TOKENS: ${COLLAB_MEMBER_TOKENS:-[]}
     ports:

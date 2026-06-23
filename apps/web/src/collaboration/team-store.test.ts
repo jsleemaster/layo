@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, test } from "vitest";
-import { createTeamManifest } from "@canvas-mcp-editor/collaboration";
+import { createTeamManifest } from "@layo/collaboration";
 import {
   createTeamManifestDownload,
   createIndexedDbTeamStore,
@@ -11,12 +11,12 @@ import {
 
 describe("indexeddb team store", () => {
   beforeEach(async () => {
-    indexedDB.deleteDatabase("canvas-mcp-editor-collaboration-test");
+    indexedDB.deleteDatabase("layo-collaboration-test");
   });
 
   test("saves, lists, and loads the current team", async () => {
     const store = createIndexedDbTeamStore({
-      databaseName: "canvas-mcp-editor-collaboration-test",
+      databaseName: "layo-collaboration-test",
       indexedDB
     });
     const team = createTeamManifest({
@@ -77,7 +77,7 @@ describe("indexeddb team store", () => {
     expect(exported).toContain("sha256-user-1");
     expect(importTeamManifest(exported).sync).toEqual({
       mode: "websocket",
-      roomPrefix: "canvas-mcp-editor",
+      roomPrefix: "layo",
       relayUrl: "ws://127.0.0.1:4327"
     });
   });
@@ -116,7 +116,7 @@ describe("indexeddb team store", () => {
       documents: [],
       sync: {
         mode: "local",
-        roomPrefix: "canvas-mcp-editor"
+        roomPrefix: "layo"
       }
     };
     const fetcher = async () =>

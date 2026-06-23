@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing alignment/distribution command callbacks and selection rules. Refactor only `InspectorAlignmentControls` markup and tokenized CSS, then lock behavior with Playwright e2e coverage.
 
-**Tech Stack:** React, TypeScript, Vite, Playwright e2e, existing Canvas MCP Editor design tokens.
+**Tech Stack:** React, TypeScript, Vite, Playwright e2e, existing Layo design tokens.
 
 ## Global Constraints
 
@@ -86,11 +86,11 @@ Run:
 ```bash
 git diff --check
 pnpm run check:design-rules
-pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --filter @layo/web typecheck
 pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "inspector alignment controls expose grouped tooltips" --headed --workers=1 --reporter=line
 pnpm typecheck
 pnpm test:e2e
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 ```
 
@@ -104,7 +104,7 @@ Verification completed before PR:
 - `pnpm run check:design-rules`
 - `pnpm typecheck`
 - `pnpm test:e2e`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "inspector alignment controls expose grouped tooltips" --headed --workers=1 --reporter=line`
 - `pnpm --dir apps/web exec vitest run src/collaboration/encrypted-provider.test.ts`
 - `pnpm --dir apps/web exec vitest run`

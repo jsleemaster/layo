@@ -45,7 +45,7 @@ importers:
 
   apps/server:
     dependencies:
-      '@canvas-mcp-editor/collaboration':
+      '@layo/collaboration':
         specifier: workspace:*
         version: link:../../packages/collaboration
       '@modelcontextprotocol/sdk':
@@ -85,10 +85,10 @@ importers:
 
   apps/web:
     dependencies:
-      '@canvas-mcp-editor/collaboration':
+      '@layo/collaboration':
         specifier: workspace:*
         version: link:../../packages/collaboration
-      '@canvas-mcp-editor/renderer':
+      '@layo/renderer':
         specifier: workspace:*
         version: link:../../packages/renderer
       '@vitejs/plugin-react':
@@ -143,7 +143,7 @@ importers:
 
   packages/collaboration:
     dependencies:
-      '@canvas-mcp-editor/renderer':
+      '@layo/renderer':
         specifier: workspace:*
         version: link:../renderer
       y-protocols:

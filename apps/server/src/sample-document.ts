@@ -27,7 +27,7 @@ export const sampleDocument = {
               },
               content: {
                 type: "text",
-                value: "캔버스 MCP 에디터",
+                value: "Layo",
                 font_size: 28,
                 font_family: "Inter"
               }

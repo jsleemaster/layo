@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Prove that an AI client can connect to Canvas MCP Editor through MCP, inspect a canvas, apply deterministic edits, validate the document, and find the edited result.
+**Goal:** Prove that an AI client can connect to Layo through MCP, inspect a canvas, apply deterministic edits, validate the document, and find the edited result.
 
 **Architecture:** Keep MCP in `apps/server` because the official TypeScript MCP SDK owns the client/server transport. Keep deterministic document mutation in the existing agent-control/storage layer, which already sits over the Rust-owned document model boundary used by the editor. Add only test and metadata hardening unless verification exposes a missing behavior.
 
@@ -50,7 +50,7 @@ describe("MCP AI editing workflow", () => {
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/server test -- src/mcp.test.ts`
+Run: `pnpm --filter @layo/server test -- src/mcp.test.ts`
 
 Expected: FAIL because existing MCP tools do not yet expose the asserted tool annotations.
 
@@ -60,7 +60,7 @@ Add a second test that connects `Client` and `createMcpServer()` with `InMemoryT
 
 - [x] **Step 4: Run test again**
 
-Run: `pnpm --filter @canvas-mcp-editor/server test -- src/mcp.test.ts`
+Run: `pnpm --filter @layo/server test -- src/mcp.test.ts`
 
 Expected: the annotation test still fails until Task 2 lands; the live MCP edit-flow test should pass or expose the real missing connection behavior.
 
@@ -97,7 +97,7 @@ annotations: {
 
 - [x] **Step 3: Run the MCP integration test**
 
-Run: `pnpm --filter @canvas-mcp-editor/server test -- src/mcp.test.ts`
+Run: `pnpm --filter @layo/server test -- src/mcp.test.ts`
 
 Expected: PASS.
 
@@ -108,7 +108,7 @@ Expected: PASS.
 
 - [x] **Step 1: Run server tests**
 
-Run: `pnpm --filter @canvas-mcp-editor/server test`
+Run: `pnpm --filter @layo/server test`
 
 Expected: PASS.
 

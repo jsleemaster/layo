@@ -64,7 +64,7 @@ expect(findNodeById(undo(deleted).document, "text-1")?.name).toBe("헤드라인"
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "deletes the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "deletes the selected node"`
 
 Expected: FAIL because `deleteSelectedNode` is not exported.
 
@@ -74,7 +74,7 @@ Find the selected node and its parent id, then call `executeEditorCommand` with 
 
 - [x] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "deletes the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "deletes the selected node"`
 
 Expected: PASS.
 
@@ -106,7 +106,7 @@ expect(findNodeById(undo(duplicated).document, "text-1-copy-1")).toBeNull();
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "duplicates the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "duplicates the selected node"`
 
 Expected: FAIL because `duplicateSelectedNode` is not exported.
 
@@ -116,7 +116,7 @@ Clone the selected node, generate an unused id by appending `-copy-N`, name it w
 
 - [x] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "duplicates the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "duplicates the selected node"`
 
 Expected: PASS.
 
@@ -138,7 +138,7 @@ Add a test named `Figma-like edit shortcuts duplicate and delete selected layers
 await page.getByRole("button", { name: "헤드라인" }).click();
 await page.keyboard.press("Control+D");
 await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
-await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 
 await page.keyboard.press("Backspace");
 await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toHaveCount(0);
@@ -174,7 +174,7 @@ Expected: PASS.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts
+pnpm --filter @layo/web test -- src/editor-state.test.ts
 pnpm test:e2e
 ```
 
@@ -186,7 +186,7 @@ Run:
 
 ```bash
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm test:e2e:collab
 ```

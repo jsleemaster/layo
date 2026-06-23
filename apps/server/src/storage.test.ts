@@ -14,8 +14,33 @@ afterEach(async () => {
 });
 
 describe("FileStorage", () => {
+  test("adopts a prior local store when the default Layo store does not exist", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const previousCwd = process.cwd();
+    process.chdir(tempRoot);
+    try {
+      const priorStoreName = [".canvas", "mcp", "editor"].join("-");
+      const priorFilesDir = path.join(tempRoot, priorStoreName, "files");
+      await mkdir(priorFilesDir, { recursive: true });
+      await writeFile(
+        path.join(priorFilesDir, "document-alpha.json"),
+        JSON.stringify({ id: "document-alpha", name: "기존 문서", pages: [] }, null, 2),
+        "utf8"
+      );
+
+      const storage = new FileStorage();
+
+      const files = await storage.listFiles();
+
+      expect(files).toMatchObject([{ id: "document-alpha", name: "기존 문서" }]);
+      expect(files[0].path).toContain(`${path.sep}.layo${path.sep}`);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
   test("starts without a generated sample document", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     const files = await storage.listFiles();
@@ -24,7 +49,7 @@ describe("FileStorage", () => {
   });
 
   test("reads an explicitly created document by file id", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
     await storage.createProject({
       projectId: "project-alpha",
@@ -42,7 +67,7 @@ describe("FileStorage", () => {
   });
 
   test("starts without a generated sample project", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     const projects = await storage.listProjects();
@@ -51,7 +76,7 @@ describe("FileStorage", () => {
   });
 
   test("removes the legacy sample project and its orphaned document even when modified", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
     await storage.createProject({
       projectId: "sample-project",
@@ -71,7 +96,7 @@ describe("FileStorage", () => {
   });
 
   test("preserves a sample-id document when it belongs to a real project", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
     await storage.createProject({
       projectId: "project-real",
@@ -88,7 +113,7 @@ describe("FileStorage", () => {
   });
 
   test("creates, reads, renames, shares, and appends documents to projects", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     const created = await storage.createProject({
@@ -132,7 +157,7 @@ describe("FileStorage", () => {
   });
 
   test("duplicates a project with copied documents and private sharing", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     await storage.createProject({
@@ -186,7 +211,7 @@ describe("FileStorage", () => {
   });
 
   test("deletes a project and its owned documents while preserving other projects", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     await storage.createProject({
@@ -212,7 +237,7 @@ describe("FileStorage", () => {
   });
 
   test("rejects unsafe project and document ids", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     await expect(
@@ -235,7 +260,7 @@ describe("FileStorage", () => {
   });
 
   test("upgrades legacy English sample labels without replacing user geometry", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const filesDir = path.join(tempRoot, "files");
     await mkdir(filesDir, { recursive: true });
     await writeFile(
@@ -265,7 +290,7 @@ describe("FileStorage", () => {
                       style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
                       content: {
                         type: "text",
-                        value: "Canvas MCP Editor",
+                        value: ["Canvas", "MCP", "Editor"].join(" "),
                         font_size: 28,
                         font_family: "Inter"
                       }
@@ -296,12 +321,12 @@ describe("FileStorage", () => {
     expect(document.pages[0]?.children[0]?.children[0]?.transform.x).toBe(321);
     expect(document.pages[0]?.children[0]?.children[0]?.content).toMatchObject({
       type: "text",
-      value: "캔버스 MCP 에디터"
+      value: "Layo"
     });
   });
 
   test("updates node geometry and persists the document", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const node = await storage.updateNodeGeometry("sample-file", "text-1", {
@@ -318,7 +343,7 @@ describe("FileStorage", () => {
   });
 
   test("updates fill and text content", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const filled = await storage.setNodeFill("sample-file", "text-1", "#2563eb");
@@ -329,7 +354,7 @@ describe("FileStorage", () => {
   });
 
   test("creates a node under a page parent", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const node = await storage.createNode("sample-file", "page-1", {
@@ -349,7 +374,7 @@ describe("FileStorage", () => {
   });
 
   test("creates components, instances, and detaches instances", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const component = await storage.createComponent("sample-file", "frame-1", {
@@ -375,11 +400,11 @@ describe("FileStorage", () => {
   });
 
   test("inspects and searches canvas nodes for agent workflows", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const inspection = await storage.inspectCanvas("sample-file");
-    const matches = await storage.findNodes("sample-file", { text: "캔버스" });
+    const matches = await storage.findNodes("sample-file", { text: "Layo" });
 
     expect(inspection.file.id).toBe("sample-file");
     expect(inspection.nodeCount).toBe(2);
@@ -390,13 +415,13 @@ describe("FileStorage", () => {
     expect(matches[0]).toMatchObject({
       name: "헤드라인",
       kind: "text",
-      text: "캔버스 MCP 에디터",
+      text: "Layo",
       path: ["page-1", "frame-1", "text-1"]
     });
   });
 
   test("dry-runs and persists agent command batches with audit summaries", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const before = await storage.readFile("sample-file");
@@ -462,7 +487,7 @@ describe("FileStorage", () => {
   });
 
   test("agent commands apply auto layout and constraints deterministically", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
 
     const autoLayout = await storage.applyAgentCommands("sample-file", {

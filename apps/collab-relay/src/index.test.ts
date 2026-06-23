@@ -16,7 +16,7 @@ describe("collaboration relay", () => {
     const relay = createCollabRelayServer({
       host: "127.0.0.1",
       port: 0,
-      allowedRoomPrefix: "canvas-mcp-editor:"
+      allowedRoomPrefix: "layo:"
     });
     await relay.listen();
 
@@ -26,7 +26,7 @@ describe("collaboration relay", () => {
       rooms: 0
     });
 
-    const socket = new WebSocket(`${relay.wsUrl}/canvas-mcp-editor:team-1:sample-file`);
+    const socket = new WebSocket(`${relay.wsUrl}/layo:team-1:sample-file`);
     await new Promise<void>((resolve, reject) => {
       socket.once("open", resolve);
       socket.once("error", reject);
@@ -41,22 +41,22 @@ describe("collaboration relay", () => {
   test("validates room prefix and token", () => {
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:"
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:"
       })
     ).toEqual({ ok: true, canWriteDocument: true });
 
     expect(
       validateRelayConnection({
         roomId: "other:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:"
+        allowedRoomPrefix: "layo:"
       })
     ).toEqual({ ok: false, reason: "room prefix is not allowed" });
 
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:",
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:",
         expectedToken: "secret",
         token: "wrong"
       })
@@ -79,8 +79,8 @@ describe("collaboration relay", () => {
 
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:",
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:",
         userId: "owner-1",
         memberToken: "owner-secret",
         requestedAccess: "sync",
@@ -90,8 +90,8 @@ describe("collaboration relay", () => {
 
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:",
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:",
         userId: "viewer-1",
         memberToken: "viewer-secret",
         requestedAccess: "sync",
@@ -104,8 +104,8 @@ describe("collaboration relay", () => {
 
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:",
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:",
         userId: "viewer-1",
         memberToken: "viewer-secret",
         requestedAccess: "awareness",
@@ -115,8 +115,8 @@ describe("collaboration relay", () => {
 
     expect(
       validateRelayConnection({
-        roomId: "canvas-mcp-editor:team-1:sample-file",
-        allowedRoomPrefix: "canvas-mcp-editor:",
+        roomId: "layo:team-1:sample-file",
+        allowedRoomPrefix: "layo:",
         userId: "unknown",
         memberToken: "viewer-secret",
         requestedAccess: "awareness",
@@ -129,7 +129,7 @@ describe("collaboration relay", () => {
     const relay = createCollabRelayServer({
       host: "127.0.0.1",
       port: 0,
-      allowedRoomPrefix: "canvas-mcp-editor:",
+      allowedRoomPrefix: "layo:",
       memberTokens: [
         {
           userId: "editor-1",
@@ -146,7 +146,7 @@ describe("collaboration relay", () => {
     await relay.listen();
 
     const editorSocket = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-1:sample-file?userId=editor-1&memberToken=editor-secret&access=sync`
+      `${relay.wsUrl}/layo:team-1:sample-file?userId=editor-1&memberToken=editor-secret&access=sync`
     );
     await new Promise<void>((resolve, reject) => {
       editorSocket.once("open", resolve);
@@ -155,7 +155,7 @@ describe("collaboration relay", () => {
     expect(relay.roomCount()).toBe(1);
 
     const rejectedSocket = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-1:sample-file?userId=editor-1&memberToken=wrong&access=sync`
+      `${relay.wsUrl}/layo:team-1:sample-file?userId=editor-1&memberToken=wrong&access=sync`
     );
     await new Promise<void>((resolve, reject) => {
       rejectedSocket.once("unexpected-response", (_request, response) => {
@@ -167,7 +167,7 @@ describe("collaboration relay", () => {
     });
 
     const rejectedViewerSync = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-1:sample-file?userId=viewer-1&memberToken=viewer-secret&access=sync`
+      `${relay.wsUrl}/layo:team-1:sample-file?userId=viewer-1&memberToken=viewer-secret&access=sync`
     );
     await new Promise<void>((resolve, reject) => {
       rejectedViewerSync.once("unexpected-response", (_request, response) => {
@@ -179,7 +179,7 @@ describe("collaboration relay", () => {
     });
 
     const viewerAwarenessSocket = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-1:sample-file?userId=viewer-1&memberToken=viewer-secret&access=awareness`
+      `${relay.wsUrl}/layo:team-1:sample-file?userId=viewer-1&memberToken=viewer-secret&access=awareness`
     );
     await new Promise<void>((resolve, reject) => {
       viewerAwarenessSocket.once("open", resolve);
@@ -195,11 +195,11 @@ describe("collaboration relay", () => {
     const relay = createCollabRelayServer({
       host: "127.0.0.1",
       port: 0,
-      allowedRoomPrefix: "canvas-mcp-editor:"
+      allowedRoomPrefix: "layo:"
     });
     await relay.listen();
-    const first = new WebSocket(`${relay.wsUrl}/canvas-mcp-editor:team-e2ee:sample-file?e2ee=true`);
-    const second = new WebSocket(`${relay.wsUrl}/canvas-mcp-editor:team-e2ee:sample-file?e2ee=true`);
+    const first = new WebSocket(`${relay.wsUrl}/layo:team-e2ee:sample-file?e2ee=true`);
+    const second = new WebSocket(`${relay.wsUrl}/layo:team-e2ee:sample-file?e2ee=true`);
 
     try {
       await Promise.all([waitForOpen(first), waitForOpen(second)]);
@@ -224,14 +224,14 @@ describe("collaboration relay", () => {
     const relay = createCollabRelayServer({
       host: "127.0.0.1",
       port: 0,
-      allowedRoomPrefix: "canvas-mcp-editor:"
+      allowedRoomPrefix: "layo:"
     });
     await relay.listen();
-    const encrypted = new WebSocket(`${relay.wsUrl}/canvas-mcp-editor:team-mixed:sample-file?e2ee=true`);
+    const encrypted = new WebSocket(`${relay.wsUrl}/layo:team-mixed:sample-file?e2ee=true`);
 
     try {
       await waitForOpen(encrypted);
-      const plain = new WebSocket(`${relay.wsUrl}/canvas-mcp-editor:team-mixed:sample-file`);
+      const plain = new WebSocket(`${relay.wsUrl}/layo:team-mixed:sample-file`);
       await expectUnauthorized(plain, "plain client joined encrypted room");
     } finally {
       encrypted.close();
@@ -243,7 +243,7 @@ describe("collaboration relay", () => {
     const relay = createCollabRelayServer({
       host: "127.0.0.1",
       port: 0,
-      allowedRoomPrefix: "canvas-mcp-editor:",
+      allowedRoomPrefix: "layo:",
       memberTokens: [
         {
           userId: "editor-1",
@@ -259,10 +259,10 @@ describe("collaboration relay", () => {
     });
     await relay.listen();
     const editor = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-viewer:sample-file?e2ee=true&userId=editor-1&memberToken=editor-secret&access=sync`
+      `${relay.wsUrl}/layo:team-viewer:sample-file?e2ee=true&userId=editor-1&memberToken=editor-secret&access=sync`
     );
     const viewer = new WebSocket(
-      `${relay.wsUrl}/canvas-mcp-editor:team-viewer:sample-file?e2ee=true&userId=viewer-1&memberToken=viewer-secret&access=awareness`
+      `${relay.wsUrl}/layo:team-viewer:sample-file?e2ee=true&userId=viewer-1&memberToken=viewer-secret&access=awareness`
     );
 
     try {

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Canvas MCP Editor should support the next Figma-parity precision editing slice: align and distribute multiple selected layers from the Korean-first toolbar.
+Layo should support the next Figma-parity precision editing slice: align and distribute multiple selected layers from the Korean-first toolbar.
 
 ## Context
 

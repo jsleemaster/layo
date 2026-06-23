@@ -4,7 +4,7 @@ import { createDocumentRoomId } from "./room";
 describe("collaboration room ids", () => {
   test("generates deterministic document room ids", () => {
     expect(createDocumentRoomId("team-1", "sample-file")).toBe(
-      "canvas-mcp-editor:team-1:sample-file"
+      "layo:team-1:sample-file"
     );
   });
 

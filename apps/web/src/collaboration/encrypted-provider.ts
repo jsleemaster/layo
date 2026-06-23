@@ -6,7 +6,7 @@ import {
   type CollaborationPresence,
   type EncryptedYjsUpdate,
   type SharedKeyEncryptionConfig
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 import * as syncDecoding from "lib0/decoding";
 import * as syncEncoding from "lib0/encoding";
 import { Awareness } from "y-protocols/awareness";

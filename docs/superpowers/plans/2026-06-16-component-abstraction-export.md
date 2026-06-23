@@ -25,7 +25,7 @@
 - [x] Implement component implementation hints and token candidate aggregation.
 - [x] Extend HTTP export test to verify the structured spec is returned through the public API.
 - [x] Update README code export section to describe `implementationSpec`.
-- [x] Run `pnpm --filter @canvas-mcp-editor/server test` and `pnpm --filter @canvas-mcp-editor/server typecheck`.
+- [x] Run `pnpm --filter @layo/server test` and `pnpm --filter @layo/server typecheck`.
 - [x] Run full repo verification and Playwright CLI e2e before PR/merge.
 
 ## Expected Export Shape

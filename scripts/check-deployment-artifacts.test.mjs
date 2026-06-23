@@ -17,13 +17,13 @@ test("relay Docker artifacts expose team-owned relay configuration", async () =>
   const compose = await readText("deploy/collab-relay/docker-compose.yml");
   const env = await readText("deploy/collab-relay/.env.example");
 
-  assert.match(dockerfile, /@canvas-mcp-editor\/collab-relay/);
+  assert.match(dockerfile, /@layo\/collab-relay/);
   assert.match(dockerfile, /EXPOSE 4327/);
   assert.match(compose, /COLLAB_RELAY_HOST/);
   assert.match(compose, /COLLAB_RELAY_PORT/);
   assert.match(compose, /COLLAB_MEMBER_TOKENS/);
   assert.match(compose, /\/health/);
-  assert.match(env, /COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:/);
+  assert.match(env, /COLLAB_ALLOWED_ROOM_PREFIX=layo:/);
   assert.match(env, /COLLAB_ROOM_TOKEN=/);
   assert.match(env, /COLLAB_MEMBER_TOKENS=\[\]/);
 });

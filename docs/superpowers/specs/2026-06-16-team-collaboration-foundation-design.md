@@ -2,7 +2,7 @@
 
 ## Context
 
-Canvas MCP Editor is intended to be open source. The project should be easy to share as a static web app, but the maintainers should not have to operate a central collaboration backend for every team. Real-time collaboration still needs to work when a team is created, and agent edits must appear through the same collaboration path as human edits.
+Layo is intended to be open source. The project should be easy to share as a static web app, but the maintainers should not have to operate a central collaboration backend for every team. Real-time collaboration still needs to work when a team is created, and agent edits must appear through the same collaboration path as human edits.
 
 The current editor already has useful boundaries:
 
@@ -73,7 +73,7 @@ The MVP should use Yjs with three layers:
 Room names should be deterministic:
 
 ```text
-canvas-mcp-editor:{teamId}:{documentId}
+layo:{teamId}:{documentId}
 ```
 
 The first implementation should store the full `DesignFile` JSON in a Yjs map entry such as `documentJson`. This is not the final fine-grained data model, but it is the fastest safe path to prove team creation, offline persistence, live sync, and agent compatibility. After that works, node trees can be moved into granular Yjs maps and arrays for better concurrent geometry and text editing.

@@ -6,7 +6,7 @@
 
 **Architecture:** Replace the current JSON-backed collaboration document internals with a granular Yjs representation while keeping the existing `createCollaborativeDesignDocument` API stable for web and agent callers. Add awareness-only soft locks so users can see who is editing a node without blocking CRDT updates. Add team asset metadata contracts so image nodes can be synchronized independently from local binary storage.
 
-**Tech Stack:** TypeScript, Yjs, Vitest, Playwright CLI, React/Vite, existing `@canvas-mcp-editor/collaboration` package, existing web collaboration session, existing Fastify/MCP agent bridge.
+**Tech Stack:** TypeScript, Yjs, Vitest, Playwright CLI, React/Vite, existing `@layo/collaboration` package, existing web collaboration session, existing Fastify/MCP agent bridge.
 
 ---
 
@@ -27,7 +27,7 @@ Verification evidence:
 - Focused red/green tests were run for each behavior before implementation.
 - `pnpm typecheck`
 - `pnpm test`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm test:e2e:collab` passed twice after the encrypted order-dependent failure was fixed.
 
 ---
@@ -76,7 +76,7 @@ Each task follows this loop:
 ```bash
 pnpm typecheck
 pnpm test
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test:e2e:collab
 pnpm exec playwright test apps/web/e2e/collaboration.spec.ts --reporter=line
 ```
@@ -141,7 +141,7 @@ test("merges concurrent edits to different fields on the same node", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- yjs-document.test.ts -t "merges concurrent edits to different fields on the same node"
+pnpm --filter @layo/collaboration test -- yjs-document.test.ts -t "merges concurrent edits to different fields on the same node"
 ```
 
 Expected: FAIL because the current whole-document JSON map allows one concurrent update to overwrite the other.
@@ -188,7 +188,7 @@ nodeMap.set("children", node.children.map((child) => child.id));
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- yjs-document.test.ts -t "merges concurrent edits to different fields on the same node"
+pnpm --filter @layo/collaboration test -- yjs-document.test.ts -t "merges concurrent edits to different fields on the same node"
 ```
 
 Expected: PASS.
@@ -198,9 +198,9 @@ Expected: PASS.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- yjs-document.test.ts
-pnpm --filter @canvas-mcp-editor/collaboration test
-pnpm --filter @canvas-mcp-editor/collaboration typecheck
+pnpm --filter @layo/collaboration test -- yjs-document.test.ts
+pnpm --filter @layo/collaboration test
+pnpm --filter @layo/collaboration typecheck
 ```
 
 Expected: PASS.
@@ -275,8 +275,8 @@ test("updates local presence with a soft editing claim", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- awareness.test.ts -t "summarizes soft editing claims"
-pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/collab-session.test.ts -t "updates local presence with a soft editing claim"
+pnpm --filter @layo/collaboration test -- awareness.test.ts -t "summarizes soft editing claims"
+pnpm --filter @layo/web test -- src/collaboration/collab-session.test.ts -t "updates local presence with a soft editing claim"
 ```
 
 Expected: FAIL because `editingNodeId` and `editingMode` are not accepted by the presence schema.
@@ -308,8 +308,8 @@ Run the same two focused commands. Expected: PASS.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test
-pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/collab-session.test.ts
+pnpm --filter @layo/collaboration test
+pnpm --filter @layo/web test -- src/collaboration/collab-session.test.ts
 pnpm typecheck
 ```
 
@@ -372,7 +372,7 @@ describe("team collaboration assets", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- assets.test.ts
+pnpm --filter @layo/collaboration test -- assets.test.ts
 ```
 
 Expected: FAIL because `assets.ts` does not exist.
@@ -426,8 +426,8 @@ export * from "./assets";
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- assets.test.ts
-pnpm --filter @canvas-mcp-editor/collaboration typecheck
+pnpm --filter @layo/collaboration test -- assets.test.ts
+pnpm --filter @layo/collaboration typecheck
 ```
 
 Expected: PASS.
@@ -473,7 +473,7 @@ describe("collaborative agent command guard", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/collaboration-agent.test.ts
+pnpm --filter @layo/server test -- src/collaboration-agent.test.ts
 ```
 
 Expected: FAIL because `assertUnchangedStateVector` is not exported.
@@ -519,8 +519,8 @@ assertUnchangedStateVector(beforeStateVector, ydoc);
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/collaboration-agent.test.ts
-pnpm --filter @canvas-mcp-editor/server test
+pnpm --filter @layo/server test -- src/collaboration-agent.test.ts
+pnpm --filter @layo/server test
 pnpm typecheck
 ```
 
@@ -544,8 +544,8 @@ Add an e2e test with two browser contexts:
 
 ```ts
 test("two editors keep independent node move and text edits", async ({ browser }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm(".layo/files/sample-file.json", { force: true });
+  await rm("apps/server/.layo/files/sample-file.json", { force: true });
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
   const firstContext = await browser.newContext();
@@ -644,7 +644,7 @@ After all task commits:
 git diff --check
 pnpm typecheck
 pnpm test
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test:e2e:collab
 pnpm exec playwright test apps/web/e2e/collaboration.spec.ts --reporter=line
 ```
@@ -652,8 +652,8 @@ pnpm exec playwright test apps/web/e2e/collaboration.spec.ts --reporter=line
 Then run a direct Playwright CLI interaction pass against the live editor:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 pnpm dev:collab
 pnpm exec playwright test apps/web/e2e/collaboration.spec.ts --grep "two editors keep independent node move and text edits" --headed --workers=1 --reporter=line
 ```
@@ -671,4 +671,4 @@ Record:
 - This plan intentionally keeps the public `createCollaborativeDesignDocument` API stable to avoid rewriting web and server callers in the same task as the CRDT model migration.
 - Hard locks are out of scope for this slice. Soft claims are awareness-only and must not block valid Yjs document updates.
 - Binary asset transport is out of scope for this slice. The asset task defines deterministic team metadata so a later storage task can sync binaries without changing image node semantics again.
-- The current repo uses shared local filesystem state in Playwright tests. Do not run headed and non-headed e2e variants in parallel when tests delete `.canvas-mcp-editor`.
+- The current repo uses shared local filesystem state in Playwright tests. Do not run headed and non-headed e2e variants in parallel when tests delete `.layo`.

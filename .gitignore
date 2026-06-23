@@ -7,7 +7,7 @@ pkg/
 .env
 .env.*
 !.env.example
-.canvas-mcp-editor/
+.layo/
 .worktrees/
 test-results/
 playwright-report/

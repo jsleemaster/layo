@@ -2,11 +2,11 @@
 
 ## Goal
 
-Build a Figma-informed roadmap for Canvas MCP Editor and start implementation with the missing layout behavior that users expect from a Figma-like editor.
+Build a Figma-informed roadmap for Layo and start implementation with the missing layout behavior that users expect from a Figma-like editor.
 
 ## Product Boundary
 
-Canvas MCP Editor should not copy every Figma product. It should copy the interaction primitives that make design editing predictable, then adapt the handoff and automation surface around MCP/HTTP.
+Layo should not copy every Figma product. It should copy the interaction primitives that make design editing predictable, then adapt the handoff and automation surface around MCP/HTTP.
 
 Adopt now:
 
@@ -21,7 +21,7 @@ Adapt:
 
 - Dev Mode as a visible panel backed by existing agent inspection and code export.
 - Code Connect as local component mapping.
-- Figma MCP ideas as deterministic Canvas MCP tools.
+- Figma MCP ideas as deterministic Layo tools.
 - Libraries as local/team-owned design assets.
 
 Defer or exclude:

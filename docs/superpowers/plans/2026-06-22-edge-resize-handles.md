@@ -40,7 +40,7 @@ Add Figma-like edge resize handles for a single selected canvas object.
 - `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "edge resize handles" --headed --workers=1 --reporter=line`
 - `pnpm test:e2e`
 - `pnpm typecheck`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm test`
 
 ## Verification Completed
@@ -50,7 +50,7 @@ Add Figma-like edge resize handles for a single selected canvas object.
 - GREEN: `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "resize handles" --reporter=line`
 - GREEN: `pnpm --dir apps/web exec vitest run src/editor-state.test.ts`
 - GREEN: `pnpm typecheck`
-- GREEN: `pnpm --filter @canvas-mcp-editor/web build`
+- GREEN: `pnpm --filter @layo/web build`
 - GREEN: `pnpm test:e2e`
 - GREEN: `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "edge resize handles" --headed --workers=1 --reporter=line`
 - GREEN: `pnpm test`

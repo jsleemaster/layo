@@ -135,14 +135,14 @@ const writeToolAnnotations = {
 
 export function createMcpServer(storage = new FileStorage()) {
   const server = new McpServer({
-    name: "canvas-mcp-editor",
+    name: "layo",
     version: "0.1.0"
   });
 
   server.registerTool(
     "list_files",
     {
-      description: "List local Canvas MCP Editor design files available to inspect.",
+      description: "List local Layo design files available to inspect.",
       annotations: readOnlyToolAnnotations,
       inputSchema: {}
     },
@@ -159,7 +159,7 @@ export function createMcpServer(storage = new FileStorage()) {
   server.registerTool(
     "list_projects",
     {
-      description: "List local Canvas MCP Editor projects and their document membership.",
+      description: "List local Layo projects and their document membership.",
       annotations: readOnlyToolAnnotations,
       inputSchema: {}
     },

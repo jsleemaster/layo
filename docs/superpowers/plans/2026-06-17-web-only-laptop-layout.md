@@ -134,9 +134,9 @@ Expected: PASS.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test
-pnpm --filter @canvas-mcp-editor/web typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web test
+pnpm --filter @layo/web typecheck
+pnpm --filter @layo/web build
 ```
 
 Expected: all pass.

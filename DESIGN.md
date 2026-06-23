@@ -1,16 +1,16 @@
 ---
 version: alpha
-name: Canvas MCP Editor Design System
+name: Layo Design System
 description: "A local-first design editor interface for technical creative work. The UI should feel quiet, precise, and inspectable: neutral panels, bright document stage, exact spacing, visible hierarchy, and restrained accent colors for focus, selection, and MCP/AI affordances. Inspired by DESIGN.md conventions from VoltAgent/awesome-design-md, but authored as a product-specific system rather than a brand clone."
 ---
 
-# Canvas MCP Editor DESIGN.md
+# Layo DESIGN.md
 
-This file defines how Canvas MCP Editor should look and feel. Agents should treat it as the project-level design source of truth, alongside the executable tokens in `apps/web/src/design-tokens.css` and `apps/web/src/design-tokens.ts`.
+This file defines how Layo should look and feel. Agents should treat it as the project-level design source of truth, alongside the executable tokens in `apps/web/src/design-tokens.css` and `apps/web/src/design-tokens.ts`.
 
 ## 1. Visual Theme & Atmosphere
 
-Canvas MCP Editor is an operational design tool, not a marketing surface. It should feel calm, technical, and built for repeated use.
+Layo is an operational design tool, not a marketing surface. It should feel calm, technical, and built for repeated use.
 
 - Primary feeling: precise, local-first, durable, inspectable.
 - Density: compact but not cramped.
@@ -145,4 +145,4 @@ When modifying UI:
 
 Quick prompt:
 
-> Build Canvas MCP Editor UI as a quiet, precise, local-first design tool. Use semantic design tokens only, keep panels compact, keep the stage bright and stable, and reserve accent colors for focus, selection, state, and MCP/AI affordances.
+> Build Layo UI as a quiet, precise, local-first design tool. Use semantic design tokens only, keep panels compact, keep the stage bright and stable, and reserve accent colors for focus, selection, state, and MCP/AI affordances.

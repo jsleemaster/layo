@@ -1,4 +1,4 @@
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument } from "@layo/renderer";
 
 export function parseDocumentPayload(payload: unknown): RendererDocument {
   if (!payload || typeof payload !== "object" || !("file" in payload)) {

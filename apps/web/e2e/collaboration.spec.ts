@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 test.beforeEach(async () => {
-  await rm(".canvas-mcp-editor", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
+  await rm(".layo", { recursive: true, force: true });
+  await rm("apps/server/.layo", { recursive: true, force: true });
 });
 
 async function createProjectFromEmptyState(page: Page) {
@@ -178,8 +178,8 @@ test("relay team syncs document edits between two browser contexts", async ({ br
 });
 
 test("two editors keep independent node move and text edits", async ({ browser }) => {
-  await rm(".canvas-mcp-editor/files/sample-file.json", { force: true });
-  await rm("apps/server/.canvas-mcp-editor/files/sample-file.json", { force: true });
+  await rm(".layo/files/sample-file.json", { force: true });
+  await rm("apps/server/.layo/files/sample-file.json", { force: true });
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
   const firstContext = await browser.newContext();

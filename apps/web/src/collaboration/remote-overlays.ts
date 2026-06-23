@@ -3,8 +3,8 @@ import type {
   CollaborationPresence,
   CollaborationSelectionBounds,
   CollaborationViewport
-} from "@canvas-mcp-editor/collaboration";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+} from "@layo/collaboration";
+import type { RendererDocument } from "@layo/renderer";
 import { findNodeById, getNodeAbsolutePosition } from "../editor-state";
 
 export interface PublishedCursor {

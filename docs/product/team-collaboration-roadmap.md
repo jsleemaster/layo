@@ -2,7 +2,7 @@
 
 Last checked: 2026-06-18
 
-This roadmap describes how Canvas MCP Editor should support team formation and
+This roadmap describes how Layo should support team formation and
 shared project work while staying local-first and team-owned. It complements the
 deployment details in `docs/deployment/collaboration.md`.
 

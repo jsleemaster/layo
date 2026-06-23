@@ -22,7 +22,7 @@ Add these tests near the top of `apps/server/src/storage.test.ts`, after the sam
 
 ```ts
   test("seeds a default project for the sample document", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     const projects = await storage.listProjects();
@@ -44,7 +44,7 @@ Add these tests near the top of `apps/server/src/storage.test.ts`, after the sam
   });
 
   test("creates, reads, renames, shares, and appends documents to projects", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     const created = await storage.createProject({
@@ -88,7 +88,7 @@ Add these tests near the top of `apps/server/src/storage.test.ts`, after the sam
   });
 
   test("rejects unsafe project and document ids", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
 
     await expect(
@@ -116,7 +116,7 @@ Add these tests near the top of `apps/server/src/storage.test.ts`, after the sam
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/storage.test.ts
+pnpm --filter @layo/server test -- src/storage.test.ts
 ```
 
 Expected: FAIL because `FileStorage` does not yet have `listProjects`, `createProject`, `updateProject`, `createProjectDocument`, or `setProjectSharing`.
@@ -380,7 +380,7 @@ function parseProjectManifest(input: unknown): ProjectManifest {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/storage.test.ts
+pnpm --filter @layo/server test -- src/storage.test.ts
 ```
 
 Expected: PASS.
@@ -406,7 +406,7 @@ Add this test after the first HTTP server test in `apps/server/src/http.test.ts`
 
 ```ts
   test("serves project create, read, update, document, and sharing routes", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const projects = await server.inject({ method: "GET", url: "/projects" });
@@ -475,7 +475,7 @@ Add this test after the first HTTP server test in `apps/server/src/http.test.ts`
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/http.test.ts
+pnpm --filter @layo/server test -- src/http.test.ts
 ```
 
 Expected: FAIL with 404 responses for `/projects`.
@@ -526,7 +526,7 @@ In `apps/server/src/http.ts`, register these routes immediately after `/health`:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/http.test.ts
+pnpm --filter @layo/server test -- src/http.test.ts
 ```
 
 Expected: PASS.
@@ -612,7 +612,7 @@ Add this test to `apps/server/src/mcp.test.ts` after the annotations test:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/mcp.test.ts
+pnpm --filter @layo/server test -- src/mcp.test.ts
 ```
 
 Expected: FAIL because project tools are not registered.
@@ -625,7 +625,7 @@ In `apps/server/src/mcp.ts`, register the project tools after `list_files`:
   server.registerTool(
     "list_projects",
     {
-      description: "List local Canvas MCP Editor projects and their document membership.",
+      description: "List local Layo projects and their document membership.",
       annotations: readOnlyToolAnnotations,
       inputSchema: {}
     },
@@ -760,7 +760,7 @@ In `apps/server/src/mcp.ts`, register the project tools after `list_files`:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/mcp.test.ts
+pnpm --filter @layo/server test -- src/mcp.test.ts
 ```
 
 Expected: PASS.
@@ -872,7 +872,7 @@ describe("indexeddb project store", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/project-api.test.ts src/project-store.test.ts
+pnpm --filter @layo/web test -- src/project-api.test.ts src/project-store.test.ts
 ```
 
 Expected: FAIL because `project-api.ts` and `project-store.ts` do not exist.
@@ -973,7 +973,7 @@ export interface IndexedDbProjectStoreOptions {
   indexedDB?: IDBFactory;
 }
 
-const DEFAULT_DATABASE_NAME = "canvas-mcp-editor-projects";
+const DEFAULT_DATABASE_NAME = "layo-projects";
 const DATABASE_VERSION = 1;
 const SETTINGS_STORE = "settings";
 const CURRENT_PROJECT_KEY = "currentProjectId";
@@ -1046,7 +1046,7 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/project-api.test.ts src/project-store.test.ts
+pnpm --filter @layo/web test -- src/project-api.test.ts src/project-store.test.ts
 ```
 
 Expected: PASS.
@@ -1073,10 +1073,10 @@ Add this test near the top of `apps/web/e2e/editor-mvp.spec.ts`:
 
 ```ts
 test("creates, reopens, and team-links a saved project", async ({ page }) => {
-  await rm(".canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm(".canvas-mcp-editor/files", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/files", { recursive: true, force: true });
+  await rm(".layo/projects", { recursive: true, force: true });
+  await rm(".layo/files", { recursive: true, force: true });
+  await rm("apps/server/.layo/projects", { recursive: true, force: true });
+  await rm("apps/server/.layo/files", { recursive: true, force: true });
 
   await page.goto("http://127.0.0.1:5173/");
   await expect(page.getByTestId("project-switcher")).toHaveValue("sample-project");
@@ -1264,14 +1264,14 @@ Add helper functions near the team actions:
 In the sidebar, replace:
 
 ```tsx
-            <h1>캔버스 MCP 에디터</h1>
+            <h1>Layo</h1>
             <p>{editor ? editor.document.name : "로컬 서버를 시작하면 샘플 파일을 불러옵니다."}</p>
 ```
 
 with:
 
 ```tsx
-            <h1>캔버스 MCP 에디터</h1>
+            <h1>Layo</h1>
             <section className="project-panel" aria-label="프로젝트">
               <label>
                 프로젝트
@@ -1398,10 +1398,10 @@ Add this section before `## Code Export` in `README.md`:
 ````md
 ## Projects
 
-Projects are saved as local-first manifests under `.canvas-mcp-editor/projects`.
+Projects are saved as local-first manifests under `.layo/projects`.
 Each `ProjectManifest` records the project name, current document, document
 membership, and sharing reference. Canvas contents remain in
-`.canvas-mcp-editor/files` as `DesignFile` JSON.
+`.layo/files` as `DesignFile` JSON.
 
 HTTP:
 
@@ -1435,8 +1435,8 @@ Current active implementation:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/storage.test.ts src/http.test.ts src/mcp.test.ts
-pnpm --filter @canvas-mcp-editor/web test -- src/project-api.test.ts src/project-store.test.ts
+pnpm --filter @layo/server test -- src/storage.test.ts src/http.test.ts src/mcp.test.ts
+pnpm --filter @layo/web test -- src/project-api.test.ts src/project-store.test.ts
 pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "creates, reopens, and team-links a saved project" --reporter=line
 ```
 
@@ -1450,7 +1450,7 @@ Run:
 pnpm test
 pnpm typecheck
 cargo test --workspace
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test:e2e
 ```
 

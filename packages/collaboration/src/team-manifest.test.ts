@@ -26,7 +26,7 @@ describe("team manifests", () => {
       currentUserId: "user-1",
       sync: {
         mode: "local",
-        roomPrefix: "canvas-mcp-editor"
+        roomPrefix: "layo"
       },
       permissions: {
         canEdit: true,
@@ -88,7 +88,7 @@ describe("team manifests", () => {
 
     expect(team.sync).toEqual({
       mode: "websocket",
-      roomPrefix: "canvas-mcp-editor",
+      roomPrefix: "layo",
       relayUrl: "ws://127.0.0.1:4327"
     });
     expect(team.members.map((member) => [member.userId, member.role])).toEqual([
@@ -137,7 +137,7 @@ describe("team manifests", () => {
         },
         sync: {
           mode: "websocket",
-          roomPrefix: "canvas-mcp-editor"
+          roomPrefix: "layo"
         }
       })
     ).toThrow(/relayUrl/i);
@@ -167,7 +167,7 @@ describe("team manifests", () => {
       ],
       sync: {
         mode: "websocket",
-        roomPrefix: "canvas-mcp-editor",
+        roomPrefix: "layo",
         relayUrl: "ws://127.0.0.1:4327"
       },
       permissions: {
@@ -242,7 +242,7 @@ describe("team manifests", () => {
       documents: [],
       sync: {
         mode: "local",
-        roomPrefix: "canvas-mcp-editor"
+        roomPrefix: "layo"
       },
       permissions: {
         canEdit: true,
@@ -293,7 +293,7 @@ describe("team manifests", () => {
         documents: [],
         sync: {
           mode: "local",
-          roomPrefix: "canvas-mcp-editor"
+          roomPrefix: "layo"
         }
       }).encryption
     ).toEqual({ mode: "none" });
@@ -315,7 +315,7 @@ describe("team manifests", () => {
       documents: [],
       sync: {
         mode: "websocket",
-        roomPrefix: "canvas-mcp-editor",
+        roomPrefix: "layo",
         relayUrl: "ws://127.0.0.1:4327",
         token: "plain-relay-token",
         memberToken: "plain-member-token"
@@ -339,7 +339,7 @@ describe("team manifests", () => {
       documents: [],
       sync: {
         mode: "websocket",
-        roomPrefix: "canvas-mcp-editor",
+        roomPrefix: "layo",
         relayUrl: "ws://127.0.0.1:4327"
       },
       permissions: {

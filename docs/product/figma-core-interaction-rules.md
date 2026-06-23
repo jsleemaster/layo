@@ -2,7 +2,7 @@
 
 Last checked: 2026-06-22
 
-This document records the Figma Design interaction rules that Canvas MCP Editor should adopt for core editing. It is intentionally scoped to direct manipulation behavior, not every Figma product surface. User-facing Canvas MCP Editor UI remains Korean-first.
+This document records the Figma Design interaction rules that Layo should adopt for core editing. It is intentionally scoped to direct manipulation behavior, not every Figma product surface. User-facing Layo UI remains Korean-first.
 
 ## Source Set
 

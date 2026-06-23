@@ -2,7 +2,7 @@
 
 Last checked: 2026-06-17
 
-This inventory is based on current Figma Learn and Figma developer documentation. It is intentionally broader than the current Canvas MCP Editor MVP so we can decide which Figma behaviors to adopt, adapt, defer, or exclude with a stable record.
+This inventory is based on current Figma Learn and Figma developer documentation. It is intentionally broader than the current Layo MVP so we can decide which Figma behaviors to adopt, adapt, defer, or exclude with a stable record.
 
 ## Source Set
 
@@ -34,7 +34,7 @@ This inventory is based on current Figma Learn and Figma developer documentation
 
 Figma currently spans these product surfaces:
 
-| Surface | What It Covers | Canvas MCP Editor Relevance |
+| Surface | What It Covers | Layo Relevance |
 | --- | --- | --- |
 | Figma Design | Interface design, layer editing, layout, components, design systems, prototyping, collaboration, import/export. | Core reference surface. This is the primary parity target. |
 | Dev Mode | Inspect, measure, export, annotations, ready-for-dev, Code Connect, MCP design context. | High relevance because this project is agent-operable and code-export oriented. |

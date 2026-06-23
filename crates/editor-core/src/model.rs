@@ -220,7 +220,7 @@ impl DesignFile {
                             opacity: 1.0,
                         },
                         content: NodeContent::Text {
-                            value: "캔버스 MCP 에디터".to_string(),
+                            value: "Layo".to_string(),
                             font_size: 28.0,
                             font_family: "Inter".to_string(),
                         },

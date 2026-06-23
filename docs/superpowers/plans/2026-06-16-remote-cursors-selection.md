@@ -22,7 +22,7 @@ Add expectations that `createPresenceState` returns `sessionId`, `viewport`, and
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/awareness.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/awareness.test.ts`
 Expected: FAIL because the new fields are not in the schema yet.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -35,7 +35,7 @@ Extend `CollaborationPresence` and the zod schema with:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/awareness.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/awareness.test.ts`
 Expected: PASS.
 
 ### Task 2: Overlay Geometry Utilities
@@ -54,7 +54,7 @@ Cover:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/remote-overlays.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/remote-overlays.test.ts`
 Expected: FAIL because the utility module does not exist.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -67,7 +67,7 @@ Implement pure helpers:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/remote-overlays.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/remote-overlays.test.ts`
 Expected: PASS.
 
 ### Task 3: Session Identity And Presence Publishing
@@ -82,7 +82,7 @@ Assert that a collaboration session exposes a stable local presence with a gener
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/collab-session.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/collab-session.test.ts`
 Expected: FAIL because the session does not expose local presence/session identity yet.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -91,7 +91,7 @@ Generate a local `sessionId` once per session, include it in initial presence, a
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/collab-session.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/collab-session.test.ts`
 Expected: PASS.
 
 ### Task 4: App Overlay Rendering
@@ -124,8 +124,8 @@ In the two-browser collaboration test, move page A's pointer and select a node, 
 - [ ] **Step 2: Run targeted checks**
 
 Run:
-- `pnpm --filter @canvas-mcp-editor/collaboration test -- src/awareness.test.ts`
-- `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/remote-overlays.test.ts src/collaboration/collab-session.test.ts`
+- `pnpm --filter @layo/collaboration test -- src/awareness.test.ts`
+- `pnpm --filter @layo/web test -- src/collaboration/remote-overlays.test.ts src/collaboration/collab-session.test.ts`
 - `pnpm typecheck`
 - `pnpm test:e2e:collab`
 

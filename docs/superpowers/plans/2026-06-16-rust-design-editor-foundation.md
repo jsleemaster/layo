@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the first runnable foundation for Canvas MCP Editor: monorepo scaffolding, Rust document core, local Fastify server, read-only MCP stdio entrypoint, and a minimal Vite React editor shell.
+**Goal:** Build the first runnable foundation for Layo: monorepo scaffolding, Rust document core, local Fastify server, read-only MCP stdio entrypoint, and a minimal Vite React editor shell.
 
 **Architecture:** Rust owns the document model, commands, geometry, and design-context generation. TypeScript owns the local server, MCP transport, web UI shell, and renderer adapter boundary. The first renderer is a thin Konva-backed adapter fed by document JSON rather than authoritative canvas state.
 
@@ -39,13 +39,13 @@ Create `package.json`:
 
 ```json
 {
-  "name": "canvas-mcp-editor",
+  "name": "layo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "pnpm -r build",
-    "dev": "pnpm --parallel --filter @canvas-mcp-editor/server --filter @canvas-mcp-editor/web dev",
+    "dev": "pnpm --parallel --filter @layo/server --filter @layo/web dev",
     "test": "pnpm -r test && cargo test --workspace",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint"
@@ -94,7 +94,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/jsleemaster/canvas-mcp-editor"
+repository = "https://github.com/jsleemaster/layo"
 ```
 
 Create `rust-toolchain.toml`:
@@ -306,7 +306,7 @@ impl DesignFile {
                             opacity: 1.0,
                         },
                         content: NodeContent::Text {
-                            value: "Canvas MCP Editor".to_string(),
+                            value: "Layo".to_string(),
                             font_size: 28.0,
                             font_family: "Inter".to_string(),
                         },
@@ -639,7 +639,7 @@ Create `apps/server/package.json`:
 
 ```json
 {
-  "name": "@canvas-mcp-editor/server",
+  "name": "@layo/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -711,7 +711,7 @@ export const sampleDocument = {
               },
               content: {
                 type: "text",
-                value: "Canvas MCP Editor",
+                value: "Layo",
                 font_size: 28,
                 font_family: "Inter"
               }
@@ -748,7 +748,7 @@ export interface StoredFileSummary {
 }
 
 export class FileStorage {
-  constructor(private readonly rootDir = path.join(process.cwd(), ".canvas-mcp-editor")) {}
+  constructor(private readonly rootDir = path.join(process.cwd(), ".layo")) {}
 
   private get filesDir() {
     return path.join(this.rootDir, "files");
@@ -829,14 +829,14 @@ import { FileStorage } from "./storage.js";
 
 export function createMcpServer(storage = new FileStorage()) {
   const server = new McpServer({
-    name: "canvas-mcp-editor",
+    name: "layo",
     version: "0.1.0"
   });
 
   server.registerTool(
     "list_files",
     {
-      description: "List local Canvas MCP Editor design files available to inspect.",
+      description: "List local Layo design files available to inspect.",
       inputSchema: {}
     },
     async () => ({
@@ -921,7 +921,7 @@ Run:
 
 ```bash
 pnpm install
-pnpm --filter @canvas-mcp-editor/server typecheck
+pnpm --filter @layo/server typecheck
 ```
 
 Expected:
@@ -956,7 +956,7 @@ Create `packages/renderer/package.json`:
 
 ```json
 {
-  "name": "@canvas-mcp-editor/renderer",
+  "name": "@layo/renderer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -1032,7 +1032,7 @@ Create `apps/web/package.json`:
 
 ```json
 {
-  "name": "@canvas-mcp-editor/web",
+  "name": "@layo/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -1044,7 +1044,7 @@ Create `apps/web/package.json`:
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@canvas-mcp-editor/renderer": "workspace:*",
+    "@layo/renderer": "workspace:*",
     "@vitejs/plugin-react": "^5.0.0",
     "vite": "^7.0.0",
     "react": "^19.0.0",
@@ -1082,7 +1082,7 @@ Create `apps/web/index.html`:
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Canvas MCP Editor</title>
+    <title>Layo</title>
   </head>
   <body>
     <div id="root"></div>
@@ -1111,7 +1111,7 @@ Create `apps/web/src/App.tsx`:
 ```tsx
 import { useEffect, useMemo, useState } from "react";
 import { Layer, Rect, Stage, Text } from "react-konva";
-import { flattenRendererNodes, type RendererDocument, type RendererNode } from "@canvas-mcp-editor/renderer";
+import { flattenRendererNodes, type RendererDocument, type RendererNode } from "@layo/renderer";
 
 function renderNode(node: RendererNode) {
   if (node.kind === "text" && node.content.type === "text") {
@@ -1161,7 +1161,7 @@ export function App() {
   return (
     <main className="app-shell">
       <aside className="sidebar">
-        <h1>Canvas MCP Editor</h1>
+        <h1>Layo</h1>
         <p>{document ? document.name : "Start the local server to load the sample file."}</p>
         <div className="layer-list">
           {nodes.map((node) => (
@@ -1259,8 +1259,8 @@ Run:
 
 ```bash
 pnpm install
-pnpm --filter @canvas-mcp-editor/renderer typecheck
-pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --filter @layo/renderer typecheck
+pnpm --filter @layo/web typecheck
 ```
 
 Expected:
@@ -1297,13 +1297,13 @@ pnpm install
 Run the local server:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
+pnpm --filter @layo/server dev
 ```
 
 Run the web editor:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/web dev
 ```
 
 Run checks:
@@ -1316,7 +1316,7 @@ cargo test --workspace
 Run the MCP server over stdio:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server mcp
+pnpm --filter @layo/server mcp
 ```
 ```
 
@@ -1327,7 +1327,7 @@ Run:
 ```bash
 pnpm typecheck
 cargo test --workspace
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 ```
 
 Expected:

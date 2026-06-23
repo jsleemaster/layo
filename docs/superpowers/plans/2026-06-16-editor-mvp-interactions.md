@@ -61,7 +61,7 @@ expect(findNodeById(undo(moved).document, "text-1")?.transform).toMatchObject({ 
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- editor-state.test.ts
+pnpm --filter @layo/web test -- editor-state.test.ts
 ```
 
 Expected: FAIL because `editor-state.ts` does not exist.
@@ -94,7 +94,7 @@ create_node
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- editor-state.test.ts
+pnpm --filter @layo/web test -- editor-state.test.ts
 ```
 
 Expected: PASS.
@@ -113,7 +113,7 @@ Add tests that verify rectangle/text creation, resize minimums, zoom range, and 
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- editor-state.test.ts
+pnpm --filter @layo/web test -- editor-state.test.ts
 ```
 
 Expected: FAIL until command support is complete.
@@ -134,7 +134,7 @@ right inspector: x, y, width, height, fill, text value
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test
+pnpm --filter @layo/web test
 ```
 
 Expected: PASS.
@@ -170,7 +170,7 @@ await server.inject({
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test
+pnpm --filter @layo/server test
 ```
 
 Expected: FAIL until storage/http edit methods exist.
@@ -201,7 +201,7 @@ POST /files/:fileId/nodes
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test
+pnpm --filter @layo/server test
 ```
 
 Expected: PASS.
@@ -230,7 +230,7 @@ Each tool returns structured JSON with `fileId`, `nodeId`, and the updated node 
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server typecheck
+pnpm --filter @layo/server typecheck
 ```
 
 Expected: PASS.
@@ -284,7 +284,7 @@ Run:
 ```bash
 pnpm test
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 ```
 
 Expected: PASS.
@@ -294,8 +294,8 @@ Expected: PASS.
 Start:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 ```
 
 - [ ] **Step 3: Verify with Playwright CLI**
@@ -303,7 +303,7 @@ pnpm --filter @canvas-mcp-editor/web dev
 Use Playwright CLI, not inferred testing:
 
 ```bash
-npx playwright screenshot --wait-for-timeout=1000 http://127.0.0.1:5173 /tmp/canvas-mcp-editor-mvp.png
+npx playwright screenshot --wait-for-timeout=1000 http://127.0.0.1:5173 /tmp/layo-mvp.png
 ```
 
 Then run a Playwright CLI script that:

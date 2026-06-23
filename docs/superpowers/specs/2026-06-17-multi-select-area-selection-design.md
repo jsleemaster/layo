@@ -2,7 +2,7 @@
 
 ## Goal
 
-Canvas MCP Editor should support the next Figma-like selection lane: Shift-click multi-selection and drag area selection. User-facing copy stays Korean-first, so the feature is described as "영역 선택" in UI and verification notes.
+Layo should support the next Figma-like selection lane: Shift-click multi-selection and drag area selection. User-facing copy stays Korean-first, so the feature is described as "영역 선택" in UI and verification notes.
 
 ## Current State
 

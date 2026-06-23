@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { rm } from "node:fs/promises";
 
 test.beforeEach(async () => {
-  await rm(".canvas-mcp-editor", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor", { recursive: true, force: true });
+  await rm(".layo", { recursive: true, force: true });
+  await rm("apps/server/.layo", { recursive: true, force: true });
 });
 
 async function openEmptyEditor(page: Page) {
@@ -189,10 +189,10 @@ test("filters projects and keeps recently opened projects first", async ({ page 
 });
 
 test("duplicates and deletes a saved project from the project panel", async ({ page }) => {
-  await rm(".canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm(".canvas-mcp-editor/files", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/projects", { recursive: true, force: true });
-  await rm("apps/server/.canvas-mcp-editor/files", { recursive: true, force: true });
+  await rm(".layo/projects", { recursive: true, force: true });
+  await rm(".layo/files", { recursive: true, force: true });
+  await rm("apps/server/.layo/projects", { recursive: true, force: true });
+  await rm("apps/server/.layo/files", { recursive: true, force: true });
 
   await page.goto("http://127.0.0.1:5173/");
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
@@ -322,7 +322,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
 
   await page.getByRole("button", { name: "확대" }).focus();
   await page.keyboard.press("Control+Z");
-  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 
   await page.keyboard.press("Control+Shift+Z");
   await expect(page.getByTestId("inspector-text")).toHaveValue("검증된 MVP 헤드라인");
@@ -380,7 +380,7 @@ test("canvas editor MVP supports Korean-first select, inspect, edit, undo, creat
   await page.getByRole("button", { name: agentName }).click();
   await expect(page.getByTestId("inspector-text")).toHaveValue(agentValue);
 
-  await page.screenshot({ path: "/tmp/canvas-mcp-editor-mvp-verified.png", fullPage: true });
+  await page.screenshot({ path: "/tmp/layo-mvp-verified.png", fullPage: true });
 });
 
 test("web editor fills the available work area with a white canvas", async ({ page }) => {
@@ -428,14 +428,14 @@ test("web editor fills the available work area with a white canvas", async ({ pa
 test("left sidebar can collapse from the top toolbar", async ({ page }) => {
   await createProjectFromEmptyState(page);
 
-  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Layo" })).toBeVisible();
   await page.getByRole("button", { name: "왼쪽 사이드바 접기" }).click();
-  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Layo" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "헤드라인" })).toHaveCount(0);
   await expect(page.getByTestId("stage-frame")).toBeVisible();
 
   await page.getByRole("button", { name: "왼쪽 사이드바 펼치기" }).click();
-  await expect(page.getByRole("heading", { name: "캔버스 MCP 에디터" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Layo" })).toBeVisible();
   await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
 });
 
@@ -485,14 +485,14 @@ test("Figma-like canvas input routing nudges layers, pans canvas, and zooms with
   await expect(page.getByTestId("inspector-x")).toHaveValue("33");
   await expect(page.getByTestId("inspector-y")).toHaveValue("50");
 
-  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
   await page.getByTestId("inspector-text").fill("키보드 단축키 검증");
   await expect(page.getByTestId("inspector-text")).toHaveValue("키보드 단축키 검증");
 
   await page.mouse.click(stageBox.x + 40, stageBox.y + 40);
   await page.keyboard.press("Control+Z");
   await page.getByRole("button", { name: "헤드라인" }).click();
-  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 
   await page.mouse.click(stageBox.x + 40, stageBox.y + 40);
   await page.keyboard.press("Control+Shift+Z");
@@ -516,7 +516,7 @@ test("text layers enter inline edit mode on double click", async ({ page }) => {
   const inlineEditor = page.getByTestId("inline-text-editor");
   await expect(inlineEditor).toBeVisible();
   await expect(inlineEditor).toBeFocused();
-  await expect(inlineEditor).toHaveValue("캔버스 MCP 에디터");
+  await expect(inlineEditor).toHaveValue("Layo");
 
   await inlineEditor.fill("더블클릭으로 바로 수정");
   await expect(page.getByTestId("inspector-text")).toHaveValue("더블클릭으로 바로 수정");
@@ -546,7 +546,7 @@ test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await page.keyboard.press("Control+D");
   await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
-  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 
   await page.keyboard.press("Backspace");
   await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toHaveCount(0);
@@ -568,7 +568,7 @@ test("Figma-like object clipboard copies and pastes selected layers", async ({ p
   await expect(firstPaste).toHaveClass(/is-selected/);
   await expect(page.getByTestId("inspector-x")).toHaveValue("56");
   await expect(page.getByTestId("inspector-y")).toHaveValue("64");
-  await expect(page.getByTestId("inspector-text")).toHaveValue("캔버스 MCP 에디터");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 
   await page.keyboard.press("Control+V");
   const secondPaste = page.getByRole("button", { name: "헤드라인 복사본 2" });

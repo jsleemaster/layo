@@ -1,6 +1,6 @@
 # Collaboration Deployment
 
-Canvas MCP Editor keeps the public web app deployable as static files. Real-time collaboration is optional and should be owned by the team using the editor.
+Layo keeps the public web app deployable as static files. Real-time collaboration is optional and should be owned by the team using the editor.
 
 ## Components
 
@@ -14,8 +14,8 @@ Canvas MCP Editor keeps the public web app deployable as static files. Real-time
 Use separate terminals:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 pnpm dev:collab
 ```
 
@@ -32,7 +32,7 @@ relay: ws://127.0.0.1:4327
 The web app can be built and served without a central collaboration relay, but it still needs a project API server for project manifests, documents, and uploaded assets. A static-only host is useful for a shell preview only unless `VITE_API_BASE_URL` points at a reachable `apps/server` deployment.
 
 ```bash
-VITE_API_BASE_URL=https://your-api.example.com pnpm --filter @canvas-mcp-editor/web build
+VITE_API_BASE_URL=https://your-api.example.com pnpm --filter @layo/web build
 ```
 
 Serve `apps/web/dist` from Vercel static output, Netlify, nginx, or another static host only when the API server is deployed separately. This repository does not install an automatic GitHub Pages deployment workflow.
@@ -43,7 +43,7 @@ For a remote editor that can create projects, save documents, upload images, and
 
 ```bash
 pnpm build:fullstack
-HOST=0.0.0.0 PORT=4317 pnpm --filter @canvas-mcp-editor/server start
+HOST=0.0.0.0 PORT=4317 pnpm --filter @layo/server start
 ```
 
 Set `WEB_DIST_DIR` if the built web directory is not `apps/web/dist`, and set `WEB_BASE_PATH` if the editor should not be served from `/app/`.
@@ -55,8 +55,8 @@ Teams that need real-time editing configure their own relay URL inside the team 
 For local collaboration testing, run the server, web app, and relay in separate terminals:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 pnpm dev:collab
 ```
 
@@ -92,7 +92,7 @@ Deploy the same Docker image to a team-owned host such as Fly.io, Render, Railwa
 ```bash
 COLLAB_RELAY_HOST=0.0.0.0
 COLLAB_RELAY_PORT=4327
-COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:
+COLLAB_ALLOWED_ROOM_PREFIX=layo:
 COLLAB_ROOM_TOKEN=
 COLLAB_MEMBER_TOKENS=[]
 ```
@@ -133,7 +133,7 @@ For sensitive work, run the relay inside a trusted private network or VPN and ke
 ```bash
 COLLAB_RELAY_HOST=127.0.0.1
 COLLAB_RELAY_PORT=4327
-COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:
+COLLAB_ALLOWED_ROOM_PREFIX=layo:
 COLLAB_ROOM_TOKEN=
 COLLAB_MEMBER_TOKENS=[]
 ```

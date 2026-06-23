@@ -1,7 +1,7 @@
 .DS_Store
 .git
 .github
-.canvas-mcp-editor
+.layo
 .worktrees
 node_modules
 dist

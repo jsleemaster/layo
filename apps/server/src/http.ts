@@ -295,7 +295,7 @@ function registerStaticWebRoutes(
     server.get(basePathWithoutTrailingSlash, async (_request, reply) => reply.redirect(options.basePath));
   }
   server.get(`${options.basePath}*`, async (request, reply) => {
-    const requestPath = new URL(request.url, "http://canvas-mcp-editor.local").pathname;
+    const requestPath = new URL(request.url, "http://layo.local").pathname;
     const relativePath = decodeURIComponent(requestPath.slice(options.basePath.length)) || "index.html";
     const response = await readStaticWebFile(distRoot, relativePath);
 

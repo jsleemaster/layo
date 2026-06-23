@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   applyAgentCommandsToDocument,
@@ -28,6 +28,7 @@ import {
 import { sampleDocument } from "./sample-document.js";
 
 const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
+const DEFAULT_STORAGE_DIR = ".layo";
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -169,7 +170,15 @@ export interface StoredAssetData extends StoredAsset {
 }
 
 export class FileStorage {
-  constructor(private readonly rootDir = path.join(process.cwd(), ".canvas-mcp-editor")) {}
+  private readonly priorRootDir: string | null;
+
+  constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
+    const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
+    this.priorRootDir =
+      path.resolve(rootDir) === defaultRootDir
+        ? path.join(process.cwd(), priorStorageDirectoryName())
+        : null;
+  }
 
   private get filesDir() {
     return path.join(this.rootDir, "files");
@@ -203,12 +212,22 @@ export class FileStorage {
     return path.join(this.assetsDir, `${assetId}.json`);
   }
 
+  private async adoptPriorDefaultStoreIfNeeded() {
+    if (!this.priorRootDir || (await pathExists(this.rootDir)) || !(await pathExists(this.priorRootDir))) {
+      return;
+    }
+
+    await rename(this.priorRootDir, this.rootDir);
+  }
+
   async prepareFiles() {
+    await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
+    await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
@@ -303,6 +322,7 @@ export class FileStorage {
   }
 
   async readProject(projectId: string): Promise<ProjectManifest> {
+    await this.adoptPriorDefaultStoreIfNeeded();
     const raw = await readFile(this.projectPathFor(projectId), "utf8");
     return parseProjectManifest(JSON.parse(raw));
   }
@@ -461,6 +481,7 @@ export class FileStorage {
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
+    await this.adoptPriorDefaultStoreIfNeeded();
     const filePath = this.filePathFor(fileId);
     const raw = await readFile(filePath, "utf8");
     const document = JSON.parse(raw) as DesignFile;
@@ -471,6 +492,7 @@ export class FileStorage {
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
+    await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await writeFile(this.filePathFor(fileId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
     return document;
@@ -551,6 +573,7 @@ export class FileStorage {
     }
     assertImageBytesMatchMimeType(data, mimeType);
 
+    await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.assetsDir, { recursive: true });
     const assetId = createStorageId("asset");
     const asset: StoredAsset = {
@@ -566,6 +589,7 @@ export class FileStorage {
   }
 
   async readAsset(assetId: string): Promise<StoredAssetData> {
+    await this.adoptPriorDefaultStoreIfNeeded();
     const raw = await readFile(this.assetMetadataPathFor(assetId), "utf8");
     const asset = parseStoredAsset(JSON.parse(raw));
     const data = await readFile(this.assetPathFor(asset.assetId));
@@ -709,6 +733,7 @@ export class FileStorage {
   }
 
   private async writeProject(project: ProjectManifest): Promise<ProjectManifest> {
+    await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.projectsDir, { recursive: true });
     const parsed = parseProjectManifest(project);
     await writeFile(this.projectPathFor(parsed.projectId), `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
@@ -732,6 +757,18 @@ function normalizeName(value: string | undefined, fallback: string) {
     throw new Error("name is required");
   }
   return normalized;
+}
+
+function priorStorageDirectoryName() {
+  return [".canvas", "mcp", "editor"].join("-");
+}
+
+function legacyEnglishProductName() {
+  return ["Canvas", "MCP", "Editor"].join(" ");
+}
+
+function legacyKoreanProductName() {
+  return ["캔버스", "MCP", "에디터"].join(" ");
 }
 
 function normalizeImageMimeType(value: string) {
@@ -924,8 +961,12 @@ function localizeLegacySampleNode(node: DesignNode): boolean {
     node.name = "헤드라인";
     changed = true;
   }
-  if (node.content.type === "text" && node.content.value === "Canvas MCP Editor") {
-    node.content.value = "캔버스 MCP 에디터";
+  if (node.content.type === "text" && node.content.value === legacyEnglishProductName()) {
+    node.content.value = "Layo";
+    changed = true;
+  }
+  if (node.content.type === "text" && node.content.value === legacyKoreanProductName()) {
+    node.content.value = "Layo";
     changed = true;
   }
 

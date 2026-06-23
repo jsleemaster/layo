@@ -1,8 +1,8 @@
-# Figma To Canvas MCP Editor Migration Roadmap
+# Figma To Layo Migration Roadmap
 
 Last checked: 2026-06-22
 
-This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Canvas MCP Editor. It does not change the product position: this project remains a local-first, AI-operable design editor, not a feature-for-feature Figma clone.
+This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Layo. It does not change the product position: this project remains a local-first, AI-operable design editor, not a feature-for-feature Figma clone.
 
 ## Migration Rules
 

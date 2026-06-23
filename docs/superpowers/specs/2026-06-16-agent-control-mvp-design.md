@@ -2,7 +2,7 @@
 
 ## Context
 
-Canvas MCP Editor already exposes basic MCP and HTTP write tools for node creation, geometry, fill, text, and component operations. That is enough for isolated edits, but it is not enough for an agent to work reliably across a design task. An agent needs to inspect a compact canvas summary, find target nodes, apply multiple changes atomically enough for a local JSON file, validate the result, and report what changed.
+Layo already exposes basic MCP and HTTP write tools for node creation, geometry, fill, text, and component operations. That is enough for isolated edits, but it is not enough for an agent to work reliably across a design task. An agent needs to inspect a compact canvas summary, find target nodes, apply multiple changes atomically enough for a local JSON file, validate the result, and report what changed.
 
 ## Direction
 

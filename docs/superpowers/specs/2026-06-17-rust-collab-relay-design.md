@@ -21,7 +21,7 @@ Objective 5 adds an experimental Rust collaboration relay that can serve the enc
 The Rust relay handles websocket URLs with the same room path shape:
 
 ```text
-ws://127.0.0.1:4327/canvas-mcp-editor:{teamId}:{documentId}?e2ee=true
+ws://127.0.0.1:4327/layo:{teamId}:{documentId}?e2ee=true
 ```
 
 Supported query parameters:
@@ -47,7 +47,7 @@ Configuration mirrors the TypeScript relay:
 
 - `COLLAB_RELAY_HOST`, default `127.0.0.1`
 - `COLLAB_RELAY_PORT`, default `4327`
-- `COLLAB_ALLOWED_ROOM_PREFIX`, default `canvas-mcp-editor`
+- `COLLAB_ALLOWED_ROOM_PREFIX`, default `layo`
 - `COLLAB_ROOM_TOKEN`, optional plaintext local/dev token
 - `COLLAB_ROOM_TOKEN_HASH`, optional SHA-256 token hash
 - `COLLAB_MEMBER_TOKENS`, optional JSON array of `{ "userId": "...", "token": "...", "role": "owner|editor|viewer" }` or `{ "userId": "...", "tokenHash": "...", "role": "owner|editor|viewer" }`

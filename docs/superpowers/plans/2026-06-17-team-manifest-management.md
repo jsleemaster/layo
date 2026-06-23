@@ -38,7 +38,7 @@ Cover:
 
 - [x] **Step 2: Verify RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts`
 Expected: FAIL because migration/validation helpers do not exist yet.
 
 - [x] **Step 3: Implement migration/validation**
@@ -47,7 +47,7 @@ Implement migration as a pure function in `packages/collaboration/src/team-manif
 
 - [x] **Step 4: Verify GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts`
 Expected: PASS.
 
 ### Task 2: Web Manifest I/O Helpers
@@ -73,7 +73,7 @@ Cover:
 
 - [x] **Step 2: Verify RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/team-store.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/team-store.test.ts`
 Expected: FAIL because helper functions do not exist.
 
 - [x] **Step 3: Implement helpers**
@@ -82,7 +82,7 @@ Keep helpers framework-independent and use `parseTeamManifest` so secret strippi
 
 - [x] **Step 4: Verify GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/team-store.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/team-store.test.ts`
 Expected: PASS.
 
 ### Task 3: Web UI Import/Export Flow
@@ -129,11 +129,11 @@ Cover:
 - [x] **Step 2: Run target checks**
 
 Run:
-- `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts`
-- `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/team-store.test.ts`
+- `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts`
+- `pnpm --filter @layo/web test -- src/collaboration/team-store.test.ts`
 - `pnpm test`
 - `pnpm typecheck`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm test:e2e:collab`
 - `git diff --check`
 

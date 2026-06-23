@@ -172,7 +172,7 @@ const teamManifestSchema = z.object({
   encryption: teamEncryptionConfigSchema.default({ mode: "none" })
 });
 
-const DEFAULT_ROOM_PREFIX = "canvas-mcp-editor";
+const DEFAULT_ROOM_PREFIX = "layo";
 const DEFAULT_E2EE_ITERATIONS = 210000;
 
 export type TeamManifestValidationResult =

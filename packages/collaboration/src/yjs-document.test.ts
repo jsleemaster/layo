@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import * as Y from "yjs";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument } from "@layo/renderer";
 import { createCollaborativeDesignDocument } from "./yjs-document";
 
 function sampleDocument(): RendererDocument {
@@ -21,7 +21,7 @@ function sampleDocument(): RendererDocument {
             style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
             content: {
               type: "text",
-              value: "Canvas MCP Editor",
+              value: "Layo",
               font_size: 28,
               font_family: "Inter"
             },

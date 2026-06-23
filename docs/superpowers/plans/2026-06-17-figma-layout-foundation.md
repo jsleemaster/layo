@@ -78,7 +78,7 @@ Run before PR:
 ```bash
 pnpm test
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test:e2e
 pnpm test:e2e:collab
 cargo test --workspace

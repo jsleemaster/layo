@@ -6,7 +6,7 @@
 
 **Architecture:** Reuse the existing `getSelectionBoundsForNodeIds` absolute-bound calculation and `selectionChromeOverlay` DOM layer. Keep resize handles single-selection only in this slice, so this task prepares the UI contract for later multi-selection bounding-box resize without changing resize behavior yet.
 
-**Tech Stack:** React, TypeScript, Vite, Playwright e2e, existing Canvas MCP Editor design tokens.
+**Tech Stack:** React, TypeScript, Vite, Playwright e2e, existing Layo design tokens.
 
 ## Global Constraints
 
@@ -85,7 +85,7 @@ Run:
 ```bash
 pnpm typecheck
 pnpm test:e2e
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "multi-selection group bounds" --headed --workers=1 --reporter=line
 ```
@@ -101,7 +101,7 @@ Verification completed before PR:
 - `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "multi-selection group bounds|resize handles|alignment and distribution|Figma-like multi-selection" --reporter=line`
 - `pnpm typecheck`
 - `pnpm test:e2e`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm test`
 - `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "multi-selection group bounds" --headed --workers=1 --reporter=line`
 

@@ -41,7 +41,7 @@ Add tests that create a shared-key manifest, preserve only non-secret encryption
 
 - [x] **Step 2: Verify manifest RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts`
 Expected: FAIL because encryption metadata helpers and redaction do not exist yet.
 
 - [x] **Step 3: Implement manifest metadata**
@@ -50,7 +50,7 @@ Add `TeamEncryptionConfig`, schema validation, create input support, legacy defa
 
 - [x] **Step 4: Verify manifest GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts`
 Expected: PASS.
 
 - [x] **Step 5: Write failing crypto tests**
@@ -59,7 +59,7 @@ Cover AES-GCM round-trip, wrong passphrase rejection, unique IVs, and empty pass
 
 - [x] **Step 6: Verify crypto RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/e2ee.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/e2ee.test.ts`
 Expected: FAIL because `src/e2ee.ts` does not exist yet.
 
 - [x] **Step 7: Implement crypto helpers**
@@ -68,7 +68,7 @@ Use Web Crypto PBKDF2-SHA-256 and AES-GCM. Encode salt and IV as base64url strin
 
 - [x] **Step 8: Verify crypto GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/collaboration test -- src/e2ee.test.ts`
+Run: `pnpm --filter @layo/collaboration test -- src/e2ee.test.ts`
 Expected: PASS.
 
 ### Task 2: Encrypted Relay Room Mode
@@ -87,7 +87,7 @@ Add tests that encrypted rooms broadcast opaque encrypted frames without mutatin
 
 - [x] **Step 2: Verify relay RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/collab-relay test -- src/index.test.ts`
+Run: `pnpm --filter @layo/collab-relay test -- src/index.test.ts`
 Expected: FAIL because encrypted room mode does not exist.
 
 - [x] **Step 3: Implement relay mode**
@@ -96,7 +96,7 @@ Track each room as `mode: "plain" | "encrypted"`. Plain rooms keep current Yjs s
 
 - [x] **Step 4: Verify relay GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/collab-relay test -- src/index.test.ts`
+Run: `pnpm --filter @layo/collab-relay test -- src/index.test.ts`
 Expected: PASS.
 
 ### Task 3: Web Encrypted Provider
@@ -118,7 +118,7 @@ Cover websocket URL includes `e2ee=true`, encrypted document frames do not conta
 
 - [x] **Step 2: Verify provider RED**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
 Expected: FAIL because encrypted provider/session wiring does not exist.
 
 - [x] **Step 3: Implement provider**
@@ -131,7 +131,7 @@ When `team.encryption.mode === "shared-key"`, require `encryptionPassphrase` and
 
 - [x] **Step 5: Verify provider GREEN**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
+Run: `pnpm --filter @layo/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
 Expected: PASS.
 
 ### Task 4: Team UI And E2E
@@ -167,12 +167,12 @@ Document that document updates are encrypted through the relay, presence remains
 - [x] **Step 5: Verify all checks**
 
 Run:
-- `pnpm --filter @canvas-mcp-editor/collaboration test -- src/team-manifest.test.ts src/e2ee.test.ts`
-- `pnpm --filter @canvas-mcp-editor/collab-relay test -- src/index.test.ts`
-- `pnpm --filter @canvas-mcp-editor/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
+- `pnpm --filter @layo/collaboration test -- src/team-manifest.test.ts src/e2ee.test.ts`
+- `pnpm --filter @layo/collab-relay test -- src/index.test.ts`
+- `pnpm --filter @layo/web test -- src/collaboration/encrypted-provider.test.ts src/collaboration/collab-session.test.ts`
 - `pnpm test`
 - `pnpm typecheck`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - `pnpm test:e2e:collab`
 - `git diff --check`
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { CollaborationPresence } from "@canvas-mcp-editor/collaboration";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { CollaborationPresence } from "@layo/collaboration";
+import type { RendererDocument } from "@layo/renderer";
 import {
   documentPointToViewport,
   getRemotePresence,

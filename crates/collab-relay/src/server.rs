@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn parses_upgrade_targets_from_query() {
         let target = parse_upgrade_target(
-            "canvas-mcp-editor:team:doc".to_string(),
+            "layo:team:doc".to_string(),
             &[
                 ("e2ee".to_string(), "true".to_string()),
                 ("access".to_string(), "awareness".to_string()),
@@ -196,7 +196,7 @@ mod tests {
         )
         .expect("target parses");
 
-        assert_eq!(target.room_id, "canvas-mcp-editor:team:doc");
+        assert_eq!(target.room_id, "layo:team:doc");
         assert!(target.encrypted);
         assert_eq!(target.access, AccessMode::Awareness);
         assert_eq!(target.user_id.as_deref(), Some("viewer-1"));

@@ -1,7 +1,7 @@
 import {
   createCollaborativeDesignDocument,
   createDocumentRoomId
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 import WebSocket from "ws";
 import { WebsocketProvider } from "y-websocket";
 import * as Y from "yjs";

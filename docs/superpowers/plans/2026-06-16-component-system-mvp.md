@@ -38,7 +38,7 @@
 - [ ] Implement server storage and HTTP component routes.
 - [ ] Add MCP tools: `list_components`, `create_component`, `create_component_instance`, `detach_instance`.
 - [ ] Extend Playwright e2e to click Create Component, Create Instance, and Detach Instance.
-- [ ] Run `pnpm test`, `pnpm typecheck`, `pnpm --filter @canvas-mcp-editor/web build`, and `pnpm test:e2e` against the current branch.
+- [ ] Run `pnpm test`, `pnpm typecheck`, `pnpm --filter @layo/web build`, and `pnpm test:e2e` against the current branch.
 
 ## Completion Rule
 

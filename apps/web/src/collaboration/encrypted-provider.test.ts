@@ -5,8 +5,8 @@ import {
   deriveSharedKey,
   encryptYjsUpdate,
   type SharedKeyEncryptionConfig
-} from "@canvas-mcp-editor/collaboration";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+} from "@layo/collaboration";
+import type { RendererDocument } from "@layo/renderer";
 import * as Y from "yjs";
 import {
   createEncryptedProvider,
@@ -234,7 +234,7 @@ function createTestProvider(input: {
   }
   return createEncryptedProvider({
     relayUrl: "ws://127.0.0.1:4327",
-    roomId: "canvas-mcp-editor:team-1:sample-file",
+    roomId: "layo:team-1:sample-file",
     userId: "user-1",
     access: "sync",
     ydoc: input.ydoc,
@@ -284,7 +284,7 @@ function sampleDocument(): RendererDocument {
             style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
             content: {
               type: "text",
-              value: "Canvas MCP Editor",
+              value: "Layo",
               font_size: 28,
               font_family: "Inter"
             },

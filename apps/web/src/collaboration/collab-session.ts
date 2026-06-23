@@ -1,4 +1,4 @@
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument } from "@layo/renderer";
 import {
   createCollaborativeDesignDocument,
   createDocumentRoomId,
@@ -6,7 +6,7 @@ import {
   summarizeAwarenessStates,
   type CollaborationPresence,
   type TeamManifest
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 import { Awareness } from "y-protocols/awareness";
 import { WebsocketProvider } from "y-websocket";
 import { IndexeddbPersistence } from "y-indexeddb";

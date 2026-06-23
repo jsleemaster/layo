@@ -1,5 +1,5 @@
 {
-  "name": "@canvas-mcp-editor/collaboration",
+  "name": "@layo/collaboration",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@canvas-mcp-editor/renderer": "workspace:*",
+    "@layo/renderer": "workspace:*",
     "y-protocols": "^1.0.7",
     "y-websocket": "^3.0.0",
     "yjs": "^13.6.27",

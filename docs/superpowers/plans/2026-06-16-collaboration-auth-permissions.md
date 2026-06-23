@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add relay authentication and owner/editor/viewer authorization for Canvas MCP Editor collaboration.
+**Goal:** Add relay authentication and owner/editor/viewer authorization for Layo collaboration.
 
 **Architecture:** Extend the shared team manifest with roles and relay token-hash metadata, pass runtime credentials separately from exported manifests, and enforce member authorization at the relay websocket boundary. Preserve local-only collaboration and file-backed agent command behavior.
 

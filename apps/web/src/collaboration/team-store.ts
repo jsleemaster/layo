@@ -1,7 +1,7 @@
 import {
   parseTeamManifest,
   type TeamManifest
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 
 export interface TeamStore {
   listTeams(): Promise<TeamManifest[]>;
@@ -16,7 +16,7 @@ export interface IndexedDbTeamStoreOptions {
   indexedDB?: IDBFactory;
 }
 
-const DEFAULT_DATABASE_NAME = "canvas-mcp-editor-collaboration";
+const DEFAULT_DATABASE_NAME = "layo-collaboration";
 const DATABASE_VERSION = 1;
 const TEAMS_STORE = "teams";
 const SETTINGS_STORE = "settings";

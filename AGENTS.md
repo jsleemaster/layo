@@ -1,10 +1,10 @@
-# Canvas MCP Editor Agent Guide
+# Layo Agent Guide
 
 Read this first when working in this repository.
 
 ## What This App Is
 
-Canvas MCP Editor is a local-first, AI-operable design editor. It is not a full Figma clone. The current goal is a small design editor with a stable document model that humans can edit in a browser and AI agents can inspect, mutate, validate, and export through deterministic MCP and HTTP tools.
+Layo is a local-first, AI-operable design editor. It is not a full Figma clone. The current goal is a small design editor with a stable document model that humans can edit in a browser and AI agents can inspect, mutate, validate, and export through deterministic MCP and HTTP tools.
 
 The app supports these core workflows:
 
@@ -71,13 +71,13 @@ pnpm install
 Run the local API server:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
+pnpm --filter @layo/server dev
 ```
 
 Run the web editor:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/web dev
 ```
 
 Run the TypeScript collaboration relay:
@@ -95,7 +95,7 @@ pnpm dev:collab:rust
 Run the MCP server over stdio:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server mcp
+pnpm --filter @layo/server mcp
 ```
 
 Run core verification:
@@ -104,7 +104,7 @@ Run core verification:
 pnpm typecheck
 pnpm test
 cargo test --workspace
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 ```
 
 Run collaboration e2e against the TypeScript relay:

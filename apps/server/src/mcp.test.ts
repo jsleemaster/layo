@@ -246,8 +246,8 @@ describe("MCP AI editing workflow", () => {
 });
 
 async function connectMcpClient() {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-mcp-"));
-  activeClient = new Client({ name: "canvas-mcp-editor-test", version: "1.0.0" });
+  tempRoot = await mkdtemp(path.join(tmpdir(), "layo-mcp-"));
+  activeClient = new Client({ name: "layo-test", version: "1.0.0" });
   activeServer = createMcpServer(new FileStorage(tempRoot));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 

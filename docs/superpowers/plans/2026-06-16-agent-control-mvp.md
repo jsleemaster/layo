@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a deterministic agent-control layer so agents can inspect, search, batch-edit, dry-run, validate, summarize, and visually verify Canvas MCP Editor files.
+**Goal:** Add a deterministic agent-control layer so agents can inspect, search, batch-edit, dry-run, validate, summarize, and visually verify Layo files.
 
 **Architecture:** Put pure agent-control behavior in a new server module so storage, HTTP, and MCP share one implementation. Storage remains the persistence boundary; HTTP and MCP expose the same semantics. Playwright verifies rendered output after an HTTP agent command writes a change.
 
@@ -41,7 +41,7 @@ Expected test behaviors:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- storage.test.ts
+pnpm --filter @layo/server test -- storage.test.ts
 ```
 
 Expected: FAIL because the methods do not exist.
@@ -117,7 +117,7 @@ For `dryRun: true`, do not call `writeFile`. For `dryRun: false`, write the prev
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- storage.test.ts
+pnpm --filter @layo/server test -- storage.test.ts
 ```
 
 Expected: PASS.
@@ -164,7 +164,7 @@ change-summary: { before: DesignFile; after: DesignFile }
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- http.test.ts
+pnpm --filter @layo/server test -- http.test.ts
 ```
 
 Expected: PASS.
@@ -200,7 +200,7 @@ Use Zod schemas that match the HTTP inputs.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server typecheck
+pnpm --filter @layo/server typecheck
 ```
 
 Expected: PASS.
@@ -225,8 +225,8 @@ In the existing Playwright e2e, call the HTTP agent command endpoint to create a
 Run requires both dev servers:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 pnpm test:e2e
 ```
 
@@ -250,7 +250,7 @@ Update README with:
 Run:
 
 ```bash
-pnpm test && pnpm typecheck && pnpm --filter @canvas-mcp-editor/web build && pnpm test:e2e
+pnpm test && pnpm typecheck && pnpm --filter @layo/web build && pnpm test:e2e
 ```
 
 Expected: PASS.

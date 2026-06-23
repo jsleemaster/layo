@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add Figma-like Shift-click multi-selection and drag area selection to Canvas MCP Editor.
+**Goal:** Add Figma-like Shift-click multi-selection and drag area selection to Layo.
 
 **Architecture:** Extend `EditorSelection` with an ordered `nodeIds` list while preserving `nodeId` as the primary selection for existing commands. Add pure editor-state helpers for toggle and bounds selection, then route Shift-click and empty-canvas drag interactions through `App.tsx`. Render a DOM area selection overlay so Playwright and direct live UI verification can prove the visible behavior.
 
@@ -75,7 +75,7 @@ test("selects fully enclosed nodes in document bounds without selecting their pa
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "multi-selection|fully enclosed"
+pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "multi-selection|fully enclosed"
 ```
 
 Expected: FAIL because `nodeIds`, `toggleSelection`, and `selectNodesInBounds` do not exist.
@@ -89,7 +89,7 @@ Add selection normalization helpers that keep only existing node ids, preserve i
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "multi-selection|fully enclosed"
+pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "multi-selection|fully enclosed"
 ```
 
 Expected: PASS.
@@ -162,10 +162,10 @@ Run:
 
 ```bash
 git diff --check
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts
+pnpm --filter @layo/web test -- src/editor-state.test.ts
 pnpm test:e2e
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm test:e2e:collab
 ```

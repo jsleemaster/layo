@@ -40,7 +40,7 @@ Required commands:
 
 ```bash
 node --test scripts/check-deployment-artifacts.test.mjs
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm typecheck
 ```
@@ -48,6 +48,6 @@ pnpm typecheck
 If Docker is available, also run:
 
 ```bash
-docker build -f apps/collab-relay/Dockerfile -t canvas-mcp-editor-collab-relay .
+docker build -f apps/collab-relay/Dockerfile -t layo-collab-relay .
 docker compose --env-file deploy/collab-relay/.env.example -f deploy/collab-relay/docker-compose.yml config
 ```

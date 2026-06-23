@@ -151,7 +151,7 @@ The local server provides:
 The initial storage format is filesystem-backed:
 
 ```text
-.canvas-mcp-editor/
+.layo/
   files/
     <file-id>.json
   assets/

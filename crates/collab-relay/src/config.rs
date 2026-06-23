@@ -93,7 +93,7 @@ impl Default for RelayConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 4327,
-            allowed_room_prefix: "canvas-mcp-editor".to_string(),
+            allowed_room_prefix: "layo".to_string(),
             room_token_hash: None,
             member_tokens: Vec::new(),
         }
@@ -254,7 +254,7 @@ mod tests {
         let config = RelayConfig::from_env_vars([
             (
                 "COLLAB_ALLOWED_ROOM_PREFIX".to_string(),
-                "canvas-mcp-editor".to_string(),
+                "layo".to_string(),
             ),
             ("COLLAB_ROOM_TOKEN".to_string(), "room-secret".to_string()),
         ])
@@ -262,7 +262,7 @@ mod tests {
 
         let auth = config
             .validate_upgrade(&UpgradeTarget {
-                room_id: "canvas-mcp-editor:team:doc".to_string(),
+                room_id: "layo:team:doc".to_string(),
                 token: Some("room-secret".to_string()),
                 user_id: None,
                 member_token: None,
@@ -280,7 +280,7 @@ mod tests {
 
         let error = config
             .validate_upgrade(&UpgradeTarget {
-                room_id: "canvas-mcp-editor:team:doc".to_string(),
+                room_id: "layo:team:doc".to_string(),
                 token: None,
                 user_id: None,
                 member_token: None,
@@ -302,7 +302,7 @@ mod tests {
 
         let auth = config
             .validate_upgrade(&UpgradeTarget {
-                room_id: "canvas-mcp-editor:team:doc".to_string(),
+                room_id: "layo:team:doc".to_string(),
                 token: None,
                 user_id: Some("viewer-1".to_string()),
                 member_token: Some("viewer-secret".to_string()),

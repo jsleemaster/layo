@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build static web and team-owned relay deployment automation for Canvas MCP Editor.
+**Goal:** Build static web and team-owned relay deployment automation for Layo.
 
 **Architecture:** Keep `apps/web` deployable as a static artifact and keep `apps/collab-relay` self-hosted by teams. Add executable artifact checks so workflow, Docker, compose, env, and docs drift is caught by `pnpm test`.
 
@@ -41,7 +41,7 @@ Expected: FAIL because the deployment files do not exist yet.
 
 - [ ] **Step 1: Add a GitHub Pages workflow.**
 
-The workflow checks out code, sets up pnpm, installs dependencies, builds `@canvas-mcp-editor/web`, uploads `apps/web/dist`, and deploys with GitHub Pages actions.
+The workflow checks out code, sets up pnpm, installs dependencies, builds `@layo/web`, uploads `apps/web/dist`, and deploys with GitHub Pages actions.
 
 - [ ] **Step 2: Run deployment artifact test.**
 
@@ -62,7 +62,7 @@ Expected: still FAIL until Docker, compose, env, and docs updates are added.
 
 - [ ] **Step 1: Add a relay Dockerfile.**
 
-Use a Node 22 Alpine image, enable Corepack, install pnpm dependencies with the lockfile, copy the workspace, expose `4327`, and start `pnpm --filter @canvas-mcp-editor/collab-relay start`.
+Use a Node 22 Alpine image, enable Corepack, install pnpm dependencies with the lockfile, copy the workspace, expose `4327`, and start `pnpm --filter @layo/collab-relay start`.
 
 - [ ] **Step 2: Add Docker Compose for team-owned relay hosting.**
 
@@ -102,7 +102,7 @@ Expected: PASS.
 - [ ] **Step 2: Run web build.**
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 ```
 
 Expected: PASS without chunk size warning.
@@ -110,7 +110,7 @@ Expected: PASS without chunk size warning.
 - [ ] **Step 3: Run Docker checks if Docker is available.**
 
 ```bash
-docker build -f apps/collab-relay/Dockerfile -t canvas-mcp-editor-collab-relay .
+docker build -f apps/collab-relay/Dockerfile -t layo-collab-relay .
 docker compose --env-file deploy/collab-relay/.env.example -f deploy/collab-relay/docker-compose.yml config
 ```
 

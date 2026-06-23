@@ -1,4 +1,4 @@
-import type { RendererDocument, RendererNode } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument, RendererNode } from "@layo/renderer";
 import * as Y from "yjs";
 
 export interface CollaborativeDesignDocument {

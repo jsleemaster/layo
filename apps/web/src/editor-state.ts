@@ -3,7 +3,7 @@ import type {
   NodeLayout,
   RendererDocument,
   RendererNode
-} from "@canvas-mcp-editor/renderer";
+} from "@layo/renderer";
 
 export interface EditorSelection {
   nodeId: string | null;

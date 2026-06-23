@@ -2,7 +2,7 @@
 
 ## Context
 
-Canvas MCP Editor currently treats `DesignFile` as the primary persisted object. The local server stores documents under `.canvas-mcp-editor/files/*.json`, and collaboration stores `TeamManifest` records in browser IndexedDB for import, export, and relay-backed sync.
+Layo currently treats `DesignFile` as the primary persisted object. The local server stores documents under `.layo/files/*.json`, and collaboration stores `TeamManifest` records in browser IndexedDB for import, export, and relay-backed sync.
 
 That is enough for a single sample file, but it does not give the product a durable project boundary. When users create a new design project, the app needs a saved record that can be listed, reopened, shared, and connected to a team without overloading either `DesignFile` or `TeamManifest`.
 
@@ -65,7 +65,7 @@ type ProjectSharing =
 Use the local API server filesystem as the canonical project store:
 
 ```text
-.canvas-mcp-editor/
+.layo/
   projects/
     {projectId}.json
   files/
@@ -113,7 +113,7 @@ Sharing a project does not export the whole project into `TeamManifest`. Instead
 5. Collaboration sessions still use deterministic room IDs:
 
 ```text
-canvas-mcp-editor:{teamId}:{documentId}
+layo:{teamId}:{documentId}
 ```
 
 This keeps project ownership local while allowing the team manifest to remain the portable collaboration artifact.
@@ -140,7 +140,7 @@ Future MCP tools can mirror the HTTP routes:
 
 On first run after this feature lands, the server should create a default project for the existing sample document if no project manifests exist.
 
-The default project should reference `sample-file` as its current document. Existing `.canvas-mcp-editor/files/*.json` documents should not be deleted or rewritten beyond metadata updates needed to attach them to a project.
+The default project should reference `sample-file` as its current document. Existing `.layo/files/*.json` documents should not be deleted or rewritten beyond metadata updates needed to attach them to a project.
 
 ## Error Handling
 

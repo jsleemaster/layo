@@ -112,14 +112,14 @@ Add tests in `crates/collab-relay/src/config.rs`:
 #[test]
 fn validates_room_prefix_and_plain_room_token() {
     let config = RelayConfig::from_env_vars([
-        ("COLLAB_ALLOWED_ROOM_PREFIX".to_string(), "canvas-mcp-editor".to_string()),
+        ("COLLAB_ALLOWED_ROOM_PREFIX".to_string(), "layo".to_string()),
         ("COLLAB_ROOM_TOKEN".to_string(), "room-secret".to_string()),
     ])
     .expect("config parses");
 
     let auth = config
         .validate_upgrade(&UpgradeTarget {
-            room_id: "canvas-mcp-editor:team:doc".to_string(),
+            room_id: "layo:team:doc".to_string(),
             token: Some("room-secret".to_string()),
             user_id: None,
             member_token: None,
@@ -137,7 +137,7 @@ fn rejects_plain_non_e2ee_rooms_in_rust_relay_v1() {
 
     let error = config
         .validate_upgrade(&UpgradeTarget {
-            room_id: "canvas-mcp-editor:team:doc".to_string(),
+            room_id: "layo:team:doc".to_string(),
             token: None,
             user_id: None,
             member_token: None,
@@ -159,7 +159,7 @@ fn viewer_members_are_awareness_only() {
 
     let auth = config
         .validate_upgrade(&UpgradeTarget {
-            room_id: "canvas-mcp-editor:team:doc".to_string(),
+            room_id: "layo:team:doc".to_string(),
             token: None,
             user_id: Some("viewer-1".to_string()),
             member_token: Some("viewer-secret".to_string()),
@@ -184,7 +184,7 @@ Expected: FAIL because `config.rs` does not exist.
 
 - [x] **Step 3: Implement config/auth**
 
-Implement env parsing, SHA-256 hex token hash checks, member role parsing, room prefix validation, encrypted-only validation, and viewer write blocking. Keep default host `127.0.0.1`, port `4327`, and prefix `canvas-mcp-editor`.
+Implement env parsing, SHA-256 hex token hash checks, member role parsing, room prefix validation, encrypted-only validation, and viewer write blocking. Keep default host `127.0.0.1`, port `4327`, and prefix `layo`.
 
 - [x] **Step 4: Verify config/auth GREEN**
 
@@ -224,8 +224,8 @@ Add tests in `crates/collab-relay/src/room.rs`:
 #[tokio::test]
 async fn broadcasts_encrypted_sync_to_other_peers_only() {
     let hub = RelayHub::default();
-    let first = hub.connect("canvas-mcp-editor:team:doc".to_string(), true).await;
-    let mut second = hub.connect("canvas-mcp-editor:team:doc".to_string(), true).await;
+    let first = hub.connect("layo:team:doc".to_string(), true).await;
+    let mut second = hub.connect("layo:team:doc".to_string(), true).await;
 
     hub.handle_frame(
         &first,
@@ -244,8 +244,8 @@ async fn broadcasts_encrypted_sync_to_other_peers_only() {
 #[tokio::test]
 async fn drops_encrypted_sync_from_viewers() {
     let hub = RelayHub::default();
-    let viewer = hub.connect("canvas-mcp-editor:team:doc".to_string(), false).await;
-    let mut editor = hub.connect("canvas-mcp-editor:team:doc".to_string(), true).await;
+    let viewer = hub.connect("layo:team:doc".to_string(), false).await;
+    let mut editor = hub.connect("layo:team:doc".to_string(), true).await;
 
     hub.handle_frame(
         &viewer,
@@ -260,8 +260,8 @@ async fn drops_encrypted_sync_from_viewers() {
 #[tokio::test]
 async fn broadcasts_awareness_from_viewers() {
     let hub = RelayHub::default();
-    let viewer = hub.connect("canvas-mcp-editor:team:doc".to_string(), false).await;
-    let mut editor = hub.connect("canvas-mcp-editor:team:doc".to_string(), true).await;
+    let viewer = hub.connect("layo:team:doc".to_string(), false).await;
+    let mut editor = hub.connect("layo:team:doc".to_string(), true).await;
 
     hub.handle_frame(
         &viewer,
@@ -345,7 +345,7 @@ async fn health_route_returns_ok() {
 #[test]
 fn parses_upgrade_targets_from_query() {
     let target = parse_upgrade_target(
-        "canvas-mcp-editor:team:doc".to_string(),
+        "layo:team:doc".to_string(),
         &[
             ("e2ee".to_string(), "true".to_string()),
             ("access".to_string(), "awareness".to_string()),
@@ -355,7 +355,7 @@ fn parses_upgrade_targets_from_query() {
     )
     .expect("target parses");
 
-    assert_eq!(target.room_id, "canvas-mcp-editor:team:doc");
+    assert_eq!(target.room_id, "layo:team:doc");
     assert!(target.encrypted);
     assert_eq!(target.access, AccessMode::Awareness);
     assert_eq!(target.user_id.as_deref(), Some("viewer-1"));

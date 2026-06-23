@@ -1,12 +1,12 @@
 # Project Brief
 
-Canvas MCP Editor is an open-source, local-first design editor built for both human editing and AI-agent control.
+Layo is an open-source, local-first design editor built for both human editing and AI-agent control.
 
 The project exists to answer one product question: can a Figma-like editor expose its design document in a deterministic way so an AI agent can inspect the canvas, edit it, validate the result, export component-ready code, and verify the rendered UI without relying on fragile screen-click automation?
 
 ## Product Scope
 
-Canvas MCP Editor is not trying to match every Figma feature. The current scope is an MVP design editor with:
+Layo is not trying to match every Figma feature. The current scope is an MVP design editor with:
 
 - A Rust-owned document model for pages, frames, rectangles, text nodes, components, geometry, and editor commands.
 - A React browser editor for selection, canvas operations, inspector panels, component actions, and collaboration controls.

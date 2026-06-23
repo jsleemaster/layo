@@ -34,7 +34,7 @@ Add a test asserting that zooming at screen point `{ x: 400, y: 300 }` changes s
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "zooms around a viewport point"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "zooms around a viewport point"`
 
 Expected: FAIL because `zoomViewportAtPoint` is not exported.
 
@@ -44,7 +44,7 @@ Implement `zoomViewportAtPoint` by converting the pointer from screen coordinate
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "zooms around a viewport point"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "zooms around a viewport point"`
 
 Expected: PASS.
 
@@ -95,7 +95,7 @@ Expected: PASS.
 
 Run:
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts
+pnpm --filter @layo/web test -- src/editor-state.test.ts
 pnpm test:e2e
 ```
 
@@ -106,7 +106,7 @@ Expected: PASS.
 Run:
 ```bash
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm test:e2e:collab
 ```

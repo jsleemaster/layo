@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add relay authentication and authorization v1 for Canvas MCP Editor collaboration while preserving static web hosting and team-owned relay deployment.
+Add relay authentication and authorization v1 for Layo collaboration while preserving static web hosting and team-owned relay deployment.
 
 ## Scope
 

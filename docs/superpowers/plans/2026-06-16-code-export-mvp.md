@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Export Canvas MCP Editor design nodes into CSS, HTML, and element-separated JavaScript modules that can be imported directly by code.
+**Goal:** Export Layo design nodes into CSS, HTML, and element-separated JavaScript modules that can be imported directly by code.
 
 **Architecture:** Add a pure server-side exporter module that accepts `DesignFile` JSON and returns in-memory artifacts. Storage, HTTP, and MCP expose the same export surface, while tests verify both text output and real per-element dynamic imports.
 
@@ -16,7 +16,7 @@
 - [x] Implement `apps/server/src/code-export.ts` with `exportDesignToCode(document, options)`.
 - [x] Add `FileStorage.exportCode(fileId, options)`.
 - [x] Add HTTP `GET /files/:fileId/export/code` and MCP `export_code`.
-- [x] Verify with `pnpm --filter @canvas-mcp-editor/server test` and `pnpm --filter @canvas-mcp-editor/server typecheck`.
+- [x] Verify with `pnpm --filter @layo/server test` and `pnpm --filter @layo/server typecheck`.
 
 ## Export Contract
 

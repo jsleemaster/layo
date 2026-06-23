@@ -1,6 +1,6 @@
 # Post-Merge Cleanup
 
-This process must run after every successful PR merge in Canvas MCP Editor.
+This process must run after every successful PR merge in Layo.
 Treat cleanup as part of the merge, not as optional follow-up work.
 
 ## Purpose

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { RendererDocument } from "@canvas-mcp-editor/renderer";
+import type { RendererDocument } from "@layo/renderer";
 import {
   alignSelectedNodeToParent,
   alignSelectedNodes,
@@ -60,7 +60,7 @@ function sampleDocument(): RendererDocument {
                 style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
                 content: {
                   type: "text",
-                  value: "캔버스 MCP 에디터",
+                  value: "Layo",
                   font_size: 28,
                   font_family: "Inter"
                 },
@@ -164,7 +164,7 @@ describe("editor state commands", () => {
     const undone = undo(renamed);
     expect(findNodeById(undone.document, "text-1")?.content).toMatchObject({
       type: "text",
-      value: "캔버스 MCP 에디터"
+      value: "Layo"
     });
   });
 

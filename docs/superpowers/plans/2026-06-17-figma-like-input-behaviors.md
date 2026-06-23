@@ -35,7 +35,7 @@ Add a test that selects `text-1`, nudges it by `{ x: 1, y: 0 }`, expects local t
 
 - [x] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "nudges the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "nudges the selected node"`
 
 Expected: FAIL because `nudgeSelectedNode` is not exported.
 
@@ -45,7 +45,7 @@ If no node is selected, return state. If a selected node exists, call `executeEd
 
 - [x] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "nudges the selected node"`
+Run: `pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "nudges the selected node"`
 
 Expected: PASS.
 
@@ -93,7 +93,7 @@ Expected: PASS.
 
 Run:
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts
+pnpm --filter @layo/web test -- src/editor-state.test.ts
 pnpm test:e2e
 ```
 
@@ -104,7 +104,7 @@ Expected: PASS.
 Run:
 ```bash
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm test:e2e:collab
 ```

@@ -1,18 +1,18 @@
 {
-  "name": "@canvas-mcp-editor/web",
+  "name": "@layo/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "pnpm --filter @layo/renderer build && pnpm --filter @layo/collaboration build && tsc -p tsconfig.json && vite build",
     "dev": "vite --host 127.0.0.1",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@canvas-mcp-editor/collaboration": "workspace:*",
-    "@canvas-mcp-editor/renderer": "workspace:*",
+    "@layo/collaboration": "workspace:*",
+    "@layo/renderer": "workspace:*",
     "@vitejs/plugin-react": "^5.0.0",
     "konva": "^10.0.0",
     "lib0": "^0.2.114",

@@ -81,7 +81,7 @@ test("distributes selected nodes horizontally while keeping outer layers fixed",
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "aligns selected|distributes selected"
+pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "aligns selected|distributes selected"
 ```
 
 Expected: FAIL because `alignSelectedNodes`, `distributeSelectedNodes`, and `setMultiSelection` import usage are not fully available for this behavior.
@@ -125,7 +125,7 @@ Implementation requirements:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts --grep "aligns selected|distributes selected"
+pnpm --filter @layo/web test -- src/editor-state.test.ts --grep "aligns selected|distributes selected"
 ```
 
 Expected: PASS.
@@ -216,17 +216,17 @@ Run:
 
 ```bash
 git diff --check
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts
+pnpm --filter @layo/web test -- src/editor-state.test.ts
 pnpm test:e2e
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test
 pnpm test:e2e:collab
 ```
 
 Expected: PASS.
 
-Result, 2026-06-18: PASS with `git diff --check`, `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts`, `pnpm test:e2e`, `pnpm typecheck`, `pnpm --filter @canvas-mcp-editor/web build`, `pnpm test`, and `pnpm test:e2e:collab`.
+Result, 2026-06-18: PASS with `git diff --check`, `pnpm --filter @layo/web test -- src/editor-state.test.ts`, `pnpm test:e2e`, `pnpm typecheck`, `pnpm --filter @layo/web build`, `pnpm test`, and `pnpm test:e2e:collab`.
 
 - [x] **Step 3: Run direct headed Playwright CLI verification**
 

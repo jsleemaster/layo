@@ -4,12 +4,12 @@ import { createIndexedDbProjectStore } from "./project-store";
 
 describe("indexeddb project store", () => {
   beforeEach(() => {
-    indexedDB.deleteDatabase("canvas-mcp-editor-projects-test");
+    indexedDB.deleteDatabase("layo-projects-test");
   });
 
   test("stores and loads the current project id", async () => {
     const store = createIndexedDbProjectStore({
-      databaseName: "canvas-mcp-editor-projects-test",
+      databaseName: "layo-projects-test",
       indexedDB
     });
 
@@ -20,7 +20,7 @@ describe("indexeddb project store", () => {
 
   test("tracks recently opened projects newest first without duplicates", async () => {
     const store = createIndexedDbProjectStore({
-      databaseName: "canvas-mcp-editor-projects-test",
+      databaseName: "layo-projects-test",
       indexedDB
     });
 

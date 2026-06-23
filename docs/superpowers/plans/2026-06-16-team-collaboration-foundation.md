@@ -20,7 +20,7 @@
 - Create `packages/collaboration/src/index.ts`
 - Create `packages/collaboration/src/*.test.ts`
 - Modify `pnpm-workspace.yaml` only if a new package path is needed
-- Modify `apps/web/package.json` to depend on `@canvas-mcp-editor/collaboration`
+- Modify `apps/web/package.json` to depend on `@layo/collaboration`
 - Create `apps/web/src/collaboration/team-store.ts`
 - Create `apps/web/src/collaboration/collab-session.ts`
 - Create `apps/web/src/collaboration/collab-session.test.ts`
@@ -44,7 +44,7 @@
 
 - [ ] **Step 1: Add package metadata**
 
-Create `@canvas-mcp-editor/collaboration` as a private workspace package with scripts:
+Create `@layo/collaboration` as a private workspace package with scripts:
 
 ```json
 {
@@ -65,7 +65,7 @@ y-protocols
 zod
 ```
 
-Add `@canvas-mcp-editor/collaboration` to `apps/web/package.json`.
+Add `@layo/collaboration` to `apps/web/package.json`.
 
 - [ ] **Step 2: Verify package is included**
 
@@ -73,8 +73,8 @@ Run:
 
 ```bash
 pnpm install
-pnpm --filter @canvas-mcp-editor/collaboration typecheck
-pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --filter @layo/collaboration typecheck
+pnpm --filter @layo/web typecheck
 ```
 
 Expected: PASS after empty exports are valid.
@@ -101,14 +101,14 @@ Test cases:
 - creates a valid manifest with `schemaVersion: 1`
 - rejects empty team names
 - rejects websocket sync config without `relayUrl`
-- generates room id `canvas-mcp-editor:{teamId}:{documentId}`
+- generates room id `layo:{teamId}:{documentId}`
 - sanitizes or rejects ids containing websocket path delimiters
 - preserves imported manifest fields after validation
 
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- team-manifest.test.ts room.test.ts
+pnpm --filter @layo/collaboration test -- team-manifest.test.ts room.test.ts
 ```
 
 Expected: FAIL because modules do not exist.
@@ -143,8 +143,8 @@ Keep room ids deterministic and safe for websocket paths.
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test
-pnpm --filter @canvas-mcp-editor/collaboration typecheck
+pnpm --filter @layo/collaboration test
+pnpm --filter @layo/collaboration typecheck
 ```
 
 Expected: PASS.
@@ -175,7 +175,7 @@ Test cases:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- yjs-document.test.ts
+pnpm --filter @layo/collaboration test -- yjs-document.test.ts
 ```
 
 Expected: FAIL.
@@ -211,8 +211,8 @@ Validate that Yjs payloads still have `id`, `name`, and `pages[]` before publish
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- yjs-document.test.ts
-pnpm --filter @canvas-mcp-editor/collaboration typecheck
+pnpm --filter @layo/collaboration test -- yjs-document.test.ts
+pnpm --filter @layo/collaboration typecheck
 ```
 
 Expected: PASS.
@@ -262,7 +262,7 @@ export function summarizeAwarenessStates(states: unknown[]): CollaborationPresen
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collaboration test -- awareness.test.ts
+pnpm --filter @layo/collaboration test -- awareness.test.ts
 ```
 
 Expected: PASS.
@@ -309,7 +309,7 @@ export interface TeamStore {
 Use one database name and versioned object stores:
 
 ```text
-canvas-mcp-editor-collaboration
+layo-collaboration
 teams
 settings
 ```
@@ -319,8 +319,8 @@ settings
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- team-store.test.ts
-pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --filter @layo/web test -- team-store.test.ts
+pnpm --filter @layo/web typecheck
 ```
 
 Expected: PASS.
@@ -374,8 +374,8 @@ Wire:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- collab-session.test.ts
-pnpm --filter @canvas-mcp-editor/web typecheck
+pnpm --filter @layo/web test -- collab-session.test.ts
+pnpm --filter @layo/web typecheck
 ```
 
 Expected: PASS.
@@ -435,9 +435,9 @@ On session document updates:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test
-pnpm --filter @canvas-mcp-editor/web typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web test
+pnpm --filter @layo/web typecheck
+pnpm --filter @layo/web build
 ```
 
 Expected: PASS.
@@ -483,7 +483,7 @@ Package scripts:
 Root script:
 
 ```json
-"dev:collab": "pnpm --filter @canvas-mcp-editor/collab-relay dev"
+"dev:collab": "pnpm --filter @layo/collab-relay dev"
 ```
 
 - [ ] **Step 3: Add relay runtime config**
@@ -493,7 +493,7 @@ Environment variables:
 ```text
 COLLAB_RELAY_HOST=127.0.0.1
 COLLAB_RELAY_PORT=4327
-COLLAB_ALLOWED_ROOM_PREFIX=canvas-mcp-editor:
+COLLAB_ALLOWED_ROOM_PREFIX=layo:
 COLLAB_ROOM_TOKEN=
 ```
 
@@ -504,8 +504,8 @@ If `COLLAB_ROOM_TOKEN` is set, require `Authorization: Bearer <token>` or a docu
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collab-relay test
-pnpm --filter @canvas-mcp-editor/collab-relay typecheck
+pnpm --filter @layo/collab-relay test
+pnpm --filter @layo/collab-relay typecheck
 ```
 
 Expected: PASS.
@@ -562,8 +562,8 @@ Test cases:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test
-pnpm --filter @canvas-mcp-editor/server typecheck
+pnpm --filter @layo/server test
+pnpm --filter @layo/server typecheck
 ```
 
 Expected: PASS.
@@ -607,9 +607,9 @@ Add:
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/collab-relay dev
-pnpm --filter @canvas-mcp-editor/server dev
-pnpm --filter @canvas-mcp-editor/web dev
+pnpm --filter @layo/collab-relay dev
+pnpm --filter @layo/server dev
+pnpm --filter @layo/web dev
 pnpm test:e2e:collab
 ```
 
@@ -664,7 +664,7 @@ Run:
 ```bash
 pnpm test
 pnpm typecheck
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 pnpm test:e2e
 pnpm test:e2e:collab
 ```

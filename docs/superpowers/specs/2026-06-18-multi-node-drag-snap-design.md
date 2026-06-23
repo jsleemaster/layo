@@ -4,7 +4,7 @@ Date: 2026-06-18
 
 ## Goal
 
-Bring the next Figma-like direct manipulation slice into Canvas MCP Editor:
+Bring the next Figma-like direct manipulation slice into Layo:
 
 - Dragging any selected layer moves the whole selected layer set as one group.
 - The selected layer set keeps its selection after the drag.

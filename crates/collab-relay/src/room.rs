@@ -108,10 +108,10 @@ mod tests {
     async fn broadcasts_encrypted_sync_to_other_peers_only() {
         let hub = RelayHub::default();
         let mut first = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), true)
+            .connect("layo:team:doc".to_string(), true)
             .await;
         let mut second = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), true)
+            .connect("layo:team:doc".to_string(), true)
             .await;
 
         hub.handle_frame(
@@ -132,10 +132,10 @@ mod tests {
     async fn drops_encrypted_sync_from_viewers() {
         let hub = RelayHub::default();
         let viewer = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), false)
+            .connect("layo:team:doc".to_string(), false)
             .await;
         let mut editor = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), true)
+            .connect("layo:team:doc".to_string(), true)
             .await;
 
         hub.handle_frame(
@@ -152,10 +152,10 @@ mod tests {
     async fn broadcasts_awareness_from_viewers() {
         let hub = RelayHub::default();
         let viewer = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), false)
+            .connect("layo:team:doc".to_string(), false)
             .await;
         let mut editor = hub
-            .connect("canvas-mcp-editor:team:doc".to_string(), true)
+            .connect("layo:team:doc".to_string(), true)
             .await;
 
         hub.handle_frame(

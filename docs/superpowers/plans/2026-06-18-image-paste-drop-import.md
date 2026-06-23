@@ -37,7 +37,7 @@ Add a test named `stores and serves image assets` in `apps/server/src/http.test.
 
 ```ts
 test("stores and serves image assets", async () => {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const server = createHttpServer(new FileStorage(tempRoot));
 
   const uploaded = await server.inject({
@@ -70,7 +70,7 @@ test("stores and serves image assets", async () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/http.test.ts -t "stores and serves image assets"
+pnpm --filter @layo/server test -- src/http.test.ts -t "stores and serves image assets"
 ```
 
 Expected: FAIL with `404` or missing `/assets` route.
@@ -84,7 +84,7 @@ Add an `assetsDir`, safe generated asset ids, MIME validation for `image/png`, `
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/server test -- src/http.test.ts -t "stores and serves image assets"
+pnpm --filter @layo/server test -- src/http.test.ts -t "stores and serves image assets"
 ```
 
 Expected: PASS.
@@ -138,7 +138,7 @@ test("creates image nodes backed by asset ids", () => {
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
+pnpm --filter @layo/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
 ```
 
 Expected: FAIL because `createImageNode` is missing.
@@ -152,7 +152,7 @@ Implement `createImageNode(sequence, input)` in `apps/web/src/editor-state.ts` w
 Run:
 
 ```bash
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
+pnpm --filter @layo/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
 ```
 
 Expected: PASS.
@@ -234,12 +234,12 @@ Run:
 
 ```bash
 git diff --check
-pnpm --filter @canvas-mcp-editor/server test -- src/http.test.ts -t "stores and serves image assets"
-pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
+pnpm --filter @layo/server test -- src/http.test.ts -t "stores and serves image assets"
+pnpm --filter @layo/web test -- src/editor-state.test.ts -t "creates image nodes backed by asset ids"
 pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "inserts image files from drop and clipboard paste" --reporter=line
 pnpm typecheck
 pnpm test
-pnpm --filter @canvas-mcp-editor/web build
+pnpm --filter @layo/web build
 ```
 
 - [ ] **Step 3: Direct Playwright CLI interaction pass**

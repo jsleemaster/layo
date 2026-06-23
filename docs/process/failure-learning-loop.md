@@ -1,7 +1,7 @@
 # Failure Learning Loop
 
 Use this process whenever the user points out a missed detail, visual regression,
-incorrect assumption, weak verification, or repeated failure in Canvas MCP Editor
+incorrect assumption, weak verification, or repeated failure in Layo
 work.
 
 ## Purpose

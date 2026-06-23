@@ -15,13 +15,13 @@ import {
   type NodeLayout,
   type RendererDocument,
   type RendererNode
-} from "@canvas-mcp-editor/renderer";
+} from "@layo/renderer";
 import {
   createSharedKeyEncryptionConfig,
   createTeamManifest,
   type CollaborationPresence,
   type TeamManifest
-} from "@canvas-mcp-editor/collaboration";
+} from "@layo/collaboration";
 import { apiUrl } from "./api-base";
 import { parseDocumentPayload } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
@@ -2769,7 +2769,7 @@ export function App() {
         },
         sync: {
           mode: "websocket",
-          roomPrefix: "canvas-mcp-editor",
+          roomPrefix: "layo",
           relayUrl: relayUrl.trim()
         },
         encryption: encryptionEnabled ? createSharedKeyEncryptionConfig() : { mode: "none" }
@@ -3193,7 +3193,7 @@ export function App() {
         </button>
         {isSidebarCollapsed ? null : (
           <>
-            <h1>캔버스 MCP 에디터</h1>
+            <h1>Layo</h1>
             <section className="project-panel" aria-label="프로젝트">
               <label>
                 프로젝트

@@ -420,7 +420,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const relay = createCollabRelayServer({
     host: process.env.COLLAB_RELAY_HOST ?? "127.0.0.1",
     port: Number(process.env.COLLAB_RELAY_PORT ?? 4327),
-    allowedRoomPrefix: process.env.COLLAB_ALLOWED_ROOM_PREFIX ?? "canvas-mcp-editor:",
+    allowedRoomPrefix: process.env.COLLAB_ALLOWED_ROOM_PREFIX ?? "layo:",
     token: process.env.COLLAB_ROOM_TOKEN || undefined,
     memberTokens: parseMemberTokens(process.env.COLLAB_MEMBER_TOKENS)
   });

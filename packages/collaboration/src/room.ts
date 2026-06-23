@@ -1,4 +1,4 @@
-const ROOM_PREFIX = "canvas-mcp-editor";
+const ROOM_PREFIX = "layo";
 const SAFE_ROOM_PART = /^[a-zA-Z0-9_-]+$/;
 
 export function createDocumentRoomId(teamId: string, documentId: string): string {

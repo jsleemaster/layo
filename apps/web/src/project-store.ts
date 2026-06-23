@@ -11,7 +11,7 @@ export interface IndexedDbProjectStoreOptions {
   indexedDB?: IDBFactory;
 }
 
-const DEFAULT_DATABASE_NAME = "canvas-mcp-editor-projects";
+const DEFAULT_DATABASE_NAME = "layo-projects";
 const DATABASE_VERSION = 1;
 const SETTINGS_STORE = "settings";
 const CURRENT_PROJECT_KEY = "currentProjectId";

@@ -1,7 +1,7 @@
 # Product Design Audit: Current Editor UI
 
 Date: 2026-06-22
-Surface: Canvas MCP Editor web editor
+Surface: Layo web editor
 Viewport: 1440 x 900
 Capture: Playwright CLI
 

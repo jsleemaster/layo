@@ -42,12 +42,12 @@ canvas object with Cmd/Ctrl+C and pasting it with Cmd/Ctrl+V.
 - `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "object clipboard" --reporter=line`
 - `pnpm test:e2e`
 - `pnpm typecheck`
-- `pnpm --filter @canvas-mcp-editor/web build`
+- `pnpm --filter @layo/web build`
 - Direct Playwright CLI interaction against `http://127.0.0.1:5173/`
 
 ## Verification Completed
 
-- RED: `pnpm --filter @canvas-mcp-editor/web test -- src/editor-state.test.ts`
+- RED: `pnpm --filter @layo/web test -- src/editor-state.test.ts`
   failed on missing `copySelectedNode`.
 - RED: `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "object clipboard" --reporter=line`
   failed because no pasted layer appeared.
@@ -55,6 +55,6 @@ canvas object with Cmd/Ctrl+C and pasting it with Cmd/Ctrl+V.
 - GREEN: `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "object clipboard" --reporter=line`
 - GREEN: `pnpm test:e2e`
 - GREEN: `pnpm typecheck`
-- GREEN: `pnpm --filter @canvas-mcp-editor/web build`
+- GREEN: `pnpm --filter @layo/web build`
 - GREEN: `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "object clipboard" --headed --workers=1 --reporter=line`
 - GREEN: `pnpm test`

@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 async function createServerWithDocument() {
-  tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+  tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const storage = new FileStorage(tempRoot);
   await storage.createProject({
     projectId: "test-project",
@@ -28,7 +28,7 @@ async function createServerWithDocument() {
 
 describe("HTTP server", () => {
   test("serves health and starts with an empty file list", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const health = await server.inject({ method: "GET", url: "/health" });
@@ -41,7 +41,7 @@ describe("HTTP server", () => {
   });
 
   test("serves project create, read, update, document, and sharing routes", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const projects = await server.inject({ method: "GET", url: "/projects" });
@@ -128,7 +128,7 @@ describe("HTTP server", () => {
   });
 
   test("answers browser CORS preflight for JSON project mutations", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const response = await server.inject({
@@ -148,7 +148,7 @@ describe("HTTP server", () => {
   });
 
   test("stores and serves image assets", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const uploaded = await server.inject({
@@ -181,12 +181,12 @@ describe("HTTP server", () => {
   });
 
   test("serves built web assets under /app without intercepting API assets", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const webDistDir = path.join(tempRoot, "web-dist");
     await mkdir(path.join(webDistDir, "assets"), { recursive: true });
     await writeFile(
       path.join(webDistDir, "index.html"),
-      '<!doctype html><title>캔버스 MCP 에디터</title><script src="/app/assets/app.js"></script>'
+      '<!doctype html><title>Layo</title><script src="/app/assets/app.js"></script>'
     );
     await writeFile(path.join(webDistDir, "assets", "app.js"), "window.__canvasEditor = true;");
     const server = createHttpServer(new FileStorage(path.join(tempRoot, "storage")), {
@@ -201,7 +201,7 @@ describe("HTTP server", () => {
     const shell = await server.inject({ method: "GET", url: "/app/" });
     expect(shell.statusCode).toBe(200);
     expect(shell.headers["content-type"]).toContain("text/html");
-    expect(shell.body).toContain("캔버스 MCP 에디터");
+    expect(shell.body).toContain("Layo");
 
     const bundle = await server.inject({ method: "GET", url: "/app/assets/app.js" });
     expect(bundle.statusCode).toBe(200);
@@ -225,7 +225,7 @@ describe("HTTP server", () => {
   });
 
   test("rejects image assets whose bytes do not match the declared mime type", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "canvas-mcp-editor-"));
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
 
     const rejected = await server.inject({
@@ -341,7 +341,7 @@ describe("HTTP server", () => {
     const find = await server.inject({
       method: "POST",
       url: "/files/sample-file/agent/find",
-      payload: { text: "캔버스" }
+      payload: { text: "Layo" }
     });
     expect(find.statusCode).toBe(200);
     expect(find.json().nodes.map((node: { id: string }) => node.id)).toEqual(["text-1"]);
@@ -435,7 +435,7 @@ describe("HTTP server", () => {
           name: "text",
           type: "string",
           sourceNodeId: "text-1",
-          defaultValue: "캔버스 MCP 에디터"
+          defaultValue: "Layo"
         }
       ]
     });
