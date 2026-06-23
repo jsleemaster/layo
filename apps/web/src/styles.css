@@ -164,6 +164,59 @@ button:disabled {
   background: var(--editor-color-surface);
 }
 
+.panel-header {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  margin-bottom: var(--editor-space-md);
+}
+
+.panel-eyebrow {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.asset-panel {
+  display: grid;
+  gap: var(--editor-space-sm);
+}
+
+.asset-panel input {
+  width: 100%;
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  padding: var(--editor-space-xs);
+  font-size: var(--editor-text-control-size);
+  line-height: var(--editor-text-control-line);
+}
+
+.asset-library-list {
+  display: grid;
+  gap: var(--editor-space-xs);
+}
+
+.asset-library-item {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  padding: var(--editor-space-sm);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-surface);
+}
+
+.asset-library-item strong {
+  font-size: var(--editor-text-body-size);
+  line-height: var(--editor-text-body-line);
+}
+
+.asset-library-item span {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
 .sidebar h1,
 .inspector h2,
 .team-panel h2 {
@@ -235,6 +288,8 @@ button:disabled {
 .team-panel input:focus-visible,
 .project-panel input:focus-visible,
 .project-panel select:focus-visible,
+.asset-panel input:focus-visible,
+.top-file-share:focus-visible,
 .team-panel textarea:focus-visible,
 .team-mode-tabs button:focus-visible,
 .team-actions button:focus-visible,
@@ -269,6 +324,67 @@ button:disabled {
   border-radius: var(--editor-radius-md);
   background: var(--editor-color-panel);
   box-shadow: var(--editor-shadow-stage);
+}
+
+.top-file-bar {
+  position: absolute;
+  z-index: 14;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--editor-size-topbar);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--editor-space-sm);
+  padding: var(--editor-space-xxs) var(--editor-space-sm);
+  border-bottom: var(--editor-border-hairline) solid var(--editor-color-border);
+  background: var(--editor-color-panel);
+}
+
+.top-file-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.top-file-tab,
+.top-file-share {
+  min-height: var(--editor-space-xl);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  padding: var(--editor-space-xxs) var(--editor-space-sm);
+  font-size: var(--editor-text-control-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: var(--editor-text-control-line);
+}
+
+.top-file-tab span,
+.top-file-share span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-file-share:disabled {
+  cursor: not-allowed;
+  color: var(--editor-color-muted);
+  opacity: 1;
+}
+
+.top-file-meta {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
 }
 
 .toolbar button {
@@ -310,7 +426,7 @@ button:disabled {
 
 .canvas-area {
   position: absolute;
-  inset: 0;
+  inset: var(--editor-size-topbar) 0 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -347,7 +463,7 @@ button:disabled {
 }
 
 .canvas-ruler-horizontal {
-  top: 0;
+  top: var(--editor-size-topbar);
   right: 0;
   left: var(--editor-size-ruler);
   height: var(--editor-size-ruler);
@@ -355,7 +471,7 @@ button:disabled {
 }
 
 .canvas-ruler-vertical {
-  top: var(--editor-size-ruler);
+  top: calc(var(--editor-size-topbar) + var(--editor-size-ruler));
   bottom: 0;
   left: 0;
   width: var(--editor-size-ruler);
@@ -365,7 +481,7 @@ button:disabled {
 .canvas-ruler-corner {
   position: absolute;
   z-index: 11;
-  top: 0;
+  top: var(--editor-size-topbar);
   left: 0;
   width: var(--editor-size-ruler);
   height: var(--editor-size-ruler);
@@ -816,6 +932,9 @@ button:disabled {
   color: var(--editor-color-muted);
   font-size: var(--editor-text-small-size);
   line-height: var(--editor-text-small-line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .team-mode-tabs button[aria-selected="true"] {

@@ -481,6 +481,37 @@ test("Figma-like editor shell separates rail, rulers, floating toolbar, and insp
   expect(canvasBackground).not.toBe("rgb(255, 255, 255)");
 });
 
+test("left rail switches active panels and top file bar preserves file context", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await expect(page.getByTestId("top-file-bar")).toBeVisible();
+  await expect(page.getByTestId("top-file-project")).toContainText("새 프로젝트");
+  await expect(page.getByTestId("top-file-document")).toContainText("새 문서");
+  await expect(page.getByTestId("top-file-share")).toContainText("비공개");
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "에셋" }).click();
+  await expect(page.getByTestId("asset-panel")).toBeVisible();
+  await expect(page.getByTestId("asset-panel")).toContainText("팀 라이브러리");
+  await expect(page.getByTestId("layer-panel")).toHaveCount(0);
+  await expect(page.getByTestId("team-panel")).toHaveCount(0);
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("layer-panel")).toBeVisible();
+  await expect(page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" })).toBeVisible();
+  await expect(page.getByTestId("asset-panel")).toHaveCount(0);
+  await expect(page.getByTestId("team-panel")).toHaveCount(0);
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await expect(page.getByTestId("team-panel")).toBeVisible();
+  await expect(page.getByTestId("team-name")).toBeVisible();
+  await expect(page.getByTestId("asset-panel")).toHaveCount(0);
+  await expect(page.getByTestId("layer-panel")).toHaveCount(0);
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
+  await expect(page.getByTestId("project-switcher")).toBeVisible();
+  await expect(page.getByTestId("project-name")).toHaveValue(/새 프로젝트/);
+});
+
 test("right-click objects and images expose common context menu commands", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const stageFrame = page.getByTestId("stage-frame");

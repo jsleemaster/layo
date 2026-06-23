@@ -121,6 +121,7 @@ const ZOOM_STEP = 0.25;
 const AREA_SELECTION_DRAG_THRESHOLD = 4;
 const RULER_MARKS = [0, 160, 320, 480, 640, 800, 960, 1120, 1280];
 type TeamPanelMode = "local" | "relay" | "manifest";
+type LeftPanelMode = "files" | "assets" | "layers" | "team";
 
 interface AreaSelectionSession {
   start: { x: number; y: number };
@@ -1663,6 +1664,7 @@ export function App() {
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
   const [encryptionPassphrase, setEncryptionPassphrase] = useState("");
   const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
+  const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("files");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [collabStatus, setCollabStatus] = useState("offline");
@@ -1968,6 +1970,16 @@ export function App() {
     ? components.find((component) => component.source_node.id === selectedNode.id)
     : undefined;
   const localSessionId = collabSession?.getLocalPresence().sessionId ?? null;
+  const currentDocumentName = editor?.document.name ?? "문서 없음";
+  const currentProjectName = currentProject?.name ?? "프로젝트 없음";
+  const topFileShareLabel =
+    currentProject?.sharing.mode === "team"
+      ? `공유됨 · ${collabSession?.team.name ?? currentProject.sharing.teamId}`
+      : "비공개";
+  const showProjectPanel = leftPanelMode === "files";
+  const showAssetPanel = leftPanelMode === "assets";
+  const showLayerPanel = leftPanelMode === "files" || leftPanelMode === "layers";
+  const showTeamPanel = leftPanelMode === "files" || leftPanelMode === "team";
 
   useEffect(() => {
     if (!inlineTextEditingNodeId) {
@@ -3407,16 +3419,40 @@ export function App() {
           L
         </div>
         <div className="editor-rail-group">
-          <button type="button" aria-label="파일" aria-pressed="true" title="파일">
+          <button
+            type="button"
+            aria-label="파일"
+            aria-pressed={leftPanelMode === "files"}
+            title="파일"
+            onClick={() => setLeftPanelMode("files")}
+          >
             ▦
           </button>
-          <button type="button" aria-label="에셋" aria-pressed="false" title="에셋">
+          <button
+            type="button"
+            aria-label="에셋"
+            aria-pressed={leftPanelMode === "assets"}
+            title="에셋"
+            onClick={() => setLeftPanelMode("assets")}
+          >
             ◇
           </button>
-          <button type="button" aria-label="레이어" aria-pressed="false" title="레이어">
+          <button
+            type="button"
+            aria-label="레이어"
+            aria-pressed={leftPanelMode === "layers"}
+            title="레이어"
+            onClick={() => setLeftPanelMode("layers")}
+          >
             ☰
           </button>
-          <button type="button" aria-label="팀" aria-pressed="false" title="팀">
+          <button
+            type="button"
+            aria-label="팀"
+            aria-pressed={leftPanelMode === "team"}
+            title="팀"
+            onClick={() => setLeftPanelMode("team")}
+          >
             ◎
           </button>
         </div>
@@ -3439,83 +3475,117 @@ export function App() {
         {isSidebarCollapsed ? null : (
           <>
             <h1>Layo</h1>
-            <section className="project-panel" aria-label="프로젝트">
-              <label>
-                프로젝트
-                <select
-                  data-testid="project-switcher"
-                  value={currentProject?.projectId ?? ""}
-                  onChange={(event) => void openProject(event.currentTarget.value)}
-                >
-                  {visibleProjects.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.name}
-                    </option>
+            {showProjectPanel ? (
+              <section className="project-panel" aria-label="프로젝트">
+                <label>
+                  프로젝트
+                  <select
+                    data-testid="project-switcher"
+                    value={currentProject?.projectId ?? ""}
+                    onChange={(event) => void openProject(event.currentTarget.value)}
+                  >
+                    {visibleProjects.map((project) => (
+                      <option key={project.projectId} value={project.projectId}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  검색
+                  <input
+                    data-testid="project-search"
+                    value={projectSearch}
+                    placeholder="프로젝트 또는 문서 이름"
+                    onChange={(event) => setProjectSearch(event.currentTarget.value)}
+                  />
+                </label>
+                <div className="project-status" data-testid="project-filter-summary">
+                  {projectFilterSummary}
+                </div>
+                <label>
+                  이름
+                  <input
+                    data-testid="project-name"
+                    value={projectNameDraft}
+                    onChange={(event) => setProjectNameDraft(event.currentTarget.value)}
+                  />
+                </label>
+                <div className="project-actions">
+                  <button type="button" onClick={createNewProject}>
+                    새 프로젝트 만들기
+                  </button>
+                  <button type="button" onClick={saveProjectName} disabled={!currentProject}>
+                    이름 저장
+                  </button>
+                  <button type="button" onClick={duplicateCurrentProject} disabled={!currentProject}>
+                    현재 프로젝트 복제
+                  </button>
+                  <button type="button" onClick={deleteCurrentProject} disabled={!currentProject || projects.length <= 1}>
+                    현재 프로젝트 삭제
+                  </button>
+                  <button type="button" onClick={linkProjectToCurrentTeam} disabled={!currentProject || !collabSession}>
+                    현재 팀과 공유
+                  </button>
+                </div>
+                <div className="project-status" data-testid="project-status">
+                  {projectStatus}
+                </div>
+                <div className="project-status" data-testid="project-sharing-status">
+                  {topFileShareLabel === "비공개" ? "비공개 프로젝트" : topFileShareLabel}
+                </div>
+              </section>
+            ) : null}
+            {showAssetPanel ? (
+              <section className="asset-panel" data-testid="asset-panel" aria-label="에셋">
+                <div className="panel-header">
+                  <span className="panel-eyebrow">에셋</span>
+                  <h2>팀 라이브러리</h2>
+                </div>
+                <label>
+                  검색
+                  <input data-testid="asset-search" placeholder="컴포넌트, 이미지, 스타일" />
+                </label>
+                <div className="asset-library-list">
+                  <div className="asset-library-item">
+                    <strong>로컬 컴포넌트</strong>
+                    <span>{components.length}개 컴포넌트</span>
+                  </div>
+                  <div className="asset-library-item">
+                    <strong>이미지 에셋</strong>
+                    <span>드롭 또는 붙여넣기로 추가</span>
+                  </div>
+                  <div className="asset-library-item">
+                    <strong>팀 라이브러리</strong>
+                    <span>{collabSession ? collabSession.team.name : "팀 연결 대기"}</span>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+            {showLayerPanel ? (
+              <section data-testid="layer-panel" aria-label="레이어">
+                <div className="panel-header">
+                  <span className="panel-eyebrow">레이어</span>
+                  <p>{editor ? editor.document.name : "로컬 서버를 시작하면 프로젝트를 불러옵니다."}</p>
+                </div>
+                <div className="layer-list">
+                  {nodes.map((node) => (
+                    <button
+                      key={node.id}
+                      type="button"
+                      className={editor?.selection.nodeIds.includes(node.id) ? "is-selected" : undefined}
+                      onClick={(event) => selectNode(node.id, event.shiftKey)}
+                    >
+                      {node.name}
+                      {node.kind === "component" ? " · 컴포넌트" : ""}
+                      {node.kind === "component_instance" ? " · 인스턴스" : ""}
+                    </button>
                   ))}
-                </select>
-              </label>
-              <label>
-                검색
-                <input
-                  data-testid="project-search"
-                  value={projectSearch}
-                  placeholder="프로젝트 또는 문서 이름"
-                  onChange={(event) => setProjectSearch(event.currentTarget.value)}
-                />
-              </label>
-              <div className="project-status" data-testid="project-filter-summary">
-                {projectFilterSummary}
-              </div>
-              <label>
-                이름
-                <input
-                  data-testid="project-name"
-                  value={projectNameDraft}
-                  onChange={(event) => setProjectNameDraft(event.currentTarget.value)}
-                />
-              </label>
-              <div className="project-actions">
-                <button type="button" onClick={createNewProject}>
-                  새 프로젝트 만들기
-                </button>
-                <button type="button" onClick={saveProjectName} disabled={!currentProject}>
-                  이름 저장
-                </button>
-                <button type="button" onClick={duplicateCurrentProject} disabled={!currentProject}>
-                  현재 프로젝트 복제
-                </button>
-                <button type="button" onClick={deleteCurrentProject} disabled={!currentProject || projects.length <= 1}>
-                  현재 프로젝트 삭제
-                </button>
-                <button type="button" onClick={linkProjectToCurrentTeam} disabled={!currentProject || !collabSession}>
-                  현재 팀과 공유
-                </button>
-              </div>
-              <div className="project-status" data-testid="project-status">
-                {projectStatus}
-              </div>
-              <div className="project-status" data-testid="project-sharing-status">
-                {currentProject?.sharing.mode === "team"
-                  ? `공유됨 · ${collabSession?.team.name ?? currentProject.sharing.teamId}`
-                  : "비공개 프로젝트"}
-              </div>
-            </section>
-            <p>{editor ? editor.document.name : "로컬 서버를 시작하면 프로젝트를 불러옵니다."}</p>
-            <div className="layer-list">
-              {nodes.map((node) => (
-                <button
-                  key={node.id}
-                  type="button"
-                  className={editor?.selection.nodeIds.includes(node.id) ? "is-selected" : undefined}
-                  onClick={(event) => selectNode(node.id, event.shiftKey)}
-                >
-                  {node.name}
-                  {node.kind === "component" ? " · 컴포넌트" : ""}
-                  {node.kind === "component_instance" ? " · 인스턴스" : ""}
-                </button>
-              ))}
-            </div>
-            <section className="team-panel" aria-label="팀 협업">
+                </div>
+              </section>
+            ) : null}
+            {showTeamPanel ? (
+            <section className="team-panel" data-testid="team-panel" aria-label="팀 협업">
               <h2>팀</h2>
               <div className="team-mode-tabs" role="tablist" aria-label="팀 협업 모드">
                 <button
@@ -3673,10 +3743,30 @@ export function App() {
                 />
               ) : null}
             </section>
+            ) : null}
           </>
         )}
       </aside>
       <section className="editor-workspace">
+        <div className="top-file-bar" data-testid="top-file-bar" aria-label="파일 바">
+          <div className="top-file-tabs">
+            <div className="top-file-tab" data-testid="top-file-project">
+              <span>{currentProjectName}</span>
+            </div>
+            <div className="top-file-tab" data-testid="top-file-document">
+              <span>{currentDocumentName}</span>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="top-file-share"
+            data-testid="top-file-share"
+            disabled={!currentProject || !collabSession}
+            onClick={linkProjectToCurrentTeam}
+          >
+            <span>{topFileShareLabel}</span>
+          </button>
+        </div>
         <div className="canvas-ruler-corner" aria-hidden="true" />
         <div className="canvas-ruler canvas-ruler-horizontal" data-testid="canvas-ruler-horizontal" aria-hidden="true">
           {RULER_MARKS.map((mark) => (
