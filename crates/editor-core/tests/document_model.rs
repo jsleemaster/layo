@@ -228,7 +228,8 @@ fn image_original_size_metadata_round_trips_through_json() {
                 "type": "image",
                 "asset_id": "asset-large",
                 "natural_width": 720,
-                "natural_height": 480
+                "natural_height": 480,
+                "fit_mode": "fit"
               },
               "children": []
             }
@@ -246,10 +247,12 @@ fn image_original_size_metadata_round_trips_through_json() {
             asset_id,
             natural_width,
             natural_height,
+            fit_mode,
         } => {
             assert_eq!(asset_id, "asset-large");
             assert_eq!(*natural_width, Some(720.0));
             assert_eq!(*natural_height, Some(480.0));
+            assert_eq!(fit_mode.as_deref(), Some("fit"));
         }
         _ => panic!("expected image content"),
     }
@@ -257,4 +260,5 @@ fn image_original_size_metadata_round_trips_through_json() {
     let json = serde_json::to_string(&parsed).unwrap();
     assert!(json.contains("\"natural_width\":720.0"));
     assert!(json.contains("\"natural_height\":480.0"));
+    assert!(json.contains("\"fit_mode\":\"fit\""));
 }

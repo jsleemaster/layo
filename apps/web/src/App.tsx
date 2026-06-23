@@ -11,6 +11,7 @@ import type { KonvaEventObject } from "konva/lib/Node";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type ImageFitMode,
   type NodeConstraints,
   type NodeLayout,
   type RendererDocument,
@@ -100,6 +101,7 @@ import {
   zoomViewport,
   zoomViewportAtPoint
 } from "./editor-state";
+import { calculateImageDrawConfig } from "./image-fit";
 import {
   documentPointToViewport,
   getRemotePresence,
@@ -380,22 +382,41 @@ async function persistImageAssetReplacement(
   }
 }
 
+async function persistImageFitMode(fileId: string, nodeId: string, fitMode: ImageFitMode) {
+  const response = await fetch(apiUrl(`/files/${fileId}/nodes/${nodeId}/image-fit`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fitMode })
+  });
+
+  if (!response.ok) {
+    throw new Error(`이미지 맞춤 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 function CanvasImageBody({
   assetId,
   width,
   height,
-  opacity
+  opacity,
+  fitMode,
+  naturalWidth,
+  naturalHeight
 }: {
   assetId: string;
   width: number;
   height: number;
   opacity: number;
+  fitMode: ImageFitMode;
+  naturalWidth?: number;
+  naturalHeight?: number;
 }) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const nextImage = new window.Image();
+    nextImage.crossOrigin = "anonymous";
     nextImage.onload = () => {
       if (!cancelled) {
         setImage(nextImage);
@@ -413,10 +434,30 @@ function CanvasImageBody({
     };
   }, [assetId]);
 
+  const drawConfig = image
+    ? calculateImageDrawConfig({
+        mode: fitMode,
+        nodeWidth: width,
+        nodeHeight: height,
+        naturalWidth: naturalWidth ?? image.naturalWidth,
+        naturalHeight: naturalHeight ?? image.naturalHeight
+      })
+    : null;
+
   return (
     <>
       <Rect width={width} height={height} fill={editorKonvaTokens.image.placeholderFill} opacity={opacity} />
-      {image ? <KonvaImage image={image} width={width} height={height} opacity={opacity} /> : null}
+      {image && drawConfig ? (
+        <KonvaImage
+          image={image}
+          x={drawConfig.x}
+          y={drawConfig.y}
+          width={drawConfig.width}
+          height={drawConfig.height}
+          crop={drawConfig.crop}
+          opacity={opacity}
+        />
+      ) : null}
     </>
   );
 }
@@ -1142,6 +1183,9 @@ function renderNode({
         width={node.size.width}
         height={node.size.height}
         opacity={node.style.opacity}
+        fitMode={node.content.fit_mode ?? "fill"}
+        naturalWidth={node.content.natural_width}
+        naturalHeight={node.content.natural_height}
       />
     ) : node.kind === "text" && node.content.type === "text" ? (
       <Text
@@ -1917,6 +1961,10 @@ export function App() {
       contextMenuNode.content.type === "image" &&
       canMutateContextMenuNode
   );
+  const contextImageFitMode =
+    contextMenuNode?.kind === "image" && contextMenuNode.content.type === "image"
+      ? contextMenuNode.content.fit_mode ?? "fill"
+      : null;
   const canResizeContextImageToNaturalSize = Boolean(
     contextMenuNode?.kind === "image" &&
       contextMenuNode.content.type === "image" &&
@@ -2368,6 +2416,35 @@ export function App() {
 
   const resizeContextImageToNaturalSize = () => {
     runContextMenuStateAction((state) => resizeSelectedImageToNaturalSize(state));
+  };
+
+  const setContextImageFitMode = async (fitMode: ImageFitMode) => {
+    if (
+      !currentProject ||
+      contextMenuNode?.kind !== "image" ||
+      contextMenuNode.content.type !== "image" ||
+      !canMutateContextMenuNode
+    ) {
+      setObjectContextMenu(null);
+      return;
+    }
+
+    const nodeId = contextMenuNode.id;
+    const nodeName = contextMenuNode.name;
+    setObjectContextMenu(null);
+
+    if ((contextMenuNode.content.fit_mode ?? "fill") === fitMode) {
+      return;
+    }
+
+    try {
+      await persistImageFitMode(currentProject.currentDocumentId, nodeId, fitMode);
+      dispatch({ type: "set_image_fit_mode", nodeId, fitMode });
+      setProjectStatus(`${nodeName} 이미지 ${fitMode === "fit" ? "맞춤" : "채우기"}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "이미지 맞춤을 저장하지 못했습니다";
+      setProjectStatus(message);
+    }
   };
 
   const startContextImageReplacement = () => {
@@ -4559,6 +4636,22 @@ export function App() {
                 onClick={resizeContextImageToNaturalSize}
               >
                 원본 크기로 맞춤
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!canReplaceContextImage || contextImageFitMode === "fill"}
+                onClick={() => void setContextImageFitMode("fill")}
+              >
+                이미지 채우기
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!canReplaceContextImage || contextImageFitMode === "fit"}
+                onClick={() => void setContextImageFitMode("fit")}
+              >
+                이미지 맞춤
               </button>
             </>
           ) : null}

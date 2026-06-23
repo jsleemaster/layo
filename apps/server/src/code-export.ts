@@ -50,7 +50,7 @@ export interface CodeStructureNode {
   content:
     | { type: "empty" }
     | { type: "text"; value: string; fontSize: number; fontFamily: string }
-    | { type: "image"; assetId: string };
+    | { type: "image"; assetId: string; fitMode: "fill" | "fit" };
   componentRef?: {
     definitionId: string;
     detached: boolean;
@@ -242,7 +242,8 @@ function contentFor(node: DesignNode): CodeStructureNode["content"] {
   if (node.content.type === "image") {
     return {
       type: "image",
-      assetId: node.content.asset_id
+      assetId: node.content.asset_id,
+      fitMode: node.content.fit_mode ?? "fill"
     };
   }
 
