@@ -171,26 +171,43 @@ const ASSET_LIBRARY_KITS = [
   {
     name: "iOS 18 and iPadOS 18",
     count: "156개의 컴포넌트",
+    templateCount: "템플릿 24개",
+    preview: "ios",
     swatches: ["mcp", "focus", "selection"]
   },
   {
     name: "iOS and iPadOS 26",
     count: "175개의 컴포넌트",
+    templateCount: "템플릿 31개",
+    preview: "ios",
     swatches: ["mcp", "selection", "ink"]
   },
   {
     name: "Simple Design System",
     count: "184개의 컴포넌트",
+    templateCount: "스타일 18개",
+    preview: "system",
     swatches: ["ink", "focus", "surface"]
   },
   {
     name: "macOS 26",
     count: "71개의 컴포넌트",
+    templateCount: "템플릿 12개",
+    preview: "mac",
     swatches: ["panel", "focus", "surface"]
+  },
+  {
+    name: "visionOS 26",
+    count: "67개의 컴포넌트",
+    templateCount: "공간 템플릿 9개",
+    preview: "vision",
+    swatches: ["focus", "selection", "surface"]
   },
   {
     name: "Material 3 Design Kit",
     count: "357개의 컴포넌트",
+    templateCount: "토큰 42개",
+    preview: "material",
     swatches: ["warning", "selection", "surface"]
   }
 ];
@@ -4075,20 +4092,40 @@ export function App() {
                 <p className="asset-kit-intro">또는 사전 제작된 UI 키트로 시작하세요</p>
                 <div className="asset-library-list">
                   {ASSET_LIBRARY_KITS.map((kit) => (
-                    <div className="asset-library-item" key={kit.name}>
-                      <span className="asset-library-thumbnail" aria-hidden="true">
-                        {kit.swatches.map((swatch) => (
-                          <span
-                            key={`${kit.name}-${swatch}`}
-                            className={`asset-library-swatch asset-library-swatch-${swatch}`}
-                          />
-                        ))}
+                    <button
+                      type="button"
+                      className="asset-library-card"
+                      data-testid="asset-library-card"
+                      key={kit.name}
+                      aria-label={`${kit.name} 라이브러리`}
+                    >
+                      <span
+                        className={`asset-library-thumbnail asset-library-thumbnail-${kit.preview}`}
+                        data-testid="asset-library-thumbnail"
+                        aria-label={`${kit.name} 라이브러리 미리보기`}
+                      >
+                        <span className="asset-thumbnail-frame">
+                          <span className="asset-thumbnail-panel asset-thumbnail-panel-primary" />
+                          <span className="asset-thumbnail-panel asset-thumbnail-panel-secondary" />
+                          <span className="asset-thumbnail-panel asset-thumbnail-panel-tertiary" />
+                        </span>
+                        <span className="asset-thumbnail-swatches" aria-hidden="true">
+                          {kit.swatches.map((swatch) => (
+                            <span
+                              key={`${kit.name}-${swatch}`}
+                              className={`asset-library-swatch asset-library-swatch-${swatch}`}
+                            />
+                          ))}
+                        </span>
                       </span>
                       <span className="asset-library-copy">
                         <strong>{kit.name}</strong>
-                        <span>{kit.count}</span>
+                        <span className="asset-library-meta">
+                          <span>{kit.count}</span>
+                          <span>{kit.templateCount}</span>
+                        </span>
                       </span>
-                    </div>
+                    </button>
                   ))}
                 </div>
               </section>

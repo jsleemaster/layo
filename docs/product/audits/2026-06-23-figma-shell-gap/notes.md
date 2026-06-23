@@ -119,3 +119,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Added undoable/editor-state-backed actions for `전체 선택`, `같은 종류 선택`, `가로 뒤집기`, `세로 뒤집기`, and `선택 영역 확대`, plus a real `코드로 내보내기` JSON download backed by the existing code-export HTTP route.
 - Fixed the long context-menu positioning bug discovered by Playwright: menus opened near the bottom of the viewport now clamp back into view so long command lists remain scrollable and clickable.
 - Verification started with RED editor-state failures for missing selection/flip/fit functions and a RED Playwright failure for missing `전체 선택`; the focused unit and e2e tests now pass.
+
+2026-06-23 asset-library card polish slice:
+
+- Compared the live first viewport against the Figma reference and found the left `에셋` panel still read as abstract color swatches instead of library/template cards.
+- Expanded the starter kit list to six Figma-like library cards, including `visionOS 26`, richer component/template metadata, accessible preview labels, and token-based miniature thumbnails.
+- Adjusted long kit names to wrap inside the card instead of truncating, so library labels remain inspectable in the dense sidebar.
+- Verification started with a RED Playwright expectation for the missing `visionOS 26` card and richer thumbnail metadata; the focused e2e now passes and visual proof is stored in `/tmp/layo-asset-library-card-polish-final2.png`.

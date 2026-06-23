@@ -30,6 +30,15 @@ test("opens with a Figma-like assets panel and keeps project controls behind the
   await expect(page.getByTestId("asset-search")).toHaveAttribute("placeholder", "모든 라이브러리 검색");
   await expect(page.getByText("아직 라이브러리가 없습니다.")).toBeVisible();
   await expect(page.getByText("iOS 18 and iPadOS 18")).toBeVisible();
+  await expect(page.getByText("visionOS 26")).toBeVisible();
+  await expect(page.getByTestId("asset-library-card")).toHaveCount(6);
+  const firstLibraryCard = page.getByTestId("asset-library-card").filter({ hasText: "iOS 18 and iPadOS 18" });
+  await expect(firstLibraryCard.getByTestId("asset-library-thumbnail")).toHaveAttribute(
+    "aria-label",
+    "iOS 18 and iPadOS 18 라이브러리 미리보기"
+  );
+  await expect(firstLibraryCard.getByText("156개의 컴포넌트")).toBeVisible();
+  await expect(firstLibraryCard.getByText("템플릿 24개")).toBeVisible();
   await expect(page.getByTestId("layer-panel")).toBeHidden();
   await expect(page.getByTestId("project-panel")).toBeHidden();
   await expect(page.getByRole("button", { name: "에셋" })).toHaveAttribute("aria-pressed", "true");

@@ -243,28 +243,97 @@ button:disabled {
   gap: var(--editor-space-xs);
 }
 
-.asset-library-item {
+.asset-library-card {
   display: grid;
-  grid-template-columns: calc(var(--editor-space-xl) * 2) minmax(0, 1fr);
+  grid-template-columns: calc(var(--editor-space-xl) * 1.75) minmax(0, 1fr);
   align-items: center;
   gap: var(--editor-space-sm);
   padding: var(--editor-space-xs);
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   border-radius: var(--editor-radius-sm);
   background: var(--editor-color-surface);
+  color: var(--editor-color-ink);
+  text-align: left;
+}
+
+.asset-library-card:not(:disabled):hover {
+  border-color: var(--editor-color-border);
+  background: var(--editor-color-control);
 }
 
 .asset-library-thumbnail {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  position: relative;
+  display: block;
   overflow: hidden;
-  height: calc(var(--editor-space-xl) + var(--editor-space-xs));
+  height: calc(var(--editor-space-xl) + var(--editor-space-sm));
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   border-radius: var(--editor-radius-sm);
   background: var(--editor-color-panel);
 }
 
+.asset-thumbnail-frame {
+  position: absolute;
+  inset: var(--editor-space-xxs);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--editor-space-xxs);
+}
+
+.asset-thumbnail-panel {
+  min-width: 0;
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-stage);
+}
+
+.asset-thumbnail-panel-primary {
+  background: var(--editor-color-focus);
+}
+
+.asset-thumbnail-panel-secondary {
+  background: var(--editor-color-selection);
+}
+
+.asset-thumbnail-panel-tertiary {
+  background: var(--editor-color-surface);
+}
+
+.asset-library-thumbnail-system .asset-thumbnail-frame,
+.asset-library-thumbnail-material .asset-thumbnail-frame {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+}
+
+.asset-library-thumbnail-mac .asset-thumbnail-frame,
+.asset-library-thumbnail-vision .asset-thumbnail-frame {
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+}
+
+.asset-library-thumbnail-system .asset-thumbnail-panel-tertiary,
+.asset-library-thumbnail-mac .asset-thumbnail-panel-secondary,
+.asset-library-thumbnail-vision .asset-thumbnail-panel-primary,
+.asset-library-thumbnail-material .asset-thumbnail-panel-primary {
+  background: var(--editor-color-ink);
+}
+
+.asset-library-thumbnail-vision .asset-thumbnail-panel-secondary,
+.asset-library-thumbnail-material .asset-thumbnail-panel-secondary {
+  background: var(--editor-color-warning);
+}
+
+.asset-thumbnail-swatches {
+  position: absolute;
+  right: var(--editor-space-xxs);
+  bottom: var(--editor-space-xxs);
+  display: flex;
+  overflow: hidden;
+  width: calc(var(--editor-space-lg) + var(--editor-space-xs));
+  height: var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+}
+
 .asset-library-swatch {
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
 }
@@ -303,16 +372,22 @@ button:disabled {
   gap: var(--editor-space-xxs);
 }
 
-.asset-library-item strong {
+.asset-library-card strong {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   font-size: var(--editor-text-body-size);
   line-height: var(--editor-text-body-line);
 }
 
-.asset-library-item span {
+.asset-library-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--editor-space-xxs) var(--editor-space-xs);
+}
+
+.asset-library-meta span {
   color: var(--editor-color-muted);
   font-size: var(--editor-text-small-size);
   line-height: var(--editor-text-small-line);
@@ -393,6 +468,7 @@ button:disabled {
 .project-panel select:focus-visible,
 .asset-panel input:focus-visible,
 .asset-empty-card button:focus-visible,
+.asset-library-card:focus-visible,
 .top-file-share:focus-visible,
 .team-panel textarea:focus-visible,
 .team-mode-tabs button:focus-visible,
