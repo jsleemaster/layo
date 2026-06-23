@@ -54,6 +54,11 @@ The app supports these core workflows:
   or unit regression coverage where applicable, a direct Playwright CLI check for
   UI issues, a memory note when the miss reflects an agent process gap, and a PR
   body that names the failure mode and verification performed.
+- Use the Post-Merge Cleanup process in `docs/process/post-merge-cleanup.md`
+  after every successful PR merge. Run `gh pr view`, `git status --short --branch`,
+  `git branch --show-current`, `git worktree list`, and remote branch checks before
+  reporting completion. Do not delete dirty worktrees or branches with unmerged
+  or user-owned changes; report them as retained cleanup exceptions instead.
 
 ## Common Commands
 
