@@ -1269,8 +1269,9 @@ button:disabled {
   position: fixed;
   z-index: 30;
   display: grid;
-  gap: var(--editor-space-xxs);
+  gap: 0;
   min-width: calc(var(--editor-size-sidebar-collapsed) * 4);
+  width: min(calc(var(--editor-size-sidebar) + var(--editor-space-xl)), calc(100vw - (var(--editor-space-lg) * 2)));
   max-height: calc(100vh - (var(--editor-space-xl) * 2));
   overflow-y: auto;
   padding: var(--editor-space-xs);
@@ -1280,10 +1281,21 @@ button:disabled {
   box-shadow: var(--editor-shadow-stage);
 }
 
+.object-context-menu-section {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  padding: var(--editor-space-xxs) 0;
+}
+
+.object-context-menu-section + .object-context-menu-section {
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
 .object-context-menu button {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
+  gap: var(--editor-space-md);
   min-height: var(--editor-space-xl);
   border-color: transparent;
   background: transparent;
@@ -1299,6 +1311,20 @@ button:disabled {
   background: transparent;
   color: var(--editor-color-muted);
   opacity: 1;
+}
+
+.object-context-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.object-context-menu-shortcut {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+  white-space: nowrap;
 }
 
 .object-context-menu-separator {
