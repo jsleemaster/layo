@@ -140,3 +140,9 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Reworked the menu into accessible grouped sections for clipboard, selection/export, edit, status, layer ordering, components, and alignment/distribution, with image-specific actions still shown only for image nodes.
 - Added right-aligned shortcut hints for the core Figma-like object actions, while keeping each menu item's accessible name on the action label so existing command tests remain stable.
 - Verification started with a RED Playwright expectation for missing grouped sections and shortcut hints; the focused e2e now passes for section count, section labeling, and shortcut rendering.
+
+2026-06-23 context-menu shortcut-equivalence slice:
+
+- Rechecked the grouped object menu and found a design-tool parity gap: several menu items displayed Figma-like shortcut hints, but the keyboard router only handled copy, paste, duplicate, delete, undo, redo, zoom, nudge, pan, and escape.
+- Added keyboard paths for the visible menu hints: `⌘X` cut, `⌘A` select all, `⇧⌘A` select same kind, `⇧1` fit selection, `⌥⌘C`/`⌥⌘V` style copy/paste, `⌘R` rename, `⌘G` group, `⇧⌘G` ungroup, and `⌥A`/`⌥H`/`⌥D`/`⌥W`/`⌥V`/`⌥S` alignment.
+- Verification started with RED Playwright failures for `Control+X` leaving the selected layer in place, `Control+G` not creating a group, `Alt+A` leaving the selected rectangle unaligned, `Control+Shift+A` not selecting same-kind layers, `Control+Alt+V` falling through to object paste, and `Control+R` not renaming the selected layer; the focused e2e tests now pass.

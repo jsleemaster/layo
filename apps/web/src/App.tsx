@@ -129,6 +129,14 @@ const OBJECT_CONTEXT_MENU_ESTIMATED_SIZE = {
   width: 280,
   height: 640
 };
+const ALIGNMENT_SHORTCUTS: Partial<Record<string, AlignmentMode>> = {
+  a: "left",
+  h: "center",
+  d: "right",
+  w: "top",
+  v: "middle",
+  s: "bottom"
+};
 
 function objectContextMenuPosition(left: number, top: number) {
   if (typeof window === "undefined") {
@@ -2975,6 +2983,44 @@ export function App() {
         });
         return;
       }
+      if (!isCommand && event.shiftKey && event.code === "Digit1") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) =>
+          fitViewportToSelection(state, {
+            width: Math.max(1, stageSize.width),
+            height: Math.max(1, stageSize.height)
+          })
+        );
+        return;
+      }
+      if (isCommand && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        updateViewportFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
+        return;
+      }
+      if (isCommand && event.altKey && event.key.toLowerCase() === "c") {
+        const currentEditor = editorRef.current;
+        const nodeId = currentEditor?.selection.nodeId ?? null;
+        const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+        if (node) {
+          event.preventDefault();
+          styleClipboardRef.current = { ...node.style };
+          setProjectStatus(`${node.name} 스타일 복사됨`);
+        }
+        return;
+      }
+      if (isCommand && event.altKey && event.key.toLowerCase() === "v") {
+        const style = styleClipboardRef.current;
+        const currentEditor = editorRef.current;
+        const nodeId = currentEditor?.selection.nodeId ?? null;
+        const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+        if (style && node && !isNodeLocked(node)) {
+          event.preventDefault();
+          updateViewportFromInteraction((state) => setSelectedNodeStyle(state, style));
+          setProjectStatus(`${node.name} 스타일 적용됨`);
+        }
+        return;
+      }
       if (isCommand && event.key.toLowerCase() === "c") {
         const clipboard = editorRef.current ? copySelectedNode(editorRef.current) : null;
         if (clipboard) {
@@ -2983,9 +3029,34 @@ export function App() {
         }
         return;
       }
+      if (isCommand && event.key.toLowerCase() === "x") {
+        const currentEditor = editorRef.current;
+        const nodeId = currentEditor?.selection.nodeId ?? null;
+        const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+        const clipboard = currentEditor && node && !isNodeLocked(node) ? copySelectedNode(currentEditor) : null;
+        if (clipboard) {
+          event.preventDefault();
+          objectClipboardRef.current = clipboard;
+          updateViewportFromInteraction(deleteSelectedNode);
+        }
+        return;
+      }
       if (isCommand && event.key.toLowerCase() === "v" && objectClipboardRef.current) {
         event.preventDefault();
         updateViewportFromInteraction((state) => pasteCopiedNode(state, objectClipboardRef.current));
+        return;
+      }
+      if (isCommand && event.key.toLowerCase() === "r") {
+        const currentEditor = editorRef.current;
+        const nodeId = currentEditor?.selection.nodeId ?? null;
+        const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+        if (node && !isNodeLocked(node)) {
+          event.preventDefault();
+          const nextName = window.prompt("레이어 이름", node.name);
+          if (nextName?.trim()) {
+            updateViewportFromInteraction((state) => renameSelectedNode(state, nextName));
+          }
+        }
         return;
       }
       if (isCommand && event.key.toLowerCase() === "d") {
@@ -2993,9 +3064,31 @@ export function App() {
         updateViewportFromInteraction(duplicateSelectedNode);
         return;
       }
+      if (isCommand && event.key.toLowerCase() === "g") {
+        event.preventDefault();
+        updateViewportFromInteraction((state) => {
+          if (event.shiftKey) {
+            return ungroupSelectedNode(state);
+          }
+
+          const sequence = flattenRendererNodes(state.document).length + 1;
+          return groupSelectedNodes(state, `group-${sequence}`, `그룹 ${sequence}`);
+        });
+        return;
+      }
       if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
         updateViewportFromInteraction(deleteSelectedNode);
+        return;
+      }
+      const alignmentShortcut = event.altKey ? ALIGNMENT_SHORTCUTS[event.key.toLowerCase()] : undefined;
+      if (!isCommand && alignmentShortcut) {
+        event.preventDefault();
+        updateViewportFromInteraction((state) =>
+          state.selection.nodeIds.length === 1
+            ? alignSelectedNodeToParent(state, alignmentShortcut)
+            : alignSelectedNodes(state, alignmentShortcut)
+        );
         return;
       }
       if (event.key === "Escape") {

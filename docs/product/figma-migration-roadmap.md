@@ -19,7 +19,7 @@ This roadmap translates `docs/product/figma-feature-inventory.md` into implement
 The current main branch already has:
 
 - Rust/TypeScript document primitives for pages, frames, rectangles, text, images, components, instances, and geometry.
-- Browser editor shell with a Figma-like left mode rail, default asset-library panel with thumbnail-rich starter kit cards, top file tabs, rulers, bottom floating toolbar, right Inspector action strip, expanded frame preset categories, creation, selection, dragging, corner-only resizing, direct double-click text editing, selection size badges, inspector geometry, grouped Inspector alignment/distribution controls, grouped object context-menu selection/flip/fit/export/style actions with shortcut hints, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
+- Browser editor shell with a Figma-like left mode rail, default asset-library panel with thumbnail-rich starter kit cards, top file tabs, rulers, bottom floating toolbar, right Inspector action strip, expanded frame preset categories, creation, selection, dragging, corner-only resizing, direct double-click text editing, selection size badges, inspector geometry, grouped Inspector alignment/distribution controls, grouped object context-menu selection/flip/fit/export/style actions with shortcut hints and matching cut/select/fit/style/rename/group/ungroup/alignment keyboard routes, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
 - Local image asset storage with browser clipboard paste, file drag/drop insertion for image nodes, context-menu image replacement, image fill/fit sizing modes, original image dimensions, and context-menu original-size restore.
 - Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, transient snap guides for page-level peer bounds/centers, and combined multi-selection group feedback.
 - Component definitions, instances, and detach.
@@ -161,7 +161,7 @@ Implementation shape:
 ## Immediate Implementation Order
 
 1. Keep the landed Lane 1 layout foundation and PR #20 navigation fixes green.
-2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, and single-object Cmd/Ctrl+C/V copy/paste.
+2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, single-object Cmd/Ctrl+C/V/X copy/cut/paste, Cmd/Ctrl+A select all, Shift+Cmd/Ctrl+A select same kind, Shift+1 fit selection, Option/Alt+Cmd/Ctrl+C/V style copy/paste, Cmd/Ctrl+R rename, Cmd/Ctrl+G grouping, Shift+Cmd/Ctrl+G ungrouping, and Option/Alt alignment shortcuts.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands and grouped Inspector affordances green for selected layers.
 5. Keep the multi-selection group outline and combined size badge green while deferring multi-selected bounding-box resize behavior to a separate slice.

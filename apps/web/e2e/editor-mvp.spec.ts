@@ -1210,6 +1210,120 @@ test("Figma-like object clipboard copies and pastes selected layers", async ({ p
   await expect(firstPaste).toBeVisible();
 });
 
+test("Figma-like object clipboard cuts selected layers with the menu shortcut", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.keyboard.press("Control+X");
+
+  await expect(page.getByRole("button", { name: "헤드라인" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+
+  await page.keyboard.press("Control+V");
+  const pastedLayer = page.getByRole("button", { name: "헤드라인 복사본" });
+  await expect(pastedLayer).toBeVisible();
+  await expect(pastedLayer).toHaveClass(/is-selected/);
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
+});
+
+test("Figma-like grouping shortcuts mirror object menu grouping", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  const firstRectangle = page.getByRole("button", { name: "사각형 3" });
+  const secondRectangle = page.getByRole("button", { name: "사각형 4" });
+  await expect(firstRectangle).toBeVisible();
+  await expect(secondRectangle).toBeVisible();
+
+  await firstRectangle.click();
+  await secondRectangle.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
+
+  await page.keyboard.press("Control+G");
+  const groupLayer = page.getByRole("button", { name: /그룹 \d+/ });
+  await expect(groupLayer).toBeVisible();
+  await expect(groupLayer).toHaveClass(/is-selected/);
+
+  await page.keyboard.press("Control+Shift+G");
+  await expect(groupLayer).toHaveCount(0);
+  await expect(firstRectangle).toBeVisible();
+  await expect(secondRectangle).toBeVisible();
+});
+
+test("Figma-like alignment shortcuts mirror object menu alignment", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "텍스트 만들기" }).click();
+  const headlineLayer = page.getByRole("button", { name: "헤드라인" });
+  const rectangleLayer = page.getByRole("button", { name: "사각형 3" });
+  const helperTextLayer = page.getByRole("button", { name: "텍스트 4" });
+  await expect(rectangleLayer).toBeVisible();
+  await expect(helperTextLayer).toBeVisible();
+
+  await page.getByTestId("inspector-x").fill("760");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("760");
+
+  await rectangleLayer.click({ modifiers: ["Shift"] });
+  await headlineLayer.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("3개 레이어 선택됨")).toBeVisible();
+
+  await page.keyboard.press("Alt+A");
+  await rectangleLayer.click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("152");
+});
+
+test("Figma-like selection shortcuts mirror object menu selection and fit actions", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  const firstRectangle = page.getByRole("button", { name: "사각형 3" });
+  const secondRectangle = page.getByRole("button", { name: "사각형 4" });
+  await expect(firstRectangle).toBeVisible();
+  await expect(secondRectangle).toBeVisible();
+
+  await firstRectangle.click();
+  await page.keyboard.press("Control+Shift+A");
+  await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
+  await expect(firstRectangle).toHaveClass(/is-selected/);
+  await expect(secondRectangle).toHaveClass(/is-selected/);
+
+  await page.keyboard.press("Control+A");
+  await expect(page.getByText("3개 레이어 선택됨")).toBeVisible();
+
+  await page.keyboard.press("Shift+1");
+  await expect(page.getByTestId("floating-toolbar").locator(".zoom-readout")).not.toHaveText("100%");
+});
+
+test("Figma-like style and rename shortcuts mirror object menu edit actions", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-fill").fill("#f97316");
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-fill").fill("#38bdf8");
+
+  const firstRectangle = page.getByRole("button", { name: "사각형 3" });
+  const secondRectangle = page.getByRole("button", { name: "사각형 4" });
+  await firstRectangle.click();
+  await page.keyboard.press("Control+Alt+C");
+
+  await secondRectangle.click();
+  await page.keyboard.press("Control+Alt+V");
+  await expect(page.getByRole("button", { name: "사각형 3 복사본" })).toHaveCount(0);
+  await expect(secondRectangle).toHaveClass(/is-selected/);
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#f97316");
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("레이어 이름");
+    await dialog.accept("단축키 레이어");
+  });
+  await page.keyboard.press("Control+R");
+  await expect(page.getByRole("button", { name: /^단축키 레이어/ })).toBeVisible();
+});
+
 test("Figma-like multi-selection supports Shift-click and area selection", async ({ page }) => {
   await createProjectFromEmptyState(page);
 
