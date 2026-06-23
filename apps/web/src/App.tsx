@@ -149,6 +149,13 @@ type ResizeHandle =
   | "bottom-right"
   | "bottom-left";
 
+const RESIZE_HANDLE_CURSORS: Record<ResizeHandle, "nwse-resize" | "nesw-resize"> = {
+  "top-left": "nwse-resize",
+  "bottom-right": "nwse-resize",
+  "top-right": "nesw-resize",
+  "bottom-left": "nesw-resize"
+};
+
 interface ResizeSession {
   nodeId: string;
   handle: ResizeHandle;
@@ -177,6 +184,7 @@ interface SelectionChromeOverlay {
   isMultiSelection: boolean;
   handles: Array<{
     handle: ResizeHandle;
+    cursor: "nwse-resize" | "nesw-resize";
     left: number;
     top: number;
     width: number;
@@ -650,6 +658,7 @@ function createSelectionChromeOverlay(
           const anchor = resizeHandlePoint(viewportSelectionBounds, handle);
           return {
             handle,
+            cursor: resizeCursorForHandle(handle),
             left: Math.round(anchor.x - size.width / 2),
             top: Math.round(anchor.y - size.height / 2),
             width: size.width,
@@ -834,6 +843,10 @@ function resizeHandleHitSize(_handle: ResizeHandle): { width: number; height: nu
   return { width: cornerHitSize, height: cornerHitSize };
 }
 
+function resizeCursorForHandle(handle: ResizeHandle): "nwse-resize" | "nesw-resize" {
+  return RESIZE_HANDLE_CURSORS[handle];
+}
+
 function resizeHandlePoint(bounds: SelectionBounds, handle: ResizeHandle): { x: number; y: number } {
   return {
     x: handle.endsWith("right")
@@ -922,6 +935,16 @@ function konvaResizeHandleRect(
   };
 }
 
+function setStageCursor(
+  event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>,
+  cursor: string
+) {
+  const stageContainer = event.target.getStage()?.container();
+  if (stageContainer) {
+    stageContainer.style.cursor = cursor;
+  }
+}
+
 function renderNode({
   node,
   selectedNodeId,
@@ -971,7 +994,16 @@ function renderNode({
     event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>
   ) => {
     event.cancelBubble = true;
+    setStageCursor(event, resizeCursorForHandle(handle));
     onResizeStart(node.id, handle);
+  };
+  const showResizeCursor = (handle: ResizeHandle, event: KonvaEventObject<MouseEvent>) => {
+    setStageCursor(event, resizeCursorForHandle(handle));
+  };
+  const clearResizeCursor = (event: KonvaEventObject<MouseEvent>) => {
+    if (event.evt.buttons === 0) {
+      setStageCursor(event, "");
+    }
   };
   const selectAndPrimeDrag = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
     if (isCanvasPanning) {
@@ -1088,6 +1120,8 @@ function renderNode({
                       {...hitRect}
                       fill={editorKonvaTokens.selection.handleFill}
                       opacity={0.01}
+                      onMouseEnter={(event) => showResizeCursor(handle, event)}
+                      onMouseLeave={clearResizeCursor}
                       onMouseDown={(event) => startResize(handle, event)}
                       onTouchStart={(event) => startResize(handle, event)}
                     />
@@ -1096,6 +1130,8 @@ function renderNode({
                       fill={editorKonvaTokens.selection.handleFill}
                       stroke={editorKonvaTokens.selection.stroke}
                       strokeWidth={editorKonvaTokens.selection.strokeWidth}
+                      onMouseEnter={(event) => showResizeCursor(handle, event)}
+                      onMouseLeave={clearResizeCursor}
                       onMouseDown={(event) => startResize(handle, event)}
                       onTouchStart={(event) => startResize(handle, event)}
                     />
@@ -2837,6 +2873,7 @@ export function App() {
     if (!pointer || !absolute || !node) {
       resizeSessionRef.current = null;
       setResizeSession(null);
+      setStageCursor(event, "");
       return;
     }
 
@@ -2848,6 +2885,14 @@ export function App() {
     );
     resizeSessionRef.current = null;
     setResizeSession(null);
+    setStageCursor(event, "");
+  };
+
+  const clearStageCursor = () => {
+    const stageContainer = stageFrameRef.current?.querySelector<HTMLElement>(".konvajs-content");
+    if (stageContainer) {
+      stageContainer.style.cursor = "";
+    }
   };
 
   const updateCursorFromPointer = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
@@ -2899,6 +2944,7 @@ export function App() {
 
   const clearCursorPresence = () => {
     const activeSession = collabSessionRef.current;
+    clearStageCursor();
     setMeasurementTargetNodeId(null);
     if (!activeSession) {
       return;
@@ -2937,6 +2983,48 @@ export function App() {
     }
 
     return false;
+  };
+
+  const updateResizeCursorFromPointer = (event: KonvaEventObject<MouseEvent>) => {
+    if (
+      !editor ||
+      !selectedNode ||
+      editor.selection.nodeIds.length !== 1 ||
+      areaSelectionRef.current ||
+      panSessionRef.current ||
+      isSpacePanningRef.current
+    ) {
+      setStageCursor(event, "");
+      return false;
+    }
+
+    const activeResize = resizeSessionRef.current;
+    if (activeResize) {
+      setStageCursor(event, resizeCursorForHandle(activeResize.handle));
+      return true;
+    }
+
+    const stage = event.target.getStage();
+    const pointer = stage?.getPointerPosition();
+    const absolute = getNodeAbsolutePosition(editor.document, selectedNode.id);
+    if (!pointer || !absolute) {
+      setStageCursor(event, "");
+      return false;
+    }
+
+    const stagePoint = documentPointFromStagePointer(pointer, editor.viewport);
+    const handle = resizeHandleAtPoint(
+      { x: absolute.x, y: absolute.y, width: selectedNode.size.width, height: selectedNode.size.height },
+      stagePoint
+    );
+
+    if (!handle) {
+      setStageCursor(event, "");
+      return false;
+    }
+
+    setStageCursor(event, resizeCursorForHandle(handle));
+    return true;
   };
 
   const startAreaSelectionFromPointer = (event: KonvaEventObject<MouseEvent>) => {
@@ -3032,6 +3120,7 @@ export function App() {
     }
 
     event.preventDefault();
+    clearStageCursor();
     panSessionRef.current = {
       clientX: point.x,
       clientY: point.y,
@@ -3452,7 +3541,12 @@ export function App() {
                   return;
                 }
 
-                updateMeasurementTargetFromPointer(event);
+                const isResizeHandleHover = updateResizeCursorFromPointer(event);
+                if (isResizeHandleHover) {
+                  setMeasurementTargetNodeId(null);
+                } else {
+                  updateMeasurementTargetFromPointer(event);
+                }
                 updateCursorFromPointer(event);
               }}
               onTouchMove={(event) => {
@@ -3653,7 +3747,8 @@ export function App() {
                       left: handle.left,
                       top: handle.top,
                       width: handle.width,
-                      height: handle.height
+                      height: handle.height,
+                      cursor: handle.cursor
                     }}
                   />
                 ))}

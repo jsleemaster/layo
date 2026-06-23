@@ -74,13 +74,13 @@ describe("encrypted collaboration provider", () => {
     try {
       const senderSocket = await waitForSocket(0);
       await waitForEncryptedFrame(senderSocket);
-      senderSocket.sent.length = 0;
       receiver = createTestProvider({ ydoc: receiverDocument.ydoc, resetSockets: false });
       const receiverSocket = await waitForSocket(1);
       await waitForEncryptedFrame(receiverSocket);
-      receiverSocket.sent.length = 0;
+      await flushEncryptedRelay(senderSocket, receiverSocket);
 
       const senderUpdateStart = senderSocket.sent.length;
+      const receiverUpdateStart = receiverSocket.sent.length;
       senderDocument.transact("create-text", (current) => {
         const next = structuredClone(current);
         next.pages[0]?.children.push({
@@ -101,15 +101,21 @@ describe("encrypted collaboration provider", () => {
         return next;
       });
 
-      await forwardEncryptedFramesUntil(senderSocket, receiverSocket, senderUpdateStart, () => {
-        try {
-          return receiverDocument
-            .getDocument()
-            .pages[0]?.children.some((node) => node.id === "text-2");
-        } catch {
-          return false;
+      await forwardEncryptedFramesBetweenUntil(
+        senderSocket,
+        receiverSocket,
+        senderUpdateStart,
+        receiverUpdateStart,
+        () => {
+          try {
+            return receiverDocument
+              .getDocument()
+              .pages[0]?.children.some((node) => node.id === "text-2");
+          } catch {
+            return false;
+          }
         }
-      });
+      );
       expect(receiverDocument.getDocument().pages.map((page) => page.id)).toEqual(["page-1"]);
       expect(receiverDocument.getDocument().pages[0]?.children.map((node) => node.id)).toEqual([
         "text-1",
@@ -314,23 +320,97 @@ async function forwardEncryptedFramesUntil(
   assertion: () => boolean
 ): Promise<void> {
   let nextIndex = startIndex;
+  let forwarded = 0;
   await waitFor(() => {
     const nextFrames = source.sent.slice(nextIndex);
     nextIndex = source.sent.length;
     for (const frame of nextFrames) {
       if (frame[0] === 10) {
+        forwarded += 1;
         target.emitMessage(frame);
       }
     }
     return assertion();
-  });
+  }, 10_000, () => `sourceFrames=${source.sent.length}, targetFrames=${target.sent.length}, forwarded=${forwarded}`);
 }
 
-async function waitFor(assertion: () => boolean, timeoutMs = 10_000): Promise<void> {
+async function forwardEncryptedFramesBetweenUntil(
+  first: MockWebSocket,
+  second: MockWebSocket,
+  firstStartIndex: number,
+  secondStartIndex: number,
+  assertion: () => boolean
+): Promise<void> {
+  let firstIndex = firstStartIndex;
+  let secondIndex = secondStartIndex;
+  let firstForwarded = 0;
+  let secondForwarded = 0;
+  await waitFor(() => {
+    const nextFirstFrames = first.sent.slice(firstIndex);
+    firstIndex = first.sent.length;
+    for (const frame of nextFirstFrames) {
+      if (frame[0] === 10) {
+        firstForwarded += 1;
+        second.emitMessage(frame);
+      }
+    }
+
+    const nextSecondFrames = second.sent.slice(secondIndex);
+    secondIndex = second.sent.length;
+    for (const frame of nextSecondFrames) {
+      if (frame[0] === 10) {
+        secondForwarded += 1;
+        first.emitMessage(frame);
+      }
+    }
+
+    return assertion();
+  }, 10_000, () =>
+    `firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded}`
+  );
+}
+
+async function flushEncryptedRelay(first: MockWebSocket, second: MockWebSocket): Promise<void> {
+  let firstIndex = 0;
+  let secondIndex = 0;
+  let idleTicks = 0;
+  let firstForwarded = 0;
+  let secondForwarded = 0;
+  await waitFor(() => {
+    let forwardedThisTick = 0;
+
+    const nextFirstFrames = first.sent.slice(firstIndex);
+    firstIndex = first.sent.length;
+    for (const frame of nextFirstFrames) {
+      if (frame[0] === 10) {
+        forwardedThisTick += 1;
+        firstForwarded += 1;
+        second.emitMessage(frame);
+      }
+    }
+
+    const nextSecondFrames = second.sent.slice(secondIndex);
+    secondIndex = second.sent.length;
+    for (const frame of nextSecondFrames) {
+      if (frame[0] === 10) {
+        forwardedThisTick += 1;
+        secondForwarded += 1;
+        first.emitMessage(frame);
+      }
+    }
+
+    idleTicks = forwardedThisTick === 0 ? idleTicks + 1 : 0;
+    return idleTicks >= 2;
+  }, 10_000, () =>
+    `firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded}`
+  );
+}
+
+async function waitFor(assertion: () => boolean, timeoutMs = 10_000, describeTimeout?: () => string): Promise<void> {
   const startedAt = Date.now();
   while (!assertion()) {
     if (Date.now() - startedAt > timeoutMs) {
-      throw new Error("timed out waiting for condition");
+      throw new Error(`timed out waiting for condition${describeTimeout ? ` (${describeTimeout()})` : ""}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }

@@ -844,6 +844,43 @@ test("selected layers expose four corner resize handles and an immediate size ba
   await expect(page.getByTestId("selection-size-badge")).toHaveText("280 x 68");
 });
 
+test("resize handles expose directional mouse cursors while hovered", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+
+  const stageCursor = () =>
+    page.evaluate(() => {
+      const stageContainer = document.querySelector<HTMLElement>(".konvajs-content");
+      if (!stageContainer) {
+        throw new Error("Konva stage container was not visible");
+      }
+      return window.getComputedStyle(stageContainer).cursor;
+    });
+
+  for (const [handle, cursor] of [
+    ["top-left", "nwse-resize"],
+    ["bottom-right", "nwse-resize"],
+    ["top-right", "nesw-resize"],
+    ["bottom-left", "nesw-resize"]
+  ] as const) {
+    const handleBox = await page.getByTestId(`resize-handle-${handle}`).boundingBox();
+    if (!handleBox) {
+      throw new Error(`${handle} resize handle was not visible`);
+    }
+
+    await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+    await expect.poll(stageCursor).toBe(cursor);
+  }
+
+  const stageBox = await page.locator("canvas").first().boundingBox();
+  if (!stageBox) {
+    throw new Error("stage canvas was not visible");
+  }
+  await page.mouse.move(stageBox.x + 20, stageBox.y + 20);
+  await expect.poll(stageCursor).toBe("auto");
+});
+
 test("selected layers expose only corner resize handles and side drags do not resize", async ({ page }) => {
   await createProjectFromEmptyState(page);
 
