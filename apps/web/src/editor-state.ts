@@ -215,7 +215,11 @@ export type EditorCommand =
       type: "set_node_layout";
       nodeId: string;
       layout: NodeLayout | null;
-      previousChildren?: Array<{ id: string; transform: RendererNode["transform"] }>;
+      previousChildren?: Array<{
+        id: string;
+        transform: RendererNode["transform"];
+        size: RendererNode["size"];
+      }>;
     }
   | {
       type: "set_node_constraints";
@@ -1799,7 +1803,8 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       const previousLayout = node.layout ? structuredClone(node.layout) : null;
       const previousChildren = node.children.map((child) => ({
         id: child.id,
-        transform: { ...child.transform }
+        transform: { ...child.transform },
+        size: { ...child.size }
       }));
 
       if (command.layout) {
@@ -1861,14 +1866,49 @@ function relayoutDocument(document: RendererDocument): void {
 function relayoutNode(node: RendererNode): void {
   const layout = normalizedAutoLayout(node.layout);
   if (layout) {
-    let cursor = layout.direction === "vertical" ? layout.padding.top : layout.padding.left;
+    const isVertical = layout.direction === "vertical";
+    const childCount = node.children.length;
+    const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
+    const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
+    const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
+    const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
+    const availableMain = Math.max(
+      0,
+      (isVertical ? node.size.height : node.size.width) - mainStartPadding - mainEndPadding
+    );
+    const availableCross = Math.max(
+      0,
+      (isVertical ? node.size.width : node.size.height) - crossStartPadding - crossEndPadding
+    );
+    const totalChildMain =
+      node.children.reduce((total, child) => total + (isVertical ? child.size.height : child.size.width), 0) +
+      layout.gap * Math.max(0, childCount - 1);
+    const remainingMain = Math.max(0, availableMain - totalChildMain);
+    let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
+    const distributedGap = layout.gap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
+
     for (const child of node.children) {
+      const crossAxisPosition = crossAxisOffset(
+        layout.align_items,
+        crossStartPadding,
+        crossEndPadding,
+        availableCross,
+        isVertical ? child.size.width : child.size.height,
+        isVertical ? node.size.width : node.size.height
+      );
+      if (layout.align_items === "stretch") {
+        if (isVertical) {
+          child.size.width = clampSize(availableCross);
+        } else {
+          child.size.height = clampSize(availableCross);
+        }
+      }
       child.transform = {
         ...child.transform,
-        x: layout.direction === "vertical" ? layout.padding.left : cursor,
-        y: layout.direction === "vertical" ? cursor : layout.padding.top
+        x: isVertical ? crossAxisPosition : cursor,
+        y: isVertical ? cursor : crossAxisPosition
       };
-      cursor += (layout.direction === "vertical" ? child.size.height : child.size.width) + layout.gap;
+      cursor += (isVertical ? child.size.height : child.size.width) + distributedGap;
     }
   }
 
@@ -1889,6 +1929,8 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   return {
     mode: layout.mode === "auto" ? "auto" : "none",
     direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
+    align_items: isLayoutAlignItems(layout.align_items) ? layout.align_items : "start",
+    justify_content: isLayoutJustifyContent(layout.justify_content) ? layout.justify_content : "start",
     gap: Math.max(0, finiteNumber(layout.gap, 0)),
     padding: {
       top: Math.max(0, finiteNumber(layout.padding?.top, 0)),
@@ -1908,13 +1950,18 @@ function normalizeNodeConstraints(constraints: NodeConstraints): NodeConstraints
 
 function restoreChildTransforms(
   node: RendererNode,
-  transforms: Array<{ id: string; transform: RendererNode["transform"] }>
+  transforms: Array<{ id: string; transform: RendererNode["transform"]; size?: RendererNode["size"] }>
 ): void {
   const byId = new Map(transforms.map((entry) => [entry.id, entry.transform]));
+  const sizeById = new Map(transforms.flatMap((entry) => (entry.size ? [[entry.id, entry.size] as const] : [])));
   for (const child of node.children) {
     const transform = byId.get(child.id);
     if (transform) {
       child.transform = { ...transform };
+    }
+    const size = sizeById.get(child.id);
+    if (size) {
+      child.size = { ...size };
     }
   }
 }
@@ -2000,6 +2047,68 @@ function isHorizontalConstraint(value: string): value is NodeConstraints["horizo
 
 function isVerticalConstraint(value: string): value is NodeConstraints["vertical"] {
   return ["top", "bottom", "top_bottom", "center", "scale"].includes(value);
+}
+
+function isLayoutAlignItems(value: string): value is NodeLayout["align_items"] {
+  return ["start", "center", "end", "stretch"].includes(value);
+}
+
+function isLayoutJustifyContent(value: string): value is NodeLayout["justify_content"] {
+  return ["start", "center", "end", "space_between", "space_around", "space_evenly"].includes(value);
+}
+
+function justifyStartOffset(
+  justifyContent: NodeLayout["justify_content"],
+  remainingMain: number,
+  childCount: number
+): number {
+  if (justifyContent === "center") {
+    return remainingMain / 2;
+  }
+  if (justifyContent === "end") {
+    return remainingMain;
+  }
+  if (justifyContent === "space_around" && childCount > 0) {
+    return remainingMain / childCount / 2;
+  }
+  if (justifyContent === "space_evenly" && childCount > 0) {
+    return remainingMain / (childCount + 1);
+  }
+  return 0;
+}
+
+function justifyGapOffset(
+  justifyContent: NodeLayout["justify_content"],
+  remainingMain: number,
+  childCount: number
+): number {
+  if (justifyContent === "space_between" && childCount > 1) {
+    return remainingMain / (childCount - 1);
+  }
+  if (justifyContent === "space_around" && childCount > 0) {
+    return remainingMain / childCount;
+  }
+  if (justifyContent === "space_evenly" && childCount > 0) {
+    return remainingMain / (childCount + 1);
+  }
+  return 0;
+}
+
+function crossAxisOffset(
+  alignItems: NodeLayout["align_items"],
+  crossStartPadding: number,
+  crossEndPadding: number,
+  availableCross: number,
+  childCrossSize: number,
+  parentCrossSize: number
+): number {
+  if (alignItems === "center") {
+    return crossStartPadding + Math.max(0, availableCross - childCrossSize) / 2;
+  }
+  if (alignItems === "end") {
+    return parentCrossSize - crossEndPadding - childCrossSize;
+  }
+  return crossStartPadding;
 }
 
 function findInNode(node: RendererNode, nodeId: string): RendererNode | null {

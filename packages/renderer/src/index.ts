@@ -1,6 +1,8 @@
 export interface NodeLayout {
   mode: "none" | "auto";
   direction: "horizontal" | "vertical";
+  align_items: "start" | "center" | "end" | "stretch";
+  justify_content: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   gap: number;
   padding: {
     top: number;

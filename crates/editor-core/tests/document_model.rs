@@ -65,6 +65,8 @@ fn layout_metadata_round_trips_through_json() {
               "layout": {
                 "mode": "auto",
                 "direction": "vertical",
+                "align_items": "center",
+                "justify_content": "space_between",
                 "gap": 12,
                 "padding": { "top": 20, "right": 24, "bottom": 20, "left": 24 }
               },
@@ -101,6 +103,14 @@ fn layout_metadata_round_trips_through_json() {
         frame.layout.as_ref().unwrap().direction,
         editor_core::LayoutDirection::Vertical
     );
+    assert_eq!(
+        frame.layout.as_ref().unwrap().align_items,
+        editor_core::LayoutAlignItems::Center
+    );
+    assert_eq!(
+        frame.layout.as_ref().unwrap().justify_content,
+        editor_core::LayoutJustifyContent::SpaceBetween
+    );
     assert_eq!(frame.layout.as_ref().unwrap().gap, 12.0);
     assert_eq!(
         child.constraints.as_ref().unwrap().horizontal,
@@ -110,6 +120,51 @@ fn layout_metadata_round_trips_through_json() {
     let json = serde_json::to_string(&parsed).unwrap();
     assert!(json.contains("\"layout\""));
     assert!(json.contains("\"constraints\""));
+}
+
+#[test]
+fn legacy_layout_metadata_defaults_alignment_fields() {
+    let raw = r##"
+    {
+      "id": "legacy-layout-file",
+      "name": "Legacy Layout File",
+      "version": 1,
+      "components": [],
+      "pages": [
+        {
+          "id": "page-1",
+          "name": "페이지 1",
+          "children": [
+            {
+              "id": "frame-1",
+              "kind": "frame",
+              "name": "Legacy Auto Frame",
+              "layout": {
+                "mode": "auto",
+                "direction": "vertical",
+                "gap": 12,
+                "padding": { "top": 20, "right": 24, "bottom": 20, "left": 24 }
+              },
+              "transform": { "x": 0, "y": 0, "rotation": 0 },
+              "size": { "width": 320, "height": 240 },
+              "style": { "fill": "#ffffff", "stroke": null, "stroke_width": 0, "opacity": 1 },
+              "content": { "type": "empty" },
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let layout = parsed.pages[0].children[0].layout.as_ref().unwrap();
+
+    assert_eq!(layout.align_items, editor_core::LayoutAlignItems::Start);
+    assert_eq!(
+        layout.justify_content,
+        editor_core::LayoutJustifyContent::Start
+    );
 }
 
 #[test]

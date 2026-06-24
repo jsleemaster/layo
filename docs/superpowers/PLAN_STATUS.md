@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-06-22
+Last audited: 2026-06-24
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -45,6 +45,7 @@ Use this order when entering the repo:
 | `2026-06-22-edge-resize-handles.md` | Completed | Added top/right/bottom/left edge resize handles alongside the existing corners, edge-specific one-axis resizing, stable hit priority between edge and corner handles, explicit bottom-right e2e targeting for the older MVP resize path, and deterministic encrypted-provider coverage that separates initial sync frames from the actual granular update frame. Verified with RED/GREEN edge Playwright coverage, `git diff --check`, focused state tests, focused and headed resize Playwright tests, `pnpm test:e2e`, `pnpm typecheck`, `pnpm --filter @layo/web build`, and `pnpm test`. |
 | `2026-06-22-multi-selection-group-affordance.md` | Completed | Added a combined multi-selection group outline and combined dimensions badge while keeping resize handles single-selection only. Verified with RED/GREEN Playwright coverage, `git diff --check`, `pnpm run check:design-rules`, focused state/e2e tests, `pnpm typecheck`, `pnpm test:e2e`, `pnpm --filter @layo/web build`, `pnpm test`, and direct headed Playwright CLI verification. |
 | `2026-06-22-inspector-alignment-affordance.md` | Completed | Separated Inspector align and distribution controls into distinct groups, added Korean tooltips, made disabled distribution state explicit, and stabilized encrypted-provider frame-forwarding tests found during verification. Verified with focused RED/GREEN Playwright coverage, `git diff --check`, `pnpm run check:design-rules`, `pnpm typecheck`, `pnpm test:e2e`, web build, headed Playwright CLI verification, focused web unit tests, and `pnpm test`. |
+| `2026-06-24-penpot-flex-alignment.md` | Completed | Added Penpot Flex-like `align_items` and `justify_content` to the shared layout model, web/server layout solvers, MCP schema defaults, Rust JSON model with legacy-layout serde defaults, code-export metadata, Korean Inspector controls, e2e coverage, and Penpot maturity docs. Verified with focused RED/GREEN tests, `pnpm run check:penpot-maturity`, focused web/server/Rust tests, `pnpm typecheck`, `pnpm --filter @layo/web build`, `pnpm test`, `cargo test --workspace`, focused Playwright CLI e2e, and Playwright API-log direct UI interaction proof. |
 
 ## Current Active Plan
 

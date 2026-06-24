@@ -119,6 +119,8 @@ describe("code export", () => {
     fixture.pages[0].children[0].layout = {
       mode: "auto",
       direction: "vertical",
+      align_items: "center",
+      justify_content: "space_between",
       gap: 8,
       padding: { top: 12, right: 16, bottom: 12, left: 16 }
     };
@@ -133,6 +135,8 @@ describe("code export", () => {
     expect(button?.structure.layout).toEqual({
       mode: "auto",
       direction: "vertical",
+      align_items: "center",
+      justify_content: "space_between",
       gap: 8,
       padding: { top: 12, right: 16, bottom: 12, left: 16 }
     });

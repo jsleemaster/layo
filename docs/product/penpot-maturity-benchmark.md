@@ -37,7 +37,7 @@ implementation slice reveals a new gap.
 | Hosting and ownership | Cloud or self-hosted instance with teams, projects, and files. | Local project manifests, static web shell, optional team-owned relay. | Self-hostable full product path with project API, web shell, assets, auth, relay, and operations docs. |
 | Collaboration | Realtime collaboration as a core team feature. | Yjs relay, presence, remote selection, roles, E2EE snapshots. | Collaboration treated as core product maturity, including comments, history, review, and recovery. |
 | Design systems | Tokens, components, variants, shared libraries. | Components and instances exist; variables/styles/libraries are immature. | First-class variables, styles, variants, library reuse, and code mapping. |
-| Layout | Flex and grid oriented layout primitives. | Layout metadata and constraints are planned/partial; predictable auto layout remains a major gate. | Auto layout, constraints, grid-like behavior, resizing semantics, and export parity. |
+| Layout | Flex and grid oriented layout primitives. | Layout metadata, constraints, single-axis flow, gap, padding, cross-axis alignment, and main-axis distribution exist; grid, wrap, margins, absolute layout items, and fit/fill sizing remain immature. | Auto layout, constraints, grid-like behavior, resizing semantics, and export parity. |
 | Import/export | Penpot file import/export, backups, shared libraries, assets. | Local design JSON, asset storage, image paste/drop, code export. | Open project export/import, Penpot/Figma migration paths, asset packaging, and backup/restore. |
 | Developer handoff | Inspect, HTML/CSS/SVG access, API, webhooks, plugin integrations. | MCP/HTTP inspect, validate, change summary, and structured code export. | Visible Dev panel plus MCP/API surfaces, repo component mappings, and ready-for-dev annotations. |
 | Extensibility | Plugin system and API integrations. | No plugin runtime; deterministic agent commands exist. | Plugin/API lane that complements MCP instead of replacing it. |
@@ -93,7 +93,7 @@ For each comparison:
 
 These are the first Penpot-comparable gaps to close:
 
-1. Auto layout, constraints, grid-like layout behavior, and resizing semantics.
+1. Complete Penpot-like layout maturity beyond the landed Flex alignment slice: grid-like layout behavior, wrap, margins, absolute/static layout items, fit/fill sizing, and deeper resizing semantics.
 2. Comments, version history, branch/review/merge, and recovery workflow.
 3. Variables, styles, variants, shared libraries, and code component mappings.
 4. Visible Dev panel backed by existing MCP/HTTP inspect/export data.

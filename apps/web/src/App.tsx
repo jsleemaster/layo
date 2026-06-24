@@ -218,6 +218,8 @@ const LOCAL_USER_COLOR = "var(--editor-color-selection)";
 const DEFAULT_NODE_LAYOUT: NodeLayout = {
   mode: "none",
   direction: "vertical",
+  align_items: "start",
+  justify_content: "start",
   gap: 8,
   padding: { top: 16, right: 16, bottom: 16, left: 16 }
 };
@@ -1732,7 +1734,16 @@ function Inspector({
       onGeometryChange(selectedNode.id, { [patchKey]: nextValue });
     }
   };
-  const layout = selectedNode.layout ?? DEFAULT_NODE_LAYOUT;
+  const layout: NodeLayout = selectedNode.layout
+    ? {
+        ...DEFAULT_NODE_LAYOUT,
+        ...selectedNode.layout,
+        padding: {
+          ...DEFAULT_NODE_LAYOUT.padding,
+          ...selectedNode.layout.padding
+        }
+      }
+    : DEFAULT_NODE_LAYOUT;
   const constraints = selectedNode.constraints ?? DEFAULT_NODE_CONSTRAINTS;
   const updateLayout = (patch: Partial<NodeLayout>) => {
     onLayoutChange(selectedNode.id, {
@@ -1855,6 +1866,40 @@ function Inspector({
           >
             <option value="vertical">세로</option>
             <option value="horizontal">가로</option>
+          </select>
+        </label>
+        <label className="stacked-field">
+          교차축 정렬
+          <select
+            data-testid="inspector-layout-align-items"
+            value={layout.align_items}
+            onChange={(event) =>
+              updateLayout({ align_items: event.currentTarget.value as NodeLayout["align_items"] })
+            }
+          >
+            <option value="start">시작</option>
+            <option value="center">가운데</option>
+            <option value="end">끝</option>
+            <option value="stretch">늘림</option>
+          </select>
+        </label>
+        <label className="stacked-field">
+          주축 분배
+          <select
+            data-testid="inspector-layout-justify-content"
+            value={layout.justify_content}
+            onChange={(event) =>
+              updateLayout({
+                justify_content: event.currentTarget.value as NodeLayout["justify_content"]
+              })
+            }
+          >
+            <option value="start">시작</option>
+            <option value="center">가운데</option>
+            <option value="end">끝</option>
+            <option value="space_between">사이</option>
+            <option value="space_around">둘레</option>
+            <option value="space_evenly">균등</option>
           </select>
         </label>
         <div className="field-grid">

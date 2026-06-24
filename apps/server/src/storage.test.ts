@@ -499,8 +499,10 @@ describe("FileStorage", () => {
           layout: {
             mode: "auto",
             direction: "vertical",
+            align_items: "center",
+            justify_content: "space_between",
             gap: 12,
-            padding: { top: 20, right: 24, bottom: 20, left: 24 }
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
           }
         },
         {
@@ -516,12 +518,12 @@ describe("FileStorage", () => {
 
     const autoFrame = autoLayout.preview.pages[0].children[0];
     expect(autoFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
-      x: 24,
+      x: 80,
       y: 20
     });
     expect(autoFrame.children.find((node) => node.id === "layout-rectangle")?.transform).toMatchObject({
-      x: 24,
-      y: 80
+      x: 130,
+      y: 164
     });
     expect(autoLayout.audit.commandTypes).toEqual(["set_layout", "create_rectangle"]);
 

@@ -166,6 +166,8 @@ The first agent command batch supports:
   "layout": {
     "mode": "auto",
     "direction": "vertical",
+    "align_items": "center",
+    "justify_content": "space_between",
     "gap": 12,
     "padding": { "top": 20, "right": 24, "bottom": 20, "left": 24 }
   }

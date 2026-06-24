@@ -8,6 +8,7 @@ pub use context::{DesignContext, NodeSummary};
 pub use geometry::{Bounds, Point, Size, Transform};
 pub use model::{
     ComponentDefinition, ComponentInstance, ComponentOverride, ComponentProperty, ComponentVariant,
-    DesignFile, HorizontalConstraint, LayoutDirection, LayoutMode, LayoutPadding, Node,
-    NodeConstraints, NodeContent, NodeKind, NodeLayout, Page, Style, VerticalConstraint,
+    DesignFile, HorizontalConstraint, LayoutAlignItems, LayoutDirection, LayoutJustifyContent,
+    LayoutMode, LayoutPadding, Node, NodeConstraints, NodeContent, NodeKind, NodeLayout, Page,
+    Style, VerticalConstraint,
 };
