@@ -225,6 +225,7 @@ const DEFAULT_NODE_LAYOUT: NodeLayout = {
   padding: { top: 16, right: 16, bottom: 16, left: 16 }
 };
 const DEFAULT_NODE_LAYOUT_ITEM: NodeLayoutItem = {
+  position: "static",
   margin: { top: 0, right: 0, bottom: 0, left: 0 }
 };
 const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
@@ -1780,6 +1781,12 @@ function Inspector({
         });
       }
     };
+  const updateLayoutItemPosition = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    onLayoutItemChange(selectedNode.id, {
+      ...layoutItem,
+      position: event.currentTarget.value as NodeLayoutItem["position"]
+    });
+  };
   const updateLayoutItemMargin =
     (side: keyof NodeLayoutItem["margin"]) => (event: React.ChangeEvent<HTMLInputElement>) => {
       const nextValue = Number(event.currentTarget.value);
@@ -1986,6 +1993,17 @@ function Inspector({
       </section>
       <section className="inspector-section" aria-label="레이아웃 아이템">
         <h3>레이아웃 아이템</h3>
+        <label className="stacked-field">
+          위치
+          <select
+            data-testid="inspector-layout-item-position"
+            value={layoutItem.position ?? "static"}
+            onChange={updateLayoutItemPosition}
+          >
+            <option value="static">흐름</option>
+            <option value="absolute">절대</option>
+          </select>
+        </label>
         <div className="field-grid">
           <label>
             마진 위

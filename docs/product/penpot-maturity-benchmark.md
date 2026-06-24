@@ -25,6 +25,7 @@ Use these sources before changing Layo's team-product roadmap:
 - Penpot MCP server: https://help.penpot.app/mcp/
 - Penpot plugin guide: https://help.penpot.app/plugins/getting-started/
 - Penpot file import/export: https://help.penpot.app/user-guide/export-import/export-import-files/
+- Penpot flexible layouts: https://help.penpot.app/user-guide/designing/flexible-layouts/
 
 Refresh this document when those sources materially change or when a Layo
 implementation slice reveals a new gap.
@@ -37,7 +38,7 @@ implementation slice reveals a new gap.
 | Hosting and ownership | Cloud or self-hosted instance with teams, projects, and files. | Local project manifests, static web shell, optional team-owned relay. | Self-hostable full product path with project API, web shell, assets, auth, relay, and operations docs. |
 | Collaboration | Realtime collaboration as a core team feature. | Yjs relay, presence, remote selection, roles, E2EE snapshots. | Collaboration treated as core product maturity, including comments, history, review, and recovery. |
 | Design systems | Tokens, components, variants, shared libraries. | Components and instances exist; variables/styles/libraries are immature. | First-class variables, styles, variants, library reuse, and code mapping. |
-| Layout | Flex and grid oriented layout primitives. | Layout metadata, constraints, single-axis flow, gap, padding, child margins, cross-axis alignment, and main-axis distribution exist; grid, wrap, absolute layout items, and fit/fill sizing remain immature. | Auto layout, constraints, grid-like behavior, resizing semantics, and export parity. |
+| Layout | Flex and grid oriented layout primitives. | Layout metadata, constraints, single-axis flow, gap, padding, child margins, static/absolute layout item positioning, cross-axis alignment, and main-axis distribution exist; grid, wrap, and fit/fill sizing remain immature. | Auto layout, constraints, grid-like behavior, resizing semantics, and export parity. |
 | Import/export | Penpot file import/export, backups, shared libraries, assets. | Local design JSON, asset storage, image paste/drop, code export. | Open project export/import, Penpot/Figma migration paths, asset packaging, and backup/restore. |
 | Developer handoff | Inspect, HTML/CSS/SVG access, API, webhooks, plugin integrations. | MCP/HTTP inspect, validate, change summary, and structured code export. | Visible Dev panel plus MCP/API surfaces, repo component mappings, and ready-for-dev annotations. |
 | Extensibility | Plugin system and API integrations. | No plugin runtime; deterministic agent commands exist. | Plugin/API lane that complements MCP instead of replacing it. |
@@ -93,7 +94,7 @@ For each comparison:
 
 These are the first Penpot-comparable gaps to close:
 
-1. Complete Penpot-like layout maturity beyond the landed Flex alignment and child-margin slices: grid-like layout behavior, wrap, absolute/static layout items, fit/fill sizing, and deeper resizing semantics.
+1. Complete Penpot-like layout maturity beyond the landed Flex alignment, child-margin, and static/absolute layout-item slices: grid-like layout behavior, wrap, fit/fill sizing, and deeper resizing semantics.
 2. Comments, version history, branch/review/merge, and recovery workflow.
 3. Variables, styles, variants, shared libraries, and code component mappings.
 4. Visible Dev panel backed by existing MCP/HTTP inspect/export data.

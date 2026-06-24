@@ -1823,6 +1823,38 @@ test("inspector layout item margin offsets auto-layout children", async ({ page 
   await expect(page.getByTestId("inspector-y")).toHaveValue("104");
 });
 
+test("inspector layout item position keeps absolute children out of auto-layout flow", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("vertical");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("12");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-layout-item-position").selectOption("absolute");
+  await page.getByTestId("inspector-x").fill("140");
+  await page.getByTestId("inspector-y").fill("160");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("140");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("160");
+
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+});
+
 test("inspector auto layout alignment controls center and distribute children", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

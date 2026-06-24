@@ -569,6 +569,63 @@ describe("FileStorage", () => {
     });
     expect(itemMarginLayout.audit.commandTypes).toEqual(["set_layout", "set_layout_item", "create_rectangle"]);
 
+
+    const absoluteItemLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "vertical",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            position: "absolute",
+            margin: { top: 10, right: 8, bottom: 14, left: 6 }
+          }
+        },
+        {
+          type: "update_geometry",
+          nodeId: "text-1",
+          x: 140,
+          y: 160
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "absolute-flow-rectangle",
+          name: "절대 제외 사각형",
+          width: 120,
+          height: 40
+        }
+      ] as any
+    });
+
+    const absoluteFrame = absoluteItemLayout.preview.pages[0].children[0];
+    expect(absoluteFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
+      x: 140,
+      y: 160
+    });
+    expect(absoluteFrame.children.find((node) => node.id === "absolute-flow-rectangle")?.transform).toMatchObject({
+      x: 20,
+      y: 20
+    });
+    expect(absoluteItemLayout.audit.commandTypes).toEqual([
+      "set_layout",
+      "set_layout_item",
+      "update_geometry",
+      "create_rectangle"
+    ]);
+
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

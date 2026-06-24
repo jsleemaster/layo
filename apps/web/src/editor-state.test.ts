@@ -345,6 +345,60 @@ describe("editor state commands", () => {
     expect(findNodeById(undone.document, "text-1")?.layout_item).toBeUndefined();
   });
 
+  test("auto layout excludes absolute layout items from flow", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.layout = {
+      mode: "auto",
+      direction: "vertical",
+      gap: 12,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 },
+      align_items: "start",
+      justify_content: "start"
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.layout_item = {
+      position: "absolute",
+      margin: { top: 10, right: 8, bottom: 14, left: 6 }
+    };
+    text.transform = { x: 140, y: 160, rotation: 0 };
+    frame.children.push({
+      id: "rectangle-1",
+      kind: "rectangle",
+      name: "사각형",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 120, height: 40 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "rectangle-1",
+      patch: { width: 120 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 140, y: 160 });
+    expect(findNodeById(relaid.document, "rectangle-1")?.transform).toMatchObject({ x: 20, y: 20 });
+  });
+
+  test("sets layout item position through an editor command and supports undo", () => {
+    const updated = executeEditorCommand(createEditorState(sampleDocument()), {
+      type: "set_node_layout_item",
+      nodeId: "text-1",
+      layoutItem: { position: "absolute", margin: { top: 10, right: 8, bottom: 14, left: 6 } }
+    } as any);
+
+    expect(findNodeById(updated.document, "text-1")?.layout_item).toEqual({
+      position: "absolute",
+      margin: { top: 10, right: 8, bottom: 14, left: 6 }
+    });
+
+    const undone = undo(updated);
+    expect(findNodeById(undone.document, "text-1")?.layout_item).toBeUndefined();
+  });
+
   test("sets auto layout through an editor command and supports undo", () => {
     const layout = {
       mode: "auto",

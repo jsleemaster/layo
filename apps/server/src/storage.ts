@@ -49,6 +49,7 @@ export interface NodeLayout {
 }
 
 export interface NodeLayoutItem {
+  position?: "static" | "absolute";
   margin: LayoutSpacing;
 }
 

@@ -37,7 +37,7 @@ Figma capabilities to bring over:
 - Constraints for child response when parent frames resize.
 - Auto layout on frames/components with vertical and horizontal flow.
 - Cross-axis alignment and main-axis distribution for single-line Flex-like layout.
-- Gap, padding, and child item margins.
+- Gap, padding, child item margins, and static/absolute layout item positioning.
 - Content-driven repositioning after create, resize, and text edits.
 - Layout and layout-item metadata in code export and agent inspection.
 
@@ -46,14 +46,13 @@ Implementation shape:
 - Add optional `layout`, `layout_item`, and `constraints` metadata to the shared node model.
 - Add deterministic layout commands to editor state, server storage, MCP/HTTP agent commands, and Rust model serialization.
 - Implement a small layout solver that runs after document mutations.
-- Add inspector controls for layout mode, flow, alignment, distribution, gap, padding, child margins, and constraints.
+- Add inspector controls for layout mode, flow, alignment, distribution, gap, padding, child margins, child layout-item positioning, and constraints.
 - Add Playwright coverage for automatic sibling repositioning and parent resize behavior.
 
 Non-goals for the first slice:
 
 - Grid auto layout.
-- Wrap, absolute/static layout item controls, min/max, baseline alignment, and advanced sizing rules.
-- Ignore-auto-layout positioning.
+- Wrap, min/max, baseline alignment, and advanced sizing rules.
 - Full Figma parity for text wrapping and intrinsic measurement.
 
 ## Lane 2: Precision Canvas Editing
@@ -162,7 +161,7 @@ Implementation shape:
 
 ## Immediate Implementation Order
 
-1. Keep the landed Lane 1 layout foundation, Flex alignment, child-margin flow, and PR #20 navigation fixes green.
+1. Keep the landed Lane 1 layout foundation, Flex alignment, child-margin flow, static/absolute layout item positioning, and PR #20 navigation fixes green.
 2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, single-object Cmd/Ctrl+C/V/X copy/cut/paste, Cmd/Ctrl+A select all, Shift+Cmd/Ctrl+A select same kind, Shift+1 fit selection, Option/Alt+Cmd/Ctrl+C/V style copy/paste, Cmd/Ctrl+R rename, Cmd/Ctrl+G grouping, Shift+Cmd/Ctrl+G ungrouping, and Option/Alt alignment shortcuts.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands and grouped Inspector affordances green for selected layers.

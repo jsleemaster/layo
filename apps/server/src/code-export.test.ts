@@ -129,8 +129,9 @@ describe("code export", () => {
       vertical: "top"
     };
     fixture.pages[0].children[0].children[0].layout_item = {
+      position: "absolute",
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
-    };
+    } as any;
 
     const result = exportDesignToCode(fixture);
     const button = result.elements.find((element) => element.id === "tds-button-primary");
@@ -148,6 +149,7 @@ describe("code export", () => {
       vertical: "top"
     });
     expect(button?.structure.children[0].layout_item).toEqual({
+      position: "absolute",
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
     });
   });

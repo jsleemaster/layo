@@ -113,8 +113,18 @@ pub struct LayoutPadding {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LayoutItemPosition {
+    Static,
+    Absolute,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct NodeLayoutItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<LayoutItemPosition>,
     pub margin: LayoutPadding,
 }
 

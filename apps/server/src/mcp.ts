@@ -34,6 +34,7 @@ const nodeLayoutSchema = z.object({
 });
 
 const nodeLayoutItemSchema = z.object({
+  position: z.enum(["static", "absolute"]).optional(),
   margin: z.object({
     top: z.number().default(0),
     right: z.number().default(0),

@@ -2,7 +2,7 @@ import type { DesignFile, DesignNode, NodeConstraints, NodeLayout, NodeLayoutIte
 
 const MIN_NODE_SIZE = 1;
 const DEFAULT_CONSTRAINTS: NodeConstraints = { horizontal: "left", vertical: "top" };
-const DEFAULT_LAYOUT_ITEM: NodeLayoutItem = { margin: { top: 0, right: 0, bottom: 0, left: 0 } };
+const DEFAULT_LAYOUT_ITEM: NodeLayoutItem = { position: "static", margin: { top: 0, right: 0, bottom: 0, left: 0 } };
 
 export function relayoutDesignFile(document: DesignFile): void {
   for (const page of document.pages) {
@@ -16,7 +16,8 @@ export function relayoutNode(node: DesignNode): void {
   const layout = normalizedAutoLayout(node.layout);
   if (layout) {
     const isVertical = layout.direction === "vertical";
-    const childCount = node.children.length;
+    const flowChildren = node.children.filter((child) => layoutItemPosition(child.layout_item) === "static");
+    const childCount = flowChildren.length;
     const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
     const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
     const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
@@ -29,7 +30,7 @@ export function relayoutNode(node: DesignNode): void {
       0,
       (isVertical ? node.size.width : node.size.height) - crossStartPadding - crossEndPadding
     );
-    const childMetrics = node.children.map((child) => childLayoutMetrics(child, isVertical));
+    const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
     const totalChildMain =
       childMetrics.reduce(
         (total, metrics) => total + metrics.mainBefore + metrics.mainSize + metrics.mainAfter,
@@ -39,7 +40,7 @@ export function relayoutNode(node: DesignNode): void {
     let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
     const distributedGap = layout.gap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
 
-    node.children.forEach((child, index) => {
+    flowChildren.forEach((child, index) => {
       const metrics = childMetrics[index];
       const crossAxisPosition = crossAxisOffset(
         layout.align_items,
@@ -111,7 +112,9 @@ export function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
 }
 
 export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
+  const position = layoutItemPosition(layoutItem);
   return {
+    ...(position === "absolute" ? { position } : {}),
     margin: {
       top: Math.max(0, finiteNumber(layoutItem.margin?.top, 0)),
       right: Math.max(0, finiteNumber(layoutItem.margin?.right, 0)),
@@ -119,6 +122,10 @@ export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutI
       left: Math.max(0, finiteNumber(layoutItem.margin?.left, 0))
     }
   };
+}
+
+function layoutItemPosition(layoutItem: NodeLayoutItem | null | undefined): "static" | "absolute" {
+  return layoutItem?.position === "absolute" ? "absolute" : "static";
 }
 
 export function normalizeNodeConstraints(constraints: NodeConstraints): NodeConstraints {

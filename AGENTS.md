@@ -33,6 +33,7 @@ The app supports these core workflows:
 - Prefer MCP or HTTP for deterministic document edits. Do not rely on clicking the UI for primary mutations.
 - Use browser automation only to verify that the local web editor renders the result correctly.
 - Browser debugging and visual verification must use Playwright CLI.
+- Apply the minimal-change ladder before adding code: confirm the behavior needs to exist, reuse existing local patterns first, prefer platform or already-installed primitives where they fit, then implement the smallest maintainable change. Do not cut validation, accessibility, security, data-loss handling, tests, or Playwright CLI proof to make a diff smaller.
 - For editor or browser interaction changes, do not stop at code-level tests.
   After the automated checks pass, run a direct Playwright CLI interaction pass
   against the live editor: click the relevant canvas/layer controls, drag or
