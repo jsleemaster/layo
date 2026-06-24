@@ -53,6 +53,29 @@ test("opens with a Figma-like assets panel and keeps project controls behind the
   await expect(page.getByTestId("project-panel")).toBeHidden();
 });
 
+test("editor chrome uses the generated Layo brand logo assets", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  const brandLogo = page.getByTestId("layo-brand-logo");
+  await expect(brandLogo).toBeVisible();
+  await expect(brandLogo).toHaveAttribute("src", /layo-logo-mark\.png$/);
+  await expect(brandLogo).toHaveJSProperty("complete", true);
+
+  const naturalSize = await brandLogo.evaluate((node) => ({
+    width: (node as HTMLImageElement).naturalWidth,
+    height: (node as HTMLImageElement).naturalHeight
+  }));
+  expect(naturalSize.width).toBeGreaterThan(0);
+  expect(naturalSize.height).toBeGreaterThan(0);
+
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/assets/brand/layo-logo-mark.png");
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute(
+    "href",
+    "/assets/brand/layo-logo-mark.png"
+  );
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/site.webmanifest");
+});
+
 async function createProjectFromEmptyState(page: Page) {
   await openEmptyEditor(page);
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();

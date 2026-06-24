@@ -146,3 +146,10 @@ This is not the full Figma parity endpoint. It is the foundation needed before d
 - Rechecked the grouped object menu and found a design-tool parity gap: several menu items displayed Figma-like shortcut hints, but the keyboard router only handled copy, paste, duplicate, delete, undo, redo, zoom, nudge, pan, and escape.
 - Added keyboard paths for the visible menu hints: `⌘X` cut, `⌘A` select all, `⇧⌘A` select same kind, `⇧1` fit selection, `⌥⌘C`/`⌥⌘V` style copy/paste, `⌘R` rename, `⌘G` group, `⇧⌘G` ungroup, and `⌥A`/`⌥H`/`⌥D`/`⌥W`/`⌥V`/`⌥S` alignment.
 - Verification started with RED Playwright failures for `Control+X` leaving the selected layer in place, `Control+G` not creating a group, `Alt+A` leaving the selected rectangle unaligned, `Control+Shift+A` not selecting same-kind layers, `Control+Alt+V` falling through to object paste, and `Control+R` not renaming the selected layer; the focused e2e tests now pass.
+
+2026-06-24 generated brand-logo asset slice:
+
+- Rechecked the Figma reference and live Layo shell for first-viewport product identity. The remaining gap was that Layo still used a text-only `L` rail mark and had no favicon, apple-touch icon, or web manifest icon.
+- Generated a bitmap Layo logo mark with imagegen, then saved a processed transparent-corner project asset at `apps/web/public/assets/brand/layo-logo-mark.png` instead of referencing the default generated-image folder.
+- Replaced the rail text mark with the generated logo image and wired the same asset into favicon, apple-touch icon, and `site.webmanifest`.
+- Verification started with a RED Playwright failure for missing `data-testid="layo-brand-logo"`; the focused e2e now verifies the rendered image loads and the document head points at the project-bound brand asset.

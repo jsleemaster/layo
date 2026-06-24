@@ -91,6 +91,14 @@ button:disabled {
   line-height: var(--editor-text-body-line);
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   background: var(--editor-color-surface);
+  overflow: hidden;
+}
+
+.editor-rail-brand img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .editor-rail-group {

@@ -4180,8 +4180,13 @@ export function App() {
   return (
     <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
       <nav className="editor-rail" data-testid="editor-rail" aria-label="편집기 탐색">
-        <div className="editor-rail-brand" aria-hidden="true">
-          L
+        <div className="editor-rail-brand" aria-label="Layo">
+          <img
+            src="/assets/brand/layo-logo-mark.png"
+            alt=""
+            data-testid="layo-brand-logo"
+            aria-hidden="true"
+          />
         </div>
         <div className="editor-rail-group">
           <button
