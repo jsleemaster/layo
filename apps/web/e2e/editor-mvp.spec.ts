@@ -1832,6 +1832,47 @@ test("inspector auto layout uses fit sizing for container", async ({ page }) => 
   await expect(page.getByTestId("inspector-y")).toHaveValue("72");
 });
 
+test("inspector grid layout auto-places static children into equal cells", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("360");
+  await page.getByTestId("inspector-height").fill("240");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await expect(page.getByTestId("inspector-layout-grid-columns")).toBeVisible();
+  await expect(page.getByTestId("inspector-layout-grid-rows")).toBeVisible();
+  await page.getByTestId("inspector-layout-grid-columns").fill("2");
+  await page.getByTestId("inspector-layout-grid-rows").fill("2");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-row-gap").fill("12");
+  await page.getByTestId("inspector-layout-column-gap").fill("16");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("24");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("24");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole("button", { name: "랜딩 프레임" }).click();
+    await expect(page.locator(".node-summary strong")).toHaveText("랜딩 프레임");
+    await page.getByRole("button", { name: "사각형 만들기" }).click();
+    await page.getByTestId("inspector-width").fill("80");
+    await page.getByTestId("inspector-height").fill("40");
+  }
+  await expect(page.getByRole("button", { name: "사각형 5" })).toBeVisible();
+
+  const cellPositions: string[] = [];
+  for (const name of ["헤드라인", "사각형 3", "사각형 4", "사각형 5"]) {
+    await page.getByRole("button", { name }).click();
+    cellPositions.push(`${await page.getByTestId("inspector-x").inputValue()},${await page.getByTestId("inspector-y").inputValue()}`);
+  }
+  expect(cellPositions.sort()).toEqual(["188,126", "188,20", "24,126", "24,20"]);
+});
+
 test("inspector layout item fill sizing stretches a child inside fixed auto layout", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

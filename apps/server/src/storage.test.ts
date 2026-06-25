@@ -909,6 +909,86 @@ describe("FileStorage", () => {
     ]);
 
 
+    const gridLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "update_geometry",
+          nodeId: "frame-1",
+          width: 360,
+          height: 240
+        },
+        {
+          type: "update_geometry",
+          nodeId: "text-1",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "grid",
+            direction: "horizontal",
+            grid_columns: 2,
+            grid_rows: 2,
+            align_items: "start",
+            justify_content: "start",
+            gap: 0,
+            row_gap: 12,
+            column_gap: 16,
+            padding: { top: 20, right: 24, bottom: 20, left: 24 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "grid-rectangle-1",
+          name: "그리드 사각형 1",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "grid-rectangle-2",
+          name: "그리드 사각형 2",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "grid-rectangle-3",
+          name: "그리드 사각형 3",
+          width: 80,
+          height: 40
+        }
+      ] as any
+    });
+
+    const gridFrame = gridLayout.preview.pages[0].children[0];
+    expect(gridFrame.layout).toMatchObject({
+      mode: "grid",
+      grid_columns: 2,
+      grid_rows: 2,
+      row_gap: 12,
+      column_gap: 16
+    });
+    expect(gridFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({ x: 24, y: 20 });
+    expect(gridFrame.children.find((node) => node.id === "grid-rectangle-1")?.transform).toMatchObject({ x: 188, y: 20 });
+    expect(gridFrame.children.find((node) => node.id === "grid-rectangle-2")?.transform).toMatchObject({ x: 24, y: 126 });
+    expect(gridFrame.children.find((node) => node.id === "grid-rectangle-3")?.transform).toMatchObject({ x: 188, y: 126 });
+    expect(gridLayout.audit.commandTypes).toEqual([
+      "update_geometry",
+      "update_geometry",
+      "set_layout",
+      "create_rectangle",
+      "create_rectangle",
+      "create_rectangle"
+    ]);
+
+
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

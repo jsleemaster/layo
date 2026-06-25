@@ -117,8 +117,10 @@ describe("code export", () => {
   test("exports layout and constraints metadata for agents", () => {
     const fixture = tossFixture();
     fixture.pages[0].children[0].layout = {
-      mode: "auto",
-      direction: "vertical",
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 2,
       align_items: "center",
       justify_content: "space_between",
       wrap: "wrap",
@@ -145,8 +147,10 @@ describe("code export", () => {
     const button = result.elements.find((element) => element.id === "tds-button-primary");
 
     expect(button?.structure.layout).toEqual({
-      mode: "auto",
-      direction: "vertical",
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 2,
       align_items: "center",
       justify_content: "space_between",
       wrap: "wrap",

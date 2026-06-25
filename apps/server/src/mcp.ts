@@ -20,7 +20,7 @@ const agentFindSchema = {
 };
 
 const nodeLayoutSchema = z.object({
-  mode: z.enum(["none", "auto"]),
+  mode: z.enum(["none", "auto", "grid"]),
   direction: z.enum(["horizontal", "vertical"]),
   wrap: z.enum(["nowrap", "wrap"]).optional(),
   align_items: z.enum(["start", "center", "end", "stretch"]).default("start"),
@@ -31,6 +31,8 @@ const nodeLayoutSchema = z.object({
   gap: z.number(),
   row_gap: z.number().optional(),
   column_gap: z.number().optional(),
+  grid_columns: z.number().optional(),
+  grid_rows: z.number().optional(),
   padding: z.object({
     top: z.number(),
     right: z.number(),
