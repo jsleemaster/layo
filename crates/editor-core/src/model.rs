@@ -153,6 +153,10 @@ pub struct NodeLayoutItem {
     pub width_sizing: LayoutItemSizing,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
     pub height_sizing: LayoutItemSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_column: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_row: Option<u32>,
     pub margin: LayoutPadding,
 }
 

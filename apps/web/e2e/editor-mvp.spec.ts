@@ -1873,6 +1873,42 @@ test("inspector grid layout auto-places static children into equal cells", async
   expect(cellPositions.sort()).toEqual(["188,126", "188,20", "24,126", "24,20"]);
 });
 
+test("inspector manual grid cell placement moves a child to the requested cell", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("390");
+  await page.getByTestId("inspector-height").fill("220");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-grid-columns").fill("3");
+  await page.getByTestId("inspector-layout-grid-rows").fill("2");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-row-gap").fill("10");
+  await page.getByTestId("inspector-layout-column-gap").fill("12");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("15");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("15");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+  await expect(page.getByTestId("inspector-layout-item-grid-column")).toBeVisible();
+  await expect(page.getByTestId("inspector-layout-item-grid-row")).toBeVisible();
+  await page.getByTestId("inspector-layout-item-grid-column").fill("3");
+  await page.getByTestId("inspector-layout-item-grid-row").fill("2");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("263");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("115");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("15");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+});
+
 test("inspector layout item fill sizing stretches a child inside fixed auto layout", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

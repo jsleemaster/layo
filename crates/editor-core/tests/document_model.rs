@@ -88,7 +88,7 @@ fn layout_metadata_round_trips_through_json() {
                   "kind": "rectangle",
                   "name": "Pinned Child",
                   "constraints": { "horizontal": "right", "vertical": "bottom" },
-                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
+                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "grid_column": 3, "grid_row": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
                   "transform": { "x": 220, "y": 180, "rotation": 0 },
                   "size": { "width": 64, "height": 32 },
                   "style": { "fill": "#e0f2fe", "stroke": null, "stroke_width": 0, "opacity": 1 },
@@ -165,6 +165,8 @@ fn layout_metadata_round_trips_through_json() {
     let json = serde_json::to_string(&parsed).unwrap();
     assert!(json.contains("\"layout\""));
     assert!(json.contains("\"constraints\""));
+    assert!(json.contains("\"grid_column\":3"));
+    assert!(json.contains("\"grid_row\":2"));
     assert!(json.contains("\"layout_item\""));
 }
 

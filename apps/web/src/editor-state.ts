@@ -1913,6 +1913,10 @@ function relayoutNode(node: RendererNode): void {
   }
 }
 
+type GridCell = { row: number; column: number };
+
+type GridAutoCell = GridCell & { nextCursor: number };
+
 function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildren: RendererNode[]): void {
   const columnGap = layout.column_gap ?? layout.gap;
   const rowGap = layout.row_gap ?? layout.gap;
@@ -1933,11 +1937,33 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
   );
   const cellWidth = availableWidth / columns;
   const cellHeight = availableHeight / rows;
+  const manualCells = new Map<string, GridCell>();
+  const occupiedCells = new Set<string>();
 
-  flowChildren.forEach((child, index) => {
-    const row = layout.direction === "vertical" ? index % rows : Math.floor(index / columns);
-    const column = layout.direction === "vertical" ? Math.floor(index / rows) : index % columns;
+  for (const child of flowChildren) {
     const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    const manualCell = manualGridCell(layoutItem, columns, rows);
+    if (manualCell) {
+      manualCells.set(child.id, manualCell);
+      occupiedCells.add(gridCellKey(manualCell));
+    }
+  }
+
+  let autoCursor = 0;
+
+  flowChildren.forEach((child) => {
+    const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    const manualCell = manualCells.get(child.id);
+    let cell: GridCell;
+    if (manualCell) {
+      cell = manualCell;
+    } else {
+      const autoCell = nextAutoGridCell(autoCursor, columns, rows, occupiedCells, layout.direction);
+      autoCursor = autoCell.nextCursor;
+      cell = autoCell;
+      occupiedCells.add(gridCellKey(autoCell));
+    }
+    const { row, column } = cell;
     const margin = layoutItem.margin;
     const innerWidth = Math.max(0, cellWidth - margin.left - margin.right);
     const innerHeight = Math.max(0, cellHeight - margin.top - margin.bottom);
@@ -2347,10 +2373,14 @@ function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const position = layoutItemPosition(layoutItem);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
+  const gridColumn = normalizeGridPlacement(layoutItem.grid_column);
+  const gridRow = normalizeGridPlacement(layoutItem.grid_row);
   return {
     ...(position === "absolute" ? { position } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
+    ...(gridColumn !== undefined ? { grid_column: gridColumn } : {}),
+    ...(gridRow !== undefined ? { grid_row: gridRow } : {}),
     margin: {
       top: Math.max(0, finiteNumber(layoutItem.margin?.top, 0)),
       right: Math.max(0, finiteNumber(layoutItem.margin?.right, 0)),
@@ -2474,6 +2504,53 @@ function isVerticalConstraint(value: string): value is NodeConstraints["vertical
 
 function normalizeGridTrackCount(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.round(finiteNumber(value, fallback)));
+}
+
+function normalizeGridPlacement(value: number | undefined): number | undefined {
+  const normalized = finiteNumber(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function manualGridCell(layoutItem: NodeLayoutItem, columns: number, rows: number): GridCell | null {
+  if (layoutItem.grid_column === undefined && layoutItem.grid_row === undefined) {
+    return null;
+  }
+  return {
+    column: gridPlacementIndex(layoutItem.grid_column, columns, 1),
+    row: gridPlacementIndex(layoutItem.grid_row, rows, 1)
+  };
+}
+
+function gridPlacementIndex(value: number | undefined, max: number, fallback: number): number {
+  const line = normalizeGridPlacement(value) ?? fallback;
+  return Math.min(Math.max(0, line - 1), Math.max(0, max - 1));
+}
+
+function nextAutoGridCell(
+  startCursor: number,
+  columns: number,
+  rows: number,
+  occupiedCells: Set<string>,
+  direction: NodeLayout["direction"]
+): GridAutoCell {
+  const capacity = Math.max(1, columns * rows);
+  for (let cursor = startCursor; cursor < capacity; cursor += 1) {
+    const cell = gridCellAt(cursor, columns, rows, direction);
+    if (cell && !occupiedCells.has(gridCellKey(cell))) {
+      return { ...cell, nextCursor: cursor + 1 };
+    }
+  }
+  return { row: Math.max(0, rows - 1), column: Math.max(0, columns - 1), nextCursor: capacity };
+}
+
+function gridCellAt(index: number, columns: number, rows: number, direction: NodeLayout["direction"]): GridCell | null {
+  const row = direction === "vertical" ? index % rows : Math.floor(index / columns);
+  const column = direction === "vertical" ? Math.floor(index / rows) : index % columns;
+  return row < rows && column < columns ? { row, column } : null;
+}
+
+function gridCellKey(cell: GridCell): string {
+  return `${cell.row}:${cell.column}`;
 }
 
 function gridAxisOffset(

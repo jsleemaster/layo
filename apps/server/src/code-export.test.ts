@@ -140,6 +140,8 @@ describe("code export", () => {
       position: "absolute",
       width_sizing: "fill",
       height_sizing: "fill",
+      grid_column: 3,
+      grid_row: 2,
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
     } as any;
 
@@ -170,6 +172,8 @@ describe("code export", () => {
       position: "absolute",
       width_sizing: "fill",
       height_sizing: "fill",
+      grid_column: 3,
+      grid_row: 2,
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
     });
   });

@@ -1682,6 +1682,7 @@ function InspectorEmptySections() {
 
 function Inspector({
   selectedNode,
+  selectedParentNode,
   selectedNodeCount,
   canAlign,
   canDistribute,
@@ -1698,6 +1699,7 @@ function Inspector({
   onShare
 }: {
   selectedNode: RendererNode | null;
+  selectedParentNode: RendererNode | null;
   selectedNodeCount: number;
   canAlign: boolean;
   canDistribute: boolean;
@@ -1767,6 +1769,7 @@ function Inspector({
         }
       }
     : DEFAULT_NODE_LAYOUT_ITEM;
+  const selectedParentUsesGrid = selectedParentNode?.layout?.mode === "grid";
   const constraints = selectedNode.constraints ?? DEFAULT_NODE_CONSTRAINTS;
   const updateLayout = (patch: Partial<NodeLayout>) => {
     onLayoutChange(selectedNode.id, {
@@ -1803,6 +1806,16 @@ function Inspector({
             ...layoutItem.margin,
             [side]: nextValue
           }
+        });
+      }
+    };
+  const updateLayoutItemGridPlacement =
+    (key: "grid_column" | "grid_row") => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const nextValue = Number(event.currentTarget.value);
+      if (Number.isFinite(nextValue)) {
+        onLayoutItemChange(selectedNode.id, {
+          ...layoutItem,
+          [key]: nextValue
         });
       }
     };
@@ -2127,6 +2140,30 @@ function Inspector({
             <option value="absolute">절대</option>
           </select>
         </label>
+        {selectedParentUsesGrid ? (
+          <div className="field-grid">
+            <label>
+              그리드 열 위치
+              <input
+                data-testid="inspector-layout-item-grid-column"
+                type="number"
+                min="1"
+                value={numericInputValue(layoutItem.grid_column ?? 1)}
+                onChange={updateLayoutItemGridPlacement("grid_column")}
+              />
+            </label>
+            <label>
+              그리드 행 위치
+              <input
+                data-testid="inspector-layout-item-grid-row"
+                type="number"
+                min="1"
+                value={numericInputValue(layoutItem.grid_row ?? 1)}
+                onChange={updateLayoutItemGridPlacement("grid_row")}
+              />
+            </label>
+          </div>
+        ) : null}
         <label className="stacked-field">
           아이템 너비
           <select
@@ -2424,6 +2461,13 @@ export function App() {
   const selectedNode = useMemo(
     () => (editor?.selection.nodeId ? findNodeById(editor.document, editor.selection.nodeId) : null),
     [editor]
+  );
+  const selectedParentNode = useMemo(
+    () =>
+      selectedNode
+        ? nodes.find((node) => node.children.some((child) => child.id === selectedNode.id)) ?? null
+        : null,
+    [nodes, selectedNode]
   );
   const contextMenuNode = useMemo(
     () =>
@@ -5258,6 +5302,7 @@ export function App() {
       </section>
       <Inspector
         selectedNode={selectedNode}
+        selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}

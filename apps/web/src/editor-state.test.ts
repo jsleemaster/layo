@@ -420,6 +420,62 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "grid-rectangle-3")?.transform).toMatchObject({ x: 188, y: 126 });
   });
 
+  test("grid layout respects manual child row and column placement", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 390, height: 220 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 3,
+      grid_rows: 2,
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 10,
+      column_gap: 12,
+      padding: { top: 20, right: 15, bottom: 20, left: 15 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    text.layout_item = {
+      grid_column: 3,
+      grid_row: 2,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 }
+    };
+    for (const [id, fill] of [
+      ["manual-grid-rectangle-1", "#e0f2fe"],
+      ["manual-grid-rectangle-2", "#fde68a"],
+      ["manual-grid-rectangle-3", "#dcfce7"]
+    ]) {
+      frame.children.push({
+        id,
+        kind: "rectangle",
+        name: id,
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 40 },
+        style: { fill, stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: []
+      });
+    }
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "manual-grid-rectangle-3",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.layout_item).toMatchObject({
+      grid_column: 3,
+      grid_row: 2
+    });
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 263, y: 115 });
+    expect(findNodeById(relaid.document, "manual-grid-rectangle-1")?.transform).toMatchObject({ x: 15, y: 20 });
+    expect(findNodeById(relaid.document, "manual-grid-rectangle-2")?.transform).toMatchObject({ x: 139, y: 20 });
+    expect(findNodeById(relaid.document, "manual-grid-rectangle-3")?.transform).toMatchObject({ x: 263, y: 20 });
+  });
+
   test("auto layout includes child margins in flow and cross-axis position", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

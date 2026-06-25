@@ -45,6 +45,8 @@ const nodeLayoutItemSchema = z.object({
   position: z.enum(["static", "absolute"]).optional(),
   width_sizing: z.enum(["fixed", "fill"]).optional(),
   height_sizing: z.enum(["fixed", "fill"]).optional(),
+  grid_column: z.number().optional(),
+  grid_row: z.number().optional(),
   margin: z.object({
     top: z.number().default(0),
     right: z.number().default(0),

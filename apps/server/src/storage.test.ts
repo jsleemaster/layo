@@ -988,6 +988,81 @@ describe("FileStorage", () => {
       "create_rectangle"
     ]);
 
+    const manualGridLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 390, height: 220 },
+        { type: "update_geometry", nodeId: "text-1", width: 80, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "grid",
+            direction: "horizontal",
+            grid_columns: 3,
+            grid_rows: 2,
+            align_items: "start",
+            justify_content: "start",
+            gap: 0,
+            row_gap: 10,
+            column_gap: 12,
+            padding: { top: 20, right: 15, bottom: 20, left: 15 }
+          }
+        },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            grid_column: 3,
+            grid_row: 2,
+            margin: { top: 0, right: 0, bottom: 0, left: 0 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "manual-grid-rectangle-1",
+          name: "수동 그리드 사각형 1",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "manual-grid-rectangle-2",
+          name: "수동 그리드 사각형 2",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "manual-grid-rectangle-3",
+          name: "수동 그리드 사각형 3",
+          width: 80,
+          height: 40
+        }
+      ] as any
+    });
+
+    const manualGridFrame = manualGridLayout.preview.pages[0].children[0];
+    expect(manualGridFrame.children.find((node) => node.id === "text-1")?.layout_item).toMatchObject({
+      grid_column: 3,
+      grid_row: 2
+    });
+    expect(manualGridFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({ x: 263, y: 115 });
+    expect(manualGridFrame.children.find((node) => node.id === "manual-grid-rectangle-1")?.transform).toMatchObject({ x: 15, y: 20 });
+    expect(manualGridFrame.children.find((node) => node.id === "manual-grid-rectangle-2")?.transform).toMatchObject({ x: 139, y: 20 });
+    expect(manualGridFrame.children.find((node) => node.id === "manual-grid-rectangle-3")?.transform).toMatchObject({ x: 263, y: 20 });
+    expect(manualGridLayout.audit.commandTypes).toEqual([
+      "update_geometry",
+      "update_geometry",
+      "set_layout",
+      "set_layout_item",
+      "create_rectangle",
+      "create_rectangle",
+      "create_rectangle"
+    ]);
 
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,

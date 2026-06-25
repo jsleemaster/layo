@@ -60,6 +60,8 @@ export interface NodeLayoutItem {
   position?: "static" | "absolute";
   width_sizing?: "fixed" | "fill";
   height_sizing?: "fixed" | "fill";
+  grid_column?: number;
+  grid_row?: number;
   margin: LayoutSpacing;
 }
 
