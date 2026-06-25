@@ -228,6 +228,8 @@ const DEFAULT_NODE_LAYOUT: NodeLayout = {
 };
 const DEFAULT_NODE_LAYOUT_ITEM: NodeLayoutItem = {
   position: "static",
+  width_sizing: "fixed",
+  height_sizing: "fixed",
   margin: { top: 0, right: 0, bottom: 0, left: 0 }
 };
 const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
@@ -2088,6 +2090,38 @@ function Inspector({
           >
             <option value="static">흐름</option>
             <option value="absolute">절대</option>
+          </select>
+        </label>
+        <label className="stacked-field">
+          아이템 너비
+          <select
+            data-testid="inspector-layout-item-width-sizing"
+            value={layoutItem.width_sizing ?? "fixed"}
+            onChange={(event) =>
+              onLayoutItemChange(selectedNode.id, {
+                ...layoutItem,
+                width_sizing: event.currentTarget.value as NodeLayoutItem["width_sizing"]
+              })
+            }
+          >
+            <option value="fixed">고정</option>
+            <option value="fill">채우기</option>
+          </select>
+        </label>
+        <label className="stacked-field">
+          아이템 높이
+          <select
+            data-testid="inspector-layout-item-height-sizing"
+            value={layoutItem.height_sizing ?? "fixed"}
+            onChange={(event) =>
+              onLayoutItemChange(selectedNode.id, {
+                ...layoutItem,
+                height_sizing: event.currentTarget.value as NodeLayoutItem["height_sizing"]
+              })
+            }
+          >
+            <option value="fixed">고정</option>
+            <option value="fill">채우기</option>
           </select>
         </label>
         <div className="field-grid">

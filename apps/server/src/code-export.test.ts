@@ -136,6 +136,8 @@ describe("code export", () => {
     };
     fixture.pages[0].children[0].children[0].layout_item = {
       position: "absolute",
+      width_sizing: "fill",
+      height_sizing: "fill",
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
     } as any;
 
@@ -162,6 +164,8 @@ describe("code export", () => {
     });
     expect(button?.structure.children[0].layout_item).toEqual({
       position: "absolute",
+      width_sizing: "fill",
+      height_sizing: "fill",
       margin: { top: 10, right: 8, bottom: 14, left: 6 }
     });
   });

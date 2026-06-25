@@ -133,10 +133,22 @@ pub enum LayoutItemPosition {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LayoutItemSizing {
+    Fixed,
+    Fill,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct NodeLayoutItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<LayoutItemPosition>,
+    #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
+    pub width_sizing: LayoutItemSizing,
+    #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
+    pub height_sizing: LayoutItemSizing,
     pub margin: LayoutPadding,
 }
 
@@ -228,6 +240,14 @@ fn default_layout_sizing() -> LayoutSizing {
 
 fn is_fixed_layout_sizing(value: &LayoutSizing) -> bool {
     matches!(value, LayoutSizing::Fixed)
+}
+
+fn default_layout_item_sizing() -> LayoutItemSizing {
+    LayoutItemSizing::Fixed
+}
+
+fn is_fixed_layout_item_sizing(value: &LayoutItemSizing) -> bool {
+    matches!(value, LayoutItemSizing::Fixed)
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

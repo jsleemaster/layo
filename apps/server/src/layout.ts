@@ -41,6 +41,7 @@ function relayoutSingleLineChildren(
   const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
   const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
   const mainGap = mainAxisGap(layout, isVertical);
+  applyFillSizingForSingleLine(node, layout, flowChildren, isVertical, mainGap);
   const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
   const totalChildMain =
     childMetrics.reduce(
@@ -117,6 +118,7 @@ function relayoutWrappedChildren(
   const mainGap = mainAxisGap(layout, isVertical);
   const crossGap = crossAxisGap(layout, isVertical);
   const lines = buildFlexLines(flowChildren, isVertical, availableMain, mainGap);
+  applyFillSizingForWrappedLines(layout, lines, isVertical, availableMain);
   const totalLineMain = lines.reduce((maximum, line) => Math.max(maximum, line.mainSize), 0);
   const totalLineCross =
     lines.reduce((total, line) => total + line.crossSize, 0) + crossGap * Math.max(0, lines.length - 1);
@@ -178,6 +180,133 @@ function mainAxisGap(layout: NodeLayout, isVertical: boolean): number {
 
 function crossAxisGap(layout: NodeLayout, isVertical: boolean): number {
   return isVertical ? layout.column_gap ?? layout.gap : layout.row_gap ?? layout.gap;
+}
+
+function applyFillSizingForSingleLine(
+  node: DesignNode,
+  layout: NodeLayout,
+  flowChildren: DesignNode[],
+  isVertical: boolean,
+  mainGap: number
+): void {
+  const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
+  const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
+  const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
+  const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
+  const availableMain = Math.max(
+    0,
+    (isVertical ? node.size.height : node.size.width) - mainStartPadding - mainEndPadding
+  );
+  const availableCross = Math.max(
+    0,
+    (isVertical ? node.size.width : node.size.height) - crossStartPadding - crossEndPadding
+  );
+  const mainAxisIsFixed = isVertical ? layout.height_sizing !== "fit" : layout.width_sizing !== "fit";
+  const crossAxisIsFixed = isVertical ? layout.width_sizing !== "fit" : layout.height_sizing !== "fit";
+  const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
+  const fillMainChildren = flowChildren.filter((child) => layoutItemMainSizing(child, isVertical) === "fill");
+
+  if (mainAxisIsFixed && fillMainChildren.length > 0) {
+    const fixedMainTotal = flowChildren.reduce((total, child, index) => {
+      const metrics = childMetrics[index];
+      const base = metrics.mainBefore + metrics.mainAfter;
+      return total + base + (layoutItemMainSizing(child, isVertical) === "fill" ? 0 : metrics.mainSize);
+    }, 0);
+    const remainingMain = Math.max(0, availableMain - fixedMainTotal - mainGap * Math.max(0, flowChildren.length - 1));
+    const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
+    for (const child of fillMainChildren) {
+      if (isVertical) {
+        child.size.height = filledMainSize;
+      } else {
+        child.size.width = filledMainSize;
+      }
+    }
+  }
+
+  if (crossAxisIsFixed) {
+    flowChildren.forEach((child, index) => {
+      if (layoutItemCrossSizing(child, isVertical) !== "fill") {
+        return;
+      }
+      const metrics = childMetrics[index];
+      const filledCrossSize = clampSize(availableCross - metrics.crossBefore - metrics.crossAfter);
+      if (isVertical) {
+        child.size.width = filledCrossSize;
+      } else {
+        child.size.height = filledCrossSize;
+      }
+    });
+  }
+}
+
+function applyFillSizingForWrappedLines(
+  layout: NodeLayout,
+  lines: Array<{
+    children: Array<{ child: DesignNode; metrics: ReturnType<typeof childLayoutMetrics> }>;
+    mainSize: number;
+    crossSize: number;
+  }>,
+  isVertical: boolean,
+  availableMain: number
+): void {
+  const mainAxisIsFixed = isVertical ? layout.height_sizing !== "fit" : layout.width_sizing !== "fit";
+  const crossAxisIsFixed = isVertical ? layout.width_sizing !== "fit" : layout.height_sizing !== "fit";
+
+  for (const line of lines) {
+    const fillMainChildren = line.children.filter((entry) => layoutItemMainSizing(entry.child, isVertical) === "fill");
+    if (mainAxisIsFixed && fillMainChildren.length > 0) {
+      const fixedMainTotal = line.children.reduce((total, entry) => {
+        const base = entry.metrics.mainBefore + entry.metrics.mainAfter;
+        return total + base + (layoutItemMainSizing(entry.child, isVertical) === "fill" ? 0 : entry.metrics.mainSize);
+      }, 0);
+      const remainingMain = Math.max(0, availableMain - fixedMainTotal - mainAxisGap(layout, isVertical) * Math.max(0, line.children.length - 1));
+      const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
+      for (const entry of fillMainChildren) {
+        if (isVertical) {
+          entry.child.size.height = filledMainSize;
+        } else {
+          entry.child.size.width = filledMainSize;
+        }
+      }
+    }
+
+    line.children = line.children.map((entry) => ({
+      child: entry.child,
+      metrics: childLayoutMetrics(entry.child, isVertical)
+    }));
+    line.mainSize = line.children.reduce(
+      (total, entry, index) =>
+        total + entry.metrics.mainBefore + entry.metrics.mainSize + entry.metrics.mainAfter +
+        (index > 0 ? mainAxisGap(layout, isVertical) : 0),
+      0
+    );
+    line.crossSize = line.children.reduce(
+      (maximum, entry) => Math.max(maximum, entry.metrics.crossBefore + entry.metrics.crossSize + entry.metrics.crossAfter),
+      0
+    );
+
+    if (crossAxisIsFixed) {
+      for (const entry of line.children) {
+        if (layoutItemCrossSizing(entry.child, isVertical) !== "fill") {
+          continue;
+        }
+        const filledCrossSize = clampSize(line.crossSize - entry.metrics.crossBefore - entry.metrics.crossAfter);
+        if (isVertical) {
+          entry.child.size.width = filledCrossSize;
+        } else {
+          entry.child.size.height = filledCrossSize;
+        }
+      }
+      line.children = line.children.map((entry) => ({
+        child: entry.child,
+        metrics: childLayoutMetrics(entry.child, isVertical)
+      }));
+      line.crossSize = line.children.reduce(
+        (maximum, entry) => Math.max(maximum, entry.metrics.crossBefore + entry.metrics.crossSize + entry.metrics.crossAfter),
+        0
+      );
+    }
+  }
 }
 
 function applyFitSizing(
@@ -297,8 +426,12 @@ export function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
 
 export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const position = layoutItemPosition(layoutItem);
+  const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
+  const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
   return {
     ...(position === "absolute" ? { position } : {}),
+    ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
+    ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
     margin: {
       top: Math.max(0, finiteNumber(layoutItem.margin?.top, 0)),
       right: Math.max(0, finiteNumber(layoutItem.margin?.right, 0)),
@@ -407,6 +540,20 @@ function isLayoutAlignContent(value: string | undefined): value is NonNullable<N
 
 function isLayoutSizing(value: string | undefined): value is NonNullable<NodeLayout["width_sizing"]> {
   return value === "fixed" || value === "fit";
+}
+
+function isLayoutItemSizing(value: string | undefined): value is NonNullable<NodeLayoutItem["width_sizing"]> {
+  return value === "fixed" || value === "fill";
+}
+
+function layoutItemMainSizing(child: { layout_item?: NodeLayoutItem | null }, isVertical: boolean): "fixed" | "fill" {
+  const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  return isVertical ? layoutItem.height_sizing ?? "fixed" : layoutItem.width_sizing ?? "fixed";
+}
+
+function layoutItemCrossSizing(child: { layout_item?: NodeLayoutItem | null }, isVertical: boolean): "fixed" | "fill" {
+  const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  return isVertical ? layoutItem.width_sizing ?? "fixed" : layoutItem.height_sizing ?? "fixed";
 }
 
 function justifyStartOffset(

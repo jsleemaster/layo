@@ -332,6 +332,47 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "rectangle-1")?.transform).toMatchObject({ x: 150, y: 220 });
   });
 
+  test("auto layout lets static children fill fixed parent axes", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 360, height: 240 };
+    frame.layout = {
+      mode: "auto",
+      direction: "vertical",
+      align_items: "start",
+      justify_content: "start",
+      gap: 12,
+      padding: { top: 20, right: 24, bottom: 20, left: 24 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 100, height: 40 };
+    text.layout_item = {
+      width_sizing: "fill",
+      height_sizing: "fill",
+      margin: { top: 0, right: 6, bottom: 0, left: 6 }
+    };
+    frame.children.push({
+      id: "fixed-rectangle-1",
+      kind: "rectangle",
+      name: "고정 사각형",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 30 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "fixed-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.size).toEqual({ width: 300, height: 158 });
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 30, y: 20 });
+    expect(findNodeById(relaid.document, "fixed-rectangle-1")?.transform).toMatchObject({ x: 24, y: 190 });
+  });
+
   test("auto layout includes child margins in flow and cross-axis position", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

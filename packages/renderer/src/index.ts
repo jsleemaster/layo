@@ -22,6 +22,8 @@ export interface NodeLayout {
 
 export interface NodeLayoutItem {
   position?: "static" | "absolute";
+  width_sizing?: "fixed" | "fill";
+  height_sizing?: "fixed" | "fill";
   margin: LayoutSpacing;
 }
 
