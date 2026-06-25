@@ -104,6 +104,10 @@ pub struct NodeLayout {
     #[serde(default = "default_layout_align_content")]
     pub align_content: LayoutAlignContent,
     pub gap: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub row_gap: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub column_gap: Option<f64>,
     pub padding: LayoutPadding,
 }
 

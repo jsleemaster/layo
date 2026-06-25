@@ -70,6 +70,8 @@ fn layout_metadata_round_trips_through_json() {
                 "justify_content": "space_between",
                 "align_content": "space_around",
                 "gap": 12,
+                "row_gap": 24,
+                "column_gap": 6,
                 "padding": { "top": 20, "right": 24, "bottom": 20, "left": 24 }
               },
               "transform": { "x": 0, "y": 0, "rotation": 0 },
@@ -123,6 +125,8 @@ fn layout_metadata_round_trips_through_json() {
         editor_core::LayoutAlignContent::SpaceAround
     );
     assert_eq!(frame.layout.as_ref().unwrap().gap, 12.0);
+    assert_eq!(frame.layout.as_ref().unwrap().row_gap, Some(24.0));
+    assert_eq!(frame.layout.as_ref().unwrap().column_gap, Some(6.0));
     assert_eq!(
         child.constraints.as_ref().unwrap().horizontal,
         editor_core::HorizontalConstraint::Right
@@ -185,6 +189,12 @@ fn legacy_layout_metadata_defaults_alignment_fields() {
         layout.justify_content,
         editor_core::LayoutJustifyContent::Start
     );
+    assert_eq!(layout.row_gap, None);
+    assert_eq!(layout.column_gap, None);
+
+    let json = serde_json::to_string(&parsed).unwrap();
+    assert!(!json.contains("\"row_gap\""));
+    assert!(!json.contains("\"column_gap\""));
 }
 
 #[test]

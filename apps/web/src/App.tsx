@@ -1986,6 +1986,34 @@ function Inspector({
             />
           </label>
           <label>
+            행 간격
+            <input
+              data-testid="inspector-layout-row-gap"
+              type="number"
+              value={numericInputValue(layout.row_gap ?? layout.gap)}
+              onChange={(event) => {
+                const nextValue = Number(event.currentTarget.value);
+                if (Number.isFinite(nextValue)) {
+                  updateLayout({ row_gap: nextValue });
+                }
+              }}
+            />
+          </label>
+          <label>
+            열 간격
+            <input
+              data-testid="inspector-layout-column-gap"
+              type="number"
+              value={numericInputValue(layout.column_gap ?? layout.gap)}
+              onChange={(event) => {
+                const nextValue = Number(event.currentTarget.value);
+                if (Number.isFinite(nextValue)) {
+                  updateLayout({ column_gap: nextValue });
+                }
+              }}
+            />
+          </label>
+          <label>
             위
             <input
               data-testid="inspector-layout-padding-top"

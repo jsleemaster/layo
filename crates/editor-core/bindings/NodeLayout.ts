@@ -7,4 +7,4 @@ import type { LayoutMode } from "./LayoutMode";
 import type { LayoutPadding } from "./LayoutPadding";
 import type { LayoutWrap } from "./LayoutWrap";
 
-export type NodeLayout = { mode: LayoutMode, direction: LayoutDirection, wrap: LayoutWrap, align_items: LayoutAlignItems, justify_content: LayoutJustifyContent, align_content: LayoutAlignContent, gap: number, padding: LayoutPadding, };
+export type NodeLayout = { mode: LayoutMode, direction: LayoutDirection, wrap: LayoutWrap, align_items: LayoutAlignItems, justify_content: LayoutJustifyContent, align_content: LayoutAlignContent, gap: number, row_gap?: number | null, column_gap?: number | null, padding: LayoutPadding, };

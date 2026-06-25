@@ -27,6 +27,8 @@ const nodeLayoutSchema = z.object({
   justify_content: z.enum(["start", "center", "end", "space_between", "space_around", "space_evenly"]).default("start"),
   align_content: z.enum(["start", "center", "end", "space_between", "space_around", "space_evenly"]).optional(),
   gap: z.number(),
+  row_gap: z.number().optional(),
+  column_gap: z.number().optional(),
   padding: z.object({
     top: z.number(),
     right: z.number(),

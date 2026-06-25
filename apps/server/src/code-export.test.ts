@@ -124,6 +124,8 @@ describe("code export", () => {
       wrap: "wrap",
       align_content: "space_around",
       gap: 8,
+      row_gap: 24,
+      column_gap: 6,
       padding: { top: 12, right: 16, bottom: 12, left: 16 }
     };
     fixture.pages[0].children[0].children[0].constraints = {
@@ -146,6 +148,8 @@ describe("code export", () => {
       wrap: "wrap",
       align_content: "space_around",
       gap: 8,
+      row_gap: 24,
+      column_gap: 6,
       padding: { top: 12, right: 16, bottom: 12, left: 16 }
     });
     expect(button?.structure.children[0].constraints).toEqual({

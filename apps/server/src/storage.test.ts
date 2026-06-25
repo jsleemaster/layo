@@ -700,6 +700,84 @@ describe("FileStorage", () => {
     ]);
 
 
+    const rowColumnGapLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "update_geometry",
+          nodeId: "frame-1",
+          width: 200,
+          height: 220
+        },
+        {
+          type: "update_geometry",
+          nodeId: "text-1",
+          width: 70,
+          height: 40
+        },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "horizontal",
+            wrap: "wrap",
+            align_content: "start",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            row_gap: 24,
+            column_gap: 6,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "gap-rectangle-1",
+          name: "간격 사각형 1",
+          width: 70,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "gap-rectangle-2",
+          name: "간격 사각형 2",
+          width: 70,
+          height: 40
+        }
+      ] as any
+    });
+
+    const gapFrame = rowColumnGapLayout.preview.pages[0].children[0];
+    expect(gapFrame.layout).toMatchObject({
+      wrap: "wrap",
+      align_content: "start",
+      row_gap: 24,
+      column_gap: 6
+    });
+    expect(gapFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
+      x: 20,
+      y: 20
+    });
+    expect(gapFrame.children.find((node) => node.id === "gap-rectangle-1")?.transform).toMatchObject({
+      x: 96,
+      y: 20
+    });
+    expect(gapFrame.children.find((node) => node.id === "gap-rectangle-2")?.transform).toMatchObject({
+      x: 20,
+      y: 84
+    });
+    expect(rowColumnGapLayout.audit.commandTypes).toEqual([
+      "update_geometry",
+      "update_geometry",
+      "set_layout",
+      "create_rectangle",
+      "create_rectangle"
+    ]);
+
+
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

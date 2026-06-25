@@ -47,6 +47,8 @@ export interface NodeLayout {
   justify_content: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   align_content?: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   gap: number;
+  row_gap?: number;
+  column_gap?: number;
   padding: LayoutSpacing;
 }
 

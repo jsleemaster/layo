@@ -1930,15 +1930,16 @@ function relayoutSingleLineChildren(
     0,
     (isVertical ? node.size.width : node.size.height) - crossStartPadding - crossEndPadding
   );
+  const mainGap = mainAxisGap(layout, isVertical);
   const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
   const totalChildMain =
     childMetrics.reduce(
       (total, metrics) => total + metrics.mainBefore + metrics.mainSize + metrics.mainAfter,
       0
-    ) + layout.gap * Math.max(0, childCount - 1);
+    ) + mainGap * Math.max(0, childCount - 1);
   const remainingMain = Math.max(0, availableMain - totalChildMain);
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
-  const distributedGap = layout.gap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
+  const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
@@ -1987,18 +1988,20 @@ function relayoutWrappedChildren(
     0,
     (isVertical ? node.size.width : node.size.height) - crossStartPadding - crossEndPadding
   );
-  const lines = buildFlexLines(flowChildren, isVertical, availableMain, layout.gap);
+  const mainGap = mainAxisGap(layout, isVertical);
+  const crossGap = crossAxisGap(layout, isVertical);
+  const lines = buildFlexLines(flowChildren, isVertical, availableMain, mainGap);
   const totalLineCross =
-    lines.reduce((total, line) => total + line.crossSize, 0) + layout.gap * Math.max(0, lines.length - 1);
+    lines.reduce((total, line) => total + line.crossSize, 0) + crossGap * Math.max(0, lines.length - 1);
   const remainingCross = Math.max(0, availableCross - totalLineCross);
   const alignContent = layout.align_content ?? "start";
   let crossCursor = crossStartPadding + justifyStartOffset(alignContent, remainingCross, lines.length);
-  const lineGap = layout.gap + justifyGapOffset(alignContent, remainingCross, lines.length);
+  const lineGap = crossGap + justifyGapOffset(alignContent, remainingCross, lines.length);
 
   for (const line of lines) {
     const remainingMain = Math.max(0, availableMain - line.mainSize);
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
-    const distributedGap = layout.gap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
+    const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
@@ -2028,6 +2031,14 @@ function relayoutWrappedChildren(
 
     crossCursor += line.crossSize + lineGap;
   }
+}
+
+function mainAxisGap(layout: NodeLayout, isVertical: boolean): number {
+  return isVertical ? layout.row_gap ?? layout.gap : layout.column_gap ?? layout.gap;
+}
+
+function crossAxisGap(layout: NodeLayout, isVertical: boolean): number {
+  return isVertical ? layout.column_gap ?? layout.gap : layout.row_gap ?? layout.gap;
 }
 
 function buildFlexLines(children: RendererNode[], isVertical: boolean, availableMain: number, gap: number) {
@@ -2080,6 +2091,9 @@ function normalizedAutoLayout(layout: NodeLayout | null | undefined): NodeLayout
 function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const wrap = isLayoutWrap(layout.wrap) ? layout.wrap : "nowrap";
   const alignContent = isLayoutAlignContent(layout.align_content) ? layout.align_content : "start";
+  const gap = Math.max(0, finiteNumber(layout.gap, 0));
+  const rowGap = Math.max(0, finiteNumber(layout.row_gap, gap));
+  const columnGap = Math.max(0, finiteNumber(layout.column_gap, gap));
   return {
     mode: layout.mode === "auto" ? "auto" : "none",
     direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
@@ -2087,7 +2101,9 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
     align_items: isLayoutAlignItems(layout.align_items) ? layout.align_items : "start",
     justify_content: isLayoutJustifyContent(layout.justify_content) ? layout.justify_content : "start",
     ...(wrap === "wrap" || alignContent !== "start" ? { align_content: alignContent } : {}),
-    gap: Math.max(0, finiteNumber(layout.gap, 0)),
+    gap,
+    ...(rowGap !== gap ? { row_gap: rowGap } : {}),
+    ...(columnGap !== gap ? { column_gap: columnGap } : {}),
     padding: {
       top: Math.max(0, finiteNumber(layout.padding?.top, 0)),
       right: Math.max(0, finiteNumber(layout.padding?.right, 0)),

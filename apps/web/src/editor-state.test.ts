@@ -400,6 +400,56 @@ describe("editor state commands", () => {
   });
 
 
+  test("auto layout uses separate row and column gaps for wrapped rows", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 200, height: 220 };
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal",
+      wrap: "wrap",
+      align_content: "start",
+      align_items: "start",
+      justify_content: "start",
+      gap: 12,
+      row_gap: 24,
+      column_gap: 6,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 70, height: 40 };
+    frame.children.push({
+      id: "gap-rectangle-1",
+      kind: "rectangle",
+      name: "간격 사각형 1",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 70, height: 40 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    frame.children.push({
+      id: "gap-rectangle-2",
+      kind: "rectangle",
+      name: "간격 사각형 2",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 70, height: 40 },
+      style: { fill: "#fde68a", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "gap-rectangle-2",
+      patch: { width: 70 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(findNodeById(relaid.document, "gap-rectangle-1")?.transform).toMatchObject({ x: 96, y: 20 });
+    expect(findNodeById(relaid.document, "gap-rectangle-2")?.transform).toMatchObject({ x: 20, y: 84 });
+  });
+
   test("auto layout wraps horizontal children into new rows", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;
