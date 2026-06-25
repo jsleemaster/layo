@@ -40,7 +40,7 @@ export interface LayoutSpacing {
 }
 
 export interface NodeLayout {
-  mode: "none" | "auto";
+  mode: "none" | "auto" | "grid";
   direction: "horizontal" | "vertical";
   wrap?: "nowrap" | "wrap";
   align_items: "start" | "center" | "end" | "stretch";
@@ -51,6 +51,8 @@ export interface NodeLayout {
   gap: number;
   row_gap?: number;
   column_gap?: number;
+  grid_columns?: number;
+  grid_rows?: number;
   padding: LayoutSpacing;
 }
 

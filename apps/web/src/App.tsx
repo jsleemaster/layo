@@ -224,6 +224,8 @@ const DEFAULT_NODE_LAYOUT: NodeLayout = {
   justify_content: "start",
   align_content: "start",
   gap: 8,
+  grid_columns: 2,
+  grid_rows: 2,
   padding: { top: 16, right: 16, bottom: 16, left: 16 }
 };
 const DEFAULT_NODE_LAYOUT_ITEM: NodeLayoutItem = {
@@ -1893,8 +1895,41 @@ function Inspector({
           >
             <option value="none">없음</option>
             <option value="auto">자동</option>
+            <option value="grid">그리드</option>
           </select>
         </label>
+        {layout.mode === "grid" ? (
+          <div className="field-grid">
+            <label>
+              그리드 열
+              <input
+                data-testid="inspector-layout-grid-columns"
+                type="number"
+                value={numericInputValue(layout.grid_columns ?? 2)}
+                onChange={(event) => {
+                  const nextValue = Number(event.currentTarget.value);
+                  if (Number.isFinite(nextValue)) {
+                    updateLayout({ grid_columns: nextValue });
+                  }
+                }}
+              />
+            </label>
+            <label>
+              그리드 행
+              <input
+                data-testid="inspector-layout-grid-rows"
+                type="number"
+                value={numericInputValue(layout.grid_rows ?? 2)}
+                onChange={(event) => {
+                  const nextValue = Number(event.currentTarget.value);
+                  if (Number.isFinite(nextValue)) {
+                    updateLayout({ grid_rows: nextValue });
+                  }
+                }}
+              />
+            </label>
+          </div>
+        ) : null}
         <label className="stacked-field">
           방향
           <select

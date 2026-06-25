@@ -13,11 +13,13 @@ export function relayoutDesignFile(document: DesignFile): void {
 }
 
 export function relayoutNode(node: DesignNode): void {
-  const layout = normalizedAutoLayout(node.layout);
+  const layout = normalizedFlowLayout(node.layout);
   if (layout) {
     const isVertical = layout.direction === "vertical";
     const flowChildren = node.children.filter((child) => layoutItemPosition(child.layout_item) === "static");
-    if (layout.wrap === "wrap") {
+    if (layout.mode === "grid") {
+      relayoutGridChildren(node, layout, flowChildren);
+    } else if (layout.wrap === "wrap") {
       relayoutWrappedChildren(node, layout, flowChildren, isVertical);
     } else {
       relayoutSingleLineChildren(node, layout, flowChildren, isVertical);
@@ -27,6 +29,50 @@ export function relayoutNode(node: DesignNode): void {
   for (const child of node.children) {
     relayoutNode(child);
   }
+}
+
+function relayoutGridChildren(node: DesignNode, layout: NodeLayout, flowChildren: DesignNode[]): void {
+  const columnGap = layout.column_gap ?? layout.gap;
+  const rowGap = layout.row_gap ?? layout.gap;
+  let columns = normalizeGridTrackCount(layout.grid_columns, 2);
+  let rows = normalizeGridTrackCount(layout.grid_rows, Math.max(1, Math.ceil(flowChildren.length / columns)));
+  if (layout.direction === "vertical") {
+    columns = Math.max(columns, Math.ceil(flowChildren.length / rows), 1);
+  } else {
+    rows = Math.max(rows, Math.ceil(flowChildren.length / columns), 1);
+  }
+  const availableWidth = Math.max(
+    0,
+    node.size.width - layout.padding.left - layout.padding.right - columnGap * Math.max(0, columns - 1)
+  );
+  const availableHeight = Math.max(
+    0,
+    node.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
+  );
+  const cellWidth = availableWidth / columns;
+  const cellHeight = availableHeight / rows;
+
+  flowChildren.forEach((child, index) => {
+    const row = layout.direction === "vertical" ? index % rows : Math.floor(index / columns);
+    const column = layout.direction === "vertical" ? Math.floor(index / rows) : index % columns;
+    const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    const margin = layoutItem.margin;
+    const innerWidth = Math.max(0, cellWidth - margin.left - margin.right);
+    const innerHeight = Math.max(0, cellHeight - margin.top - margin.bottom);
+
+    if (layoutItem.width_sizing === "fill") {
+      child.size.width = clampSize(innerWidth);
+    }
+    if (layoutItem.height_sizing === "fill" || layout.align_items === "stretch") {
+      child.size.height = clampSize(innerHeight);
+    }
+
+    child.transform = {
+      ...child.transform,
+      x: layout.padding.left + column * (cellWidth + columnGap) + margin.left + gridAxisOffset(layout.justify_content, innerWidth, child.size.width),
+      y: layout.padding.top + row * (cellHeight + rowGap) + margin.top + gridAxisOffset(layout.align_items, innerHeight, child.size.height)
+    };
+  });
 }
 
 function relayoutSingleLineChildren(
@@ -378,7 +424,7 @@ export function applyConstraintsAfterParentResize(
   parent: DesignNode,
   previousSize: { width: number; height: number }
 ): void {
-  if (normalizedAutoLayout(parent.layout)) {
+  if (normalizedFlowLayout(parent.layout)) {
     return;
   }
 
@@ -396,6 +442,7 @@ export function applyConstraintsAfterParentResize(
 }
 
 export function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
+  const mode = layout.mode === "grid" ? "grid" : layout.mode === "auto" ? "auto" : "none";
   const wrap = isLayoutWrap(layout.wrap) ? layout.wrap : "nowrap";
   const alignContent = isLayoutAlignContent(layout.align_content) ? layout.align_content : "start";
   const widthSizing = isLayoutSizing(layout.width_sizing) ? layout.width_sizing : "fixed";
@@ -403,8 +450,10 @@ export function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const gap = Math.max(0, finiteNumber(layout.gap, 0));
   const rowGap = Math.max(0, finiteNumber(layout.row_gap, gap));
   const columnGap = Math.max(0, finiteNumber(layout.column_gap, gap));
+  const gridColumns = normalizeGridTrackCount(layout.grid_columns, 2);
+  const gridRows = normalizeGridTrackCount(layout.grid_rows, 1);
   return {
-    mode: layout.mode === "auto" ? "auto" : "none",
+    mode,
     direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
     ...(wrap === "wrap" ? { wrap } : {}),
     align_items: isLayoutAlignItems(layout.align_items) ? layout.align_items : "start",
@@ -415,6 +464,7 @@ export function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
     gap,
     ...(rowGap !== gap ? { row_gap: rowGap } : {}),
     ...(columnGap !== gap ? { column_gap: columnGap } : {}),
+    ...(mode === "grid" ? { grid_columns: gridColumns, grid_rows: gridRows } : {}),
     padding: {
       top: Math.max(0, finiteNumber(layout.padding?.top, 0)),
       right: Math.max(0, finiteNumber(layout.padding?.right, 0)),
@@ -452,8 +502,8 @@ export function normalizeNodeConstraints(constraints: NodeConstraints): NodeCons
   };
 }
 
-function normalizedAutoLayout(layout: NodeLayout | null | undefined): NodeLayout | null {
-  if (!layout || layout.mode !== "auto") {
+function normalizedFlowLayout(layout: NodeLayout | null | undefined): NodeLayout | null {
+  if (!layout || (layout.mode !== "auto" && layout.mode !== "grid")) {
     return null;
   }
 
@@ -520,6 +570,25 @@ function isHorizontalConstraint(value: string): value is NodeConstraints["horizo
 
 function isVerticalConstraint(value: string): value is NodeConstraints["vertical"] {
   return ["top", "bottom", "top_bottom", "center", "scale"].includes(value);
+}
+
+function normalizeGridTrackCount(value: number | undefined, fallback: number): number {
+  return Math.max(1, Math.round(finiteNumber(value, fallback)));
+}
+
+function gridAxisOffset(
+  alignment: NodeLayout["align_items"] | NodeLayout["justify_content"],
+  available: number,
+  size: number
+): number {
+  const remaining = Math.max(0, available - size);
+  if (alignment === "center") {
+    return remaining / 2;
+  }
+  if (alignment === "end") {
+    return remaining;
+  }
+  return 0;
 }
 
 function isLayoutWrap(value: string | undefined): value is NonNullable<NodeLayout["wrap"]> {

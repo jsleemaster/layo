@@ -373,6 +373,53 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "fixed-rectangle-1")?.transform).toMatchObject({ x: 24, y: 190 });
   });
 
+  test("grid layout auto-places static children into equal cells", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 360, height: 240 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 2,
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 12,
+      column_gap: 16,
+      padding: { top: 20, right: 24, bottom: 20, left: 24 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    for (const [id, fill] of [
+      ["grid-rectangle-1", "#e0f2fe"],
+      ["grid-rectangle-2", "#fde68a"],
+      ["grid-rectangle-3", "#dcfce7"]
+    ]) {
+      frame.children.push({
+        id,
+        kind: "rectangle",
+        name: id,
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 40 },
+        style: { fill, stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: []
+      });
+    }
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "grid-rectangle-3",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 24, y: 20 });
+    expect(findNodeById(relaid.document, "grid-rectangle-1")?.transform).toMatchObject({ x: 188, y: 20 });
+    expect(findNodeById(relaid.document, "grid-rectangle-2")?.transform).toMatchObject({ x: 24, y: 126 });
+    expect(findNodeById(relaid.document, "grid-rectangle-3")?.transform).toMatchObject({ x: 188, y: 126 });
+  });
+
   test("auto layout includes child margins in flow and cross-axis position", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

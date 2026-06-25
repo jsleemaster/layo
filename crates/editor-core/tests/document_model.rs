@@ -63,8 +63,10 @@ fn layout_metadata_round_trips_through_json() {
               "kind": "frame",
               "name": "Auto Frame",
               "layout": {
-                "mode": "auto",
-                "direction": "vertical",
+                "mode": "grid",
+                "direction": "horizontal",
+                "grid_columns": 2,
+                "grid_rows": 2,
                 "wrap": "wrap",
                 "align_items": "center",
                 "justify_content": "space_between",
@@ -105,11 +107,13 @@ fn layout_metadata_round_trips_through_json() {
     let frame = &parsed.pages[0].children[0];
     let child = &frame.children[0];
 
-    assert_eq!(frame.layout.as_ref().unwrap().mode, editor_core::LayoutMode::Auto);
+    assert_eq!(frame.layout.as_ref().unwrap().mode, editor_core::LayoutMode::Grid);
     assert_eq!(
         frame.layout.as_ref().unwrap().direction,
-        editor_core::LayoutDirection::Vertical
+        editor_core::LayoutDirection::Horizontal
     );
+    assert_eq!(frame.layout.as_ref().unwrap().grid_columns, Some(2));
+    assert_eq!(frame.layout.as_ref().unwrap().grid_rows, Some(2));
     assert_eq!(
         frame.layout.as_ref().unwrap().wrap,
         editor_core::LayoutWrap::Wrap

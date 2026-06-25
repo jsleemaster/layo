@@ -111,6 +111,10 @@ pub struct NodeLayout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row_gap: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_columns: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_rows: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column_gap: Option<f64>,
     pub padding: LayoutPadding,
 }
@@ -158,6 +162,7 @@ pub struct NodeLayoutItem {
 pub enum LayoutMode {
     None,
     Auto,
+    Grid,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
