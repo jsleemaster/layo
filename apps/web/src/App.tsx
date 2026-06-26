@@ -7354,7 +7354,11 @@ export function App() {
                             <strong>{version.message}</strong>
                             <span>
                               {formatFileVersionCreatedAt(version.createdAt)} · {version.nodeCount}개 객체 ·{" "}
-                              {version.source === "restore" ? "복원 전 자동 저장" : "수동 저장"}
+                              {version.source === "restore"
+                                ? "복원 전 자동 저장"
+                                : version.source === "auto"
+                                  ? "자동 저장"
+                                  : "수동 저장"}
                             </span>
                           </span>
                           <button

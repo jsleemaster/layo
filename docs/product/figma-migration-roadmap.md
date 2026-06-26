@@ -103,7 +103,7 @@ Figma capabilities to bring over:
 
 - Canvas comments with threads, mentions, resolved state, and prototype comments.
 - Cursor chat and spotlight.
-- Version history with named checkpoints.
+- Version history with named checkpoints and automatic recovery snapshots.
 - Branches, review, and merge.
 - Viewer history or lightweight activity log.
 

@@ -1228,6 +1228,23 @@ test("file version history saves and restores a document snapshot", async ({ pag
   expect(versionsPayload.versions.map((version: { source: string }) => version.source)).toContain("restore");
 });
 
+test("file version history shows automatic saved versions from persisted edits", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  for (const value of ["자동 UI 1", "자동 UI 2", "자동 UI 3"]) {
+    const response = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+      data: {
+        dryRun: false,
+        commands: [{ type: "update_text", nodeId: "text-1", value }]
+      }
+    });
+    expect(response.ok()).toBeTruthy();
+  }
+
+  await page.getByRole("button", { name: "새로고침" }).click();
+  await expect(page.getByTestId("file-version-list")).toContainText("자동 저장");
+});
+
 test("inspector shows fill token binding from agent-applied color tokens", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {

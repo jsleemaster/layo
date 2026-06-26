@@ -7,7 +7,7 @@ export interface FileVersionSummary {
   fileId: string;
   name: string;
   message: string;
-  source: "manual" | "restore";
+  source: "manual" | "restore" | "auto";
   createdAt: string;
   nodeCount: number;
 }

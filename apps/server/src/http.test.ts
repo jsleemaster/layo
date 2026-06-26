@@ -553,6 +553,36 @@ describe("HTTP server", () => {
     expect(restored.json().recoveryVersion.source).toBe("restore");
   });
 
+  test("serves automatic file versions created by persisted agent commands", async () => {
+    const server = await createServerWithDocument();
+
+    for (const value of ["HTTP 자동 1", "HTTP 자동 2", "HTTP 자동 3"]) {
+      const response = await server.inject({
+        method: "POST",
+        url: "/files/sample-file/agent/commands",
+        payload: {
+          dryRun: false,
+          commands: [{ type: "update_text", nodeId: "text-1", value }]
+        }
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const listed = await server.inject({ method: "GET", url: "/files/sample-file/versions" });
+    expect(listed.statusCode).toBe(200);
+    const autoVersion = listed
+      .json()
+      .versions.find((version: { source: string }) => version.source === "auto");
+    expect(autoVersion).toMatchObject({ message: "자동 저장", source: "auto" });
+
+    const read = await server.inject({
+      method: "GET",
+      url: `/files/sample-file/versions/${autoVersion.versionId}`
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json().version.document.pages[0].children[0].children[0].content.value).toBe("HTTP 자동 3");
+  });
+
   test("exports a design file as CSS, HTML, and importable element modules", async () => {
     const server = await createServerWithDocument();
 

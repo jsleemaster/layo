@@ -394,6 +394,40 @@ describe("MCP AI editing workflow", () => {
     expect(restored.recoveryVersion.source).toBe("restore");
   });
 
+  test("lists automatic file versions created by persisted MCP agent commands", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "auto-history-project",
+        name: "자동 히스토리 프로젝트",
+        documentId: "auto-history-file",
+        documentName: "자동 히스토리 문서"
+      }
+    });
+
+    for (const value of ["MCP 자동 1", "MCP 자동 2", "MCP 자동 3"]) {
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "auto-history-file",
+          dryRun: false,
+          commands: [{ type: "update_text", nodeId: "text-1", value }]
+        }
+      });
+    }
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_file_versions",
+        arguments: { fileId: "auto-history-file" }
+      })
+    );
+    const autoVersion = listed.versions.find((version: { source: string }) => version.source === "auto");
+    expect(autoVersion).toMatchObject({ message: "자동 저장", source: "auto" });
+  });
+
   test("lets an MCP client bind spacing tokens to layout gap and padding", async () => {
     const client = await connectMcpClient();
 

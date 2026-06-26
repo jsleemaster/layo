@@ -142,6 +142,31 @@ describe("FileStorage", () => {
     expect(versions.map((item) => item.source)).toContain("restore");
   });
 
+  test("creates an automatic file version after the third persisted edit", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    await storage.updateText("sample-file", "text-1", "자동 변경 1");
+    await storage.updateText("sample-file", "text-1", "자동 변경 2");
+    expect((await storage.listFileVersions("sample-file")).filter((version) => version.source === "auto")).toEqual([]);
+
+    await storage.updateText("sample-file", "text-1", "자동 변경 3");
+
+    const autoVersions = (await storage.listFileVersions("sample-file")).filter(
+      (version) => version.source === "auto"
+    );
+    expect(autoVersions).toHaveLength(1);
+    expect(autoVersions[0]).toMatchObject({
+      fileId: "sample-file",
+      message: "자동 저장",
+      source: "auto",
+      name: "테스트 문서"
+    });
+
+    const autoSnapshot = await storage.readFileVersion("sample-file", autoVersions[0].versionId);
+    expect(findTextValue(autoSnapshot.document, "text-1")).toBe("자동 변경 3");
+  });
+
   test("creates, reads, renames, shares, and appends documents to projects", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);

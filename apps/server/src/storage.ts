@@ -34,6 +34,7 @@ import { sampleDocument } from "./sample-document.js";
 
 const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
 const DEFAULT_STORAGE_DIR = ".layo";
+const AUTO_FILE_VERSION_EDIT_INTERVAL = 3;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -193,7 +194,7 @@ export interface StoredFileSummary {
   modifiedAt: string;
 }
 
-export type FileVersionSource = "manual" | "restore";
+export type FileVersionSource = "manual" | "restore" | "auto";
 
 export interface StoredFileVersionSummary {
   schemaVersion: 1;
@@ -219,6 +220,14 @@ export interface RestoreFileVersionResult {
   file: DesignFile;
   restoredVersion: StoredFileVersionSummary;
   recoveryVersion: StoredFileVersionSummary;
+}
+
+interface AutoFileVersionState {
+  schemaVersion: 1;
+  fileId: string;
+  editCount: number;
+  lastAutoVersionId?: string;
+  updatedAt: string;
 }
 
 export interface ProjectDocumentSummary {
@@ -311,6 +320,10 @@ export class FileStorage {
     return path.join(this.rootDir, "history");
   }
 
+  private get historyStateDir() {
+    return path.join(this.rootDir, "history-state");
+  }
+
   private filePathFor(fileId: string) {
     const safeFileId = fileId.replace(/[^a-zA-Z0-9_-]/g, "");
     return path.join(this.filesDir, `${safeFileId}.json`);
@@ -324,6 +337,11 @@ export class FileStorage {
   private fileVersionPathFor(fileId: string, versionId: string) {
     assertSafeStorageId(versionId);
     return path.join(this.fileHistoryDirFor(fileId), `${versionId}.json`);
+  }
+
+  private fileHistoryStatePathFor(fileId: string) {
+    assertSafeStorageId(fileId);
+    return path.join(this.historyStateDir, `${fileId}.json`);
   }
 
   private projectPathFor(projectId: string) {
@@ -693,6 +711,7 @@ export class FileStorage {
     const tokens = importDesignTokensFromDtcg(tokensDocument);
     document.tokens = tokens;
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return { file: document, tokens };
   }
 
@@ -718,6 +737,7 @@ export class FileStorage {
     relayoutDesignFile(document);
 
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -731,6 +751,7 @@ export class FileStorage {
     node.style = { ...node.style, fill, fill_token: null };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -748,6 +769,7 @@ export class FileStorage {
     node.content = { ...node.content, value };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -781,6 +803,7 @@ export class FileStorage {
     node.content = content;
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -802,6 +825,7 @@ export class FileStorage {
     node.content = { ...node.content, fit_mode: fitMode };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -815,6 +839,7 @@ export class FileStorage {
     parent.children.push(node);
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -877,6 +902,7 @@ export class FileStorage {
     document.components.push(component);
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return component;
   }
 
@@ -909,6 +935,7 @@ export class FileStorage {
     parent.children.push(node);
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -926,6 +953,7 @@ export class FileStorage {
     node.component_instance = null;
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
     return node;
   }
 
@@ -965,6 +993,7 @@ export class FileStorage {
         collaborativeResult.changedNodeIds
       );
       await this.writeFile(fileId, collaborativeResult.preview);
+      await this.recordFileEditForAutoVersion(fileId, collaborativeResult.preview);
       return result;
     }
 
@@ -976,6 +1005,7 @@ export class FileStorage {
 
     if (persisted) {
       await this.writeFile(fileId, preview);
+      await this.recordFileEditForAutoVersion(fileId, preview);
     }
 
     return result;
@@ -1019,6 +1049,63 @@ export class FileStorage {
       "utf8"
     );
     return summarizeStoredFileVersion(version);
+  }
+
+  private async readAutoFileVersionState(fileId: string): Promise<AutoFileVersionState> {
+    assertSafeStorageId(fileId);
+    let raw: string;
+    try {
+      raw = await readFile(this.fileHistoryStatePathFor(fileId), "utf8");
+    } catch {
+      return {
+        schemaVersion: 1,
+        fileId,
+        editCount: 0,
+        updatedAt: new Date(0).toISOString()
+      };
+    }
+
+    return parseAutoFileVersionState(JSON.parse(raw), fileId);
+  }
+
+  private async writeAutoFileVersionState(state: AutoFileVersionState): Promise<void> {
+    await mkdir(this.historyStateDir, { recursive: true });
+    await writeFile(
+      this.fileHistoryStatePathFor(state.fileId),
+      `${JSON.stringify(state, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
+  private async recordFileEditForAutoVersion(
+    fileId: string,
+    document: DesignFile
+  ): Promise<StoredFileVersionSummary | null> {
+    const state = await this.readAutoFileVersionState(fileId);
+    const updatedAt = new Date().toISOString();
+    const editCount = state.editCount + 1;
+
+    if (editCount < AUTO_FILE_VERSION_EDIT_INTERVAL) {
+      await this.writeAutoFileVersionState({
+        ...state,
+        editCount,
+        updatedAt
+      });
+      return null;
+    }
+
+    const version = await this.writeFileVersion(fileId, document, {
+      message: "자동 저장",
+      source: "auto"
+    });
+    await this.writeAutoFileVersionState({
+      schemaVersion: 1,
+      fileId,
+      editCount: 0,
+      lastAutoVersionId: version.versionId,
+      updatedAt
+    });
+    return version;
   }
 }
 
@@ -1124,7 +1211,7 @@ function parseStoredFileVersion(input: unknown, expectedFileId: string): StoredF
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`file version mismatch: ${candidate.fileId}`);
   }
-  if (candidate.source !== "manual" && candidate.source !== "restore") {
+  if (candidate.source !== "manual" && candidate.source !== "restore" && candidate.source !== "auto") {
     throw new Error(`unsupported file version source: ${String(candidate.source)}`);
   }
   if (!candidate.document || candidate.document.id !== expectedFileId) {
@@ -1154,6 +1241,32 @@ function summarizeStoredFileVersion(version: StoredFileVersion): StoredFileVersi
     source: version.source,
     createdAt: version.createdAt,
     nodeCount: version.nodeCount
+  };
+}
+
+function parseAutoFileVersionState(input: unknown, expectedFileId: string): AutoFileVersionState {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid auto file version state");
+  }
+
+  const candidate = input as AutoFileVersionState;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported auto file version state schema: ${String(candidate.schemaVersion)}`);
+  }
+  assertSafeStorageId(candidate.fileId);
+  if (candidate.fileId !== expectedFileId) {
+    throw new Error(`auto file version state mismatch: ${candidate.fileId}`);
+  }
+  if (candidate.lastAutoVersionId !== undefined) {
+    assertSafeStorageId(candidate.lastAutoVersionId);
+  }
+
+  return {
+    schemaVersion: 1,
+    fileId: candidate.fileId,
+    editCount: Math.max(0, Math.round(Number(candidate.editCount) || 0)),
+    lastAutoVersionId: candidate.lastAutoVersionId,
+    updatedAt: normalizeName(candidate.updatedAt, new Date(0).toISOString())
   };
 }
 
