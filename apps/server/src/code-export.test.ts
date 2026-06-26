@@ -81,6 +81,39 @@ describe("code export", () => {
     ]);
   });
 
+  test("exports color token bindings as CSS variables and implementation metadata", () => {
+    const fixture = tossFixture() as any;
+    fixture.tokens = [
+      {
+        id: "color-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#3182f6"
+      }
+    ];
+    fixture.pages[0].children[0].style.fill_token = "color-brand-primary";
+
+    const result = exportDesignToCode(fixture);
+    const button = result.elements.find((element) => element.id === "tds-button-primary");
+
+    expect(result.implementationSpec.tokens.colors).toEqual([
+      {
+        id: "color-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#3182f6"
+      }
+    ]);
+    expect(result.css).toContain("--layo-token-color-brand-primary: #3182f6;");
+    expect(result.css).toContain(
+      "background-color: var(--layo-token-color-brand-primary, #3182f6);"
+    );
+    expect(button?.structure.style).toMatchObject({
+      fill: "#3182f6",
+      fillToken: "color-brand-primary"
+    });
+  });
+
   test("exports component definitions and instance references for agents", () => {
     const result = exportDesignToCode(componentFixture());
 

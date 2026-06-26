@@ -1191,6 +1191,35 @@ test("empty text inspector field renders as a single underline with placeholder"
   await expect(textField).toHaveCSS("border-bottom-width", "1px");
 });
 
+test("inspector shows fill token binding from agent-applied color tokens", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: {
+            id: "color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_token", nodeId: "text-1", tokenId: "color-brand-primary" }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#2563eb");
+  await expect(page.getByTestId("inspector-fill-token")).toContainText("Brand / Primary");
+});
+
 test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

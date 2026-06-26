@@ -310,6 +310,53 @@ fn legacy_layout_metadata_defaults_alignment_fields() {
 }
 
 #[test]
+fn color_token_metadata_round_trips_through_json() {
+    let raw = r##"
+    {
+      "id": "token-file",
+      "name": "Token File",
+      "version": 1,
+      "components": [],
+      "tokens": [
+        { "id": "color-brand-primary", "name": "Brand / Primary", "type": "color", "value": "#2563eb" }
+      ],
+      "pages": [
+        {
+          "id": "page-1",
+          "name": "페이지 1",
+          "children": [
+            {
+              "id": "text-1",
+              "kind": "text",
+              "name": "Headline",
+              "transform": { "x": 0, "y": 0, "rotation": 0 },
+              "size": { "width": 120, "height": 48 },
+              "style": {
+                "fill": "#2563eb",
+                "fill_token": "color-brand-primary",
+                "stroke": null,
+                "stroke_width": 0,
+                "opacity": 1
+              },
+              "content": { "type": "text", "value": "Token", "font_size": 28, "font_family": "Inter" },
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let json = serde_json::to_string(&parsed).unwrap();
+
+    assert!(json.contains("\"tokens\""));
+    assert!(json.contains("\"id\":\"color-brand-primary\""));
+    assert!(json.contains("\"type\":\"color\""));
+    assert!(json.contains("\"fill_token\":\"color-brand-primary\""));
+}
+
+#[test]
 fn node_interaction_metadata_round_trips_through_json() {
     let raw = r##"
     {

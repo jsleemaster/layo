@@ -1,4 +1,5 @@
 import type {
+  DesignToken,
   GridArea,
   GridTrack,
   ImageFitMode,
@@ -100,6 +101,11 @@ export type EditorCommand =
       type: "set_fill";
       nodeId: string;
       fill: string;
+    }
+  | {
+      type: "set_fill_token";
+      nodeId: string;
+      tokenId: string;
     }
   | {
       type: "set_node_style";
@@ -286,6 +292,10 @@ export function findNodeById(document: RendererDocument, nodeId: string): Render
   }
 
   return null;
+}
+
+function findColorToken(document: RendererDocument, tokenId: string): DesignToken | null {
+  return (document.tokens ?? []).find((token) => token.id === tokenId && token.type === "color") ?? null;
 }
 
 export function getNodeAbsolutePosition(
@@ -1221,15 +1231,40 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         return { document, inverse: null };
       }
 
+      const previousStyle = { ...node.style };
       const inverse: EditorCommand = {
-        type: "set_fill",
+        type: "set_node_style",
         nodeId: command.nodeId,
-        fill: node.style.fill
+        style: previousStyle
       };
-      node.style = { ...node.style, fill: command.fill };
+      node.style = { ...node.style, fill: command.fill, fill_token: null };
       relayoutDocument(next);
 
       return { document: next, inverse };
+    }
+    case "set_fill_token": {
+      const node = findNodeById(next, command.nodeId);
+      const token = findColorToken(next, command.tokenId);
+      if (!node || !token || isNodeLocked(node)) {
+        return { document, inverse: null };
+      }
+
+      const previousStyle = { ...node.style };
+      if (previousStyle.fill === token.value && previousStyle.fill_token === token.id) {
+        return { document, inverse: null };
+      }
+
+      node.style = { ...node.style, fill: token.value, fill_token: token.id };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_node_style",
+          nodeId: command.nodeId,
+          style: previousStyle
+        }
+      };
     }
     case "set_node_style": {
       const node = findNodeById(next, command.nodeId);
@@ -1240,6 +1275,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       const previousStyle = { ...node.style };
       if (
         previousStyle.fill === command.style.fill &&
+        previousStyle.fill_token === command.style.fill_token &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
         previousStyle.opacity === command.style.opacity

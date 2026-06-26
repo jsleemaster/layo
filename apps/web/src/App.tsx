@@ -13,6 +13,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type DesignToken,
   type GridArea,
   type GridTrack,
   type ImageFitMode,
@@ -2655,6 +2656,7 @@ function Inspector({
   selectedNode,
   selectedParentNode,
   selectedNodeCount,
+  documentTokens,
   canAlign,
   canDistribute,
   onGeometryChange,
@@ -2672,6 +2674,7 @@ function Inspector({
   selectedNode: RendererNode | null;
   selectedParentNode: RendererNode | null;
   selectedNodeCount: number;
+  documentTokens: DesignToken[];
   canAlign: boolean;
   canDistribute: boolean;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
@@ -2742,6 +2745,9 @@ function Inspector({
     : DEFAULT_NODE_LAYOUT_ITEM;
   const selectedParentUsesGrid = selectedParentNode?.layout?.mode === "grid";
   const constraints = selectedNode.constraints ?? DEFAULT_NODE_CONSTRAINTS;
+  const fillToken = selectedNode.style.fill_token
+    ? documentTokens.find((token) => token.id === selectedNode.style.fill_token && token.type === "color") ?? null
+    : null;
   const updateLayout = (patch: Partial<NodeLayout>) => {
     onLayoutChange(selectedNode.id, {
       ...layout,
@@ -2895,6 +2901,11 @@ function Inspector({
           onChange={(event) => onFillChange(selectedNode.id, event.currentTarget.value)}
         />
       </label>
+      {selectedNode.style.fill_token ? (
+        <div className="inspector-token-readout" data-testid="inspector-fill-token">
+          토큰 {fillToken?.name ?? selectedNode.style.fill_token}
+        </div>
+      ) : null}
       {selectedNode.content.type === "text" ? (
         <label className="stacked-field">
           텍스트
@@ -7712,6 +7723,7 @@ export function App() {
         selectedNode={selectedNode}
         selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}
+        documentTokens={editor?.document.tokens ?? []}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}
         zoomLabel={`${Math.round((editor?.viewport.scale ?? 1) * 100)}%`}

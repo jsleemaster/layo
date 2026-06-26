@@ -90,6 +90,13 @@ const nodeConstraintsSchema = z.object({
   vertical: z.enum(["top", "bottom", "top_bottom", "center", "scale"])
 });
 
+const designTokenSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(["color"]),
+  value: z.string()
+});
+
 const agentCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("update_geometry"),
@@ -103,6 +110,15 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("set_fill"),
     nodeId: z.string(),
     fill: z.string()
+  }),
+  z.object({
+    type: z.literal("create_token"),
+    token: designTokenSchema
+  }),
+  z.object({
+    type: z.literal("set_fill_token"),
+    nodeId: z.string(),
+    tokenId: z.string()
   }),
   z.object({
     type: z.literal("update_text"),

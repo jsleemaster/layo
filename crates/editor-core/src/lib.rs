@@ -8,9 +8,9 @@ pub use context::{DesignContext, NodeSummary};
 pub use geometry::{Bounds, Point, Size, Transform};
 pub use model::{
     ComponentDefinition, ComponentInstance, ComponentOverride, ComponentProperty, ComponentVariant,
-    DesignFile, GridArea, GridTrack, GridTrackType, HorizontalConstraint, LayoutAlignContent, LayoutAlignItems,
-    LayoutDirection, LayoutItemPosition, LayoutItemSizing, LayoutJustifyContent, LayoutJustifyItems, LayoutMode,
-    LayoutPadding, LayoutSelfAlignment, LayoutSizing, LayoutWrap,
+    DesignFile, DesignToken, DesignTokenType, GridArea, GridTrack, GridTrackType, HorizontalConstraint,
+    LayoutAlignContent, LayoutAlignItems, LayoutDirection, LayoutItemPosition, LayoutItemSizing,
+    LayoutJustifyContent, LayoutJustifyItems, LayoutMode, LayoutPadding, LayoutSelfAlignment, LayoutSizing, LayoutWrap,
     Node, NodeConstraints, NodeContent, NodeKind, NodeLayout, NodeLayoutItem, Page, Style,
     VerticalConstraint,
 };

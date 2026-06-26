@@ -8,6 +8,7 @@ import {
 import type {
   ComponentDefinition,
   DesignFile,
+  DesignToken,
   DesignNode,
   NodeConstraints,
   NodeLayout,
@@ -53,6 +54,7 @@ export interface CanvasInspection {
   pages: Array<{ id: string; name: string; nodeCount: number }>;
   nodeCount: number;
   componentCount: number;
+  tokens: DesignToken[];
   components: Array<{ id: string; name: string; variantCount: number }>;
   nodes: AgentNodeSummary[];
   validation: DocumentValidation;
@@ -76,6 +78,8 @@ export type AgentCommand =
       height?: number;
     }
   | { type: "set_fill"; nodeId: string; fill: string }
+  | { type: "create_token"; token: DesignToken }
+  | { type: "set_fill_token"; nodeId: string; tokenId: string }
   | { type: "update_text"; nodeId: string; value: string }
   | {
       type: "create_rectangle";
@@ -168,6 +172,7 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
     })),
     nodeCount: nodes.length,
     componentCount: components.length,
+    tokens: document.tokens ?? [],
     components: components.map((component) => ({
       id: component.id,
       name: component.name,
@@ -211,6 +216,29 @@ export function validateDocument(document: DesignFile): DocumentValidation {
   const issues: DocumentValidationIssue[] = [];
   const ids = new Map<string, string[][]>();
   const componentIds = new Set<string>();
+  const tokenIds = new Set<string>();
+
+  for (const token of document.tokens ?? []) {
+    if (tokenIds.has(token.id)) {
+      issues.push({
+        code: "duplicate_token_id",
+        message: `duplicate token id: ${token.id}`
+      });
+    }
+    tokenIds.add(token.id);
+    if (token.type !== "color") {
+      issues.push({
+        code: "invalid_token_type",
+        message: `unsupported token type: ${token.id}`
+      });
+    }
+    if (!token.value.trim()) {
+      issues.push({
+        code: "invalid_token_value",
+        message: `token must have a non-empty value: ${token.id}`
+      });
+    }
+  }
 
   for (const component of document.components ?? []) {
     if (componentIds.has(component.id)) {
@@ -231,7 +259,7 @@ export function validateDocument(document: DesignFile): DocumentValidation {
   for (const page of document.pages) {
     registerId(ids, page.id, [page.id]);
     for (const node of page.children) {
-      validateNode(node, [page.id, node.id], ids, componentIds, issues);
+      validateNode(node, [page.id, node.id], ids, componentIds, tokenIds, issues);
     }
   }
 
@@ -384,6 +412,7 @@ function validateNode(
   path: string[],
   ids: Map<string, string[][]>,
   componentIds: Set<string>,
+  tokenIds: Set<string>,
   issues: DocumentValidationIssue[]
 ) {
   registerId(ids, node.id, path);
@@ -401,6 +430,15 @@ function validateNode(
     issues.push({
       code: "invalid_opacity",
       message: `node opacity must be between 0 and 1: ${node.id}`,
+      nodeId: node.id,
+      path
+    });
+  }
+
+  if (node.style.fill_token && !tokenIds.has(node.style.fill_token)) {
+    issues.push({
+      code: "missing_fill_token",
+      message: `node references missing fill token: ${node.style.fill_token}`,
       nodeId: node.id,
       path
     });
@@ -434,7 +472,7 @@ function validateNode(
   }
 
   for (const child of node.children) {
-    validateNode(child, [...path, child.id], ids, componentIds, issues);
+    validateNode(child, [...path, child.id], ids, componentIds, tokenIds, issues);
   }
 }
 
@@ -476,7 +514,29 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     }
     case "set_fill": {
       const node = requireNode(document, command.nodeId);
-      node.style = { ...node.style, fill: command.fill };
+      node.style = { ...node.style, fill: command.fill, fill_token: null };
+      return node.id;
+    }
+    case "create_token": {
+      document.tokens = document.tokens ?? [];
+      const existingIndex = document.tokens.findIndex((token) => token.id === command.token.id);
+      const token = {
+        id: command.token.id,
+        name: command.token.name,
+        type: command.token.type,
+        value: command.token.value
+      };
+      if (existingIndex >= 0) {
+        document.tokens[existingIndex] = token;
+      } else {
+        document.tokens.push(token);
+      }
+      return token.id;
+    }
+    case "set_fill_token": {
+      const node = requireNode(document, command.nodeId);
+      const token = requireColorToken(document, command.tokenId);
+      node.style = { ...node.style, fill: token.value, fill_token: token.id };
       return node.id;
     }
     case "update_text": {
@@ -591,6 +651,17 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       return node.id;
     }
   }
+}
+
+function requireColorToken(document: DesignFile, tokenId: string): DesignToken {
+  const token = (document.tokens ?? []).find((candidate) => candidate.id === tokenId);
+  if (!token) {
+    throw new Error(`token not found: ${tokenId}`);
+  }
+  if (token.type !== "color") {
+    throw new Error(`token is not a color token: ${tokenId}`);
+  }
+  return token;
 }
 
 function requireNode(document: DesignFile, nodeId: string): DesignNode {
