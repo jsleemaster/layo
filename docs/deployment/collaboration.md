@@ -37,6 +37,26 @@ VITE_API_BASE_URL=https://your-api.example.com pnpm --filter @layo/web build
 
 Serve `apps/web/dist` from Vercel static output, Netlify, nginx, or another static host only when the API server is deployed separately. This repository does not install an automatic GitHub Pages deployment workflow.
 
+## Vercel full-stack deployment
+
+The repository includes a Vercel deployment path for a same-origin editor preview:
+
+- `vercel.json` builds `apps/web` as a Vite static app.
+- `/projects`, `/files`, `/assets`, and `/health` are rewritten to `api/[...path].ts`.
+- The Vercel function adapts the existing Fastify server without starting a long-running listener.
+
+```bash
+vercel build --yes
+vercel deploy --prebuilt --prod
+```
+
+By default, Vercel runtime writes use `/tmp/layo` because the deployment
+filesystem is otherwise read-only. This is useful for validating the deployed
+editor shell and API routing, but it is not durable team storage. Set
+`LAYO_STORAGE_DIR` only on hosts with persistent writable storage. Production
+team storage still needs a durable database/object-store implementation before
+it can replace local project manifests.
+
 ## Full-stack web and API deployment
 
 For a remote editor that can create projects, save documents, upload images, and reload state, build the web shell under `/app/` and run the Node API server. The server serves the built web app from `/app/` while keeping API routes at `/projects`, `/files`, and `/assets/:assetId`.

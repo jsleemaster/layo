@@ -72,7 +72,9 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-There is no active implementation plan left under `docs/superpowers/plans` as of this audit. New feature work should start from a new plan or spec instead of resuming any historical plan above.
+| Plan | Status | Evidence |
+| --- | --- | --- |
+| `2026-06-26-vercel-fullstack-deployment.md` | Active | Fixing the incorrect GitHub About deployment link by adding Vercel full-stack routing, deploying the real Layo editor, and replacing the unrelated `layo.vercel.app` URL. |
 
 ## Handoff Plan
 

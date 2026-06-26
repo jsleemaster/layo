@@ -41,3 +41,23 @@ test("deployment docs keep web hosting and relay hosting separate", async () => 
   assert.match(docs, /Trusted network relay/i);
   assert.match(docs, /docker compose/i);
 });
+
+test("vercel deployment routes same-origin API requests to the Layo server function", async () => {
+  const config = JSON.parse(await readText("vercel.json"));
+  const apiFunction = await readText("api/[...path].ts");
+
+  assert.equal(config.framework, "vite");
+  assert.equal(config.outputDirectory, "apps/web/dist");
+  assert.match(config.buildCommand, /pnpm --filter @layo\/web build/);
+  assert.deepEqual(config.rewrites, [
+    { source: "/health", destination: "/api/health" },
+    { source: "/projects/:path*", destination: "/api/projects/:path*" },
+    { source: "/files/:path*", destination: "/api/files/:path*" },
+    { source: "/assets/:path*", destination: "/api/assets/:path*" }
+  ]);
+
+  assert.match(apiFunction, /createHttpServer/);
+  assert.match(apiFunction, /new FileStorage/);
+  assert.match(apiFunction, /\/tmp\/layo/);
+  assert.match(apiFunction, /originalUrl\.slice\(4\)/);
+});
