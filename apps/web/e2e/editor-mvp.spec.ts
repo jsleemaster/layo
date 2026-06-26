@@ -1963,6 +1963,69 @@ test("inspector grid track units resize cells with px and fr values", async ({ p
   });
 });
 
+test("canvas grid column handles resize tracks directly in the viewport", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("420");
+  await page.getByTestId("inspector-height").fill("240");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-grid-column-tracks").fill("120px 1fr");
+  await page.getByTestId("inspector-layout-grid-row-tracks").fill("90px 1fr");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-column-gap").fill("10");
+  await page.getByTestId("inspector-layout-row-gap").fill("0");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("150");
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("110");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  const firstColumnHandle = page.getByTestId("grid-column-resize-handle-1");
+  await expect(firstColumnHandle).toBeVisible();
+  const handleBox = await firstColumnHandle.boundingBox();
+  if (!handleBox) {
+    throw new Error("grid column handle did not expose a bounding box");
+  }
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 40, handleBox.y + handleBox.height / 2);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-layout-grid-column-tracks")).toHaveValue("160px 1fr");
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("190");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  const firstRowHandle = page.getByTestId("grid-row-resize-handle-1");
+  await expect(firstRowHandle).toBeVisible();
+  const rowHandleBox = await firstRowHandle.boundingBox();
+  if (!rowHandleBox) {
+    throw new Error("grid row handle did not expose a bounding box");
+  }
+
+  await page.mouse.move(rowHandleBox.x + rowHandleBox.width / 2, rowHandleBox.y + rowHandleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(rowHandleBox.x + rowHandleBox.width / 2, rowHandleBox.y + rowHandleBox.height / 2 + 30);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-layout-grid-row-tracks")).toHaveValue("120px 1fr");
+  await page.getByRole("button", { name: "사각형 4" }).click();
+  await expect(page.getByTestId("inspector-y")).toHaveValue("140");
+});
+
 test("inspector manual grid cell placement moves a child to the requested cell", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

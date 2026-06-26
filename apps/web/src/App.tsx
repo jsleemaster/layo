@@ -436,6 +436,12 @@ interface ResizeSession {
   handle: ResizeHandle;
 }
 
+interface GridResizeSession {
+  nodeId: string;
+  axis: "column" | "row";
+  index: number;
+}
+
 interface MeasurementLineOverlay {
   left: number;
   top: number;
@@ -496,6 +502,32 @@ interface FrameSpacingOverlay {
   segments: FrameSpacingSegment[];
 }
 
+interface GridViewportLine {
+  id: string;
+  orientation: "vertical" | "horizontal";
+  left: number;
+  top: number;
+  width?: number;
+  height?: number;
+}
+
+interface GridViewportHandle {
+  id: string;
+  testId: string;
+  axis: "column" | "row";
+  index: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cursor: "col-resize" | "row-resize";
+}
+
+interface GridViewportOverlay {
+  lines: GridViewportLine[];
+  handles: GridViewportHandle[];
+}
+
 interface ObjectContextMenuState {
   left: number;
   top: number;
@@ -511,6 +543,8 @@ const RESIZE_HANDLES: ResizeHandle[] = [
 ];
 const RESIZE_HIT_HANDLES: ResizeHandle[] = RESIZE_HANDLES;
 const MIN_RESIZE_SIZE = 1;
+const GRID_RESIZE_HANDLE_SIZE = 10;
+const GRID_MIN_TRACK_SIZE = 1;
 const IMPORTED_IMAGE_MIN_DIMENSION = 96;
 const IMPORTED_IMAGE_MAX_DIMENSION = 480;
 
@@ -1095,6 +1129,138 @@ function createFrameSpacingOverlay(
   return segments.length ? { segments } : null;
 }
 
+function createGridViewportOverlay(
+  frameBounds: SelectionBounds,
+  frame: RendererNode,
+  viewport: EditorState["viewport"]
+): GridViewportOverlay | null {
+  const layout = normalizedInspectorLayout(frame.layout);
+  if (layout.mode !== "grid") {
+    return null;
+  }
+
+  const flowChildren = frame.children.filter(
+    (child) => (child.layout_item?.position ?? "static") === "static" && isNodeVisible(child)
+  );
+  const columnGap = layout.column_gap ?? layout.gap;
+  const rowGap = layout.row_gap ?? layout.gap;
+  let columns = gridTrackCountForOverlay(layout.grid_column_tracks, layout.grid_columns, 2);
+  let rows = gridTrackCountForOverlay(
+    layout.grid_row_tracks,
+    layout.grid_rows,
+    Math.max(1, Math.ceil(flowChildren.length / columns))
+  );
+  if (isVerticalGridDirection(layout.direction)) {
+    columns = Math.max(columns, Math.ceil(flowChildren.length / rows), 1);
+  } else {
+    rows = Math.max(rows, Math.ceil(flowChildren.length / columns), 1);
+  }
+
+  const availableWidth = Math.max(
+    0,
+    frame.size.width - layout.padding.left - layout.padding.right - columnGap * Math.max(0, columns - 1)
+  );
+  const availableHeight = Math.max(
+    0,
+    frame.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
+  );
+  const columnTracks = resolveGridTracksForOverlay(layout.grid_column_tracks, columns);
+  const rowTracks = resolveGridTracksForOverlay(layout.grid_row_tracks, rows);
+  const columnSizes = resolveGridTrackSizesForOverlay(columnTracks, availableWidth);
+  const rowSizes = resolveGridTrackSizesForOverlay(rowTracks, availableHeight);
+  const columnStarts = gridTrackStartsForOverlay(columnSizes, columnGap);
+  const rowStarts = gridTrackStartsForOverlay(rowSizes, rowGap);
+  const gridLeft = frameBounds.x + layout.padding.left;
+  const gridTop = frameBounds.y + layout.padding.top;
+  const gridWidth = columnSizes.reduce((total, size) => total + size, 0) + columnGap * Math.max(0, columns - 1);
+  const gridHeight = rowSizes.reduce((total, size) => total + size, 0) + rowGap * Math.max(0, rows - 1);
+  if (gridWidth <= 0 || gridHeight <= 0) {
+    return null;
+  }
+
+  const topLeft = documentPointToViewport({ x: gridLeft, y: gridTop, space: "document" }, viewport);
+  const bottomRight = documentPointToViewport(
+    { x: gridLeft + gridWidth, y: gridTop + gridHeight, space: "document" },
+    viewport
+  );
+  const viewportGridHeight = bottomRight.y - topLeft.y;
+  const viewportGridWidth = bottomRight.x - topLeft.x;
+  const lines: GridViewportLine[] = [];
+  const handles: GridViewportHandle[] = [];
+
+  columnStarts.forEach((start, index) => {
+    const startPoint = documentPointToViewport({ x: gridLeft + start, y: gridTop, space: "document" }, viewport);
+    lines.push({
+      id: `column-start-${index}`,
+      orientation: "vertical",
+      left: Math.round(startPoint.x),
+      top: Math.round(topLeft.y),
+      height: Math.round(viewportGridHeight)
+    });
+    const endPoint = documentPointToViewport(
+      { x: gridLeft + start + columnSizes[index], y: gridTop, space: "document" },
+      viewport
+    );
+    lines.push({
+      id: `column-end-${index}`,
+      orientation: "vertical",
+      left: Math.round(endPoint.x),
+      top: Math.round(topLeft.y),
+      height: Math.round(viewportGridHeight)
+    });
+    if (index < columns - 1) {
+      handles.push({
+        id: `column-${index + 1}`,
+        testId: `grid-column-resize-handle-${index + 1}`,
+        axis: "column",
+        index,
+        left: Math.round(endPoint.x - GRID_RESIZE_HANDLE_SIZE / 2),
+        top: Math.round(topLeft.y),
+        width: GRID_RESIZE_HANDLE_SIZE,
+        height: Math.round(viewportGridHeight),
+        cursor: "col-resize"
+      });
+    }
+  });
+
+  rowStarts.forEach((start, index) => {
+    const startPoint = documentPointToViewport({ x: gridLeft, y: gridTop + start, space: "document" }, viewport);
+    lines.push({
+      id: `row-start-${index}`,
+      orientation: "horizontal",
+      left: Math.round(topLeft.x),
+      top: Math.round(startPoint.y),
+      width: Math.round(viewportGridWidth)
+    });
+    const endPoint = documentPointToViewport(
+      { x: gridLeft, y: gridTop + start + rowSizes[index], space: "document" },
+      viewport
+    );
+    lines.push({
+      id: `row-end-${index}`,
+      orientation: "horizontal",
+      left: Math.round(topLeft.x),
+      top: Math.round(endPoint.y),
+      width: Math.round(viewportGridWidth)
+    });
+    if (index < rows - 1) {
+      handles.push({
+        id: `row-${index + 1}`,
+        testId: `grid-row-resize-handle-${index + 1}`,
+        axis: "row",
+        index,
+        left: Math.round(topLeft.x),
+        top: Math.round(endPoint.y - GRID_RESIZE_HANDLE_SIZE / 2),
+        width: Math.round(viewportGridWidth),
+        height: GRID_RESIZE_HANDLE_SIZE,
+        cursor: "row-resize"
+      });
+    }
+  });
+
+  return { lines, handles };
+}
+
 function addFrameSpacingSegment(
   segments: FrameSpacingSegment[],
   id: string,
@@ -1194,6 +1360,70 @@ function addSiblingSpacingSegments(
       }
     );
   }
+}
+
+function normalizedInspectorLayout(layout: RendererNode["layout"]): NodeLayout {
+  return layout
+    ? {
+        ...DEFAULT_NODE_LAYOUT,
+        ...layout,
+        padding: {
+          ...DEFAULT_NODE_LAYOUT.padding,
+          ...layout.padding
+        }
+      }
+    : DEFAULT_NODE_LAYOUT;
+}
+
+function gridTrackCountForOverlay(
+  tracks: GridTrack[] | undefined,
+  explicitCount: number | undefined,
+  fallback: number
+): number {
+  const count = explicitCount ?? tracks?.length ?? fallback;
+  return Math.max(1, Math.round(Number.isFinite(count) ? count : fallback));
+}
+
+function resolveGridTracksForOverlay(tracks: GridTrack[] | undefined, count: number): GridTrack[] {
+  return Array.from({ length: count }, (_, index) => normalizeGridTrackForOverlay(tracks?.[index]));
+}
+
+function normalizeGridTrackForOverlay(track: GridTrack | undefined): GridTrack {
+  if (track?.type === "px") {
+    return { type: "px", value: Math.max(0, finiteGridValue(track.value, 0)) };
+  }
+  if (track?.type === "auto") {
+    return { type: "auto" };
+  }
+  return { type: "fr", value: Math.max(0.0001, finiteGridValue(track?.value, 1)) };
+}
+
+function finiteGridValue(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function resolveGridTrackSizesForOverlay(tracks: GridTrack[], availableSize: number): number[] {
+  const fixedSizes = tracks.map((track) => (track.type === "px" ? track.value ?? 0 : 0));
+  const fixedSize = fixedSizes.reduce((total, size) => total + size, 0);
+  const frTotal = tracks.reduce((total, track) => total + (track.type === "fr" ? track.value ?? 1 : 0), 0);
+  const remainingSize = Math.max(0, availableSize - fixedSize);
+  return fixedSizes.map((size, index) =>
+    tracks[index].type === "fr" && frTotal > 0 ? remainingSize * ((tracks[index].value ?? 1) / frTotal) : size
+  );
+}
+
+function gridTrackStartsForOverlay(trackSizes: number[], gap: number): number[] {
+  const starts: number[] = [];
+  let cursor = 0;
+  for (const size of trackSizes) {
+    starts.push(cursor);
+    cursor += size + gap;
+  }
+  return starts;
+}
+
+function isVerticalGridDirection(direction: NodeLayout["direction"]): boolean {
+  return direction === "vertical" || direction === "vertical_reverse";
 }
 
 function resizeHandleVisualSize(_handle: ResizeHandle): { width: number; height: number } {
@@ -2577,6 +2807,7 @@ function Inspector({
 export function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [resizeSession, setResizeSession] = useState<ResizeSession | null>(null);
+  const [gridResizeSession, setGridResizeSession] = useState<GridResizeSession | null>(null);
   const [teamName, setTeamName] = useState("디자인 팀");
   const [relayUrl, setRelayUrl] = useState("");
   const [relayToken, setRelayToken] = useState("");
@@ -2608,6 +2839,8 @@ export function App() {
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
+  const gridResizeSessionRef = useRef<GridResizeSession | null>(null);
+  const gridResizeClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
   const panSessionRef = useRef<{
@@ -2903,6 +3136,24 @@ export function App() {
     }
 
     return createFrameSpacingOverlay(frameBounds, selectedNode, editor.viewport);
+  }, [editor, selectedNode, selectedNodeIds]);
+  const gridViewportOverlay = useMemo(() => {
+    if (
+      !editor ||
+      selectedNodeIds.length !== 1 ||
+      !selectedNode ||
+      (selectedNode.kind !== "frame" && selectedNode.kind !== "component") ||
+      selectedNode.layout?.mode !== "grid"
+    ) {
+      return null;
+    }
+
+    const frameBounds = getNodeBounds(editor.document, selectedNode.id);
+    if (!frameBounds) {
+      return null;
+    }
+
+    return createGridViewportOverlay(frameBounds, selectedNode, editor.viewport);
   }, [editor, selectedNode, selectedNodeIds]);
   const snapGuideOverlays = useMemo(() => {
     if (!editor || !snapGuides.length) {
@@ -4004,6 +4255,170 @@ export function App() {
       layout: layout.mode === "none" ? null : layout
     });
   };
+
+  const layoutForGridResizeAtPoint = (
+    state: EditorState,
+    session: GridResizeSession,
+    documentPoint: { x: number; y: number }
+  ): NodeLayout | null => {
+    const node = findNodeById(state.document, session.nodeId);
+    const frameBounds = getNodeBounds(state.document, session.nodeId);
+    if (
+      !node ||
+      !frameBounds ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      (node.kind !== "frame" && node.kind !== "component")
+    ) {
+      return null;
+    }
+
+    const layout = normalizedInspectorLayout(node.layout);
+    if (layout.mode !== "grid") {
+      return null;
+    }
+
+    const flowChildren = node.children.filter(
+      (child) => (child.layout_item?.position ?? "static") === "static" && isNodeVisible(child)
+    );
+    const columnGap = layout.column_gap ?? layout.gap;
+    const rowGap = layout.row_gap ?? layout.gap;
+    let columns = gridTrackCountForOverlay(layout.grid_column_tracks, layout.grid_columns, 2);
+    let rows = gridTrackCountForOverlay(
+      layout.grid_row_tracks,
+      layout.grid_rows,
+      Math.max(1, Math.ceil(flowChildren.length / columns))
+    );
+    if (isVerticalGridDirection(layout.direction)) {
+      columns = Math.max(columns, Math.ceil(flowChildren.length / rows), 1);
+    } else {
+      rows = Math.max(rows, Math.ceil(flowChildren.length / columns), 1);
+    }
+
+    if (session.axis === "column") {
+      if (session.index < 0 || session.index >= columns - 1) {
+        return null;
+      }
+      const availableWidth = Math.max(
+        0,
+        node.size.width - layout.padding.left - layout.padding.right - columnGap * Math.max(0, columns - 1)
+      );
+      const tracks = resolveGridTracksForOverlay(layout.grid_column_tracks, columns);
+      const trackStarts = gridTrackStartsForOverlay(resolveGridTrackSizesForOverlay(tracks, availableWidth), columnGap);
+      const trackStart = trackStarts[session.index] ?? 0;
+      const nextSize = Math.max(
+        GRID_MIN_TRACK_SIZE,
+        Math.round(documentPoint.x - (frameBounds.x + layout.padding.left) - trackStart)
+      );
+      return {
+        ...layout,
+        grid_columns: columns,
+        grid_column_tracks: tracks.map((track, index) =>
+          index === session.index ? { type: "px", value: nextSize } : track
+        )
+      };
+    }
+
+    if (session.index < 0 || session.index >= rows - 1) {
+      return null;
+    }
+    const availableHeight = Math.max(
+      0,
+      node.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
+    );
+    const tracks = resolveGridTracksForOverlay(layout.grid_row_tracks, rows);
+    const trackStarts = gridTrackStartsForOverlay(resolveGridTrackSizesForOverlay(tracks, availableHeight), rowGap);
+    const trackStart = trackStarts[session.index] ?? 0;
+    const nextSize = Math.max(
+      GRID_MIN_TRACK_SIZE,
+      Math.round(documentPoint.y - (frameBounds.y + layout.padding.top) - trackStart)
+    );
+    return {
+      ...layout,
+      grid_rows: rows,
+      grid_row_tracks: tracks.map((track, index) =>
+        index === session.index ? { type: "px", value: nextSize } : track
+      )
+    };
+  };
+
+  const updateGridResizeFromClientPoint = (
+    session: GridResizeSession,
+    clientPoint: { x: number; y: number }
+  ) => {
+    const currentEditor = editorRef.current;
+    const documentPoint = currentEditor
+      ? documentPointFromClientPoint(clientPoint, currentEditor.viewport, stageFrameRef.current)
+      : null;
+    if (!currentEditor || !documentPoint) {
+      return;
+    }
+
+    const nextLayout = layoutForGridResizeAtPoint(currentEditor, session, documentPoint);
+    if (!nextLayout) {
+      return;
+    }
+
+    dispatch({
+      type: "set_node_layout",
+      nodeId: session.nodeId,
+      layout: nextLayout
+    });
+  };
+
+  const startGridResize = (
+    handle: GridViewportHandle,
+    event: React.MouseEvent<HTMLDivElement>
+  ) => {
+    if (!editor || !selectedNode || selectedNode.id !== editor.selection.nodeId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const nextSession = {
+      nodeId: selectedNode.id,
+      axis: handle.axis,
+      index: handle.index
+    };
+    gridResizeSessionRef.current = nextSession;
+    gridResizeClientPointRef.current = { x: event.clientX, y: event.clientY };
+    setGridResizeSession(nextSession);
+    document.body.style.cursor = handle.cursor;
+  };
+
+  useEffect(() => {
+    if (!gridResizeSession) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      event.preventDefault();
+      gridResizeClientPointRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const stopGridResize = () => {
+      const lastPoint = gridResizeClientPointRef.current;
+      if (lastPoint) {
+        updateGridResizeFromClientPoint(gridResizeSession, lastPoint);
+      }
+      gridResizeSessionRef.current = null;
+      gridResizeClientPointRef.current = null;
+      setGridResizeSession(null);
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", stopGridResize, { once: true });
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", stopGridResize);
+      if (gridResizeSessionRef.current === gridResizeSession) {
+        gridResizeSessionRef.current = null;
+      }
+      gridResizeClientPointRef.current = null;
+      document.body.style.cursor = "";
+    };
+  }, [gridResizeSession]);
 
   const updateLayoutItem = (nodeId: string, layoutItem: NodeLayoutItem) => {
     dispatch({ type: "set_node_layout_item", nodeId, layoutItem });
@@ -5440,6 +5855,44 @@ export function App() {
                 }
               />
             ))}
+            {gridViewportOverlay ? (
+              <div className="grid-viewport-overlay" data-testid="grid-viewport-overlay" aria-hidden="true">
+                {gridViewportOverlay.lines.map((line) => (
+                  <div
+                    key={line.id}
+                    className={`grid-viewport-line grid-viewport-line-${line.orientation}`}
+                    style={
+                      line.orientation === "vertical"
+                        ? {
+                            left: line.left,
+                            top: line.top,
+                            height: line.height
+                          }
+                        : {
+                            left: line.left,
+                            top: line.top,
+                            width: line.width
+                          }
+                    }
+                  />
+                ))}
+                {gridViewportOverlay.handles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`grid-resize-handle grid-resize-handle-${handle.axis}`}
+                    data-testid={handle.testId}
+                    style={{
+                      left: handle.left,
+                      top: handle.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startGridResize(handle, event)}
+                  />
+                ))}
+              </div>
+            ) : null}
             {measurementOverlay ? (
               <div className="measurement-overlay" data-testid="measurement-overlay" aria-hidden="true">
                 <div

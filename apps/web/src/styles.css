@@ -771,6 +771,58 @@ button:disabled {
   transform: translate(0, -50%);
 }
 
+.grid-viewport-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.grid-viewport-line {
+  position: absolute;
+  pointer-events: none;
+  background: var(--editor-color-selection);
+  opacity: 0.48;
+}
+
+.grid-viewport-line-vertical {
+  width: var(--editor-border-hairline);
+}
+
+.grid-viewport-line-horizontal {
+  height: var(--editor-border-hairline);
+}
+
+.grid-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+}
+
+.grid-resize-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-selection);
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-selection-soft);
+}
+
+.grid-resize-handle-column::after {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - var(--editor-border-hairline));
+  width: calc(var(--editor-border-hairline) * 2);
+}
+
+.grid-resize-handle-row::after {
+  right: 0;
+  bottom: calc(50% - var(--editor-border-hairline));
+  left: 0;
+  height: calc(var(--editor-border-hairline) * 2);
+}
+
 .selection-chrome-overlay {
   position: absolute;
   inset: 0;
