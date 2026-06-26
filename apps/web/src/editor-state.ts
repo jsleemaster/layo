@@ -2571,17 +2571,24 @@ function relayoutWrappedChildren(
     const remainingMain = Math.max(0, availableMain - line.mainSize);
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
     const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
+    const baselineOffset =
+      !isVertical && layout.align_items === "baseline"
+        ? Math.max(...line.children.map((entry) => entry.metrics.crossBefore + nodeBaselineOffset(entry.child)))
+        : null;
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
-      const crossAxisPosition = crossAxisLineOffset(
-        layout.align_items,
-        crossCursor,
-        line.crossSize,
-        metrics.crossSize,
-        metrics.crossBefore,
-        metrics.crossAfter
-      );
+      const crossAxisPosition =
+        baselineOffset === null
+          ? crossAxisLineOffset(
+              layout.align_items,
+              crossCursor,
+              line.crossSize,
+              metrics.crossSize,
+              metrics.crossBefore,
+              metrics.crossAfter
+            )
+          : crossCursor + baselineOffset - nodeBaselineOffset(child);
       if (layout.align_items === "stretch") {
         if (isVertical) {
           child.size.width = clampLayoutItemWidth(
