@@ -230,7 +230,9 @@ pub enum LayoutMode {
 #[ts(export)]
 pub enum LayoutDirection {
     Horizontal,
+    HorizontalReverse,
     Vertical,
+    VerticalReverse,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

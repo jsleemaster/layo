@@ -1899,16 +1899,17 @@ function relayoutDocument(document: RendererDocument): void {
 function relayoutNode(node: RendererNode): void {
   const layout = normalizedFlowLayout(node.layout);
   if (layout) {
-    const isVertical = layout.direction === "vertical";
+    const isVertical = isVerticalLayoutDirection(layout.direction);
+    const isReverse = isReverseLayoutDirection(layout.direction);
     const flowChildren = node.children.filter((child) => layoutItemPosition(child.layout_item) === "static");
     applyLayoutContainerSizeLimits(node, layout);
     flowChildren.forEach(applyLayoutItemSizeLimits);
     if (layout.mode === "grid") {
       relayoutGridChildren(node, layout, flowChildren);
     } else if (layout.wrap === "wrap") {
-      relayoutWrappedChildren(node, layout, flowChildren, isVertical);
+      relayoutWrappedChildren(node, layout, flowChildren, isVertical, isReverse);
     } else {
-      relayoutSingleLineChildren(node, layout, flowChildren, isVertical);
+      relayoutSingleLineChildren(node, layout, flowChildren, isVertical, isReverse);
     }
   }
 
@@ -1928,7 +1929,7 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
   const rowGap = layout.row_gap ?? layout.gap;
   let columns = gridTrackCount(layout.grid_column_tracks, layout.grid_columns, 2);
   let rows = gridTrackCount(layout.grid_row_tracks, layout.grid_rows, Math.max(1, Math.ceil(flowChildren.length / columns)));
-  if (layout.direction === "vertical") {
+  if (isVerticalLayoutDirection(layout.direction)) {
     columns = Math.max(columns, Math.ceil(flowChildren.length / rows), 1);
   } else {
     rows = Math.max(rows, Math.ceil(flowChildren.length / columns), 1);
@@ -2009,16 +2010,17 @@ function relayoutSingleLineChildren(
   node: RendererNode,
   layout: NodeLayout,
   flowChildren: RendererNode[],
-  isVertical: boolean
+  isVertical: boolean,
+  isReverse: boolean
 ): void {
   const childCount = flowChildren.length;
-  const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
-  const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
+  const mainStartPadding = mainStartPaddingFor(layout, isVertical, isReverse);
+  const mainEndPadding = mainEndPaddingFor(layout, isVertical, isReverse);
   const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
   const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
   const mainGap = mainAxisGap(layout, isVertical);
-  applyFillSizingForSingleLine(node, layout, flowChildren, isVertical, mainGap);
-  const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
+  applyFillSizingForSingleLine(node, layout, flowChildren, isVertical, isReverse, mainGap);
+  const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical, isReverse));
   const totalChildMain =
     childMetrics.reduce(
       (total, metrics) => total + metrics.mainBefore + metrics.mainSize + metrics.mainAfter,
@@ -2069,10 +2071,18 @@ function relayoutSingleLineChildren(
         );
       }
     }
+    const mainAxisPosition = mainAxisChildPosition(
+      isVertical ? node.size.height : node.size.width,
+      cursor,
+      metrics,
+      child,
+      isVertical,
+      isReverse
+    );
     child.transform = {
       ...child.transform,
-      x: isVertical ? crossAxisPosition : cursor + metrics.mainBefore,
-      y: isVertical ? cursor + metrics.mainBefore : crossAxisPosition
+      x: isVertical ? crossAxisPosition : mainAxisPosition,
+      y: isVertical ? mainAxisPosition : crossAxisPosition
     };
     cursor += metrics.mainBefore + (isVertical ? child.size.height : child.size.width) + metrics.mainAfter + distributedGap;
   });
@@ -2082,10 +2092,11 @@ function relayoutWrappedChildren(
   node: RendererNode,
   layout: NodeLayout,
   flowChildren: RendererNode[],
-  isVertical: boolean
+  isVertical: boolean,
+  isReverse: boolean
 ): void {
-  const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
-  const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
+  const mainStartPadding = mainStartPaddingFor(layout, isVertical, isReverse);
+  const mainEndPadding = mainEndPaddingFor(layout, isVertical, isReverse);
   const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
   const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
   let availableMain = Math.max(
@@ -2098,8 +2109,8 @@ function relayoutWrappedChildren(
   );
   const mainGap = mainAxisGap(layout, isVertical);
   const crossGap = crossAxisGap(layout, isVertical);
-  const lines = buildFlexLines(flowChildren, isVertical, availableMain, mainGap);
-  applyFillSizingForWrappedLines(layout, lines, isVertical, availableMain);
+  const lines = buildFlexLines(flowChildren, isVertical, isReverse, availableMain, mainGap);
+  applyFillSizingForWrappedLines(layout, lines, isVertical, isReverse, availableMain);
   const totalLineMain = lines.reduce((maximum, line) => Math.max(maximum, line.mainSize), 0);
   const totalLineCross =
     lines.reduce((total, line) => total + line.crossSize, 0) + crossGap * Math.max(0, lines.length - 1);
@@ -2148,10 +2159,18 @@ function relayoutWrappedChildren(
           );
         }
       }
+      const mainAxisPosition = mainAxisChildPosition(
+        isVertical ? node.size.height : node.size.width,
+        mainCursor,
+        metrics,
+        child,
+        isVertical,
+        isReverse
+      );
       child.transform = {
         ...child.transform,
-        x: isVertical ? crossAxisPosition : mainCursor + metrics.mainBefore,
-        y: isVertical ? mainCursor + metrics.mainBefore : crossAxisPosition
+        x: isVertical ? crossAxisPosition : mainAxisPosition,
+        y: isVertical ? mainAxisPosition : crossAxisPosition
       };
       mainCursor += metrics.mainBefore + (isVertical ? child.size.height : child.size.width) + metrics.mainAfter + distributedGap;
     }
@@ -2173,10 +2192,11 @@ function applyFillSizingForSingleLine(
   layout: NodeLayout,
   flowChildren: RendererNode[],
   isVertical: boolean,
+  isReverse: boolean,
   mainGap: number
 ): void {
-  const mainStartPadding = isVertical ? layout.padding.top : layout.padding.left;
-  const mainEndPadding = isVertical ? layout.padding.bottom : layout.padding.right;
+  const mainStartPadding = mainStartPaddingFor(layout, isVertical, isReverse);
+  const mainEndPadding = mainEndPaddingFor(layout, isVertical, isReverse);
   const crossStartPadding = isVertical ? layout.padding.left : layout.padding.top;
   const crossEndPadding = isVertical ? layout.padding.right : layout.padding.bottom;
   const availableMain = Math.max(
@@ -2189,7 +2209,7 @@ function applyFillSizingForSingleLine(
   );
   const mainAxisIsFixed = isVertical ? layout.height_sizing !== "fit" : layout.width_sizing !== "fit";
   const crossAxisIsFixed = isVertical ? layout.width_sizing !== "fit" : layout.height_sizing !== "fit";
-  const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical));
+  const childMetrics = flowChildren.map((child) => childLayoutMetrics(child, isVertical, isReverse));
   const fillMainChildren = flowChildren.filter((child) => layoutItemMainSizing(child, isVertical) === "fill");
 
   if (mainAxisIsFixed && fillMainChildren.length > 0) {
@@ -2233,6 +2253,7 @@ function applyFillSizingForWrappedLines(
     crossSize: number;
   }>,
   isVertical: boolean,
+  isReverse: boolean,
   availableMain: number
 ): void {
   const mainAxisIsFixed = isVertical ? layout.height_sizing !== "fit" : layout.width_sizing !== "fit";
@@ -2258,7 +2279,7 @@ function applyFillSizingForWrappedLines(
 
     line.children = line.children.map((entry) => ({
       child: entry.child,
-      metrics: childLayoutMetrics(entry.child, isVertical)
+      metrics: childLayoutMetrics(entry.child, isVertical, isReverse)
     }));
     line.mainSize = line.children.reduce(
       (total, entry, index) =>
@@ -2285,7 +2306,7 @@ function applyFillSizingForWrappedLines(
       }
       line.children = line.children.map((entry) => ({
         child: entry.child,
-        metrics: childLayoutMetrics(entry.child, isVertical)
+        metrics: childLayoutMetrics(entry.child, isVertical, isReverse)
       }));
       line.crossSize = line.children.reduce(
         (maximum, entry) => Math.max(maximum, entry.metrics.crossBefore + entry.metrics.crossSize + entry.metrics.crossAfter),
@@ -2321,7 +2342,13 @@ function applyFitSizing(
   }
 }
 
-function buildFlexLines(children: RendererNode[], isVertical: boolean, availableMain: number, gap: number) {
+function buildFlexLines(
+  children: RendererNode[],
+  isVertical: boolean,
+  isReverse: boolean,
+  availableMain: number,
+  gap: number
+) {
   const lines: Array<{
     children: Array<{ child: RendererNode; metrics: ReturnType<typeof childLayoutMetrics> }>;
     mainSize: number;
@@ -2330,7 +2357,7 @@ function buildFlexLines(children: RendererNode[], isVertical: boolean, available
   let currentLine: (typeof lines)[number] | null = null;
 
   for (const child of children) {
-    const metrics = childLayoutMetrics(child, isVertical);
+    const metrics = childLayoutMetrics(child, isVertical, isReverse);
     const itemMainSize = metrics.mainBefore + metrics.mainSize + metrics.mainAfter;
     const itemCrossSize = metrics.crossBefore + metrics.crossSize + metrics.crossAfter;
     const nextMainSize = currentLine
@@ -2370,6 +2397,7 @@ function normalizedFlowLayout(layout: NodeLayout | null | undefined): NodeLayout
 
 function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const mode = layout.mode === "grid" ? "grid" : layout.mode === "auto" ? "auto" : "none";
+  const direction = normalizeLayoutDirection(layout.direction);
   const wrap = isLayoutWrap(layout.wrap) ? layout.wrap : "nowrap";
   const alignContent = isLayoutAlignContent(layout.align_content) ? layout.align_content : "start";
   const widthSizing = isLayoutSizing(layout.width_sizing) ? layout.width_sizing : "fixed";
@@ -2388,7 +2416,7 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const gridAreas = normalizeOptionalGridAreas(layout.grid_areas, gridColumns, gridRows);
   return {
     mode,
-    direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
+    direction,
     ...(wrap === "wrap" ? { wrap } : {}),
     align_items: isLayoutAlignItems(layout.align_items) ? layout.align_items : "start",
     justify_content: isLayoutJustifyContent(layout.justify_content) ? layout.justify_content : "start",
@@ -2780,8 +2808,16 @@ function nextAutoGridCell(
 }
 
 function gridCellAt(index: number, columns: number, rows: number, direction: NodeLayout["direction"]): GridCell | null {
-  const row = direction === "vertical" ? index % rows : Math.floor(index / columns);
-  const column = direction === "vertical" ? Math.floor(index / rows) : index % columns;
+  if (isVerticalLayoutDirection(direction)) {
+    const rowOffset = index % rows;
+    const row = direction === "vertical_reverse" ? rows - 1 - rowOffset : rowOffset;
+    const column = Math.floor(index / rows);
+    return row < rows && column < columns ? { row, column } : null;
+  }
+
+  const columnOffset = index % columns;
+  const row = Math.floor(index / columns);
+  const column = direction === "horizontal_reverse" ? columns - 1 - columnOffset : columnOffset;
   return row < rows && column < columns ? { row, column } : null;
 }
 
@@ -2911,16 +2947,70 @@ function crossAxisLineOffset(
   return lineCrossStart + crossBefore;
 }
 
-function childLayoutMetrics(child: RendererNode, isVertical: boolean) {
+function mainStartPaddingFor(layout: NodeLayout, isVertical: boolean, isReverse: boolean): number {
+  if (isVertical) {
+    return isReverse ? layout.padding.bottom : layout.padding.top;
+  }
+  return isReverse ? layout.padding.right : layout.padding.left;
+}
+
+function mainEndPaddingFor(layout: NodeLayout, isVertical: boolean, isReverse: boolean): number {
+  if (isVertical) {
+    return isReverse ? layout.padding.top : layout.padding.bottom;
+  }
+  return isReverse ? layout.padding.left : layout.padding.right;
+}
+
+function mainAxisChildPosition(
+  parentMainSize: number,
+  cursor: number,
+  metrics: ReturnType<typeof childLayoutMetrics>,
+  child: RendererNode,
+  isVertical: boolean,
+  isReverse: boolean
+): number {
+  const childMainSize = isVertical ? child.size.height : child.size.width;
+  if (isReverse) {
+    return parentMainSize - cursor - metrics.mainBefore - childMainSize;
+  }
+  return cursor + metrics.mainBefore;
+}
+
+function childLayoutMetrics(child: RendererNode, isVertical: boolean, isReverse = false) {
   const margin = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM).margin;
+  const mainBefore = isVertical
+    ? isReverse ? margin.bottom : margin.top
+    : isReverse ? margin.right : margin.left;
+  const mainAfter = isVertical
+    ? isReverse ? margin.top : margin.bottom
+    : isReverse ? margin.left : margin.right;
   return {
-    mainBefore: isVertical ? margin.top : margin.left,
-    mainAfter: isVertical ? margin.bottom : margin.right,
+    mainBefore,
+    mainAfter,
     mainSize: isVertical ? child.size.height : child.size.width,
     crossBefore: isVertical ? margin.left : margin.top,
     crossAfter: isVertical ? margin.right : margin.bottom,
     crossSize: isVertical ? child.size.width : child.size.height
   };
+}
+
+function normalizeLayoutDirection(direction: NodeLayout["direction"] | string | undefined): NodeLayout["direction"] {
+  if (
+    direction === "horizontal" ||
+    direction === "horizontal_reverse" ||
+    direction === "vertical_reverse"
+  ) {
+    return direction;
+  }
+  return "vertical";
+}
+
+function isVerticalLayoutDirection(direction: NodeLayout["direction"]): boolean {
+  return direction === "vertical" || direction === "vertical_reverse";
+}
+
+function isReverseLayoutDirection(direction: NodeLayout["direction"]): boolean {
+  return direction === "horizontal_reverse" || direction === "vertical_reverse";
 }
 
 function findInNode(node: RendererNode, nodeId: string): RendererNode | null {

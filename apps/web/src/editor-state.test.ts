@@ -300,6 +300,74 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "fit-rectangle-1")?.transform).toMatchObject({ x: 24, y: 72 });
   });
 
+  test("auto layout supports horizontal reverse direction", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal_reverse",
+      align_items: "start",
+      justify_content: "start",
+      gap: 12,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 260, height: 48 };
+    frame.children.push({
+      id: "reverse-row-rectangle-1",
+      kind: "rectangle",
+      name: "역방향 행 사각형",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 30 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "reverse-row-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 140, y: 20 });
+    expect(findNodeById(relaid.document, "reverse-row-rectangle-1")?.transform).toMatchObject({ x: 48, y: 20 });
+  });
+
+  test("auto layout supports vertical reverse direction", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.layout = {
+      mode: "auto",
+      direction: "vertical_reverse",
+      align_items: "start",
+      justify_content: "start",
+      gap: 12,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 260, height: 48 };
+    frame.children.push({
+      id: "reverse-column-rectangle-1",
+      kind: "rectangle",
+      name: "역방향 열 사각형",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 30 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "reverse-column-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 20, y: 212 });
+    expect(findNodeById(relaid.document, "reverse-column-rectangle-1")?.transform).toMatchObject({ x: 20, y: 170 });
+  });
+
   test("auto layout clamps fit containers and fill children with min and max sizing rules", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

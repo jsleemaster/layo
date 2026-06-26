@@ -527,6 +527,116 @@ describe("FileStorage", () => {
     });
     expect(autoLayout.audit.commandTypes).toEqual(["set_layout", "create_rectangle"]);
 
+    const reverseRowLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "update_geometry",
+          nodeId: "frame-1",
+          width: 420,
+          height: 280
+        },
+        {
+          type: "update_geometry",
+          nodeId: "text-1",
+          width: 260,
+          height: 48
+        },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "horizontal_reverse",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "reverse-row-rectangle",
+          name: "역방향 행 사각형",
+          width: 80,
+          height: 30
+        }
+      ] as any
+    });
+
+    const reverseRowFrame = reverseRowLayout.preview.pages[0].children[0];
+    expect(reverseRowFrame.layout).toMatchObject({ direction: "horizontal_reverse" });
+    expect(reverseRowFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
+      x: 140,
+      y: 20
+    });
+    expect(reverseRowFrame.children.find((node) => node.id === "reverse-row-rectangle")?.transform).toMatchObject({
+      x: 48,
+      y: 20
+    });
+    expect(reverseRowLayout.audit.commandTypes).toEqual([
+      "update_geometry",
+      "update_geometry",
+      "set_layout",
+      "create_rectangle"
+    ]);
+
+    const reverseColumnLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "update_geometry",
+          nodeId: "frame-1",
+          width: 420,
+          height: 280
+        },
+        {
+          type: "update_geometry",
+          nodeId: "text-1",
+          width: 260,
+          height: 48
+        },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "vertical_reverse",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "reverse-column-rectangle",
+          name: "역방향 열 사각형",
+          width: 80,
+          height: 30
+        }
+      ] as any
+    });
+
+    const reverseColumnFrame = reverseColumnLayout.preview.pages[0].children[0];
+    expect(reverseColumnFrame.layout).toMatchObject({ direction: "vertical_reverse" });
+    expect(reverseColumnFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
+      x: 20,
+      y: 212
+    });
+    expect(reverseColumnFrame.children.find((node) => node.id === "reverse-column-rectangle")?.transform).toMatchObject({
+      x: 20,
+      y: 170
+    });
+    expect(reverseColumnLayout.audit.commandTypes).toEqual([
+      "update_geometry",
+      "update_geometry",
+      "set_layout",
+      "create_rectangle"
+    ]);
+
     const itemMarginLayout = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

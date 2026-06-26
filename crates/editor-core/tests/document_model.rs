@@ -64,7 +64,7 @@ fn layout_metadata_round_trips_through_json() {
               "name": "Auto Frame",
               "layout": {
                 "mode": "grid",
-                "direction": "horizontal",
+                "direction": "horizontal_reverse",
                 "grid_columns": 2,
                 "grid_rows": 2,
                 "grid_column_tracks": [{ "type": "px", "value": 120 }, { "type": "fr", "value": 2 }],
@@ -117,7 +117,7 @@ fn layout_metadata_round_trips_through_json() {
     assert_eq!(frame.layout.as_ref().unwrap().mode, editor_core::LayoutMode::Grid);
     assert_eq!(
         frame.layout.as_ref().unwrap().direction,
-        editor_core::LayoutDirection::Horizontal
+        editor_core::LayoutDirection::HorizontalReverse
     );
     assert_eq!(frame.layout.as_ref().unwrap().grid_columns, Some(2));
     assert_eq!(frame.layout.as_ref().unwrap().grid_rows, Some(2));
@@ -225,6 +225,7 @@ fn layout_metadata_round_trips_through_json() {
     assert!(json.contains("\"max_width\":240.0"));
     assert!(json.contains("\"min_height\":160.0"));
     assert!(json.contains("\"max_height\":170.0"));
+    assert!(json.contains("\"direction\":\"horizontal_reverse\""));
     assert!(json.contains("\"grid_column_tracks\""));
     assert!(json.contains("\"grid_row_tracks\""));
     assert!(json.contains("\"grid_areas\""));

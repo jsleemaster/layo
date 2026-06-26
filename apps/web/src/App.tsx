@@ -2129,7 +2129,9 @@ function Inspector({
             }
           >
             <option value="vertical">세로</option>
+            <option value="vertical_reverse">세로 역순</option>
             <option value="horizontal">가로</option>
+            <option value="horizontal_reverse">가로 역순</option>
           </select>
         </label>
         <label className="stacked-field">

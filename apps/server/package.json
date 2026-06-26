@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "NODE_OPTIONS=--conditions=development tsx watch src/index.ts",
-    "mcp": "tsx src/mcp.ts",
+    "mcp": "NODE_OPTIONS=--conditions=development tsx src/mcp.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",

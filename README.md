@@ -174,6 +174,9 @@ The first agent command batch supports:
 }
 ```
 
+`direction` accepts `vertical`, `vertical_reverse`, `horizontal`, or
+`horizontal_reverse`.
+
 `set_constraints` accepts horizontal values `left`, `right`, `left_right`, `center`, or `scale`, and vertical values `top`, `bottom`, `top_bottom`, `center`, or `scale`.
 
 For an active team-owned relay room, `apply_agent_commands` also accepts:

@@ -54,7 +54,7 @@ export interface GridArea {
 
 export interface NodeLayout {
   mode: "none" | "auto" | "grid";
-  direction: "horizontal" | "vertical";
+  direction: "horizontal" | "horizontal_reverse" | "vertical" | "vertical_reverse";
   wrap?: "nowrap" | "wrap";
   align_items: "start" | "center" | "end" | "stretch";
   justify_content: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
