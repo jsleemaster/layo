@@ -396,6 +396,7 @@ describe("MCP AI editing workflow", () => {
 
   test("lets an MCP client create, list, and resolve selected-node comments", async () => {
     const client = await connectMcpClient();
+    const target = { userId: "minji", displayName: "민지", role: "editor" } as const;
 
     await client.callTool({
       name: "create_project",
@@ -414,7 +415,8 @@ describe("MCP AI editing workflow", () => {
           fileId: "comment-file",
           nodeId: "text-1",
           body: "@민지 문구 확인 필요",
-          authorName: "디자인 팀"
+          authorName: "디자인 팀",
+          mentionTargets: [target]
         }
       })
     );
@@ -424,6 +426,7 @@ describe("MCP AI editing workflow", () => {
       nodeName: "헤드라인",
       body: "@민지 문구 확인 필요",
       mentions: ["민지"],
+      mentionTargets: [target],
       readBy: ["디자인 팀"],
       replies: [],
       resolvedAt: null
@@ -459,7 +462,8 @@ describe("MCP AI editing workflow", () => {
           fileId: "comment-file",
           threadId: created.thread.threadId,
           body: "@민지 문구를 더 짧게 줄였어요",
-          authorName: "개발 팀"
+          authorName: "개발 팀",
+          mentionTargets: [target]
         }
       })
     );
@@ -467,7 +471,8 @@ describe("MCP AI editing workflow", () => {
       expect.objectContaining({
         body: "@민지 문구를 더 짧게 줄였어요",
         authorName: "개발 팀",
-        mentions: ["민지"]
+        mentions: ["민지"],
+        mentionTargets: [target]
       })
     ]);
 
@@ -550,7 +555,8 @@ describe("MCP AI editing workflow", () => {
           nodeName: "헤드라인",
           actorName: "사용자",
           body: "@민지 문구 확인 필요",
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         },
         {
           type: "replied",
@@ -563,7 +569,8 @@ describe("MCP AI editing workflow", () => {
           nodeName: "헤드라인",
           actorName: "개발 팀",
           body: "@민지 문구를 더 짧게 줄였어요",
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         },
         {
           type: "created",
@@ -576,7 +583,8 @@ describe("MCP AI editing workflow", () => {
           nodeName: "헤드라인",
           actorName: "디자인 팀",
           body: "@민지 문구 확인 필요",
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         }
       ]
     });

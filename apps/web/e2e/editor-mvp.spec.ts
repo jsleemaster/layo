@@ -1386,6 +1386,54 @@ test("comments panel shows mentions and marks unread threads read", async ({ pag
   });
 });
 
+test("comments panel resolves current team members as mention targets", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const teamManifest = {
+    schemaVersion: 1,
+    teamId: "team-minji",
+    name: "민지 팀",
+    createdAt: "2026-06-27T00:00:00.000Z",
+    currentUserId: "local-user",
+    members: [
+      { userId: "local-user", displayName: "로컬 사용자", color: "#0f766e", role: "owner" },
+      { userId: "minji", displayName: "민지", color: "#7c3aed", role: "editor" }
+    ],
+    documents: [],
+    sync: { mode: "local", roomPrefix: "layo" },
+    permissions: { canEdit: true, canInvite: true },
+    auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
+    encryption: { mode: "none" }
+  };
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("민지 팀");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("민지 팀");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("@민지 팀 멘션 확인");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("팀 멘션 민지");
+
+  const response = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(response.ok()).toBeTruthy();
+  const thread = (await response.json()).threads.find(
+    (candidate: { body: string }) => candidate.body === "@민지 팀 멘션 확인"
+  );
+  expect(thread).toMatchObject({
+    mentions: ["민지"],
+    mentionTargets: [{ userId: "minji", displayName: "민지", role: "editor" }]
+  });
+});
+
 test("file panel summarizes unread comments and marks the current file read", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

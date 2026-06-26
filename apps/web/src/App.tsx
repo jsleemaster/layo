@@ -48,6 +48,7 @@ import {
   saveFileVersion,
   summarizeDocumentChanges,
   type CommentActivityFeed,
+  type CommentMentionTarget,
   type CommentNotificationSummary,
   type CommentThread,
   type FileVersionChangeSummary,
@@ -1178,6 +1179,87 @@ function createCommentBubbleOverlays(
       }
     ];
   });
+}
+
+function isCommentMentionBoundary(value: string | undefined) {
+  return !value || /\s|[.,;:!?()[\]{}'"`]/.test(value);
+}
+
+function resolveCommentMentionTargets(
+  body: string,
+  team: TeamManifest | null | undefined
+): CommentMentionTarget[] {
+  if (!team) {
+    return [];
+  }
+
+  const targetsByUserId = new Map<string, { index: number; target: CommentMentionTarget }>();
+  for (const member of team.members) {
+    const labels = [member.displayName, member.userId].map((label) => label.trim()).filter(Boolean);
+    let firstIndex = Number.POSITIVE_INFINITY;
+    for (const label of labels) {
+      const mention = `@${label}`;
+      let searchIndex = body.indexOf(mention);
+      while (searchIndex >= 0) {
+        const nextCharacter = body[searchIndex + mention.length];
+        if (isCommentMentionBoundary(nextCharacter)) {
+          firstIndex = Math.min(firstIndex, searchIndex);
+          break;
+        }
+        searchIndex = body.indexOf(mention, searchIndex + mention.length);
+      }
+    }
+    if (Number.isFinite(firstIndex)) {
+      targetsByUserId.set(member.userId, {
+        index: firstIndex,
+        target: {
+          userId: member.userId,
+          displayName: member.displayName,
+          role: member.role
+        }
+      });
+    }
+  }
+
+  return Array.from(targetsByUserId.values())
+    .sort((first, second) => first.index - second.index || first.target.displayName.localeCompare(second.target.displayName))
+    .map((entry) => entry.target);
+}
+
+function unresolvedCommentMentions(mentions: string[], mentionTargets: CommentMentionTarget[] | undefined) {
+  const resolvedLabels = new Set(
+    (mentionTargets ?? []).flatMap((target) => [target.userId.trim(), target.displayName.trim()])
+  );
+  return mentions.filter((mention) => !resolvedLabels.has(mention.trim()));
+}
+
+function CommentMentionChips({
+  mentions,
+  mentionTargets
+}: {
+  mentions: string[];
+  mentionTargets?: CommentMentionTarget[];
+}) {
+  const targets = mentionTargets ?? [];
+  const legacyMentions = unresolvedCommentMentions(mentions, targets);
+  if (targets.length === 0 && legacyMentions.length === 0) {
+    return null;
+  }
+
+  return (
+    <span className="comment-mentions">
+      {targets.map((target) => (
+        <span className="comment-mention" key={target.userId}>
+          팀 멘션 {target.displayName}
+        </span>
+      ))}
+      {legacyMentions.map((mention) => (
+        <span className="comment-mention" key={mention}>
+          언급 {mention}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function rangeGap(firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) {
@@ -3277,15 +3359,7 @@ function Inspector({
                     <span>
                       {thread.nodeId} · {thread.authorName}
                     </span>
-                    {thread.mentions.length > 0 ? (
-                      <span className="comment-mentions">
-                        {thread.mentions.map((mention) => (
-                          <span className="comment-mention" key={mention}>
-                            언급 {mention}
-                          </span>
-                        ))}
-                      </span>
-                    ) : null}
+                    <CommentMentionChips mentions={thread.mentions} mentionTargets={thread.mentionTargets} />
                     {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
                   </span>
                   <span className="comment-row-actions">
@@ -3309,15 +3383,7 @@ function Inspector({
                       <li className="comment-reply" key={reply.replyId}>
                         <strong>{reply.body}</strong>
                         <span>{reply.authorName}</span>
-                        {reply.mentions.length > 0 ? (
-                          <span className="comment-mentions">
-                            {reply.mentions.map((mention) => (
-                              <span className="comment-mention" key={mention}>
-                                언급 {mention}
-                              </span>
-                            ))}
-                          </span>
-                        ) : null}
+                        <CommentMentionChips mentions={reply.mentions} mentionTargets={reply.mentionTargets} />
                       </li>
                     ))}
                   </ul>
@@ -6850,7 +6916,8 @@ export function App() {
       await createCommentThread(currentProject.currentDocumentId, {
         nodeId,
         body,
-        authorName: "사용자"
+        authorName: "사용자",
+        mentionTargets: resolveCommentMentionTargets(body, collabSession?.team)
       });
       setCommentBody("");
       await Promise.all([
@@ -6878,7 +6945,8 @@ export function App() {
     try {
       await addCommentReply(currentProject.currentDocumentId, threadId, {
         body,
-        authorName: "사용자"
+        authorName: "사용자",
+        mentionTargets: resolveCommentMentionTargets(body, collabSession?.team)
       });
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
       await Promise.all([

@@ -288,6 +288,41 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment threads persist structured team mention targets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const target = { userId: "minji", displayName: "민지", role: "editor" } as const;
+
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "@민지 문구 확인 필요",
+      authorName: "디자인 팀",
+      mentionTargets: [target]
+    });
+    expect(created).toMatchObject({
+      mentions: ["민지"],
+      mentionTargets: [target]
+    });
+
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "@minji 반영했어요",
+      authorName: "개발 팀",
+      mentionTargets: [target]
+    });
+    expect(replied.replies[0]).toMatchObject({
+      mentions: ["minji"],
+      mentionTargets: [target]
+    });
+
+    const activity = await storage.listCommentActivity({ viewerId: "사용자", limit: 10 });
+    expect(activity.events.map((event) => event.mentionTargets)).toEqual([[target], [target]]);
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(sidecar.threads[0].mentionTargets).toEqual([target]);
+    expect(sidecar.threads[0].replies[0].mentionTargets).toEqual([target]);
+    expect(sidecar.activity[0].mentionTargets).toEqual([target]);
+  });
+
   test("comment notifications summarize unread threads by project file and mark a file read", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);

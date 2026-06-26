@@ -32,6 +32,12 @@ const gridAreaSchema = z.object({
   row_span: z.number()
 });
 
+const commentMentionTargetSchema = z.object({
+  userId: z.string().describe("Stable team member id"),
+  displayName: z.string().describe("Team member display name"),
+  role: z.enum(["owner", "editor", "viewer"]).describe("Team member role")
+});
+
 const nodeLayoutSchema = z.object({
   mode: z.enum(["none", "auto", "grid"]),
   direction: z.enum(["horizontal", "horizontal_reverse", "vertical", "vertical_reverse"]),
@@ -706,17 +712,18 @@ export function createMcpServer(storage = new FileStorage()) {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Canvas node id to attach the comment to"),
         body: z.string().describe("Comment body"),
-        authorName: z.string().optional().describe("Display name for the comment author")
+        authorName: z.string().optional().describe("Display name for the comment author"),
+        mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this comment")
       }
     },
-    async ({ fileId, nodeId, body, authorName }) => ({
+    async ({ fileId, nodeId, body, authorName, mentionTargets }) => ({
       content: [
         {
           type: "text",
           text: JSON.stringify(
             {
               fileId,
-              thread: await storage.createCommentThread(fileId, { nodeId, body, authorName })
+              thread: await storage.createCommentThread(fileId, { nodeId, body, authorName, mentionTargets })
             },
             null,
             2
@@ -868,17 +875,18 @@ export function createMcpServer(storage = new FileStorage()) {
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
         body: z.string().describe("Reply body"),
-        authorName: z.string().optional().describe("Display name for the reply author")
+        authorName: z.string().optional().describe("Display name for the reply author"),
+        mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this reply")
       }
     },
-    async ({ fileId, threadId, body, authorName }) => ({
+    async ({ fileId, threadId, body, authorName, mentionTargets }) => ({
       content: [
         {
           type: "text",
           text: JSON.stringify(
             {
               fileId,
-              thread: await storage.addCommentReply(fileId, threadId, { body, authorName })
+              thread: await storage.addCommentReply(fileId, threadId, { body, authorName, mentionTargets })
             },
             null,
             2

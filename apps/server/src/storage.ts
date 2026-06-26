@@ -234,6 +234,7 @@ export interface StoredCommentThread {
   createdAt: string;
   resolvedAt: string | null;
   mentions: string[];
+  mentionTargets: StoredCommentMentionTarget[];
   readBy: string[];
   unread?: boolean;
   replies: StoredCommentReply[];
@@ -246,9 +247,17 @@ export interface StoredCommentReply {
   authorName: string;
   createdAt: string;
   mentions: string[];
+  mentionTargets: StoredCommentMentionTarget[];
 }
 
 export type CommentActivityType = "created" | "replied" | "resolved";
+export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
+
+export interface StoredCommentMentionTarget {
+  userId: string;
+  displayName: string;
+  role: CommentMentionTargetRole;
+}
 
 export interface StoredCommentActivityEvent {
   schemaVersion: 1;
@@ -262,6 +271,7 @@ export interface StoredCommentActivityEvent {
   actorName: string;
   body: string;
   mentions: string[];
+  mentionTargets: StoredCommentMentionTarget[];
   createdAt: string;
 }
 
@@ -269,11 +279,13 @@ export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
   authorName?: string;
+  mentionTargets?: StoredCommentMentionTarget[];
 }
 
 export interface CreateCommentReplyInput {
   body: string;
   authorName?: string;
+  mentionTargets?: StoredCommentMentionTarget[];
 }
 
 export interface ListCommentThreadsOptions {
@@ -923,6 +935,7 @@ export class FileStorage {
       createdAt: now,
       resolvedAt: null,
       mentions: extractCommentMentions(body),
+      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets),
       readBy: [authorName],
       replies: []
     };
@@ -939,6 +952,7 @@ export class FileStorage {
         actorName: thread.authorName,
         body: thread.body,
         mentions: thread.mentions,
+        mentionTargets: thread.mentionTargets,
         createdAt: thread.createdAt
       })
     });
@@ -966,7 +980,8 @@ export class FileStorage {
       body,
       authorName,
       createdAt: new Date().toISOString(),
-      mentions: extractCommentMentions(body)
+      mentions: extractCommentMentions(body),
+      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
     };
     const repliedThread: StoredCommentThread = {
       ...thread,
@@ -988,6 +1003,7 @@ export class FileStorage {
         actorName: reply.authorName,
         body: reply.body,
         mentions: reply.mentions,
+        mentionTargets: reply.mentionTargets,
         createdAt: reply.createdAt
       })
     });
@@ -1068,6 +1084,7 @@ export class FileStorage {
         actorName: "사용자",
         body: thread.body,
         mentions: thread.mentions,
+        mentionTargets: thread.mentionTargets,
         createdAt: resolvedAt
       })
     });
@@ -1557,6 +1574,46 @@ function normalizeCommentMentionList(value: unknown, body: string) {
   return uniqueNames(value.filter((item): item is string => typeof item === "string"));
 }
 
+function normalizeCommentMentionTargetList(value: unknown): StoredCommentMentionTarget[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return value
+    .map(normalizeCommentMentionTarget)
+    .filter((target) => {
+      if (seen.has(target.userId)) {
+        return false;
+      }
+      seen.add(target.userId);
+      return true;
+    });
+}
+
+function normalizeCommentMentionTarget(value: unknown): StoredCommentMentionTarget {
+  if (!value || typeof value !== "object") {
+    throw inputValidationError("comment mention target is required");
+  }
+
+  const candidate = value as Partial<StoredCommentMentionTarget>;
+  const userId = normalizeName(candidate.userId, "");
+  const displayName = normalizeName(candidate.displayName, userId);
+  if (!isCommentMentionTargetRole(candidate.role)) {
+    throw inputValidationError("comment mention target role is invalid");
+  }
+
+  return {
+    userId,
+    displayName,
+    role: candidate.role
+  };
+}
+
+function isCommentMentionTargetRole(value: unknown): value is CommentMentionTargetRole {
+  return value === "owner" || value === "editor" || value === "viewer";
+}
+
 function normalizeCommentReaderList(value: unknown, authorName: string) {
   if (!Array.isArray(value)) {
     return [authorName];
@@ -1756,6 +1813,7 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
     resolvedAt: candidate.resolvedAt ? normalizeName(candidate.resolvedAt, "") : null,
     mentions: normalizeCommentMentionList(candidate.mentions, body),
+    mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
     readBy: normalizeCommentReaderList(candidate.readBy, authorName),
     replies: Array.isArray(candidate.replies)
       ? candidate.replies.map((reply) => parseStoredCommentReply(reply))
@@ -1782,7 +1840,8 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
     body,
     authorName: normalizeName(candidate.authorName, "사용자"),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
-    mentions: normalizeCommentMentionList(candidate.mentions, body)
+    mentions: normalizeCommentMentionList(candidate.mentions, body),
+    mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets)
   };
 }
 
@@ -1825,6 +1884,7 @@ function parseStoredCommentActivityEvent(
     actorName: normalizeName(candidate.actorName, "사용자"),
     body,
     mentions: normalizeCommentMentionList(candidate.mentions, body),
+    mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
   };
 }

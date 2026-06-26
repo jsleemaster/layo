@@ -22,6 +22,14 @@ export interface RestoreFileVersionResult {
   recoveryVersion: FileVersionSummary;
 }
 
+export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
+
+export interface CommentMentionTarget {
+  userId: string;
+  displayName: string;
+  role: CommentMentionTargetRole;
+}
+
 export interface CommentThread {
   schemaVersion: 1;
   threadId: string;
@@ -33,6 +41,7 @@ export interface CommentThread {
   createdAt: string;
   resolvedAt: string | null;
   mentions: string[];
+  mentionTargets: CommentMentionTarget[];
   readBy: string[];
   unread?: boolean;
   replies: CommentReply[];
@@ -45,6 +54,7 @@ export interface CommentReply {
   authorName: string;
   createdAt: string;
   mentions: string[];
+  mentionTargets: CommentMentionTarget[];
 }
 
 export interface CommentNotificationFileSummary {
@@ -83,6 +93,7 @@ export interface CommentActivityEvent {
   actorName: string;
   body: string;
   mentions: string[];
+  mentionTargets: CommentMentionTarget[];
   createdAt: string;
 }
 
@@ -95,11 +106,13 @@ export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
   authorName?: string;
+  mentionTargets?: CommentMentionTarget[];
 }
 
 export interface CreateCommentReplyInput {
   body: string;
   authorName?: string;
+  mentionTargets?: CommentMentionTarget[];
 }
 
 export interface FileVersionChangeSummary {

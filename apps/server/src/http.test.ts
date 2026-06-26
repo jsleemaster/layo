@@ -355,6 +355,7 @@ describe("HTTP server", () => {
 
   test("serves comment mentions and viewer read state routes", async () => {
     const server = await createServerWithDocument();
+    const target = { userId: "minji", displayName: "민지", role: "editor" } as const;
 
     const created = await server.inject({
       method: "POST",
@@ -362,12 +363,14 @@ describe("HTTP server", () => {
       payload: {
         nodeId: "text-1",
         body: "@민지 문구 확인 필요",
-        authorName: "디자인 팀"
+        authorName: "디자인 팀",
+        mentionTargets: [target]
       }
     });
     expect(created.statusCode).toBe(200);
     expect(created.json().thread).toMatchObject({
       mentions: ["민지"],
+      mentionTargets: [target],
       readBy: ["디자인 팀"]
     });
 
@@ -400,7 +403,8 @@ describe("HTTP server", () => {
       url: `/files/sample-file/comments/${created.json().thread.threadId}/replies`,
       payload: {
         body: "@민지 수정했어요",
-        authorName: "개발 팀"
+        authorName: "개발 팀",
+        mentionTargets: [target]
       }
     });
     expect(replied.statusCode).toBe(200);
@@ -408,7 +412,8 @@ describe("HTTP server", () => {
       readBy: ["개발 팀"],
       replies: [
         expect.objectContaining({
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         })
       ]
     });
@@ -484,7 +489,8 @@ describe("HTTP server", () => {
           nodeName: "헤드라인",
           actorName: "사용자",
           body: "@민지 문구 확인 필요",
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         },
         {
           type: "replied",
@@ -497,7 +503,8 @@ describe("HTTP server", () => {
           nodeName: "헤드라인",
           actorName: "개발 팀",
           body: "@민지 수정했어요",
-          mentions: ["민지"]
+          mentions: ["민지"],
+          mentionTargets: [target]
         }
       ]
     });
