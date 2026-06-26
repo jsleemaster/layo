@@ -164,19 +164,26 @@ function relayoutSingleLineChildren(
   const remainingMain = Math.max(0, availableMain - totalChildMain);
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
   const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
+  const baselineOffset =
+    !isVertical && layout.align_items === "baseline"
+      ? Math.max(...flowChildren.map((child, index) => childMetrics[index].crossBefore + nodeBaselineOffset(child)))
+      : null;
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
-    const crossAxisPosition = crossAxisOffset(
-      layout.align_items,
-      crossStartPadding,
-      crossEndPadding,
-      availableCross,
-      metrics.crossSize,
-      isVertical ? node.size.width : node.size.height,
-      metrics.crossBefore,
-      metrics.crossAfter
-    );
+    const crossAxisPosition =
+      baselineOffset === null
+        ? crossAxisOffset(
+            layout.align_items,
+            crossStartPadding,
+            crossEndPadding,
+            availableCross,
+            metrics.crossSize,
+            isVertical ? node.size.width : node.size.height,
+            metrics.crossBefore,
+            metrics.crossAfter
+          )
+        : crossStartPadding + baselineOffset - nodeBaselineOffset(child);
     if (layout.align_items === "stretch") {
       if (isVertical) {
         child.size.width = clampLayoutItemWidth(
@@ -952,7 +959,7 @@ function isLayoutWrap(value: string | undefined): value is NonNullable<NodeLayou
 }
 
 function isLayoutAlignItems(value: string): value is NodeLayout["align_items"] {
-  return ["start", "center", "end", "stretch"].includes(value);
+  return ["start", "center", "end", "stretch", "baseline"].includes(value);
 }
 
 function isLayoutJustifyContent(value: string): value is NodeLayout["justify_content"] {
@@ -1060,6 +1067,13 @@ function crossAxisLineOffset(
     return lineCrossStart + lineCrossSize - crossAfter - childCrossSize;
   }
   return lineCrossStart + crossBefore;
+}
+
+function nodeBaselineOffset(node: DesignNode): number {
+  if (node.content.type === "text") {
+    return Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
+  }
+  return node.size.height;
 }
 
 function mainStartPaddingFor(layout: NodeLayout, isVertical: boolean, isReverse: boolean): number {

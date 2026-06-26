@@ -36,7 +36,7 @@ const nodeLayoutSchema = z.object({
   mode: z.enum(["none", "auto", "grid"]),
   direction: z.enum(["horizontal", "horizontal_reverse", "vertical", "vertical_reverse"]),
   wrap: z.enum(["nowrap", "wrap"]).optional(),
-  align_items: z.enum(["start", "center", "end", "stretch"]).default("start"),
+  align_items: z.enum(["start", "center", "end", "stretch", "baseline"]).default("start"),
   justify_content: z.enum(["start", "center", "end", "space_between", "space_around", "space_evenly"]).default("start"),
   justify_items: z.enum(["start", "center", "end", "stretch"]).optional(),
   align_content: z.enum(["start", "center", "end", "space_between", "space_around", "space_evenly"]).optional(),

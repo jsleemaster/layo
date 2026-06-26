@@ -2489,6 +2489,61 @@ test("inspector grid item self alignment overrides container stretch", async ({ 
   await expect(page.getByTestId("inspector-height")).toHaveValue("40");
 });
 
+test("inspector auto layout baseline aligns mixed text baselines", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "caption-1",
+          name: "캡션",
+          value: "Caption",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 24,
+          fill: "#374151",
+          fontSize: 16,
+          fontFamily: "Inter"
+        }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("360");
+  await page.getByTestId("inspector-height").fill("140");
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-align-items").selectOption("baseline");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("10");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("120");
+  await page.getByTestId("inspector-height").fill("48");
+  await page.getByRole("button", { name: "캡션" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("24");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-layout-align-items")).toHaveValue("baseline");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+  await page.getByRole("button", { name: "캡션" }).click();
+  await expect(page.getByTestId("inspector-y")).toHaveValue("29");
+});
+
 test("inspector grid item span stretches a child across multiple cells", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

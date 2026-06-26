@@ -680,6 +680,104 @@ describe("editor state commands", () => {
     });
   });
 
+  test("baseline alignment matches mixed text baselines in horizontal auto layout", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 360, height: 140 };
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal",
+      align_items: "baseline",
+      justify_content: "start",
+      gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 120, height: 48 };
+    text.content = {
+      type: "text",
+      value: "Title",
+      font_size: 32,
+      font_family: "Inter"
+    };
+    frame.children.push({
+      id: "caption-1",
+      kind: "text",
+      name: "캡션",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 24 },
+      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "text",
+        value: "Caption",
+        font_size: 16,
+        font_family: "Inter"
+      },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "caption-1",
+      patch: { width: 80 }
+    });
+
+    const title = findNodeById(relaid.document, "text-1");
+    const caption = findNodeById(relaid.document, "caption-1");
+    expect(title?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
+    expect((title?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
+  test("baseline alignment preserves reverse row order", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 360, height: 140 };
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal_reverse",
+      align_items: "baseline",
+      justify_content: "start",
+      gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 120, height: 48 };
+    text.content = {
+      type: "text",
+      value: "Title",
+      font_size: 32,
+      font_family: "Inter"
+    };
+    frame.children.push({
+      id: "caption-1",
+      kind: "text",
+      name: "캡션",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 24 },
+      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "text",
+        value: "Caption",
+        font_size: 16,
+        font_family: "Inter"
+      },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "caption-1",
+      patch: { width: 80 }
+    });
+
+    const title = findNodeById(relaid.document, "text-1");
+    const caption = findNodeById(relaid.document, "caption-1");
+    expect(title?.transform).toMatchObject({ x: 220, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 130, y: 33 });
+    expect((title?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
   test("grid layout respects manual child row and column placement", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

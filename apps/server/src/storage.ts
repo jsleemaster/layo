@@ -57,7 +57,7 @@ export interface NodeLayout {
   mode: "none" | "auto" | "grid";
   direction: "horizontal" | "horizontal_reverse" | "vertical" | "vertical_reverse";
   wrap?: "nowrap" | "wrap";
-  align_items: "start" | "center" | "end" | "stretch";
+  align_items: "start" | "center" | "end" | "stretch" | "baseline";
   justify_content: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   justify_items?: "start" | "center" | "end" | "stretch";
   align_content?: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";

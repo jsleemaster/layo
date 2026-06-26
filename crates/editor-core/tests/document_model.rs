@@ -71,7 +71,7 @@ fn layout_metadata_round_trips_through_json() {
                 "grid_row_tracks": [{ "type": "auto" }, { "type": "fr", "value": 1 }],
                 "grid_areas": [{ "name": "hero", "column": 2, "row": 1, "column_span": 2, "row_span": 2 }],
                 "wrap": "wrap",
-                "align_items": "center",
+                "align_items": "baseline",
                 "justify_content": "space_between",
                 "justify_items": "stretch",
                 "align_content": "space_around",
@@ -159,7 +159,7 @@ fn layout_metadata_round_trips_through_json() {
     );
     assert_eq!(
         frame.layout.as_ref().unwrap().align_items,
-        editor_core::LayoutAlignItems::Center
+        editor_core::LayoutAlignItems::Baseline
     );
     assert_eq!(
         frame.layout.as_ref().unwrap().justify_content,
