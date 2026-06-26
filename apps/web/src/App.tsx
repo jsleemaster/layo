@@ -1115,6 +1115,51 @@ function viewportBounds(bounds: SelectionBounds, viewport: EditorState["viewport
   };
 }
 
+interface CommentBubbleOverlay {
+  nodeId: string;
+  nodeName: string;
+  count: number;
+  left: number;
+  top: number;
+}
+
+function createCommentBubbleOverlays(
+  document: RendererDocument,
+  threads: CommentThread[],
+  viewport: EditorState["viewport"]
+): CommentBubbleOverlay[] {
+  const countsByNodeId = new Map<string, { count: number; nodeName: string }>();
+  for (const thread of threads) {
+    if (thread.resolvedAt) {
+      continue;
+    }
+    const current = countsByNodeId.get(thread.nodeId);
+    countsByNodeId.set(thread.nodeId, {
+      count: (current?.count ?? 0) + 1,
+      nodeName: current?.nodeName ?? thread.nodeName
+    });
+  }
+
+  return Array.from(countsByNodeId.entries()).flatMap(([nodeId, summary]) => {
+    const node = findNodeById(document, nodeId);
+    const bounds = getNodeBounds(document, nodeId);
+    if (!node || !bounds || !isNodeVisible(node)) {
+      return [];
+    }
+
+    const rect = viewportBounds(bounds, viewport);
+    return [
+      {
+        nodeId,
+        nodeName: node.name || summary.nodeName || nodeId,
+        count: summary.count,
+        left: rect.left + rect.width,
+        top: rect.top
+      }
+    ];
+  });
+}
+
 function rangeGap(firstStart: number, firstEnd: number, secondStart: number, secondEnd: number) {
   if (firstEnd <= secondStart) {
     return { start: firstEnd, end: secondStart, distance: secondStart - firstEnd };
@@ -4130,6 +4175,10 @@ export function App() {
   const selectedNodeCommentThreads = useMemo(
     () => (selectedNode ? commentThreads.filter((thread) => thread.nodeId === selectedNode.id) : []),
     [commentThreads, selectedNode]
+  );
+  const commentBubbleOverlays = useMemo(
+    () => (editor ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport) : []),
+    [commentThreads, editor]
   );
   const selectedParentNode = useMemo(
     () =>
@@ -8354,6 +8403,35 @@ export function App() {
                 >
                   {selectionChromeOverlay.badge.text}
                 </div>
+              </div>
+            ) : null}
+            {commentBubbleOverlays.length > 0 ? (
+              <div className="comment-bubble-layer" data-testid="comment-bubble-layer" aria-label="캔버스 코멘트">
+                {commentBubbleOverlays.map((bubble) => (
+                  <button
+                    key={bubble.nodeId}
+                    type="button"
+                    className="comment-bubble"
+                    data-testid={`comment-bubble-${bubble.nodeId}`}
+                    aria-label={`${bubble.nodeName} 활성 코멘트 ${bubble.count}개`}
+                    title={`${bubble.nodeName} 활성 코멘트 ${bubble.count}개`}
+                    style={{
+                      left: bubble.left,
+                      top: bubble.top
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectNode(bubble.nodeId);
+                    }}
+                  >
+                    {bubble.count}
+                  </button>
+                ))}
               </div>
             ) : null}
             {frameSpacingOverlay ? (

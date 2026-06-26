@@ -963,6 +963,39 @@ button:disabled {
   white-space: nowrap;
 }
 
+.comment-bubble-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.comment-bubble {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  transform: translate(6px, -50%);
+  border: var(--editor-border-hairline) solid var(--editor-color-selection);
+  border-radius: var(--editor-radius-pill);
+  background: var(--editor-color-panel);
+  color: var(--editor-color-selection);
+  box-shadow: 0 6px 18px var(--editor-color-stage-shadow);
+  cursor: pointer;
+  pointer-events: auto;
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: 1;
+  letter-spacing: var(--editor-letter-spacing);
+}
+
+.comment-bubble:hover,
+.comment-bubble:focus-visible {
+  background: var(--editor-color-selection);
+  color: var(--editor-color-control);
+}
+
 .inline-text-editor {
   position: absolute;
   z-index: 7;

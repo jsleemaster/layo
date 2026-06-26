@@ -1317,6 +1317,30 @@ test("comments panel creates and resolves a selected-layer thread", async ({ pag
   });
 });
 
+test("canvas comment bubbles open selected-layer threads and disappear after resolve", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("문구 확인 필요");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  const bubble = page.getByTestId("comment-bubble-text-1");
+  await expect(bubble).toBeVisible();
+  await expect(bubble).toHaveText("1");
+  await expect(bubble).toHaveAttribute("aria-label", "헤드라인 활성 코멘트 1개");
+
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByTestId("comment-panel")).toContainText("사각형 3");
+  await bubble.click();
+  await expect(page.getByTestId("comment-panel")).toContainText("헤드라인");
+  await expect(page.getByTestId("comment-list")).toContainText("문구 확인 필요");
+
+  await page.getByRole("button", { name: "문구 확인 필요 해결" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 해결됨");
+  await expect(bubble).toHaveCount(0);
+});
+
 test("file version history shows automatic saved versions from persisted edits", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

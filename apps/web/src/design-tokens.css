@@ -41,6 +41,7 @@
   --editor-radius-sm: 6px;
   --editor-radius-md: 8px;
   --editor-radius-lg: 12px;
+  --editor-radius-pill: 999px;
 
   --editor-size-sidebar: 280px;
   --editor-size-sidebar-collapsed: 48px;

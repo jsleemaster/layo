@@ -31,6 +31,9 @@ deployment details in `docs/deployment/collaboration.md`.
   reserved for owners and editors.
 - E2EE protects document snapshots, but awareness, presence, room ids, and auth
   metadata remain visible to the relay operator in v1.
+- Selected-node comment threads persist in local sidecar storage, can be
+  created/resolved from the Inspector, and show unresolved viewport bubbles on
+  the commented canvas object.
 
 ## Phase 1: Local Team Creation
 
@@ -118,7 +121,9 @@ Exit criteria:
 ## Later Team Features
 
 - Invite links and one-time join flows.
-- Viewport comment bubbles, replies, mentions, unread notifications, and live comment sync beyond the landed selected-node comment thread foundation.
+- Replies, mentions, unread notifications, live comment sync, and dashboard
+  notifications beyond the landed selected-node comment thread and viewport
+  bubble foundation.
 - Named checkpoints and activity history.
 - Branch, review, and merge flows for design changes.
 - Document-level permission policies beyond relay connection roles.
