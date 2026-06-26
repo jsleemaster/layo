@@ -1386,6 +1386,37 @@ test("comments panel shows mentions and marks unread threads read", async ({ pag
   });
 });
 
+test("file panel summarizes unread comments and marks the current file read", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "@민지 파일 검수 필요",
+      authorName: "디자인 팀"
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  const summary = page.getByTestId("comment-notification-summary");
+  await expect(summary).toContainText("읽지 않은 코멘트 1개");
+  await expect(summary).toContainText("새 문서 1");
+
+  await page.getByTestId("mark-file-comments-read").click();
+  await expect(summary).toContainText("읽지 않은 코멘트 없음");
+
+  const readResponse = await page.request.get(
+    `http://127.0.0.1:4317/comments/notifications?viewerId=${encodeURIComponent("사용자")}`
+  );
+  expect(readResponse.ok()).toBeTruthy();
+  expect((await readResponse.json()).summary).toMatchObject({
+    totalUnread: 0,
+    projects: []
+  });
+});
+
 test("canvas comment bubbles open selected-layer threads and disappear after resolve", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

@@ -267,6 +267,33 @@ export interface MarkCommentThreadReadInput {
   viewerId?: string;
 }
 
+export interface ListCommentNotificationsOptions {
+  viewerId?: string;
+}
+
+export interface MarkFileCommentsReadInput {
+  viewerId?: string;
+}
+
+export interface CommentNotificationFileSummary {
+  fileId: string;
+  name: string;
+  unreadCount: number;
+}
+
+export interface CommentNotificationProjectSummary {
+  projectId: string;
+  name: string;
+  unreadCount: number;
+  files: CommentNotificationFileSummary[];
+}
+
+export interface CommentNotificationSummary {
+  viewerId: string;
+  totalUnread: number;
+  projects: CommentNotificationProjectSummary[];
+}
+
 interface StoredCommentThreadFile {
   schemaVersion: 1;
   fileId: string;
@@ -687,6 +714,45 @@ export class FileStorage {
     return project;
   }
 
+  async listCommentNotifications(
+    options: ListCommentNotificationsOptions = {}
+  ): Promise<CommentNotificationSummary> {
+    const viewerId = normalizeName(options.viewerId, "사용자");
+    const projects = await this.listProjects();
+    const projectSummaries: CommentNotificationProjectSummary[] = [];
+
+    for (const project of projects) {
+      const files: CommentNotificationFileSummary[] = [];
+      for (const document of project.documents) {
+        const store = await this.readCommentThreadFile(document.documentId);
+        const unreadCount = countUnreadCommentThreads(store.threads, viewerId);
+        if (unreadCount > 0) {
+          files.push({
+            fileId: document.documentId,
+            name: document.name,
+            unreadCount
+          });
+        }
+      }
+
+      const unreadCount = files.reduce((total, file) => total + file.unreadCount, 0);
+      if (unreadCount > 0) {
+        projectSummaries.push({
+          projectId: project.projectId,
+          name: project.name,
+          unreadCount,
+          files
+        });
+      }
+    }
+
+    return {
+      viewerId,
+      totalUnread: projectSummaries.reduce((total, project) => total + project.unreadCount, 0),
+      projects: projectSummaries
+    };
+  }
+
   async readFile(fileId: string): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const filePath = this.filePathFor(fileId);
@@ -867,6 +933,25 @@ export class FileStorage {
       )
     });
     return withViewerUnread(readThread, viewerId);
+  }
+
+  async markFileCommentsRead(
+    fileId: string,
+    input: MarkFileCommentsReadInput = {}
+  ): Promise<StoredCommentThread[]> {
+    await this.readFile(fileId);
+    const viewerId = normalizeName(input.viewerId, "사용자");
+    const store = await this.readCommentThreadFile(fileId);
+    const threads = store.threads.map((thread) =>
+      thread.resolvedAt === null
+        ? {
+            ...thread,
+            readBy: uniqueNames([...thread.readBy, viewerId])
+          }
+        : thread
+    );
+    await this.writeCommentThreadFile({ ...store, threads });
+    return threads.map((thread) => withViewerUnread(thread, viewerId));
   }
 
   async resolveCommentThread(fileId: string, threadId: string): Promise<StoredCommentThread> {
@@ -1386,6 +1471,10 @@ function withViewerUnread(thread: StoredCommentThread, viewerId?: string): Store
     ...thread,
     unread: !thread.readBy.includes(normalizedViewerId)
   };
+}
+
+function countUnreadCommentThreads(threads: StoredCommentThread[], viewerId: string) {
+  return threads.filter((thread) => thread.resolvedAt === null && !thread.readBy.includes(viewerId)).length;
 }
 
 function priorStorageDirectoryName() {

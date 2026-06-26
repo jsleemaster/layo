@@ -482,6 +482,46 @@ describe("MCP AI editing workflow", () => {
       "@민지 문구를 더 짧게 줄였어요"
     ]);
 
+    const notifications = parseToolJson(
+      await client.callTool({
+        name: "list_comment_notifications",
+        arguments: { viewerId: "사용자" }
+      })
+    );
+    expect(notifications.summary).toMatchObject({
+      viewerId: "사용자",
+      totalUnread: 1,
+      projects: [
+        {
+          projectId: "comment-project",
+          unreadCount: 1,
+          files: [{ fileId: "comment-file", name: "코멘트 문서", unreadCount: 1 }]
+        }
+      ]
+    });
+
+    const fileRead = parseToolJson(
+      await client.callTool({
+        name: "mark_file_comments_read",
+        arguments: { fileId: "comment-file", viewerId: "사용자" }
+      })
+    );
+    expect(fileRead.threads[0]).toMatchObject({
+      threadId: created.thread.threadId,
+      unread: false
+    });
+
+    const notificationsAfterRead = parseToolJson(
+      await client.callTool({
+        name: "list_comment_notifications",
+        arguments: { viewerId: "사용자" }
+      })
+    );
+    expect(notificationsAfterRead.summary).toMatchObject({
+      totalUnread: 0,
+      projects: []
+    });
+
     const resolved = parseToolJson(
       await client.callTool({
         name: "resolve_comment_thread",
