@@ -39,6 +39,9 @@ deployment details in `docs/deployment/collaboration.md`.
 - Comment threads and replies persist extracted `@mention` tokens, expose
   local viewer unread/read state through storage, HTTP, MCP, web API helpers,
   and the Inspector, and can be marked read from the Inspector.
+- Local project/file unread comment summaries are available through storage,
+  HTTP, MCP, web API helpers, and the file panel; the current file can be
+  marked read without selecting every commented object.
 
 ## Phase 1: Local Team Creation
 
@@ -126,10 +129,10 @@ Exit criteria:
 ## Later Team Features
 
 - Invite links and one-time join flows.
-- Live comment sync, dashboard/activity notifications, real team-member mention
-  targeting, and notification retention beyond the landed selected-node comment
-  thread, reply, viewport bubble, persisted mention, and local unread/read
-  foundation.
+- Live comment sync, real team-member mention targeting, notification
+  retention, and team activity feeds beyond the landed selected-node comment
+  thread, reply, viewport bubble, persisted mention, local unread/read state,
+  and local project/file unread summary foundation.
 - Named checkpoints and activity history.
 - Branch, review, and merge flows for design changes.
 - Document-level permission policies beyond relay connection roles.

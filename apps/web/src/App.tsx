@@ -35,15 +35,18 @@ import {
   createCommentThread,
   exportDesignTokensDtcg,
   importDesignTokensDtcg,
+  listCommentNotifications,
   listCommentThreads,
   listFileVersions,
   markCommentThreadRead,
+  markFileCommentsRead,
   parseDocumentPayload,
   readFileVersion,
   restoreFileVersion,
   resolveCommentThread,
   saveFileVersion,
   summarizeDocumentChanges,
+  type CommentNotificationSummary,
   type CommentThread,
   type FileVersionChangeSummary,
   type FileVersionSummary
@@ -4013,6 +4016,8 @@ export function App() {
   const [commentBody, setCommentBody] = useState("");
   const [commentReplyBodies, setCommentReplyBodies] = useState<Record<string, string>>({});
   const [commentStatus, setCommentStatus] = useState("코멘트 대기 중");
+  const [commentNotificationSummary, setCommentNotificationSummary] =
+    useState<CommentNotificationSummary | null>(null);
   const [tokenDtcgDraft, setTokenDtcgDraft] = useState("");
   const [tokenDtcgStatus, setTokenDtcgStatus] = useState("");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
@@ -4099,6 +4104,19 @@ export function App() {
     setCommentStatus(status);
   };
 
+  const resetCommentNotifications = () => {
+    setCommentNotificationSummary(null);
+  };
+
+  const refreshCommentNotifications = async () => {
+    try {
+      const summary = await listCommentNotifications(LOCAL_COMMENT_VIEWER_ID);
+      setCommentNotificationSummary(summary);
+    } catch {
+      setCommentNotificationSummary(null);
+    }
+  };
+
   const refreshCommentThreads = async (fileId: string, status?: string) => {
     try {
       const threads = await listCommentThreads(fileId, false, fetch, LOCAL_COMMENT_VIEWER_ID);
@@ -4141,6 +4159,7 @@ export function App() {
     setProjectStatus(`${project.name} 불러옴`);
     void refreshFileVersions(project.currentDocumentId);
     void refreshCommentThreads(project.currentDocumentId);
+    void refreshCommentNotifications();
   };
 
   useEffect(() => {
@@ -4165,6 +4184,7 @@ export function App() {
             setProjectStatus("저장된 프로젝트 없음");
             resetFileVersions("프로젝트 없음");
             resetCommentThreads("프로젝트 없음");
+            resetCommentNotifications();
             setEditor(null);
           }
           return;
@@ -4189,11 +4209,13 @@ export function App() {
         setProjectStatus(`${selectedProject.name} 불러옴`);
         void refreshFileVersions(selectedProject.currentDocumentId);
         void refreshCommentThreads(selectedProject.currentDocumentId);
+        void refreshCommentNotifications();
       } catch {
         if (!cancelled) {
           setProjectStatus("로컬 서버를 시작하면 프로젝트를 불러옵니다");
           resetFileVersions("버전 기록 대기 중");
           resetCommentThreads("코멘트 대기 중");
+          resetCommentNotifications();
           setEditor(null);
         }
       }
@@ -4258,6 +4280,21 @@ export function App() {
   const commentBubbleOverlays = useMemo(
     () => (editor ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport) : []),
     [commentThreads, editor]
+  );
+  const currentProjectCommentNotification = useMemo(
+    () =>
+      currentProject
+        ? commentNotificationSummary?.projects.find((project) => project.projectId === currentProject.projectId) ??
+          null
+        : null,
+    [commentNotificationSummary, currentProject]
+  );
+  const currentFileUnreadCommentCount = useMemo(
+    () =>
+      currentProjectCommentNotification?.files.find(
+        (file) => file.fileId === currentProject?.currentDocumentId
+      )?.unreadCount ?? 0,
+    [currentProject, currentProjectCommentNotification]
   );
   const selectedParentNode = useMemo(
     () =>
@@ -6599,6 +6636,7 @@ export function App() {
         current.map((candidate) => (candidate.projectId === project.projectId ? project : candidate))
       );
       setProjectNameDraft(project.name);
+      void refreshCommentNotifications();
       setProjectStatus(`${project.name} 저장됨`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "프로젝트 이름을 저장하지 못했습니다";
@@ -6649,6 +6687,7 @@ export function App() {
         setProjectNameDraft("");
         resetFileVersions("프로젝트 없음");
         resetCommentThreads("프로젝트 없음");
+        resetCommentNotifications();
         await projectStore.setCurrentProjectId("");
       }
       setProjectStatus(`${deletedProject.name} 프로젝트 삭제됨`);
@@ -6751,6 +6790,7 @@ export function App() {
       setTokenDtcgStatus("");
       await refreshFileVersions(currentProject.currentDocumentId, `${version.message} 복원됨`);
       void refreshCommentThreads(currentProject.currentDocumentId);
+      void refreshCommentNotifications();
     } catch (error) {
       const message = error instanceof Error ? error.message : "버전을 복원하지 못했습니다";
       setFileVersionStatus(message);
@@ -6775,7 +6815,10 @@ export function App() {
         authorName: "사용자"
       });
       setCommentBody("");
-      await refreshCommentThreads(currentProject.currentDocumentId, "코멘트 추가됨");
+      await Promise.all([
+        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 추가됨"),
+        refreshCommentNotifications()
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 추가하지 못했습니다";
       setCommentStatus(message);
@@ -6799,7 +6842,10 @@ export function App() {
         authorName: "사용자"
       });
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
-      await refreshCommentThreads(currentProject.currentDocumentId, "답글 추가됨");
+      await Promise.all([
+        refreshCommentThreads(currentProject.currentDocumentId, "답글 추가됨"),
+        refreshCommentNotifications()
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "답글을 추가하지 못했습니다";
       setCommentStatus(message);
@@ -6814,7 +6860,10 @@ export function App() {
 
     try {
       await resolveCommentThread(currentProject.currentDocumentId, threadId);
-      await refreshCommentThreads(currentProject.currentDocumentId, "코멘트 해결됨");
+      await Promise.all([
+        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 해결됨"),
+        refreshCommentNotifications()
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 해결하지 못했습니다";
       setCommentStatus(message);
@@ -6829,10 +6878,32 @@ export function App() {
 
     try {
       await markCommentThreadRead(currentProject.currentDocumentId, threadId, LOCAL_COMMENT_VIEWER_ID);
-      await refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음");
+      await Promise.all([
+        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
+        refreshCommentNotifications()
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 읽음 처리하지 못했습니다";
       setCommentStatus(message);
+    }
+  };
+
+  const markCurrentFileCommentsRead = async () => {
+    if (!currentProject) {
+      setProjectStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      await markFileCommentsRead(currentProject.currentDocumentId, LOCAL_COMMENT_VIEWER_ID);
+      await Promise.all([
+        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
+        refreshCommentNotifications()
+      ]);
+      setProjectStatus("현재 파일 코멘트 읽음");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "현재 파일 코멘트를 읽음 처리하지 못했습니다";
+      setProjectStatus(message);
     }
   };
 
@@ -7669,6 +7740,48 @@ export function App() {
                 <div className="project-status" data-testid="project-sharing-status">
                   {topFileShareLabel === "비공개" ? "비공개 프로젝트" : topFileShareLabel}
                 </div>
+                <section
+                  className="comment-notification-summary"
+                  data-testid="comment-notification-summary"
+                  aria-label="코멘트 알림"
+                >
+                  <div className="comment-notification-heading">
+                    <strong>코멘트 알림</strong>
+                    <span
+                      className={
+                        commentNotificationSummary?.totalUnread
+                          ? "comment-notification-pill comment-notification-pill-unread"
+                          : "comment-notification-pill"
+                      }
+                    >
+                      {commentNotificationSummary
+                        ? commentNotificationSummary.totalUnread > 0
+                          ? `읽지 않은 코멘트 ${commentNotificationSummary.totalUnread}개`
+                          : "읽지 않은 코멘트 없음"
+                        : "코멘트 알림 대기 중"}
+                    </span>
+                  </div>
+                  <ul className="comment-notification-list">
+                    {currentProjectCommentNotification?.files.length ? (
+                      currentProjectCommentNotification.files.map((file) => (
+                        <li className="comment-notification-row" key={file.fileId}>
+                          <span>{file.name}</span>
+                          <strong>{file.unreadCount}개</strong>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="comment-notification-empty">현재 프로젝트 알림 없음</li>
+                    )}
+                  </ul>
+                  <button
+                    type="button"
+                    data-testid="mark-file-comments-read"
+                    onClick={() => void markCurrentFileCommentsRead()}
+                    disabled={!currentProject || currentFileUnreadCommentCount === 0}
+                  >
+                    현재 파일 읽음
+                  </button>
+                </section>
                 <section className="file-version-panel" data-testid="file-version-panel" aria-label="버전 기록">
                   <div className="file-version-heading">
                     <strong>버전 기록</strong>

@@ -165,6 +165,21 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
+  server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
+    return {
+      summary: await storage.listCommentNotifications({ viewerId: request.query.viewerId })
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { viewerId?: string };
+  }>("/files/:fileId/comments/read", async (request) => {
+    return {
+      threads: await storage.markFileCommentsRead(request.params.fileId, request.body)
+    };
+  });
+
   server.post<{
     Params: { fileId: string; threadId: string };
     Body: { body: string; authorName?: string };

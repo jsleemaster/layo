@@ -727,6 +727,31 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "list_comment_notifications",
+    {
+      description: "List project and file unread comment notification counts for a Layo viewer.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        viewerId: z.string().optional().describe("Viewer id used to compute unread comment notifications")
+      }
+    },
+    async ({ viewerId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              summary: await storage.listCommentNotifications({ viewerId })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "resolve_comment_thread",
     {
       description: "Resolve one selected-node comment thread for a Layo design file.",
@@ -772,6 +797,33 @@ export function createMcpServer(storage = new FileStorage()) {
             {
               fileId,
               thread: await storage.markCommentThreadRead(fileId, threadId, { viewerId })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "mark_file_comments_read",
+    {
+      description: "Mark every active comment thread in one Layo design file as read for a viewer.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        viewerId: z.string().optional().describe("Viewer id to add to each active thread read state")
+      }
+    },
+    async ({ fileId, viewerId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              fileId,
+              threads: await storage.markFileCommentsRead(fileId, { viewerId })
             },
             null,
             2

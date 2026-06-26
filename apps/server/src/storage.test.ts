@@ -288,6 +288,83 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment notifications summarize unread threads by project file and mark a file read", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "project-alpha",
+      name: "알파 프로젝트",
+      documentId: "document-alpha",
+      documentName: "알파 문서"
+    });
+    await storage.createProjectDocument("project-alpha", {
+      documentId: "document-beta",
+      name: "베타 문서"
+    });
+    await storage.createProject({
+      projectId: "project-bravo",
+      name: "브라보 프로젝트",
+      documentId: "document-bravo",
+      documentName: "브라보 문서"
+    });
+
+    await storage.createCommentThread("document-alpha", {
+      nodeId: "text-1",
+      body: "@민지 알파 문서 확인 필요",
+      authorName: "디자인 팀"
+    });
+    const beta = await storage.createCommentThread("document-beta", {
+      nodeId: "text-1",
+      body: "베타 문서는 이미 읽음",
+      authorName: "디자인 팀"
+    });
+    await storage.markCommentThreadRead("document-beta", beta.threadId, { viewerId: "사용자" });
+    const resolved = await storage.createCommentThread("document-alpha", {
+      nodeId: "text-1",
+      body: "해결된 코멘트는 알림에서 제외",
+      authorName: "디자인 팀"
+    });
+    await storage.resolveCommentThread("document-alpha", resolved.threadId);
+    await storage.createCommentThread("document-bravo", {
+      nodeId: "text-1",
+      body: "브라보 문서 확인 필요",
+      authorName: "디자인 팀"
+    });
+
+    await expect(storage.listCommentNotifications({ viewerId: "사용자" })).resolves.toMatchObject({
+      viewerId: "사용자",
+      totalUnread: 2,
+      projects: [
+        {
+          projectId: "project-bravo",
+          name: "브라보 프로젝트",
+          unreadCount: 1,
+          files: [{ fileId: "document-bravo", name: "브라보 문서", unreadCount: 1 }]
+        },
+        {
+          projectId: "project-alpha",
+          name: "알파 프로젝트",
+          unreadCount: 1,
+          files: [{ fileId: "document-alpha", name: "알파 문서", unreadCount: 1 }]
+        }
+      ]
+    });
+
+    await storage.markFileCommentsRead("document-alpha", { viewerId: "사용자" });
+
+    await expect(storage.listCommentNotifications({ viewerId: "사용자" })).resolves.toMatchObject({
+      viewerId: "사용자",
+      totalUnread: 1,
+      projects: [
+        {
+          projectId: "project-bravo",
+          unreadCount: 1,
+          files: [{ fileId: "document-bravo", unreadCount: 1 }]
+        }
+      ]
+    });
+  });
+
   test("comment threads reject a missing body with a validation error", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

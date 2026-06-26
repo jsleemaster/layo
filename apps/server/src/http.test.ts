@@ -421,6 +421,43 @@ describe("HTTP server", () => {
       threadId: created.json().thread.threadId,
       unread: true
     });
+
+    const notifications = await server.inject({
+      method: "GET",
+      url: "/comments/notifications?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90"
+    });
+    expect(notifications.statusCode).toBe(200);
+    expect(notifications.json().summary).toMatchObject({
+      viewerId: "사용자",
+      totalUnread: 1,
+      projects: [
+        {
+          projectId: "test-project",
+          unreadCount: 1,
+          files: [{ fileId: "sample-file", name: "테스트 문서", unreadCount: 1 }]
+        }
+      ]
+    });
+
+    const readFile = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/comments/read",
+      payload: { viewerId: "사용자" }
+    });
+    expect(readFile.statusCode).toBe(200);
+    expect(readFile.json().threads[0]).toMatchObject({
+      threadId: created.json().thread.threadId,
+      unread: false
+    });
+
+    const notificationsAfterRead = await server.inject({
+      method: "GET",
+      url: "/comments/notifications?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90"
+    });
+    expect(notificationsAfterRead.json().summary).toMatchObject({
+      totalUnread: 0,
+      projects: []
+    });
   });
 
   test("updates image node assets and persists replacement metadata", async () => {

@@ -47,6 +47,25 @@ export interface CommentReply {
   mentions: string[];
 }
 
+export interface CommentNotificationFileSummary {
+  fileId: string;
+  name: string;
+  unreadCount: number;
+}
+
+export interface CommentNotificationProjectSummary {
+  projectId: string;
+  name: string;
+  unreadCount: number;
+  files: CommentNotificationFileSummary[];
+}
+
+export interface CommentNotificationSummary {
+  viewerId: string;
+  totalUnread: number;
+  projects: CommentNotificationProjectSummary[];
+}
+
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
@@ -210,6 +229,34 @@ export async function markCommentThreadRead(
   });
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
+}
+
+export async function listCommentNotifications(
+  viewerId = "사용자",
+  fetcher: typeof fetch = fetch
+): Promise<CommentNotificationSummary> {
+  const params = new URLSearchParams();
+  if (viewerId.trim()) {
+    params.set("viewerId", viewerId);
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetcher(apiUrl(`/comments/notifications${query}`));
+  const payload = await readDocumentJson(response);
+  return (payload as { summary: CommentNotificationSummary }).summary;
+}
+
+export async function markFileCommentsRead(
+  fileId: string,
+  viewerId = "사용자",
+  fetcher: typeof fetch = fetch
+): Promise<CommentThread[]> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/comments/read`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ viewerId })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { threads: CommentThread[] }).threads;
 }
 
 export async function summarizeDocumentChanges(

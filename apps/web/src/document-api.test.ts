@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   addCommentReply,
   createCommentThread,
+  listCommentNotifications,
   listCommentThreads,
   listFileVersions,
   markCommentThreadRead,
+  markFileCommentsRead,
   parseDocumentPayload,
   readFileVersion,
   resolveCommentThread,
@@ -65,6 +67,81 @@ describe("parseDocumentPayload", () => {
     });
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/files/sample-file/agent/change-summary"), "POST"]
+    ]);
+  });
+
+  test("lists unread comment notifications and marks the current file read", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const parsedUrl = new URL(String(url), "http://127.0.0.1:4317");
+
+      if (parsedUrl.pathname === "/comments/notifications") {
+        expect(parsedUrl.searchParams.get("viewerId")).toBe("사용자");
+        return jsonResponse({
+          summary: {
+            viewerId: "사용자",
+            totalUnread: 1,
+            projects: [
+              {
+                projectId: "project-1",
+                name: "브랜드 리뉴얼",
+                unreadCount: 1,
+                files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1 }]
+              }
+            ]
+          }
+        });
+      }
+
+      if (parsedUrl.pathname === "/files/sample-file/comments/read" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ viewerId: "사용자" });
+        return jsonResponse({
+          threads: [
+            {
+              threadId: "comment-1",
+              fileId: "sample-file",
+              nodeId: "text-1",
+              nodeName: "헤드라인",
+              body: "@민지 문구 확인 필요",
+              authorName: "디자인 팀",
+              createdAt: "2026-06-27T00:00:00.000Z",
+              mentions: ["민지"],
+              readBy: ["디자인 팀", "사용자"],
+              replies: [],
+              resolvedAt: null,
+              unread: false
+            }
+          ]
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(listCommentNotifications("사용자", fetcher as typeof fetch)).resolves.toEqual({
+      viewerId: "사용자",
+      totalUnread: 1,
+      projects: [
+        {
+          projectId: "project-1",
+          name: "브랜드 리뉴얼",
+          unreadCount: 1,
+          files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1 }]
+        }
+      ]
+    });
+    await expect(markFileCommentsRead("sample-file", "사용자", fetcher as typeof fetch)).resolves.toEqual([
+      expect.objectContaining({
+        threadId: "comment-1",
+        unread: false,
+        readBy: ["디자인 팀", "사용자"]
+      })
+    ]);
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/comments/notifications?viewerId="), "GET"],
+      [expect.stringContaining("/files/sample-file/comments/read"), "POST"]
     ]);
   });
 });
