@@ -23,6 +23,7 @@ import {
 import { applyAgentCommandsToCollaboration } from "./collaboration-agent.js";
 import {
   applyConstraintsAfterParentResize,
+  normalizeNodeLayoutItem,
   relayoutDesignFile
 } from "./layout.js";
 import { sampleDocument } from "./sample-document.js";
@@ -568,6 +569,7 @@ export class FileStorage {
     }
 
     const previousSize = { ...node.size };
+    pinDirectGeometryResizeLayoutItemAxes(document, nodeId, patch);
     node.transform = {
       ...node.transform,
       x: patch.x ?? node.transform.x,
@@ -1039,6 +1041,117 @@ function findInNode(node: DesignNode, nodeId: string): DesignNode | null {
 
   for (const child of node.children) {
     const found = findInNode(child, nodeId);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function pinDirectGeometryResizeLayoutItemAxes(
+  document: DesignFile,
+  nodeId: string,
+  patch: GeometryPatch
+): void {
+  if (patch.width === undefined && patch.height === undefined) {
+    return;
+  }
+
+  const selected = findNodeWithParent(document, nodeId);
+  const parent = selected ? findNodeById(document, selected.parentId) : null;
+  if (
+    !selected ||
+    !parent?.layout ||
+    (parent.layout.mode !== "auto" && parent.layout.mode !== "grid") ||
+    layoutItemPositionForStorage(selected.node.layout_item) !== "static"
+  ) {
+    return;
+  }
+
+  const layoutItem = normalizeNodeLayoutItem(
+    selected.node.layout_item ?? { margin: { top: 0, right: 0, bottom: 0, left: 0 } }
+  );
+  let changed = false;
+  if (patch.width !== undefined && layoutItem.width_sizing === "fill") {
+    delete layoutItem.width_sizing;
+    changed = true;
+  }
+  if (patch.height !== undefined && layoutItem.height_sizing === "fill") {
+    delete layoutItem.height_sizing;
+    changed = true;
+  }
+
+  if (changed) {
+    restoreNodeLayoutItemForGeometry(selected.node, layoutItem);
+  }
+}
+
+function restoreNodeLayoutItemForGeometry(node: DesignNode, layoutItem: NodeLayoutItem): void {
+  const normalized = normalizeNodeLayoutItem(layoutItem);
+  if (hasLayoutItemMetadata(normalized)) {
+    node.layout_item = normalized;
+  } else {
+    delete node.layout_item;
+  }
+}
+
+function hasLayoutItemMetadata(layoutItem: NodeLayoutItem): boolean {
+  return Boolean(
+    layoutItem.position ||
+      layoutItem.width_sizing ||
+      layoutItem.height_sizing ||
+      layoutItem.justify_self ||
+      layoutItem.align_self ||
+      layoutItem.min_width !== undefined ||
+      layoutItem.max_width !== undefined ||
+      layoutItem.min_height !== undefined ||
+      layoutItem.max_height !== undefined ||
+      layoutItem.grid_area ||
+      layoutItem.grid_column !== undefined ||
+      layoutItem.grid_row !== undefined ||
+      layoutItem.grid_column_span !== undefined ||
+      layoutItem.grid_row_span !== undefined ||
+      layoutItem.margin.top !== 0 ||
+      layoutItem.margin.right !== 0 ||
+      layoutItem.margin.bottom !== 0 ||
+      layoutItem.margin.left !== 0
+  );
+}
+
+function layoutItemPositionForStorage(layoutItem: NodeLayoutItem | null | undefined): "static" | "absolute" {
+  return layoutItem?.position === "absolute" ? "absolute" : "static";
+}
+
+function findNodeWithParent(
+  document: DesignFile,
+  nodeId: string
+): { parentId: string; node: DesignNode } | null {
+  for (const page of document.pages) {
+    const topLevelNode = page.children.find((node) => node.id === nodeId);
+    if (topLevelNode) {
+      return { parentId: page.id, node: topLevelNode };
+    }
+
+    for (const node of page.children) {
+      const found = findNodeParentInTree(node, nodeId);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findNodeParentInTree(parent: DesignNode, nodeId: string): { parentId: string; node: DesignNode } | null {
+  const child = parent.children.find((candidate) => candidate.id === nodeId);
+  if (child) {
+    return { parentId: parent.id, node: child };
+  }
+
+  for (const candidate of parent.children) {
+    const found = findNodeParentInTree(candidate, nodeId);
     if (found) {
       return found;
     }

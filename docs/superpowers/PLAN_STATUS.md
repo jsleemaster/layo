@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-06-26
+Last audited: 2026-06-27
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -75,6 +75,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-06-27-penpot-layout-direct-resize-sizing.md` | Completed | Added Penpot-like direct resize semantics for fill layout children so manually resized axes become fixed instead of snapping back during relayout. Undo/redo restores the previous `layout_item`, and server geometry updates apply the same saved-document rule. Verified with focused RED/GREEN web state and server storage tests, focused Playwright CLI coverage, web/server typechecks, `pnpm typecheck`, `pnpm run check:penpot-maturity`, `pnpm --filter @layo/web build`, `pnpm test`, `pnpm test:e2e`, and `git diff --check`. |
 | `2026-06-27-penpot-grid-item-self-alignment.md` | Completed | Added Penpot-like grid item `justify_self` and `align_self` controls across renderer/server/Rust layout contracts, MCP `set_layout_item`, web/server grid solvers, code export metadata, and the selected-grid-child inspector. Verified with RED/GREEN web/server/Rust/export tests, focused Playwright CLI, Playwright API-log interaction proof, `pnpm typecheck`, `pnpm run check:penpot-maturity`, `cargo test -p editor-core`, `pnpm --filter @layo/web build`, `pnpm test`, `pnpm test:e2e`, and `git diff --check`. Baseline alignment and deeper resizing semantics remain later maturity gaps. |
 | `2026-06-26-penpot-grid-justify-items-stretch.md` | Completed | Added Penpot-like container-level grid horizontal item alignment with `justify_items: stretch`. The field is now in renderer/server/Rust layout contracts, MCP `set_layout`, web/server grid solvers, structured export metadata, and a grid-only inspector select. Verified with RED/GREEN web and server tests, Rust JSON round-trip/default tests, focused Playwright CLI, and Playwright API-log interaction proof. Baseline alignment and deeper resizing semantics remain later maturity gaps. |
 | `2026-06-26-vercel-fullstack-deployment.md` | Waiting on external Vercel deployment credentials | Vercel full-stack routing merged in PR #95 and the incorrect GitHub About homepage was removed. A real Vercel deployment URL is still unavailable because this workstation has no Vercel CLI token/login, repo secrets, `.vercel` project link, or connector action capable of creating/deploying the project. |

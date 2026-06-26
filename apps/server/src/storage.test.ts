@@ -342,6 +342,61 @@ describe("FileStorage", () => {
     expect(JSON.stringify(document)).toContain('"x":88');
   });
 
+  test("direct geometry updates pin resized fill layout item axes to fixed", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 360, height: 240 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "vertical",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            padding: { top: 20, right: 24, bottom: 20, left: 24 }
+          }
+        },
+        { type: "update_geometry", nodeId: "text-1", width: 100, height: 40 },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            width_sizing: "fill",
+            height_sizing: "fill",
+            margin: { top: 0, right: 6, bottom: 0, left: 6 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "fixed-rectangle-1",
+          name: "고정 사각형",
+          width: 80,
+          height: 30
+        }
+      ] as any
+    });
+
+    const node = await storage.updateNodeGeometry("sample-file", "text-1", { width: 180 });
+    const document = await storage.readFile("sample-file");
+    const frame = document.pages[0].children[0];
+    const text = frame.children.find((child) => child.id === "text-1");
+
+    expect(node.size.width).toBe(180);
+    expect(text?.size.width).toBe(180);
+    expect(text?.layout_item).toMatchObject({
+      height_sizing: "fill",
+      margin: { top: 0, right: 6, bottom: 0, left: 6 }
+    });
+    expect(text?.layout_item?.width_sizing).toBeUndefined();
+  });
+
   test("updates fill and text content", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

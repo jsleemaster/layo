@@ -90,6 +90,7 @@ export type EditorCommand =
       type: "update_node_geometry";
       nodeId: string;
       patch: GeometryPatch;
+      layoutItem?: NodeLayoutItem | null;
     }
   | {
       type: "update_nodes_geometry";
@@ -1137,6 +1138,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         return { document, inverse: null };
       }
       const previousSize = { ...node.size };
+      const previousLayoutItem = node.layout_item ? structuredClone(node.layout_item) : null;
 
       const inverse: EditorCommand = {
         type: "update_node_geometry",
@@ -1146,9 +1148,15 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           y: node.transform.y,
           width: node.size.width,
           height: node.size.height
-        }
+        },
+        layoutItem: previousLayoutItem
       };
 
+      if ("layoutItem" in command) {
+        restoreNodeLayoutItemForGeometry(node, command.layoutItem);
+      } else {
+        pinDirectlyResizedLayoutItemAxes(next, command.nodeId, command.patch);
+      }
       node.transform = {
         ...node.transform,
         x: command.patch.x ?? node.transform.x,
@@ -2808,6 +2816,81 @@ function buildFlexLines(
   return lines;
 }
 
+function pinDirectlyResizedLayoutItemAxes(
+  document: RendererDocument,
+  nodeId: string,
+  patch: GeometryPatch
+): void {
+  if (patch.width === undefined && patch.height === undefined) {
+    return;
+  }
+
+  const selected = findNodeWithParent(document, nodeId);
+  const parent = selected ? findNodeById(document, selected.parentId) : null;
+  if (!selected || !parent || !normalizedFlowLayout(parent.layout)) {
+    return;
+  }
+
+  const node = selected.node;
+  if (layoutItemPosition(node.layout_item) !== "static") {
+    return;
+  }
+
+  const layoutItem = normalizeNodeLayoutItem(node.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  let changed = false;
+  if (patch.width !== undefined && layoutItem.width_sizing === "fill") {
+    delete layoutItem.width_sizing;
+    changed = true;
+  }
+  if (patch.height !== undefined && layoutItem.height_sizing === "fill") {
+    delete layoutItem.height_sizing;
+    changed = true;
+  }
+
+  if (!changed) {
+    return;
+  }
+
+  restoreNodeLayoutItemForGeometry(node, layoutItem);
+}
+
+function restoreNodeLayoutItemForGeometry(node: RendererNode, layoutItem: NodeLayoutItem | null | undefined): void {
+  if (!layoutItem) {
+    delete node.layout_item;
+    return;
+  }
+
+  const normalized = normalizeNodeLayoutItem(layoutItem);
+  if (hasLayoutItemMetadata(normalized)) {
+    node.layout_item = normalized;
+  } else {
+    delete node.layout_item;
+  }
+}
+
+function hasLayoutItemMetadata(layoutItem: NodeLayoutItem): boolean {
+  return Boolean(
+    layoutItem.position ||
+      layoutItem.width_sizing ||
+      layoutItem.height_sizing ||
+      layoutItem.justify_self ||
+      layoutItem.align_self ||
+      layoutItem.min_width !== undefined ||
+      layoutItem.max_width !== undefined ||
+      layoutItem.min_height !== undefined ||
+      layoutItem.max_height !== undefined ||
+      layoutItem.grid_area ||
+      layoutItem.grid_column !== undefined ||
+      layoutItem.grid_row !== undefined ||
+      layoutItem.grid_column_span !== undefined ||
+      layoutItem.grid_row_span !== undefined ||
+      layoutItem.margin.top !== 0 ||
+      layoutItem.margin.right !== 0 ||
+      layoutItem.margin.bottom !== 0 ||
+      layoutItem.margin.left !== 0
+  );
+}
+
 function normalizedFlowLayout(layout: NodeLayout | null | undefined): NodeLayout | null {
   if (!layout || (layout.mode !== "auto" && layout.mode !== "grid")) {
     return null;
@@ -3947,18 +4030,21 @@ function findSelectedNodeWithParent(
   state: EditorState
 ): { parentId: string; node: RendererNode } | null {
   const selectedNodeId = state.selection.nodeId;
-  if (!selectedNodeId) {
-    return null;
-  }
+  return selectedNodeId ? findNodeWithParent(state.document, selectedNodeId) : null;
+}
 
-  for (const page of state.document.pages) {
-    const topLevelNode = page.children.find((node) => node.id === selectedNodeId);
+function findNodeWithParent(
+  document: RendererDocument,
+  nodeId: string
+): { parentId: string; node: RendererNode } | null {
+  for (const page of document.pages) {
+    const topLevelNode = page.children.find((node) => node.id === nodeId);
     if (topLevelNode) {
       return { parentId: page.id, node: topLevelNode };
     }
 
     for (const node of page.children) {
-      const found = findNodeParentInTree(node, selectedNodeId);
+      const found = findNodeParentInTree(node, nodeId);
       if (found) {
         return found;
       }

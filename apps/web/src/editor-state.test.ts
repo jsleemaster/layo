@@ -520,6 +520,50 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "fixed-rectangle-1")?.transform).toMatchObject({ x: 24, y: 190 });
   });
 
+  test("direct resizing a fill layout child pins resized axes to fixed and supports undo", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 360, height: 240 };
+    frame.layout = {
+      mode: "auto",
+      direction: "vertical",
+      align_items: "start",
+      justify_content: "start",
+      gap: 12,
+      padding: { top: 20, right: 24, bottom: 20, left: 24 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 100, height: 40 };
+    text.layout_item = {
+      width_sizing: "fill",
+      height_sizing: "fill",
+      margin: { top: 0, right: 6, bottom: 0, left: 6 }
+    };
+
+    const resized = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "text-1",
+      patch: { width: 180 }
+    });
+
+    expect(findNodeById(resized.document, "text-1")?.size.width).toBe(180);
+    expect(findNodeById(resized.document, "text-1")?.layout_item).toMatchObject({
+      height_sizing: "fill",
+      margin: { top: 0, right: 6, bottom: 0, left: 6 }
+    });
+    expect(findNodeById(resized.document, "text-1")?.layout_item?.width_sizing).toBeUndefined();
+
+    const undone = undo(resized);
+    expect(findNodeById(undone.document, "text-1")?.layout_item).toMatchObject({
+      width_sizing: "fill",
+      height_sizing: "fill"
+    });
+
+    const redone = redo(undone);
+    expect(findNodeById(redone.document, "text-1")?.size.width).toBe(180);
+    expect(findNodeById(redone.document, "text-1")?.layout_item?.width_sizing).toBeUndefined();
+  });
+
   test("grid layout auto-places static children into equal cells", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;
