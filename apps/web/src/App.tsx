@@ -333,6 +333,18 @@ const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
   horizontal: "left",
   vertical: "top"
 };
+
+function normalizedAppLayoutItem(layoutItem: RendererNode["layout_item"]): NodeLayoutItem {
+  return {
+    ...DEFAULT_NODE_LAYOUT_ITEM,
+    ...layoutItem,
+    margin: {
+      ...DEFAULT_NODE_LAYOUT_ITEM.margin,
+      ...layoutItem?.margin
+    }
+  };
+}
+
 const KEYBOARD_PAN_STEP = 24;
 const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
@@ -442,6 +454,14 @@ interface GridResizeSession {
   index: number;
 }
 
+type GridAreaBoundaryEdge = "left" | "right" | "top" | "bottom";
+
+interface GridAreaBoundarySession {
+  parentNodeId: string;
+  childNodeId: string;
+  edge: GridAreaBoundaryEdge;
+}
+
 interface MeasurementLineOverlay {
   left: number;
   top: number;
@@ -523,6 +543,20 @@ interface GridViewportHandle {
   cursor: "col-resize" | "row-resize";
 }
 
+interface GridAreaBoundaryHandle {
+  id: string;
+  testId: string;
+  parentNodeId: string;
+  childNodeId: string;
+  edge: GridAreaBoundaryEdge;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cursor: "col-resize" | "row-resize";
+  title: string;
+}
+
 interface GridViewportAddControl {
   id: string;
   testId: string;
@@ -559,9 +593,17 @@ interface GridViewportOverlay {
   nodeId: string;
   lines: GridViewportLine[];
   handles: GridViewportHandle[];
+  areaBoundaryHandles: GridAreaBoundaryHandle[];
   addControls: GridViewportAddControl[];
   removeControls: GridViewportRemoveControl[];
   headerControls: GridViewportHeaderControl[];
+}
+
+interface GridPlacement {
+  column: number;
+  row: number;
+  columnSpan: number;
+  rowSpan: number;
 }
 
 interface ObjectContextMenuState {
@@ -600,6 +642,7 @@ const GRID_RESIZE_HANDLE_SIZE = 10;
 const GRID_ADD_CONTROL_SIZE = 22;
 const GRID_ADD_CONTROL_OFFSET = 8;
 const GRID_HEADER_CONTROL_OFFSET = GRID_ADD_CONTROL_SIZE * 2 + GRID_ADD_CONTROL_OFFSET * 2;
+const GRID_AREA_BOUNDARY_HANDLE_SIZE = 14;
 const GRID_MIN_TRACK_SIZE = 1;
 const IMPORTED_IMAGE_MIN_DIMENSION = 96;
 const IMPORTED_IMAGE_MAX_DIMENSION = 480;
@@ -1207,12 +1250,17 @@ function gridViewportTrackCountsForOverlay(layout: NodeLayout, frame: RendererNo
 function createGridViewportOverlay(
   frameBounds: SelectionBounds,
   frame: RendererNode,
-  viewport: EditorState["viewport"]
+  viewport: EditorState["viewport"],
+  options: {
+    selectedChild?: RendererNode | null;
+    showTrackControls?: boolean;
+  } = {}
 ): GridViewportOverlay | null {
   const layout = normalizedInspectorLayout(frame.layout);
   if (layout.mode !== "grid") {
     return null;
   }
+  const showTrackControls = options.showTrackControls ?? true;
 
   const columnGap = layout.column_gap ?? layout.gap;
   const rowGap = layout.row_gap ?? layout.gap;
@@ -1251,26 +1299,29 @@ function createGridViewportOverlay(
   const handles: GridViewportHandle[] = [];
   const removeControls: GridViewportRemoveControl[] = [];
   const headerControls: GridViewportHeaderControl[] = [];
-  const addControls: GridViewportAddControl[] = [
-    {
-      id: "add-column",
-      testId: "grid-column-add-control",
-      axis: "column",
-      left: Math.round(bottomRight.x + GRID_ADD_CONTROL_OFFSET),
-      top: Math.round(topLeft.y - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
-      label: "+",
-      title: "그리드 열 추가"
-    },
-    {
-      id: "add-row",
-      testId: "grid-row-add-control",
-      axis: "row",
-      left: Math.round(topLeft.x - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
-      top: Math.round(bottomRight.y + GRID_ADD_CONTROL_OFFSET),
-      label: "+",
-      title: "그리드 행 추가"
-    }
-  ];
+  const areaBoundaryHandles: GridAreaBoundaryHandle[] = [];
+  const addControls: GridViewportAddControl[] = showTrackControls
+    ? [
+        {
+          id: "add-column",
+          testId: "grid-column-add-control",
+          axis: "column",
+          left: Math.round(bottomRight.x + GRID_ADD_CONTROL_OFFSET),
+          top: Math.round(topLeft.y - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
+          label: "+",
+          title: "그리드 열 추가"
+        },
+        {
+          id: "add-row",
+          testId: "grid-row-add-control",
+          axis: "row",
+          left: Math.round(topLeft.x - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
+          top: Math.round(bottomRight.y + GRID_ADD_CONTROL_OFFSET),
+          label: "+",
+          title: "그리드 행 추가"
+        }
+      ]
+    : [];
 
   columnStarts.forEach((start, index) => {
     const startPoint = documentPointToViewport({ x: gridLeft + start, y: gridTop, space: "document" }, viewport);
@@ -1285,27 +1336,29 @@ function createGridViewportOverlay(
       { x: gridLeft + start + columnSizes[index], y: gridTop, space: "document" },
       viewport
     );
-    headerControls.push({
-      id: `column-header-${index + 1}`,
-      testId: `grid-column-header-${index + 1}`,
-      axis: "column",
-      index,
-      left: Math.round((startPoint.x + endPoint.x) / 2 - GRID_ADD_CONTROL_SIZE / 2),
-      top: Math.round(topLeft.y - GRID_HEADER_CONTROL_OFFSET),
-      label: String(index + 1),
-      title: `그리드 ${index + 1}열 메뉴`
-    });
-    if (columns > 1) {
-      removeControls.push({
-        id: `remove-column-${index + 1}`,
-        testId: `grid-column-remove-control-${index + 1}`,
+    if (showTrackControls) {
+      headerControls.push({
+        id: `column-header-${index + 1}`,
+        testId: `grid-column-header-${index + 1}`,
         axis: "column",
         index,
         left: Math.round((startPoint.x + endPoint.x) / 2 - GRID_ADD_CONTROL_SIZE / 2),
-        top: Math.round(topLeft.y - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
-        label: "-",
-        title: `그리드 ${index + 1}열 삭제`
+        top: Math.round(topLeft.y - GRID_HEADER_CONTROL_OFFSET),
+        label: String(index + 1),
+        title: `그리드 ${index + 1}열 메뉴`
       });
+      if (columns > 1) {
+        removeControls.push({
+          id: `remove-column-${index + 1}`,
+          testId: `grid-column-remove-control-${index + 1}`,
+          axis: "column",
+          index,
+          left: Math.round((startPoint.x + endPoint.x) / 2 - GRID_ADD_CONTROL_SIZE / 2),
+          top: Math.round(topLeft.y - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
+          label: "-",
+          title: `그리드 ${index + 1}열 삭제`
+        });
+      }
     }
     lines.push({
       id: `column-end-${index}`,
@@ -1314,7 +1367,7 @@ function createGridViewportOverlay(
       top: Math.round(topLeft.y),
       height: Math.round(viewportGridHeight)
     });
-    if (index < columns - 1) {
+    if (showTrackControls && index < columns - 1) {
       handles.push({
         id: `column-${index + 1}`,
         testId: `grid-column-resize-handle-${index + 1}`,
@@ -1342,27 +1395,29 @@ function createGridViewportOverlay(
       { x: gridLeft, y: gridTop + start + rowSizes[index], space: "document" },
       viewport
     );
-    headerControls.push({
-      id: `row-header-${index + 1}`,
-      testId: `grid-row-header-${index + 1}`,
-      axis: "row",
-      index,
-      left: Math.round(topLeft.x - GRID_HEADER_CONTROL_OFFSET),
-      top: Math.round((startPoint.y + endPoint.y) / 2 - GRID_ADD_CONTROL_SIZE / 2),
-      label: String(index + 1),
-      title: `그리드 ${index + 1}행 메뉴`
-    });
-    if (rows > 1) {
-      removeControls.push({
-        id: `remove-row-${index + 1}`,
-        testId: `grid-row-remove-control-${index + 1}`,
+    if (showTrackControls) {
+      headerControls.push({
+        id: `row-header-${index + 1}`,
+        testId: `grid-row-header-${index + 1}`,
         axis: "row",
         index,
-        left: Math.round(topLeft.x - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
+        left: Math.round(topLeft.x - GRID_HEADER_CONTROL_OFFSET),
         top: Math.round((startPoint.y + endPoint.y) / 2 - GRID_ADD_CONTROL_SIZE / 2),
-        label: "-",
-        title: `그리드 ${index + 1}행 삭제`
+        label: String(index + 1),
+        title: `그리드 ${index + 1}행 메뉴`
       });
+      if (rows > 1) {
+        removeControls.push({
+          id: `remove-row-${index + 1}`,
+          testId: `grid-row-remove-control-${index + 1}`,
+          axis: "row",
+          index,
+          left: Math.round(topLeft.x - GRID_ADD_CONTROL_SIZE - GRID_ADD_CONTROL_OFFSET),
+          top: Math.round((startPoint.y + endPoint.y) / 2 - GRID_ADD_CONTROL_SIZE / 2),
+          label: "-",
+          title: `그리드 ${index + 1}행 삭제`
+        });
+      }
     }
     lines.push({
       id: `row-end-${index}`,
@@ -1371,7 +1426,7 @@ function createGridViewportOverlay(
       top: Math.round(endPoint.y),
       width: Math.round(viewportGridWidth)
     });
-    if (index < rows - 1) {
+    if (showTrackControls && index < rows - 1) {
       handles.push({
         id: `row-${index + 1}`,
         testId: `grid-row-resize-handle-${index + 1}`,
@@ -1386,7 +1441,118 @@ function createGridViewportOverlay(
     }
   });
 
-  return { nodeId: frame.id, lines, handles, addControls, removeControls, headerControls };
+  const selectedChild = options.selectedChild;
+  if (
+    selectedChild &&
+    !isNodeLocked(selectedChild) &&
+    isNodeVisible(selectedChild) &&
+    (selectedChild.layout_item?.position ?? "static") === "static"
+  ) {
+    const layoutItem = normalizedAppLayoutItem(selectedChild.layout_item);
+    const areaName = normalizeGridAreaNameForOverlay(layoutItem.grid_area);
+    const areaPlacement = areaName
+      ? gridAreaPlacementsByNameForOverlay(layout.grid_areas, columns, rows).get(areaName) ?? null
+      : null;
+    const explicitPlacement = areaName ? null : manualGridPlacementForOverlay(layoutItem, columns, rows);
+    const autoPlacement =
+      areaName || explicitPlacement
+        ? null
+        : autoGridPlacementForOverlay(frame, selectedChild, layout, columns, rows);
+    const placement = areaPlacement ?? explicitPlacement ?? autoPlacement;
+    const columnEndIndex = placement ? placement.column + placement.columnSpan - 1 : -1;
+    const rowEndIndex = placement ? placement.row + placement.rowSpan - 1 : -1;
+    if (
+      placement &&
+      placement.column >= 0 &&
+      placement.row >= 0 &&
+      columnEndIndex < columnSizes.length &&
+      rowEndIndex < rowSizes.length
+    ) {
+      const areaLeft = documentPointToViewport(
+        { x: gridLeft + columnStarts[placement.column], y: gridTop, space: "document" },
+        viewport
+      ).x;
+      const areaRight = documentPointToViewport(
+        {
+          x: gridLeft + columnStarts[columnEndIndex] + columnSizes[columnEndIndex],
+          y: gridTop,
+          space: "document"
+        },
+        viewport
+      ).x;
+      const areaTop = documentPointToViewport(
+        { x: gridLeft, y: gridTop + rowStarts[placement.row], space: "document" },
+        viewport
+      ).y;
+      const areaBottom = documentPointToViewport(
+        {
+          x: gridLeft,
+          y: gridTop + rowStarts[rowEndIndex] + rowSizes[rowEndIndex],
+          space: "document"
+        },
+        viewport
+      ).y;
+      const handleSize = GRID_AREA_BOUNDARY_HANDLE_SIZE;
+      const verticalHeight = Math.max(1, Math.round(areaBottom - areaTop));
+      const horizontalWidth = Math.max(1, Math.round(areaRight - areaLeft));
+      areaBoundaryHandles.push(
+        {
+          id: `${selectedChild.id}-area-left`,
+          testId: "grid-area-boundary-handle-left",
+          parentNodeId: frame.id,
+          childNodeId: selectedChild.id,
+          edge: "left",
+          left: Math.round(areaLeft - handleSize / 2),
+          top: Math.round(areaTop),
+          width: handleSize,
+          height: verticalHeight,
+          cursor: "col-resize",
+          title: "그리드 영역 왼쪽 경계 조절"
+        },
+        {
+          id: `${selectedChild.id}-area-right`,
+          testId: "grid-area-boundary-handle-right",
+          parentNodeId: frame.id,
+          childNodeId: selectedChild.id,
+          edge: "right",
+          left: Math.round(areaRight - handleSize / 2),
+          top: Math.round(areaTop),
+          width: handleSize,
+          height: verticalHeight,
+          cursor: "col-resize",
+          title: "그리드 영역 오른쪽 경계 조절"
+        },
+        {
+          id: `${selectedChild.id}-area-top`,
+          testId: "grid-area-boundary-handle-top",
+          parentNodeId: frame.id,
+          childNodeId: selectedChild.id,
+          edge: "top",
+          left: Math.round(areaLeft),
+          top: Math.round(areaTop - handleSize / 2),
+          width: horizontalWidth,
+          height: handleSize,
+          cursor: "row-resize",
+          title: "그리드 영역 위쪽 경계 조절"
+        },
+        {
+          id: `${selectedChild.id}-area-bottom`,
+          testId: "grid-area-boundary-handle-bottom",
+          parentNodeId: frame.id,
+          childNodeId: selectedChild.id,
+          edge: "bottom",
+          left: Math.round(areaLeft),
+          top: Math.round(areaBottom - handleSize / 2),
+          width: horizontalWidth,
+          height: handleSize,
+          cursor: "row-resize",
+          title: "그리드 영역 아래쪽 경계 조절"
+        }
+      );
+    }
+  }
+
+  return { nodeId: frame.id, lines, handles, areaBoundaryHandles, addControls, removeControls, headerControls };
 }
 
 function addFrameSpacingSegment(
@@ -1556,6 +1722,213 @@ function gridTrackStartsForOverlay(trackSizes: number[], gap: number): number[] 
     cursor += size + gap;
   }
   return starts;
+}
+
+function gridLineOffsetsForOverlay(trackStarts: number[], trackSizes: number[]): number[] {
+  if (!trackStarts.length || !trackSizes.length) {
+    return [0];
+  }
+  const offsets = [0];
+  for (let index = 0; index < trackSizes.length; index += 1) {
+    offsets.push((trackStarts[index] ?? 0) + (trackSizes[index] ?? 0));
+  }
+  return offsets;
+}
+
+function nearestGridLineIndexForOverlay(coordinate: number, trackStarts: number[], trackSizes: number[]): number {
+  const lineOffsets = gridLineOffsetsForOverlay(trackStarts, trackSizes);
+  return lineOffsets.reduce((closestIndex, offset, index) => {
+    const closestOffset = lineOffsets[closestIndex] ?? 0;
+    return Math.abs(offset - coordinate) < Math.abs(closestOffset - coordinate) ? index : closestIndex;
+  }, 0);
+}
+
+function clampGridLineForOverlay(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeGridPlacementForOverlay(value: number | undefined): number | undefined {
+  const normalized = finiteGridValue(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function normalizeGridSpanForOverlay(value: number | undefined): number | undefined {
+  const normalized = finiteGridValue(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function normalizeGridPlacementLineForOverlay(value: number | undefined, max: number, fallback: number): number {
+  return Math.min(normalizeGridPlacementForOverlay(value) ?? fallback, Math.max(1, max));
+}
+
+function gridPlacementIndexForOverlay(value: number | undefined, max: number, fallback: number): number {
+  const line = normalizeGridPlacementForOverlay(value) ?? fallback;
+  return Math.min(Math.max(0, line - 1), Math.max(0, max - 1));
+}
+
+function gridPlacementSpanForOverlay(value: number | undefined, remainingTracks: number): number {
+  return Math.min(value ?? 1, Math.max(1, remainingTracks));
+}
+
+function normalizeGridAreaNameForOverlay(value: string | undefined): string | undefined {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name.length > 0 ? name : undefined;
+}
+
+function normalizeGridAreaForOverlay(area: GridArea | undefined, columns: number, rows: number): GridArea | null {
+  const name = normalizeGridAreaNameForOverlay(area?.name);
+  if (!name) {
+    return null;
+  }
+  const column = normalizeGridPlacementLineForOverlay(area?.column, columns, 1);
+  const row = normalizeGridPlacementLineForOverlay(area?.row, rows, 1);
+  return {
+    name,
+    column,
+    row,
+    column_span: gridPlacementSpanForOverlay(
+      normalizeGridSpanForOverlay(area?.column_span),
+      columns - (column - 1)
+    ),
+    row_span: gridPlacementSpanForOverlay(
+      normalizeGridSpanForOverlay(area?.row_span),
+      rows - (row - 1)
+    )
+  };
+}
+
+function normalizeGridAreasForOverlay(
+  areas: GridArea[] | undefined,
+  columns: number,
+  rows: number
+): GridArea[] {
+  return (areas ?? [])
+    .map((area) => normalizeGridAreaForOverlay(area, columns, rows))
+    .filter((area): area is GridArea => area !== null);
+}
+
+function gridAreaPlacementsByNameForOverlay(
+  areas: GridArea[] | undefined,
+  columns: number,
+  rows: number
+): Map<string, GridPlacement> {
+  const placements = new Map<string, GridPlacement>();
+  for (const area of normalizeGridAreasForOverlay(areas, columns, rows)) {
+    if (!placements.has(area.name)) {
+      placements.set(area.name, {
+        column: area.column - 1,
+        row: area.row - 1,
+        columnSpan: area.column_span,
+        rowSpan: area.row_span
+      });
+    }
+  }
+  return placements;
+}
+
+function manualGridPlacementForOverlay(layoutItem: NodeLayoutItem, columns: number, rows: number): GridPlacement | null {
+  const columnSpan = normalizeGridSpanForOverlay(layoutItem.grid_column_span);
+  const rowSpan = normalizeGridSpanForOverlay(layoutItem.grid_row_span);
+  if (
+    layoutItem.grid_column === undefined &&
+    layoutItem.grid_row === undefined &&
+    columnSpan === undefined &&
+    rowSpan === undefined
+  ) {
+    return null;
+  }
+  const column = gridPlacementIndexForOverlay(layoutItem.grid_column, columns, 1);
+  const row = gridPlacementIndexForOverlay(layoutItem.grid_row, rows, 1);
+  return {
+    column,
+    row,
+    columnSpan: gridPlacementSpanForOverlay(columnSpan, columns - column),
+    rowSpan: gridPlacementSpanForOverlay(rowSpan, rows - row)
+  };
+}
+
+function gridPlacementCellsForOverlay(placement: GridPlacement): Array<{ column: number; row: number }> {
+  return Array.from({ length: placement.rowSpan }, (_, rowOffset) =>
+    Array.from({ length: placement.columnSpan }, (__, columnOffset) => ({
+      column: placement.column + columnOffset,
+      row: placement.row + rowOffset
+    }))
+  ).flat();
+}
+
+function occupyGridPlacementForOverlay(occupiedCells: Set<string>, placement: GridPlacement): void {
+  for (const cell of gridPlacementCellsForOverlay(placement)) {
+    occupiedCells.add(`${cell.column}:${cell.row}`);
+  }
+}
+
+function nextAutoGridCellForOverlay(
+  startCursor: number,
+  columns: number,
+  rows: number,
+  occupiedCells: Set<string>,
+  direction: NodeLayout["direction"]
+): { column: number; row: number; cursor: number } | null {
+  const totalCells = Math.max(1, columns * rows);
+  const isVertical = isVerticalGridDirection(direction);
+  const isReverse = direction === "horizontal_reverse" || direction === "vertical_reverse";
+  for (let offset = 0; offset < totalCells; offset += 1) {
+    const cursor = (startCursor + offset) % totalCells;
+    const orderedCursor = isReverse ? totalCells - 1 - cursor : cursor;
+    const column = isVertical ? Math.floor(orderedCursor / rows) : orderedCursor % columns;
+    const row = isVertical ? orderedCursor % rows : Math.floor(orderedCursor / columns);
+    if (!occupiedCells.has(`${column}:${row}`)) {
+      return { column, row, cursor: cursor + 1 };
+    }
+  }
+  return null;
+}
+
+function autoGridPlacementForOverlay(
+  frame: RendererNode,
+  child: RendererNode,
+  layout: NodeLayout,
+  columns: number,
+  rows: number
+): GridPlacement | null {
+  const areaPlacements = gridAreaPlacementsByNameForOverlay(layout.grid_areas, columns, rows);
+  const flowChildren = frame.children.filter(
+    (candidate) => (candidate.layout_item?.position ?? "static") === "static" && isNodeVisible(candidate)
+  );
+  const placements = new Map<string, GridPlacement>();
+  const occupiedCells = new Set<string>();
+  for (const candidate of flowChildren) {
+    const layoutItem = normalizedAppLayoutItem(candidate.layout_item);
+    const placement =
+      (normalizeGridAreaNameForOverlay(layoutItem.grid_area)
+        ? areaPlacements.get(normalizeGridAreaNameForOverlay(layoutItem.grid_area) ?? "") ?? null
+        : null) ?? manualGridPlacementForOverlay(layoutItem, columns, rows);
+    if (!placement) {
+      continue;
+    }
+    placements.set(candidate.id, placement);
+    occupyGridPlacementForOverlay(occupiedCells, placement);
+  }
+
+  let autoCursor = 0;
+  for (const candidate of flowChildren) {
+    if (placements.has(candidate.id)) {
+      continue;
+    }
+    const autoCell = nextAutoGridCellForOverlay(autoCursor, columns, rows, occupiedCells, layout.direction);
+    if (!autoCell) {
+      break;
+    }
+    autoCursor = autoCell.cursor;
+    const placement = { column: autoCell.column, row: autoCell.row, columnSpan: 1, rowSpan: 1 };
+    placements.set(candidate.id, placement);
+    occupyGridPlacementForOverlay(occupiedCells, placement);
+    if (candidate.id === child.id) {
+      return placement;
+    }
+  }
+
+  return placements.get(child.id) ?? null;
 }
 
 function isVerticalGridDirection(direction: NodeLayout["direction"]): boolean {
@@ -2944,6 +3317,7 @@ export function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [resizeSession, setResizeSession] = useState<ResizeSession | null>(null);
   const [gridResizeSession, setGridResizeSession] = useState<GridResizeSession | null>(null);
+  const [gridAreaBoundarySession, setGridAreaBoundarySession] = useState<GridAreaBoundarySession | null>(null);
   const [teamName, setTeamName] = useState("디자인 팀");
   const [relayUrl, setRelayUrl] = useState("");
   const [relayToken, setRelayToken] = useState("");
@@ -2978,6 +3352,8 @@ export function App() {
   const resizeSessionRef = useRef<ResizeSession | null>(null);
   const gridResizeSessionRef = useRef<GridResizeSession | null>(null);
   const gridResizeClientPointRef = useRef<{ x: number; y: number } | null>(null);
+  const gridAreaBoundarySessionRef = useRef<GridAreaBoundarySession | null>(null);
+  const gridAreaBoundaryClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridTrackDragRef = useRef<GridTrackDragState | null>(null);
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
@@ -3294,23 +3670,36 @@ export function App() {
     return createFrameSpacingOverlay(frameBounds, selectedNode, editor.viewport);
   }, [editor, selectedNode, selectedNodeIds]);
   const gridViewportOverlay = useMemo(() => {
-    if (
-      !editor ||
-      selectedNodeIds.length !== 1 ||
-      !selectedNode ||
-      (selectedNode.kind !== "frame" && selectedNode.kind !== "component") ||
-      selectedNode.layout?.mode !== "grid"
-    ) {
+    if (!editor || selectedNodeIds.length !== 1 || !selectedNode) {
       return null;
     }
 
-    const frameBounds = getNodeBounds(editor.document, selectedNode.id);
+    const selectedGridFrame =
+      (selectedNode.kind === "frame" || selectedNode.kind === "component") && selectedNode.layout?.mode === "grid"
+        ? selectedNode
+        : null;
+    const parentGridFrame =
+      selectedParentNode &&
+      (selectedParentNode.kind === "frame" || selectedParentNode.kind === "component") &&
+      selectedParentNode.layout?.mode === "grid"
+        ? selectedParentNode
+        : null;
+    const frame = selectedGridFrame ?? parentGridFrame;
+    const selectedChild = selectedGridFrame ? null : selectedNode;
+    if (!frame) {
+      return null;
+    }
+
+    const frameBounds = getNodeBounds(editor.document, frame.id);
     if (!frameBounds) {
       return null;
     }
 
-    return createGridViewportOverlay(frameBounds, selectedNode, editor.viewport);
-  }, [editor, selectedNode, selectedNodeIds]);
+    return createGridViewportOverlay(frameBounds, frame, editor.viewport, {
+      selectedChild,
+      showTrackControls: selectedChild === null
+    });
+  }, [editor, selectedNode, selectedNodeIds, selectedParentNode]);
   const snapGuideOverlays = useMemo(() => {
     if (!editor || !snapGuides.length) {
       return [];
@@ -4241,6 +4630,29 @@ export function App() {
     setEditor(nextState);
   };
 
+  const dispatchPreservingSelection = (
+    command: Parameters<typeof executeEditorCommand>[1],
+    nodeId: string
+  ) => {
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      setEditor((current) => (current ? setSelection(executeEditorCommand(current, command), nodeId) : current));
+      return;
+    }
+
+    if (!editor) {
+      return;
+    }
+
+    const nextState = setSelection(
+      executeEditorCommand({ ...editor, document: activeSession.getDocument() }, command),
+      nodeId
+    );
+    activeSession.transact("editor-command", () => nextState.document);
+    publishEditorPresence(nextState);
+    setEditor(nextState);
+  };
+
   const startInlineTextEdit = (nodeId: string) => {
     const currentEditor = editorRef.current;
     const node = currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
@@ -4536,6 +4948,152 @@ export function App() {
       type: "set_node_layout",
       nodeId: session.nodeId,
       layout: nextLayout
+    });
+  };
+
+  const updateGridAreaBoundaryFromClientPoint = (
+    session: GridAreaBoundarySession,
+    clientPoint: { x: number; y: number }
+  ) => {
+    const currentEditor = editorRef.current;
+    const documentPoint = currentEditor
+      ? documentPointFromClientPoint(clientPoint, currentEditor.viewport, stageFrameRef.current)
+      : null;
+    if (!currentEditor || !documentPoint) {
+      return;
+    }
+
+    const parent = findNodeById(currentEditor.document, session.parentNodeId);
+    const child = findNodeById(currentEditor.document, session.childNodeId);
+    const frameBounds = getNodeBounds(currentEditor.document, session.parentNodeId);
+    if (
+      !parent ||
+      !child ||
+      !frameBounds ||
+      isNodeLocked(parent) ||
+      isNodeLocked(child) ||
+      !isNodeVisible(parent) ||
+      !isNodeVisible(child) ||
+      (parent.kind !== "frame" && parent.kind !== "component") ||
+      (child.layout_item?.position ?? "static") !== "static"
+    ) {
+      return;
+    }
+
+    const layout = normalizedInspectorLayout(parent.layout);
+    if (layout.mode !== "grid") {
+      return;
+    }
+
+    const columnGap = layout.column_gap ?? layout.gap;
+    const rowGap = layout.row_gap ?? layout.gap;
+    const { columns, rows } = gridViewportTrackCountsForOverlay(layout, parent);
+    const availableWidth = Math.max(
+      0,
+      parent.size.width - layout.padding.left - layout.padding.right - columnGap * Math.max(0, columns - 1)
+    );
+    const availableHeight = Math.max(
+      0,
+      parent.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
+    );
+    const columnTracks = resolveGridTracksForOverlay(layout.grid_column_tracks, columns);
+    const rowTracks = resolveGridTracksForOverlay(layout.grid_row_tracks, rows);
+    const columnSizes = resolveGridTrackSizesForOverlay(columnTracks, availableWidth);
+    const rowSizes = resolveGridTrackSizesForOverlay(rowTracks, availableHeight);
+    const columnStarts = gridTrackStartsForOverlay(columnSizes, columnGap);
+    const rowStarts = gridTrackStartsForOverlay(rowSizes, rowGap);
+    const layoutItem = normalizedAppLayoutItem(child.layout_item);
+    const areaName = normalizeGridAreaNameForOverlay(layoutItem.grid_area);
+    const normalizedAreas = normalizeGridAreasForOverlay(layout.grid_areas, columns, rows);
+    const namedArea = areaName ? normalizedAreas.find((area) => area.name === areaName) ?? null : null;
+    const areaPlacement = namedArea
+      ? {
+          column: namedArea.column - 1,
+          row: namedArea.row - 1,
+          columnSpan: namedArea.column_span,
+          rowSpan: namedArea.row_span
+        }
+      : null;
+    const explicitPlacement = areaName ? null : manualGridPlacementForOverlay(layoutItem, columns, rows);
+    const autoPlacement =
+      areaName || explicitPlacement ? null : autoGridPlacementForOverlay(parent, child, layout, columns, rows);
+    const placement = areaPlacement ?? explicitPlacement ?? autoPlacement;
+    if (!placement) {
+      return;
+    }
+
+    const nextPlacement = { ...placement };
+    if (session.edge === "left" || session.edge === "right") {
+      const relativeX = documentPoint.x - (frameBounds.x + layout.padding.left);
+      const targetLine = nearestGridLineIndexForOverlay(relativeX, columnStarts, columnSizes);
+      const currentEnd = placement.column + placement.columnSpan;
+      if (session.edge === "right") {
+        const nextEnd = clampGridLineForOverlay(targetLine, placement.column + 1, columns);
+        nextPlacement.columnSpan = nextEnd - placement.column;
+      } else {
+        const nextStart = clampGridLineForOverlay(targetLine, 0, currentEnd - 1);
+        nextPlacement.column = nextStart;
+        nextPlacement.columnSpan = currentEnd - nextStart;
+      }
+    } else {
+      const relativeY = documentPoint.y - (frameBounds.y + layout.padding.top);
+      const targetLine = nearestGridLineIndexForOverlay(relativeY, rowStarts, rowSizes);
+      const currentEnd = placement.row + placement.rowSpan;
+      if (session.edge === "bottom") {
+        const nextEnd = clampGridLineForOverlay(targetLine, placement.row + 1, rows);
+        nextPlacement.rowSpan = nextEnd - placement.row;
+      } else {
+        const nextStart = clampGridLineForOverlay(targetLine, 0, currentEnd - 1);
+        nextPlacement.row = nextStart;
+        nextPlacement.rowSpan = currentEnd - nextStart;
+      }
+    }
+
+    const placementDidChange =
+      nextPlacement.column !== placement.column ||
+      nextPlacement.row !== placement.row ||
+      nextPlacement.columnSpan !== placement.columnSpan ||
+      nextPlacement.rowSpan !== placement.rowSpan;
+    if (!placementDidChange) {
+      return;
+    }
+
+    if (areaName && namedArea) {
+      dispatchPreservingSelection(
+        {
+          type: "set_node_layout",
+          nodeId: parent.id,
+          layout: {
+            ...layout,
+            grid_areas: normalizedAreas.map((area) =>
+              area.name === areaName
+                ? {
+                    ...area,
+                    column: nextPlacement.column + 1,
+                    row: nextPlacement.row + 1,
+                    column_span: nextPlacement.columnSpan,
+                    row_span: nextPlacement.rowSpan
+                  }
+                : area
+            )
+          }
+        },
+        child.id
+      );
+      return;
+    }
+
+    dispatch({
+      type: "set_node_layout_item",
+      nodeId: child.id,
+      layoutItem: {
+        ...layoutItem,
+        grid_area: undefined,
+        grid_column: nextPlacement.column + 1,
+        grid_row: nextPlacement.row + 1,
+        grid_column_span: nextPlacement.columnSpan,
+        grid_row_span: nextPlacement.rowSpan
+      }
     });
   };
 
@@ -4903,6 +5461,63 @@ export function App() {
       document.body.style.cursor = "";
     };
   }, [gridResizeSession]);
+
+  const startGridAreaBoundaryResize = (
+    handle: GridAreaBoundaryHandle,
+    event: React.MouseEvent<HTMLDivElement>
+  ) => {
+    if (!editor || selectedNodeIds.length !== 1 || selectedNode?.id !== handle.childNodeId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const nextSession = {
+      parentNodeId: handle.parentNodeId,
+      childNodeId: handle.childNodeId,
+      edge: handle.edge
+    };
+    gridAreaBoundarySessionRef.current = nextSession;
+    gridAreaBoundaryClientPointRef.current = { x: event.clientX, y: event.clientY };
+    setGridAreaBoundarySession(nextSession);
+    document.body.style.cursor = handle.cursor;
+  };
+
+  useEffect(() => {
+    if (!gridAreaBoundarySession) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      gridAreaBoundaryClientPointRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const stopGridAreaBoundaryResize = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lastPoint = gridAreaBoundaryClientPointRef.current;
+      if (lastPoint) {
+        updateGridAreaBoundaryFromClientPoint(gridAreaBoundarySession, lastPoint);
+      }
+      gridAreaBoundarySessionRef.current = null;
+      gridAreaBoundaryClientPointRef.current = null;
+      setGridAreaBoundarySession(null);
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", handlePointerMove, { capture: true });
+    window.addEventListener("mouseup", stopGridAreaBoundaryResize, { capture: true, once: true });
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove, { capture: true });
+      window.removeEventListener("mouseup", stopGridAreaBoundaryResize, { capture: true });
+      if (gridAreaBoundarySessionRef.current === gridAreaBoundarySession) {
+        gridAreaBoundarySessionRef.current = null;
+      }
+      gridAreaBoundaryClientPointRef.current = null;
+      document.body.style.cursor = "";
+    };
+  }, [gridAreaBoundarySession]);
 
   const updateLayoutItem = (nodeId: string, layoutItem: NodeLayoutItem) => {
     dispatch({ type: "set_node_layout_item", nodeId, layoutItem });
@@ -6431,6 +7046,23 @@ export function App() {
                       cursor: handle.cursor
                     }}
                     onMouseDown={(event) => startGridResize(handle, event)}
+                  />
+                ))}
+                {gridViewportOverlay.areaBoundaryHandles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`grid-area-boundary-handle grid-area-boundary-handle-${handle.edge}`}
+                    data-testid={handle.testId}
+                    aria-label={handle.title}
+                    title={handle.title}
+                    style={{
+                      left: handle.left,
+                      top: handle.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startGridAreaBoundaryResize(handle, event)}
                   />
                 ))}
               </div>

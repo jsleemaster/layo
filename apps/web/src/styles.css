@@ -863,6 +863,38 @@ button:disabled {
   height: calc(var(--editor-border-hairline) * 2);
 }
 
+.grid-area-boundary-handle {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+}
+
+.grid-area-boundary-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-selection);
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-stage);
+}
+
+.grid-area-boundary-handle-left::after,
+.grid-area-boundary-handle-right::after {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - var(--editor-border-hairline));
+  width: calc(var(--editor-border-hairline) * 3);
+}
+
+.grid-area-boundary-handle-top::after,
+.grid-area-boundary-handle-bottom::after {
+  right: 0;
+  bottom: calc(50% - var(--editor-border-hairline));
+  left: 0;
+  height: calc(var(--editor-border-hairline) * 3);
+}
+
 .selection-chrome-overlay {
   position: absolute;
   inset: 0;

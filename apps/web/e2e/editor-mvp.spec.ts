@@ -2470,6 +2470,96 @@ test("inspector grid item span stretches a child across multiple cells", async (
   await expect(page.getByTestId("inspector-y")).toHaveValue("20");
 });
 
+test("canvas grid area boundary handle expands an explicit child span", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("420");
+  await page.getByTestId("inspector-height").fill("240");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-grid-column-tracks").fill("120px 80px 1fr");
+  await page.getByTestId("inspector-layout-grid-row-tracks").fill("90px 90px");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-column-gap").fill("10");
+  await page.getByTestId("inspector-layout-row-gap").fill("8");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+  await page.getByTestId("inspector-layout-item-grid-column").fill("1");
+  await page.getByTestId("inspector-layout-item-grid-row").fill("1");
+  await page.getByTestId("inspector-layout-item-grid-column-span").fill("1");
+  await page.getByTestId("inspector-layout-item-width-sizing").selectOption("fill");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("120");
+
+  const rightBoundaryHandle = page.getByTestId("grid-area-boundary-handle-right");
+  await expect(rightBoundaryHandle).toBeVisible();
+  const handleBox = await rightBoundaryHandle.boundingBox();
+  if (!handleBox) {
+    throw new Error("grid area right boundary handle did not expose a bounding box");
+  }
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2 + 90, handleBox.y + handleBox.height / 2);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-layout-item-grid-column")).toHaveValue("1");
+  await expect(page.getByTestId("inspector-layout-item-grid-column-span")).toHaveValue("2");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("210");
+});
+
+test("canvas grid area boundary handle expands a named grid area", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("280");
+  await page.getByTestId("inspector-height").fill("220");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-grid-column-tracks").fill("120px 120px");
+  await page.getByTestId("inspector-layout-grid-row-tracks").fill("80px 80px");
+  await page.getByTestId("inspector-layout-grid-areas").fill("hero:1/1/1/1");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-column-gap").fill("0");
+  await page.getByTestId("inspector-layout-row-gap").fill("0");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-layout-item-grid-area").fill("hero");
+  await page.getByTestId("inspector-layout-item-width-sizing").selectOption("fill");
+  await page.getByTestId("inspector-layout-item-height-sizing").selectOption("fill");
+  await expect(page.getByTestId("inspector-layout-item-grid-area")).toHaveValue("hero");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("80");
+
+  const bottomBoundaryHandle = page.getByTestId("grid-area-boundary-handle-bottom");
+  await expect(bottomBoundaryHandle).toBeVisible();
+  const handleBox = await bottomBoundaryHandle.boundingBox();
+  if (!handleBox) {
+    throw new Error("grid area bottom boundary handle did not expose a bounding box");
+  }
+
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2 + 80);
+  await page.mouse.up();
+
+  await expect(page.getByTestId("inspector-layout-item-grid-area")).toHaveValue("hero");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("160");
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-layout-grid-areas")).toHaveValue("hero:1/1/1/2");
+});
+
 test("inspector grid named areas place children and reserve occupied cells", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
