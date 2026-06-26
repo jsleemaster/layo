@@ -543,6 +543,63 @@ describe("editor state commands", () => {
     });
   });
 
+  test("grid layout sizes tracks with pixel and fraction units", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 500, height: 260 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 3,
+      grid_rows: 2,
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "fr", value: 2 },
+        { type: "fr", value: 1 }
+      ],
+      grid_row_tracks: [
+        { type: "px", value: 80 },
+        { type: "fr", value: 1 }
+      ],
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 10,
+      column_gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    for (const [id, fill] of [
+      ["track-grid-rectangle-1", "#e0f2fe"],
+      ["track-grid-rectangle-2", "#fde68a"],
+      ["track-grid-rectangle-3", "#dcfce7"]
+    ]) {
+      frame.children.push({
+        id,
+        kind: "rectangle",
+        name: id,
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 40 },
+        style: { fill, stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: []
+      });
+    }
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "track-grid-rectangle-3",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(findNodeById(relaid.document, "track-grid-rectangle-1")?.transform).toMatchObject({ x: 150, y: 20 });
+    expect(findNodeById(relaid.document, "track-grid-rectangle-2")?.transform.x).toBeCloseTo(373.33, 1);
+    expect(findNodeById(relaid.document, "track-grid-rectangle-2")?.transform.y).toBe(20);
+    expect(findNodeById(relaid.document, "track-grid-rectangle-3")?.transform).toMatchObject({ x: 20, y: 110 });
+  });
+
   test("auto layout includes child margins in flow and cross-axis position", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

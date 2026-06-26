@@ -19,6 +19,11 @@ const agentFindSchema = {
   componentDefinitionId: z.string().optional().describe("Component definition id to match")
 };
 
+const gridTrackSchema = z.object({
+  type: z.enum(["px", "fr", "auto"]),
+  value: z.number().optional()
+});
+
 const nodeLayoutSchema = z.object({
   mode: z.enum(["none", "auto", "grid"]),
   direction: z.enum(["horizontal", "vertical"]),
@@ -33,6 +38,8 @@ const nodeLayoutSchema = z.object({
   column_gap: z.number().optional(),
   grid_columns: z.number().optional(),
   grid_rows: z.number().optional(),
+  grid_column_tracks: z.array(gridTrackSchema).optional(),
+  grid_row_tracks: z.array(gridTrackSchema).optional(),
   padding: z.object({
     top: z.number(),
     right: z.number(),

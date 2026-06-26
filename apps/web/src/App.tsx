@@ -13,6 +13,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type GridTrack,
   type ImageFitMode,
   type NodeConstraints,
   type NodeLayout,
@@ -123,6 +124,52 @@ import {
 
 function numericInputValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function gridTrackInputValue(tracks: GridTrack[] | undefined, count: number) {
+  return Array.from({ length: count }, (_, index) => gridTrackToken(tracks?.[index])).join(" ");
+}
+
+function gridTrackToken(track: GridTrack | undefined) {
+  if (track?.type === "px") {
+    return `${numericInputValue(track.value ?? 0)}px`;
+  }
+  if (track?.type === "auto") {
+    return "auto";
+  }
+  return `${numericInputValue(track?.value ?? 1)}fr`;
+}
+
+function parseGridTrackInput(value: string): GridTrack[] | null {
+  const tokens = value.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const tracks = tokens.map(parseGridTrackToken);
+  return tracks.every((track): track is GridTrack => track !== null) ? tracks : null;
+}
+
+function parseGridTrackToken(token: string): GridTrack | null {
+  if (token.toLowerCase() === "auto") {
+    return { type: "auto" };
+  }
+
+  const match = token.match(/^(\d+(?:\.\d+)?)(px|fr)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const unit = match[2].toLowerCase();
+  if (unit === "px") {
+    return { type: "px", value: Math.max(0, value) };
+  }
+  return { type: "fr", value: Math.max(0.0001, value) };
 }
 
 const OBJECT_CONTEXT_MENU_MARGIN = 8;
@@ -1938,6 +1985,38 @@ function Inspector({
                   const nextValue = Number(event.currentTarget.value);
                   if (Number.isFinite(nextValue)) {
                     updateLayout({ grid_rows: nextValue });
+                  }
+                }}
+              />
+            </label>
+            <label>
+              열 트랙
+              <input
+                data-testid="inspector-layout-grid-column-tracks"
+                value={gridTrackInputValue(layout.grid_column_tracks, layout.grid_columns ?? 2)}
+                onChange={(event) => {
+                  const nextTracks = parseGridTrackInput(event.currentTarget.value);
+                  if (nextTracks) {
+                    updateLayout({
+                      grid_columns: nextTracks.length,
+                      grid_column_tracks: nextTracks
+                    });
+                  }
+                }}
+              />
+            </label>
+            <label>
+              행 트랙
+              <input
+                data-testid="inspector-layout-grid-row-tracks"
+                value={gridTrackInputValue(layout.grid_row_tracks, layout.grid_rows ?? 2)}
+                onChange={(event) => {
+                  const nextTracks = parseGridTrackInput(event.currentTarget.value);
+                  if (nextTracks) {
+                    updateLayout({
+                      grid_rows: nextTracks.length,
+                      grid_row_tracks: nextTracks
+                    });
                   }
                 }}
               />

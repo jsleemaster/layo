@@ -1135,6 +1135,90 @@ describe("FileStorage", () => {
       y: 115
     });
 
+    const trackGridLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 500, height: 260 },
+        { type: "update_geometry", nodeId: "text-1", width: 80, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "grid",
+            direction: "horizontal",
+            grid_columns: 3,
+            grid_rows: 2,
+            grid_column_tracks: [
+              { type: "px", value: 120 },
+              { type: "fr", value: 2 },
+              { type: "fr", value: 1 }
+            ],
+            grid_row_tracks: [
+              { type: "px", value: 80 },
+              { type: "fr", value: 1 }
+            ],
+            align_items: "start",
+            justify_content: "start",
+            gap: 0,
+            row_gap: 10,
+            column_gap: 10,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "track-grid-rectangle-1",
+          name: "트랙 그리드 사각형 1",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "track-grid-rectangle-2",
+          name: "트랙 그리드 사각형 2",
+          width: 80,
+          height: 40
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "track-grid-rectangle-3",
+          name: "트랙 그리드 사각형 3",
+          width: 80,
+          height: 40
+        }
+      ] as any
+    });
+
+    const trackGridFrame = trackGridLayout.preview.pages[0].children[0];
+    expect(trackGridFrame.layout).toMatchObject({
+      mode: "grid",
+      grid_columns: 3,
+      grid_rows: 2,
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "fr", value: 2 },
+        { type: "fr", value: 1 }
+      ],
+      grid_row_tracks: [{ type: "px", value: 80 }, { type: "fr", value: 1 }]
+    });
+    expect(trackGridFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(trackGridFrame.children.find((node) => node.id === "track-grid-rectangle-1")?.transform).toMatchObject({
+      x: 150,
+      y: 20
+    });
+    expect(trackGridFrame.children.find((node) => node.id === "track-grid-rectangle-2")?.transform.x).toBeCloseTo(
+      373.33,
+      1
+    );
+    expect(trackGridFrame.children.find((node) => node.id === "track-grid-rectangle-2")?.transform.y).toBe(20);
+    expect(trackGridFrame.children.find((node) => node.id === "track-grid-rectangle-3")?.transform).toMatchObject({
+      x: 20,
+      y: 110
+    });
+
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-06-25
+Last audited: 2026-06-26
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -55,6 +55,7 @@ Use this order when entering the repo:
 | `2026-06-25-penpot-grid-auto-layout.md` | Completed | Added Penpot-like Grid `layout.mode = grid` with equal-cell auto-placement, grid row/column counts, row/column gaps, padding, static/absolute item flow behavior, shared web/server/Rust contracts, MCP schema, code export, Korean Inspector controls, and Playwright CLI coverage. Manual grid cell placement, named areas, and FR/auto/pixel track units remain later maturity gaps. Verified with focused RED/GREEN web/server/Rust tests, `pnpm typecheck`, `cargo test -p editor-core`, focused Playwright CLI, and full-suite checks recorded in the implementation plan and PR. |
 | `2026-06-25-penpot-grid-manual-placement.md` | Completed | Added Penpot-like Grid manual one-cell placement with `layout_item.grid_column` and `layout_item.grid_row` across shared web/server/Rust contracts, MCP schema, code export, Korean Inspector controls, and Playwright CLI coverage. Grid spans, named areas, viewport area editing, and FR/auto/pixel track units remain later maturity gaps. Verified with focused RED/GREEN web/server/Rust tests, `pnpm typecheck`, `pnpm run check:penpot-maturity`, `pnpm --filter @layo/web build`, `cargo test -p editor-core`, `pnpm test`, `git diff --check`, focused Playwright CLI, and `pnpm test:e2e`. |
 | `2026-06-25-penpot-grid-span.md` | Completed | Added Penpot-like Grid item spans with `layout_item.grid_column_span` and `layout_item.grid_row_span` across shared web/server/Rust contracts, MCP schema, code export, Korean Inspector controls, and Playwright CLI coverage. Named grid areas, viewport area editing, and non-equal track units remain later maturity gaps. Verified with RED/GREEN web/server/Rust tests, `pnpm typecheck`, `pnpm run check:penpot-maturity`, focused Playwright CLI, `pnpm --filter @layo/web build`, `cargo test -p editor-core`, `pnpm --filter @layo/collaboration build`, `git diff --check`, `pnpm test`, and `pnpm test:e2e`. |
+| `2026-06-26-penpot-grid-track-units.md` | Completed | Added Penpot-like Grid pixel/fraction/auto track units with `layout.grid_column_tracks` and `layout.grid_row_tracks` across shared web/server/Rust contracts, MCP schema, generated bindings, Korean Inspector controls, and Playwright CLI coverage. Named grid areas, min/max rules, baseline alignment, viewport grid editing, and deeper resizing semantics remain later maturity gaps. Verified with focused RED/GREEN web/server/Rust tests, `pnpm typecheck`, `pnpm run check:penpot-maturity`, focused Playwright CLI, `pnpm --filter @layo/web build`, `cargo test -p editor-core`, `git diff --check`, `pnpm test`, and `pnpm test:e2e`. |
 
 ## Current Active Plan
 

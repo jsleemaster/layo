@@ -1873,6 +1873,52 @@ test("inspector grid layout auto-places static children into equal cells", async
   expect(cellPositions.sort()).toEqual(["188,126", "188,20", "24,126", "24,20"]);
 });
 
+test("inspector grid track units resize cells with px and fr values", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("500");
+  await page.getByTestId("inspector-height").fill("260");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await expect(page.getByTestId("inspector-layout-grid-column-tracks")).toBeVisible();
+  await expect(page.getByTestId("inspector-layout-grid-row-tracks")).toBeVisible();
+  await page.getByTestId("inspector-layout-grid-column-tracks").fill("120px 2fr 1fr");
+  await page.getByTestId("inspector-layout-grid-row-tracks").fill("80px 1fr");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-row-gap").fill("10");
+  await page.getByTestId("inspector-layout-column-gap").fill("10");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("40");
+
+  for (let index = 0; index < 3; index += 1) {
+    await page.getByRole("button", { name: "랜딩 프레임" }).click();
+    await page.getByRole("button", { name: "사각형 만들기" }).click();
+    await page.getByTestId("inspector-width").fill("80");
+    await page.getByTestId("inspector-height").fill("40");
+  }
+
+  const positions: Record<string, string> = {};
+  for (const name of ["헤드라인", "사각형 3", "사각형 4", "사각형 5"]) {
+    await page.getByRole("button", { name }).click();
+    positions[name] = `${await page.getByTestId("inspector-x").inputValue()},${await page.getByTestId("inspector-y").inputValue()}`;
+  }
+
+  expect(positions).toMatchObject({
+    "헤드라인": "20,20",
+    "사각형 3": "150,20",
+    "사각형 4": "373.3,20",
+    "사각형 5": "20,110"
+  });
+});
+
 test("inspector manual grid cell placement moves a child to the requested cell", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

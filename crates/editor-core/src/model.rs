@@ -116,7 +116,29 @@ pub struct NodeLayout {
     pub grid_rows: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column_gap: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_column_tracks: Option<Vec<GridTrack>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_row_tracks: Option<Vec<GridTrack>>,
     pub padding: LayoutPadding,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct GridTrack {
+    #[serde(rename = "type")]
+    pub track_type: GridTrackType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum GridTrackType {
+    Px,
+    Fr,
+    Auto,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

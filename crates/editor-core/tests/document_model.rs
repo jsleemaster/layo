@@ -67,6 +67,8 @@ fn layout_metadata_round_trips_through_json() {
                 "direction": "horizontal",
                 "grid_columns": 2,
                 "grid_rows": 2,
+                "grid_column_tracks": [{ "type": "px", "value": 120 }, { "type": "fr", "value": 2 }],
+                "grid_row_tracks": [{ "type": "auto" }, { "type": "fr", "value": 1 }],
                 "wrap": "wrap",
                 "align_items": "center",
                 "justify_content": "space_between",
@@ -114,6 +116,27 @@ fn layout_metadata_round_trips_through_json() {
     );
     assert_eq!(frame.layout.as_ref().unwrap().grid_columns, Some(2));
     assert_eq!(frame.layout.as_ref().unwrap().grid_rows, Some(2));
+    assert_eq!(
+        frame.layout.as_ref().unwrap().grid_column_tracks.as_ref().unwrap()[0],
+        editor_core::GridTrack {
+            track_type: editor_core::GridTrackType::Px,
+            value: Some(120.0)
+        }
+    );
+    assert_eq!(
+        frame.layout.as_ref().unwrap().grid_column_tracks.as_ref().unwrap()[1],
+        editor_core::GridTrack {
+            track_type: editor_core::GridTrackType::Fr,
+            value: Some(2.0)
+        }
+    );
+    assert_eq!(
+        frame.layout.as_ref().unwrap().grid_row_tracks.as_ref().unwrap()[0],
+        editor_core::GridTrack {
+            track_type: editor_core::GridTrackType::Auto,
+            value: None
+        }
+    );
     assert_eq!(
         frame.layout.as_ref().unwrap().wrap,
         editor_core::LayoutWrap::Wrap
@@ -171,6 +194,11 @@ fn layout_metadata_round_trips_through_json() {
     assert!(json.contains("\"grid_row\":2"));
     assert!(json.contains("\"grid_column_span\":2"));
     assert!(json.contains("\"grid_row_span\":2"));
+    assert!(json.contains("\"grid_column_tracks\""));
+    assert!(json.contains("\"grid_row_tracks\""));
+    assert!(json.contains("\"type\":\"px\""));
+    assert!(json.contains("\"type\":\"fr\""));
+    assert!(json.contains("\"type\":\"auto\""));
     assert!(json.contains("\"layout_item\""));
 }
 

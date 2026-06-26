@@ -1,4 +1,5 @@
 import type {
+  GridTrack,
   ImageFitMode,
   NodeConstraints,
   NodeLayout,
@@ -1922,8 +1923,8 @@ type GridAutoCell = GridCell & { nextCursor: number };
 function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildren: RendererNode[]): void {
   const columnGap = layout.column_gap ?? layout.gap;
   const rowGap = layout.row_gap ?? layout.gap;
-  let columns = normalizeGridTrackCount(layout.grid_columns, 2);
-  let rows = normalizeGridTrackCount(layout.grid_rows, Math.max(1, Math.ceil(flowChildren.length / columns)));
+  let columns = gridTrackCount(layout.grid_column_tracks, layout.grid_columns, 2);
+  let rows = gridTrackCount(layout.grid_row_tracks, layout.grid_rows, Math.max(1, Math.ceil(flowChildren.length / columns)));
   if (layout.direction === "vertical") {
     columns = Math.max(columns, Math.ceil(flowChildren.length / rows), 1);
   } else {
@@ -1937,8 +1938,6 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
     0,
     node.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
   );
-  const cellWidth = availableWidth / columns;
-  const cellHeight = availableHeight / rows;
   const manualPlacements = new Map<string, GridPlacement>();
   const occupiedCells = new Set<string>();
 
@@ -1967,10 +1966,23 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
       placement = { row: autoCell.row, column: autoCell.column, rowSpan: 1, columnSpan: 1 };
       occupiedCells.add(gridCellKey(autoCell));
     }
+    manualPlacements.set(child.id, placement);
+  });
+
+  const columnTracks = resolveGridTracks(layout.grid_column_tracks, columns);
+  const rowTracks = resolveGridTracks(layout.grid_row_tracks, rows);
+  const columnSizes = resolveGridTrackSizes(columnTracks, availableWidth, "column", flowChildren, manualPlacements);
+  const rowSizes = resolveGridTrackSizes(rowTracks, availableHeight, "row", flowChildren, manualPlacements);
+  const columnStarts = gridTrackStarts(columnSizes, columnGap);
+  const rowStarts = gridTrackStarts(rowSizes, rowGap);
+
+  flowChildren.forEach((child) => {
+    const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    const placement = manualPlacements.get(child.id) ?? { row: 0, column: 0, rowSpan: 1, columnSpan: 1 };
     const { row, column } = placement;
     const margin = layoutItem.margin;
-    const placementWidth = cellWidth * placement.columnSpan + columnGap * Math.max(0, placement.columnSpan - 1);
-    const placementHeight = cellHeight * placement.rowSpan + rowGap * Math.max(0, placement.rowSpan - 1);
+    const placementWidth = gridPlacementTrackSize(columnSizes, column, placement.columnSpan, columnGap);
+    const placementHeight = gridPlacementTrackSize(rowSizes, row, placement.rowSpan, rowGap);
     const innerWidth = Math.max(0, placementWidth - margin.left - margin.right);
     const innerHeight = Math.max(0, placementHeight - margin.top - margin.bottom);
 
@@ -1983,8 +1995,8 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
 
     child.transform = {
       ...child.transform,
-      x: layout.padding.left + column * (cellWidth + columnGap) + margin.left + gridAxisOffset(layout.justify_content, innerWidth, child.size.width),
-      y: layout.padding.top + row * (cellHeight + rowGap) + margin.top + gridAxisOffset(layout.align_items, innerHeight, child.size.height)
+      x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(layout.justify_content, innerWidth, child.size.width),
+      y: layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(layout.align_items, innerHeight, child.size.height)
     };
   });
 }
@@ -2351,8 +2363,10 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const gap = Math.max(0, finiteNumber(layout.gap, 0));
   const rowGap = Math.max(0, finiteNumber(layout.row_gap, gap));
   const columnGap = Math.max(0, finiteNumber(layout.column_gap, gap));
-  const gridColumns = normalizeGridTrackCount(layout.grid_columns, 2);
-  const gridRows = normalizeGridTrackCount(layout.grid_rows, 1);
+  const gridColumns = gridTrackCount(layout.grid_column_tracks, layout.grid_columns, 2);
+  const gridRows = gridTrackCount(layout.grid_row_tracks, layout.grid_rows, 1);
+  const gridColumnTracks = normalizeOptionalGridTracks(layout.grid_column_tracks, gridColumns);
+  const gridRowTracks = normalizeOptionalGridTracks(layout.grid_row_tracks, gridRows);
   return {
     mode,
     direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
@@ -2365,7 +2379,14 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
     gap,
     ...(rowGap !== gap ? { row_gap: rowGap } : {}),
     ...(columnGap !== gap ? { column_gap: columnGap } : {}),
-    ...(mode === "grid" ? { grid_columns: gridColumns, grid_rows: gridRows } : {}),
+    ...(mode === "grid"
+      ? {
+          grid_columns: gridColumns,
+          grid_rows: gridRows,
+          ...(gridColumnTracks ? { grid_column_tracks: gridColumnTracks } : {}),
+          ...(gridRowTracks ? { grid_row_tracks: gridRowTracks } : {})
+        }
+      : {}),
     padding: {
       top: Math.max(0, finiteNumber(layout.padding?.top, 0)),
       right: Math.max(0, finiteNumber(layout.padding?.right, 0)),
@@ -2514,6 +2535,86 @@ function isVerticalConstraint(value: string): value is NodeConstraints["vertical
 
 function normalizeGridTrackCount(value: number | undefined, fallback: number): number {
   return Math.max(1, Math.round(finiteNumber(value, fallback)));
+}
+
+function gridTrackCount(tracks: GridTrack[] | undefined, explicitCount: number | undefined, fallback: number): number {
+  return normalizeGridTrackCount(explicitCount, tracks?.length ?? fallback);
+}
+
+function normalizeOptionalGridTracks(tracks: GridTrack[] | undefined, count: number): GridTrack[] | undefined {
+  if (!Array.isArray(tracks) || tracks.length === 0) {
+    return undefined;
+  }
+  return Array.from({ length: count }, (_, index) => normalizeGridTrack(tracks[index]));
+}
+
+function resolveGridTracks(tracks: GridTrack[] | undefined, count: number): GridTrack[] {
+  return Array.from({ length: count }, (_, index) => normalizeGridTrack(tracks?.[index]));
+}
+
+function normalizeGridTrack(track: GridTrack | undefined): GridTrack {
+  if (track?.type === "px") {
+    return { type: "px", value: Math.max(0, finiteNumber(track.value, 0)) };
+  }
+  if (track?.type === "auto") {
+    return { type: "auto" };
+  }
+  return { type: "fr", value: Math.max(0.0001, finiteNumber(track?.value, 1)) };
+}
+
+function resolveGridTrackSizes(
+  tracks: GridTrack[],
+  availableSize: number,
+  axis: "column" | "row",
+  flowChildren: RendererNode[],
+  placements: Map<string, GridPlacement>
+): number[] {
+  const sizes = tracks.map((track, index) =>
+    track.type === "px" ? track.value ?? 0 : track.type === "auto" ? autoGridTrackSize(index, axis, flowChildren, placements) : 0
+  );
+  const fixedSize = sizes.reduce((total, size) => total + size, 0);
+  const frTotal = tracks.reduce((total, track) => total + (track.type === "fr" ? track.value ?? 1 : 0), 0);
+  const remainingSize = Math.max(0, availableSize - fixedSize);
+  return sizes.map((size, index) =>
+    tracks[index].type === "fr" && frTotal > 0 ? remainingSize * ((tracks[index].value ?? 1) / frTotal) : size
+  );
+}
+
+function autoGridTrackSize(
+  index: number,
+  axis: "column" | "row",
+  flowChildren: RendererNode[],
+  placements: Map<string, GridPlacement>
+): number {
+  return flowChildren.reduce((maximum, child) => {
+    const placement = placements.get(child.id);
+    if (!placement) {
+      return maximum;
+    }
+    const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    if (axis === "column" && placement.column === index && placement.columnSpan === 1) {
+      return Math.max(maximum, child.size.width + layoutItem.margin.left + layoutItem.margin.right);
+    }
+    if (axis === "row" && placement.row === index && placement.rowSpan === 1) {
+      return Math.max(maximum, child.size.height + layoutItem.margin.top + layoutItem.margin.bottom);
+    }
+    return maximum;
+  }, 0);
+}
+
+function gridTrackStarts(trackSizes: number[], gap: number): number[] {
+  const starts: number[] = [];
+  let cursor = 0;
+  for (const size of trackSizes) {
+    starts.push(cursor);
+    cursor += size + gap;
+  }
+  return starts;
+}
+
+function gridPlacementTrackSize(trackSizes: number[], start: number, span: number, gap: number): number {
+  const tracks = trackSizes.slice(start, start + span);
+  return tracks.reduce((total, size) => total + size, 0) + gap * Math.max(0, tracks.length - 1);
 }
 
 function normalizeGridPlacement(value: number | undefined): number | undefined {

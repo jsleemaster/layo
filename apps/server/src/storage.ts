@@ -39,6 +39,11 @@ export interface LayoutSpacing {
   left: number;
 }
 
+export interface GridTrack {
+  type: "px" | "fr" | "auto";
+  value?: number;
+}
+
 export interface NodeLayout {
   mode: "none" | "auto" | "grid";
   direction: "horizontal" | "vertical";
@@ -53,6 +58,8 @@ export interface NodeLayout {
   column_gap?: number;
   grid_columns?: number;
   grid_rows?: number;
+  grid_column_tracks?: GridTrack[];
+  grid_row_tracks?: GridTrack[];
   padding: LayoutSpacing;
 }
 
