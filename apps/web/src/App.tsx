@@ -148,6 +148,7 @@ import {
 } from "./collaboration/remote-overlays";
 
 const LOCAL_COMMENT_VIEWER_ID = "사용자";
+const COMMENT_LIVE_REFRESH_INTERVAL_MS = 2_000;
 
 function formatCommentActivityType(type: CommentActivityFeed["events"][number]["type"]) {
   switch (type) {
@@ -4230,6 +4231,23 @@ export function App() {
       setCommentStatus(message);
     }
   };
+
+  useEffect(() => {
+    const fileId = currentProject?.currentDocumentId;
+    if (!fileId) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void Promise.all([
+        refreshCommentThreads(fileId),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+    }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentProject?.currentDocumentId]);
 
   useEffect(() => {
     editorRef.current = editor;

@@ -934,7 +934,7 @@ export class FileStorage {
       throw new Error(`node not found: ${input.nodeId}`);
     }
 
-    const now = new Date().toISOString();
+    const now = createMonotonicCommentTimestamp();
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
     const thread: StoredCommentThread = {
@@ -992,7 +992,7 @@ export class FileStorage {
       replyId: createStorageId("reply"),
       body,
       authorName,
-      createdAt: new Date().toISOString(),
+      createdAt: createMonotonicCommentTimestamp(),
       mentions: extractCommentMentions(body),
       mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
     };
@@ -1078,7 +1078,7 @@ export class FileStorage {
       throw new Error(`comment thread not found: ${threadId}`);
     }
 
-    const resolvedAt = thread.resolvedAt ?? new Date().toISOString();
+    const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
     const resolvedThread: StoredCommentThread = {
       ...thread,
       resolvedAt
@@ -1544,6 +1544,15 @@ function assertSafeStorageId(value: string) {
 
 function createStorageId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+let lastCommentTimestampMs = 0;
+
+function createMonotonicCommentTimestamp() {
+  const now = Date.now();
+  const next = now <= lastCommentTimestampMs ? lastCommentTimestampMs + 1 : now;
+  lastCommentTimestampMs = next;
+  return new Date(next).toISOString();
 }
 
 function normalizeListLimit(value: number | undefined, fallback: number) {

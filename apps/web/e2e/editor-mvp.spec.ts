@@ -1487,6 +1487,32 @@ test("file panel shows mention-targeted comment notifications", async ({ page })
   await expect(summary).toContainText("멘션 1개");
 });
 
+test("file panel receives externally created comment notifications without reload", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await openFilePanel(page);
+  const summary = page.getByTestId("comment-notification-summary");
+  const feed = page.getByTestId("comment-activity-feed");
+  await expect(summary).toContainText("읽지 않은 코멘트 없음");
+  await expect(feed).toContainText("최근 코멘트 활동 없음");
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "@사용자 외부 알림 확인",
+      authorName: "디자인 팀",
+      mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await expect(summary).toContainText("읽지 않은 코멘트 1개", { timeout: 4_000 });
+  await expect(summary).toContainText("나를 멘션 1개");
+  await expect(summary).toContainText("멘션 1개");
+  await expect(feed).toContainText("디자인 팀");
+  await expect(feed).toContainText("@사용자 외부 알림 확인");
+});
+
 test("file panel shows retained recent comment activity", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

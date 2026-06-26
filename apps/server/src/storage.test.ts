@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { validateDocument as validateDesignFile } from "./agent-control";
 import { FileStorage } from "./storage";
 
@@ -426,16 +426,22 @@ describe("FileStorage", () => {
     });
     await storage.updateProject("project-old", { name: "오래된 프로젝트 수정됨" });
 
-    await storage.createCommentThread("document-old", {
-      nodeId: "text-1",
-      body: "먼저 만든 알림",
-      authorName: "디자인 팀"
-    });
-    await storage.createCommentThread("document-new", {
-      nodeId: "text-1",
-      body: "나중에 만든 알림",
-      authorName: "디자인 팀"
-    });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      await storage.createCommentThread("document-old", {
+        nodeId: "text-1",
+        body: "먼저 만든 알림",
+        authorName: "디자인 팀"
+      });
+      await storage.createCommentThread("document-new", {
+        nodeId: "text-1",
+        body: "나중에 만든 알림",
+        authorName: "디자인 팀"
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     const summary = await storage.listCommentNotifications({ viewerId: "사용자" });
 
