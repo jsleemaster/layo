@@ -589,6 +589,18 @@ interface GridViewportHeaderControl {
   title: string;
 }
 
+interface GridViewportCellControl {
+  id: string;
+  testId: string;
+  column: number;
+  row: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  title: string;
+}
+
 interface GridViewportOverlay {
   nodeId: string;
   lines: GridViewportLine[];
@@ -597,6 +609,7 @@ interface GridViewportOverlay {
   addControls: GridViewportAddControl[];
   removeControls: GridViewportRemoveControl[];
   headerControls: GridViewportHeaderControl[];
+  cellControls: GridViewportCellControl[];
 }
 
 interface GridPlacement {
@@ -619,6 +632,14 @@ interface GridTrackContextMenuState {
   nodeId: string;
   axis: "column" | "row";
   index: number;
+}
+
+interface GridCellContextMenuState {
+  left: number;
+  top: number;
+  nodeId: string;
+  column: number;
+  row: number;
 }
 
 interface GridTrackDragState {
@@ -1299,6 +1320,7 @@ function createGridViewportOverlay(
   const handles: GridViewportHandle[] = [];
   const removeControls: GridViewportRemoveControl[] = [];
   const headerControls: GridViewportHeaderControl[] = [];
+  const cellControls: GridViewportCellControl[] = [];
   const areaBoundaryHandles: GridAreaBoundaryHandle[] = [];
   const addControls: GridViewportAddControl[] = showTrackControls
     ? [
@@ -1441,6 +1463,42 @@ function createGridViewportOverlay(
     }
   });
 
+  if (showTrackControls) {
+    rowStarts.forEach((rowStart, rowIndex) => {
+      const rowStartPoint = documentPointToViewport(
+        { x: gridLeft, y: gridTop + rowStart, space: "document" },
+        viewport
+      );
+      const rowEndPoint = documentPointToViewport(
+        { x: gridLeft, y: gridTop + rowStart + rowSizes[rowIndex], space: "document" },
+        viewport
+      );
+
+      columnStarts.forEach((columnStart, columnIndex) => {
+        const columnStartPoint = documentPointToViewport(
+          { x: gridLeft + columnStart, y: gridTop, space: "document" },
+          viewport
+        );
+        const columnEndPoint = documentPointToViewport(
+          { x: gridLeft + columnStart + columnSizes[columnIndex], y: gridTop, space: "document" },
+          viewport
+        );
+
+        cellControls.push({
+          id: `cell-${columnIndex + 1}-${rowIndex + 1}`,
+          testId: `grid-cell-hit-zone-${columnIndex + 1}-${rowIndex + 1}`,
+          column: columnIndex,
+          row: rowIndex,
+          left: Math.round(columnStartPoint.x),
+          top: Math.round(rowStartPoint.y),
+          width: Math.max(1, Math.round(columnEndPoint.x - columnStartPoint.x)),
+          height: Math.max(1, Math.round(rowEndPoint.y - rowStartPoint.y)),
+          title: `그리드 ${columnIndex + 1}열 ${rowIndex + 1}행 셀 메뉴`
+        });
+      });
+    });
+  }
+
   const selectedChild = options.selectedChild;
   if (
     selectedChild &&
@@ -1552,7 +1610,16 @@ function createGridViewportOverlay(
     }
   }
 
-  return { nodeId: frame.id, lines, handles, areaBoundaryHandles, addControls, removeControls, headerControls };
+  return {
+    nodeId: frame.id,
+    lines,
+    handles,
+    areaBoundaryHandles,
+    addControls,
+    removeControls,
+    headerControls,
+    cellControls
+  };
 }
 
 function addFrameSpacingSegment(
@@ -1805,6 +1872,17 @@ function normalizeGridAreasForOverlay(
   return (areas ?? [])
     .map((area) => normalizeGridAreaForOverlay(area, columns, rows))
     .filter((area): area is GridArea => area !== null);
+}
+
+function nextGridAreaNameForOverlay(areas: GridArea[] | undefined): string {
+  const existingNames = new Set((areas ?? []).map((area) => normalizeGridAreaNameForOverlay(area.name)).filter(Boolean));
+  for (let index = 1; index < Number.MAX_SAFE_INTEGER; index += 1) {
+    const name = `area${index}`;
+    if (!existingNames.has(name)) {
+      return name;
+    }
+  }
+  return `area${Date.now()}`;
 }
 
 function gridAreaPlacementsByNameForOverlay(
@@ -3346,6 +3424,7 @@ export function App() {
   const [inlineTextEditingNodeId, setInlineTextEditingNodeId] = useState<string | null>(null);
   const [objectContextMenu, setObjectContextMenu] = useState<ObjectContextMenuState | null>(null);
   const [gridTrackContextMenu, setGridTrackContextMenu] = useState<GridTrackContextMenuState | null>(null);
+  const [gridCellContextMenu, setGridCellContextMenu] = useState<GridCellContextMenuState | null>(null);
   const editorRef = useRef<EditorState | null>(null);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
@@ -3845,6 +3924,35 @@ export function App() {
     };
   }, [gridTrackContextMenu]);
 
+  useEffect(() => {
+    if (!gridCellContextMenu) {
+      return undefined;
+    }
+
+    const closeFromPointer = (event: PointerEvent) => {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('[data-testid="grid-cell-context-menu"]')
+      ) {
+        return;
+      }
+
+      setGridCellContextMenu(null);
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setGridCellContextMenu(null);
+      }
+    };
+
+    window.addEventListener("pointerdown", closeFromPointer);
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeFromPointer);
+      window.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [gridCellContextMenu]);
+
   const normalizePresenceForOverlay = (
     nextPresence: CollaborationPresence[],
     nextLocalSessionId: string | null
@@ -4332,6 +4440,7 @@ export function App() {
     setInlineTextEditingNodeId(null);
     setMeasurementTargetNodeId(null);
     setGridTrackContextMenu(null);
+    setGridCellContextMenu(null);
 
     if (!editor) {
       return;
@@ -5211,6 +5320,39 @@ export function App() {
     });
   };
 
+  const openGridCellContextMenuFromCell = (
+    control: GridViewportCellControl,
+    event: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!editor || !selectedNode || selectedNode.id !== editor.selection.nodeId) {
+      return;
+    }
+
+    const node = findNodeById(editor.document, selectedNode.id);
+    if (
+      !node ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      (node.kind !== "frame" && node.kind !== "component") ||
+      normalizedInspectorLayout(node.layout).mode !== "grid"
+    ) {
+      return;
+    }
+
+    setInlineTextEditingNodeId(null);
+    setMeasurementTargetNodeId(null);
+    setObjectContextMenu(null);
+    setGridTrackContextMenu(null);
+    setGridCellContextMenu({
+      ...objectContextMenuPosition(event.clientX, event.clientY),
+      nodeId: node.id,
+      column: control.column,
+      row: control.row
+    });
+  };
+
   const openGridTrackContextMenuFromHeader = (
     control: GridViewportHeaderControl,
     event: React.MouseEvent<HTMLButtonElement>
@@ -5227,6 +5369,7 @@ export function App() {
     setInlineTextEditingNodeId(null);
     setMeasurementTargetNodeId(null);
     setObjectContextMenu(null);
+    setGridCellContextMenu(null);
     setGridTrackContextMenu({
       ...objectContextMenuPosition(event.clientX, event.clientY),
       nodeId: selectedNode.id,
@@ -5251,6 +5394,7 @@ export function App() {
     setInlineTextEditingNodeId(null);
     setMeasurementTargetNodeId(null);
     setObjectContextMenu(null);
+    setGridCellContextMenu(null);
     setGridTrackContextMenu(null);
     gridTrackDragRef.current = {
       nodeId: selectedNode.id,
@@ -5406,6 +5550,61 @@ export function App() {
       layout: nextLayout
     });
     setGridTrackContextMenu(null);
+  };
+
+  const applyGridCellMergeAction = () => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || !gridCellContextMenu) {
+      return;
+    }
+
+    const node = findNodeById(currentEditor.document, gridCellContextMenu.nodeId);
+    if (
+      !node ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      (node.kind !== "frame" && node.kind !== "component")
+    ) {
+      setGridCellContextMenu(null);
+      return;
+    }
+
+    const layout = normalizedInspectorLayout(node.layout);
+    if (layout.mode !== "grid") {
+      setGridCellContextMenu(null);
+      return;
+    }
+
+    const { columns, rows } = gridViewportTrackCountsForOverlay(layout, node);
+    if (
+      gridCellContextMenu.column < 0 ||
+      gridCellContextMenu.column >= columns ||
+      gridCellContextMenu.row < 0 ||
+      gridCellContextMenu.row >= rows
+    ) {
+      setGridCellContextMenu(null);
+      return;
+    }
+
+    const normalizedAreas = normalizeGridAreasForOverlay(layout.grid_areas, columns, rows);
+    dispatch({
+      type: "set_node_layout",
+      nodeId: node.id,
+      layout: {
+        ...layout,
+        grid_areas: [
+          ...normalizedAreas,
+          {
+            name: nextGridAreaNameForOverlay(normalizedAreas),
+            column: gridCellContextMenu.column + 1,
+            row: gridCellContextMenu.row + 1,
+            column_span: 1,
+            row_span: 1
+          }
+        ]
+      }
+    });
+    setGridCellContextMenu(null);
   };
 
   const startGridResize = (
@@ -6956,6 +7155,24 @@ export function App() {
             ))}
             {gridViewportOverlay ? (
               <div className="grid-viewport-overlay" data-testid="grid-viewport-overlay">
+                {gridViewportOverlay.cellControls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className="grid-cell-hit-zone"
+                    data-testid={control.testId}
+                    aria-label={control.title}
+                    title={control.title}
+                    style={{
+                      left: control.left,
+                      top: control.top,
+                      width: control.width,
+                      height: control.height
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => openGridCellContextMenuFromCell(control, event)}
+                  />
+                ))}
                 {gridViewportOverlay.lines.map((line) => (
                   <div
                     key={line.id}
@@ -7551,6 +7768,21 @@ export function App() {
               />
             </ContextMenuSection>
           )}
+        </div>
+      ) : null}
+      {gridCellContextMenu ? (
+        <div
+          className="object-context-menu"
+          data-testid="grid-cell-context-menu"
+          role="menu"
+          aria-label="그리드 셀 메뉴"
+          onContextMenu={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: gridCellContextMenu.left, top: gridCellContextMenu.top }}
+        >
+          <ContextMenuSection label="셀">
+            <ContextMenuItem label="셀 병합 영역 만들기" onClick={applyGridCellMergeAction} />
+          </ContextMenuSection>
         </div>
       ) : null}
       <input

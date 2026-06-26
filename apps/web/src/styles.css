@@ -793,10 +793,28 @@ button:disabled {
   height: var(--editor-border-hairline);
 }
 
+.grid-cell-hit-zone {
+  position: absolute;
+  z-index: 0;
+  pointer-events: auto;
+  box-sizing: border-box;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: context-menu;
+}
+
+.grid-cell-hit-zone:focus-visible {
+  outline: var(--editor-border-hairline) solid var(--editor-color-selection);
+  outline-offset: calc(var(--editor-border-hairline) * -1);
+}
+
 .grid-add-control,
 .grid-remove-control,
 .grid-track-header {
   position: absolute;
+  z-index: 2;
   pointer-events: auto;
   display: inline-flex;
   align-items: center;
@@ -835,6 +853,7 @@ button:disabled {
 
 .grid-resize-handle {
   position: absolute;
+  z-index: 3;
   pointer-events: auto;
   box-sizing: border-box;
   border: 0;
@@ -865,6 +884,7 @@ button:disabled {
 
 .grid-area-boundary-handle {
   position: absolute;
+  z-index: 4;
   pointer-events: auto;
   box-sizing: border-box;
   border: 0;
