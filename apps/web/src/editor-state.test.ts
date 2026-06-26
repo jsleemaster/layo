@@ -597,6 +597,45 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "text-1")?.size).toEqual({ width: 150, height: 40 });
   });
 
+  test("grid layout item self alignment overrides container stretch", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 320, height: 160 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 1,
+      align_items: "stretch",
+      justify_content: "start",
+      justify_items: "stretch",
+      gap: 0,
+      row_gap: 0,
+      column_gap: 0,
+      padding: { top: 10, right: 10, bottom: 10, left: 10 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 40, height: 40 };
+    text.layout_item = {
+      justify_self: "end",
+      align_self: "center",
+      margin: { top: 0, right: 0, bottom: 0, left: 0 }
+    };
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "text-1",
+      patch: { width: 40 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 120, y: 60 });
+    expect(findNodeById(relaid.document, "text-1")?.size).toEqual({ width: 40, height: 40 });
+    expect(findNodeById(relaid.document, "text-1")?.layout_item).toMatchObject({
+      justify_self: "end",
+      align_self: "center"
+    });
+  });
+
   test("grid layout respects manual child row and column placement", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

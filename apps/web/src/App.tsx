@@ -2791,6 +2791,14 @@ function Inspector({
         });
       }
     };
+  const updateLayoutItemSelfAlignment =
+    (key: "justify_self" | "align_self") => (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = event.currentTarget.value;
+      onLayoutItemChange(selectedNode.id, {
+        ...layoutItem,
+        [key]: value === "" ? undefined : value
+      } as NodeLayoutItem);
+    };
   const updateLayoutSizeLimit =
     (key: "min_width" | "max_width" | "min_height" | "max_height") =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -3257,6 +3265,34 @@ function Inspector({
         </label>
         {selectedParentUsesGrid ? (
           <div className="field-grid">
+            <label>
+              아이템 가로 정렬
+              <select
+                data-testid="inspector-layout-item-justify-self"
+                value={layoutItem.justify_self ?? ""}
+                onChange={updateLayoutItemSelfAlignment("justify_self")}
+              >
+                <option value="">상속</option>
+                <option value="start">시작</option>
+                <option value="center">가운데</option>
+                <option value="end">끝</option>
+                <option value="stretch">늘림</option>
+              </select>
+            </label>
+            <label>
+              아이템 세로 정렬
+              <select
+                data-testid="inspector-layout-item-align-self"
+                value={layoutItem.align_self ?? ""}
+                onChange={updateLayoutItemSelfAlignment("align_self")}
+              >
+                <option value="">상속</option>
+                <option value="start">시작</option>
+                <option value="center">가운데</option>
+                <option value="end">끝</option>
+                <option value="stretch">늘림</option>
+              </select>
+            </label>
             <label>
               그리드 영역
               <input

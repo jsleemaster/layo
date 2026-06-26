@@ -2,5 +2,6 @@
 import type { LayoutItemPosition } from "./LayoutItemPosition";
 import type { LayoutItemSizing } from "./LayoutItemSizing";
 import type { LayoutPadding } from "./LayoutPadding";
+import type { LayoutSelfAlignment } from "./LayoutSelfAlignment";
 
-export type NodeLayoutItem = { position?: LayoutItemPosition | null, width_sizing?: LayoutItemSizing, height_sizing?: LayoutItemSizing, min_width?: number | null, max_width?: number | null, min_height?: number | null, max_height?: number | null, grid_area?: string | null, grid_column?: number | null, grid_row?: number | null, grid_column_span?: number | null, grid_row_span?: number | null, margin: LayoutPadding, };
+export type NodeLayoutItem = { position?: LayoutItemPosition | null, width_sizing?: LayoutItemSizing, height_sizing?: LayoutItemSizing, justify_self?: LayoutSelfAlignment | null, align_self?: LayoutSelfAlignment | null, min_width?: number | null, max_width?: number | null, min_height?: number | null, max_height?: number | null, grid_area?: string | null, grid_column?: number | null, grid_row?: number | null, grid_column_span?: number | null, grid_row_span?: number | null, margin: LayoutPadding, };

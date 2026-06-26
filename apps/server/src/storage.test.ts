@@ -1558,6 +1558,54 @@ describe("FileStorage", () => {
     expect(text?.transform).toMatchObject({ x: 10, y: 10 });
     expect(text?.size).toEqual({ width: 150, height: 40 });
   });
+
+  test("agent commands apply grid item self alignment deterministically", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 320, height: 160 },
+        { type: "update_geometry", nodeId: "text-1", width: 40, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "grid",
+            direction: "horizontal",
+            grid_columns: 2,
+            grid_rows: 1,
+            align_items: "start",
+            justify_content: "start",
+            justify_items: "start",
+            gap: 0,
+            row_gap: 0,
+            column_gap: 0,
+            padding: { top: 10, right: 10, bottom: 10, left: 10 }
+          }
+        },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            justify_self: "stretch",
+            align_self: "stretch",
+            margin: { top: 0, right: 0, bottom: 0, left: 0 }
+          }
+        }
+      ] as any
+    });
+
+    const frame = result.preview.pages[0].children[0];
+    const text = frame.children.find((node) => node.id === "text-1");
+    expect(text?.layout_item).toMatchObject({
+      justify_self: "stretch",
+      align_self: "stretch"
+    });
+    expect(text?.transform).toMatchObject({ x: 10, y: 10 });
+    expect(text?.size).toEqual({ width: 150, height: 140 });
+  });
 });
 
 async function storageWithDocument(root: string) {

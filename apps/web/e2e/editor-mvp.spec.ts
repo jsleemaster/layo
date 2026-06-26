@@ -2456,6 +2456,39 @@ test("inspector grid justify items stretch expands child width", async ({ page }
   await expect(page.getByTestId("inspector-width")).toHaveValue("150");
 });
 
+test("inspector grid item self alignment overrides container stretch", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("320");
+  await page.getByTestId("inspector-height").fill("160");
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-grid-columns").fill("2");
+  await page.getByTestId("inspector-layout-grid-rows").fill("1");
+  await page.getByTestId("inspector-layout-align-items").selectOption("stretch");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-grid-justify-items").selectOption("stretch");
+  await page.getByTestId("inspector-layout-gap").fill("0");
+  await page.getByTestId("inspector-layout-row-gap").fill("0");
+  await page.getByTestId("inspector-layout-column-gap").fill("0");
+  await page.getByTestId("inspector-layout-padding-top").fill("10");
+  await page.getByTestId("inspector-layout-padding-right").fill("10");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("10");
+  await page.getByTestId("inspector-layout-padding-left").fill("10");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-layout-item-justify-self").selectOption("end");
+  await page.getByTestId("inspector-layout-item-align-self").selectOption("center");
+  await page.getByTestId("inspector-width").fill("40");
+  await page.getByTestId("inspector-height").fill("40");
+
+  await expect(page.getByTestId("inspector-layout-item-justify-self")).toHaveValue("end");
+  await expect(page.getByTestId("inspector-layout-item-align-self")).toHaveValue("center");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("120");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("60");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("40");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("40");
+});
+
 test("inspector grid item span stretches a child across multiple cells", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

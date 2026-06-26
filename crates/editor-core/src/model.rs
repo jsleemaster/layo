@@ -189,6 +189,16 @@ pub enum LayoutItemSizing {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LayoutSelfAlignment {
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct NodeLayoutItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -197,6 +207,10 @@ pub struct NodeLayoutItem {
     pub width_sizing: LayoutItemSizing,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
     pub height_sizing: LayoutItemSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub justify_self: Option<LayoutSelfAlignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align_self: Option<LayoutSelfAlignment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_width: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

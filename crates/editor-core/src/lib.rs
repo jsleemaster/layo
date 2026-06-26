@@ -10,7 +10,7 @@ pub use model::{
     ComponentDefinition, ComponentInstance, ComponentOverride, ComponentProperty, ComponentVariant,
     DesignFile, GridArea, GridTrack, GridTrackType, HorizontalConstraint, LayoutAlignContent, LayoutAlignItems,
     LayoutDirection, LayoutItemPosition, LayoutItemSizing, LayoutJustifyContent, LayoutJustifyItems, LayoutMode,
-    LayoutPadding, LayoutSizing, LayoutWrap,
+    LayoutPadding, LayoutSelfAlignment, LayoutSizing, LayoutWrap,
     Node, NodeConstraints, NodeContent, NodeKind, NodeLayout, NodeLayoutItem, Page, Style,
     VerticalConstraint,
 };

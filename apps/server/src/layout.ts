@@ -100,6 +100,8 @@ function relayoutGridChildren(node: DesignNode, layout: NodeLayout, flowChildren
 
   flowChildren.forEach((child) => {
     const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+    const justifySelf = layoutItem.justify_self ?? justifyItems;
+    const alignSelf = layoutItem.align_self ?? layout.align_items;
     const placement = manualPlacements.get(child.id) ?? { row: 0, column: 0, rowSpan: 1, columnSpan: 1 };
     const { row, column } = placement;
     const margin = layoutItem.margin;
@@ -108,17 +110,17 @@ function relayoutGridChildren(node: DesignNode, layout: NodeLayout, flowChildren
     const innerWidth = Math.max(0, placementWidth - margin.left - margin.right);
     const innerHeight = Math.max(0, placementHeight - margin.top - margin.bottom);
 
-    if (layoutItem.width_sizing === "fill" || justifyItems === "stretch") {
+    if (layoutItem.width_sizing === "fill" || justifySelf === "stretch") {
       child.size.width = clampLayoutItemWidth(child, innerWidth);
     }
-    if (layoutItem.height_sizing === "fill" || layout.align_items === "stretch") {
+    if (layoutItem.height_sizing === "fill" || alignSelf === "stretch") {
       child.size.height = clampLayoutItemHeight(child, innerHeight);
     }
 
     child.transform = {
       ...child.transform,
-      x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifyItems, innerWidth, child.size.width),
-      y: layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(layout.align_items, innerHeight, child.size.height)
+      x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifySelf, innerWidth, child.size.width),
+      y: layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
     };
   });
 }
@@ -584,6 +586,8 @@ export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutI
   const position = layoutItemPosition(layoutItem);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
+  const justifySelf = isLayoutSelfAlignment(layoutItem.justify_self) ? layoutItem.justify_self : undefined;
+  const alignSelf = isLayoutSelfAlignment(layoutItem.align_self) ? layoutItem.align_self : undefined;
   const minWidth = normalizeMinSizeLimit(layoutItem.min_width);
   const maxWidth = normalizeMaxSizeLimit(layoutItem.max_width, minWidth);
   const minHeight = normalizeMinSizeLimit(layoutItem.min_height);
@@ -597,6 +601,8 @@ export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutI
     ...(position === "absolute" ? { position } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
+    ...(justifySelf ? { justify_self: justifySelf } : {}),
+    ...(alignSelf ? { align_self: alignSelf } : {}),
     ...(minWidth !== undefined ? { min_width: minWidth } : {}),
     ...(maxWidth !== undefined ? { max_width: maxWidth } : {}),
     ...(minHeight !== undefined ? { min_height: minHeight } : {}),
@@ -954,6 +960,10 @@ function isLayoutJustifyContent(value: string): value is NodeLayout["justify_con
 }
 
 function isLayoutJustifyItems(value: string | undefined): value is NonNullable<NodeLayout["justify_items"]> {
+  return value === "start" || value === "center" || value === "end" || value === "stretch";
+}
+
+function isLayoutSelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["justify_self"]> {
   return value === "start" || value === "center" || value === "end" || value === "stretch";
 }
 

@@ -96,7 +96,7 @@ fn layout_metadata_round_trips_through_json() {
                   "kind": "rectangle",
                   "name": "Pinned Child",
                   "constraints": { "horizontal": "right", "vertical": "bottom" },
-                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "min_width": 120, "max_width": 180, "min_height": 80, "max_height": 120, "grid_area": "hero", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
+                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "justify_self": "end", "align_self": "center", "min_width": 120, "max_width": 180, "min_height": 80, "max_height": 120, "grid_area": "hero", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
                   "transform": { "x": 220, "y": 180, "rotation": 0 },
                   "size": { "width": 64, "height": 32 },
                   "style": { "fill": "#e0f2fe", "stroke": null, "stroke_width": 0, "opacity": 1 },
@@ -200,6 +200,14 @@ fn layout_metadata_round_trips_through_json() {
         child.layout_item.as_ref().unwrap().height_sizing,
         editor_core::LayoutItemSizing::Fill
     );
+    assert_eq!(
+        child.layout_item.as_ref().unwrap().justify_self.as_ref().unwrap(),
+        &editor_core::LayoutSelfAlignment::End
+    );
+    assert_eq!(
+        child.layout_item.as_ref().unwrap().align_self.as_ref().unwrap(),
+        &editor_core::LayoutSelfAlignment::Center
+    );
     assert_eq!(child.layout_item.as_ref().unwrap().min_width, Some(120.0));
     assert_eq!(child.layout_item.as_ref().unwrap().max_width, Some(180.0));
     assert_eq!(child.layout_item.as_ref().unwrap().min_height, Some(80.0));
@@ -235,6 +243,8 @@ fn layout_metadata_round_trips_through_json() {
     assert!(json.contains("\"grid_row_tracks\""));
     assert!(json.contains("\"grid_areas\""));
     assert!(json.contains("\"justify_items\":\"stretch\""));
+    assert!(json.contains("\"justify_self\":\"end\""));
+    assert!(json.contains("\"align_self\":\"center\""));
     assert!(json.contains("\"name\":\"hero\""));
     assert!(json.contains("\"grid_area\":\"hero\""));
     assert!(json.contains("\"type\":\"px\""));
