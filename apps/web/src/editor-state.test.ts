@@ -866,6 +866,195 @@ describe("editor state commands", () => {
     expect(deleted.history.past).toHaveLength(0);
   });
 
+  test("reorders a grid column with static children in one undoable command", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 420, height: 240 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 3,
+      grid_rows: 2,
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "px", value: 80 },
+        { type: "fr", value: 1 }
+      ],
+      grid_row_tracks: [
+        { type: "px", value: 90 },
+        { type: "fr", value: 1 }
+      ],
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      column_gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    for (const [id, fill] of [
+      ["reorder-column-rectangle-1", "#e0f2fe"],
+      ["reorder-column-rectangle-2", "#fde68a"],
+      ["reorder-column-rectangle-3", "#dcfce7"],
+      ["reorder-column-rectangle-4", "#fee2e2"]
+    ]) {
+      frame.children.push({
+        id,
+        kind: "rectangle",
+        name: id,
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 40 },
+        style: { fill, stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: []
+      });
+    }
+
+    const reordered = executeEditorCommand(createEditorState(document), {
+      type: "reorder_grid_track_with_children",
+      nodeId: "frame-1",
+      axis: "column",
+      fromIndex: 0,
+      toIndex: 2
+    });
+    const reorderedFrame = findNodeById(reordered.document, "frame-1");
+
+    expect(reorderedFrame?.layout).toMatchObject({
+      mode: "grid",
+      grid_columns: 3,
+      grid_column_tracks: [
+        { type: "px", value: 80 },
+        { type: "fr", value: 1 },
+        { type: "px", value: 120 }
+      ]
+    });
+    expect(findNodeById(reordered.document, "text-1")?.transform).toMatchObject({ x: 280, y: 20 });
+    expect(findNodeById(reordered.document, "reorder-column-rectangle-1")?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(findNodeById(reordered.document, "reorder-column-rectangle-2")?.transform).toMatchObject({ x: 110, y: 20 });
+    expect(findNodeById(reordered.document, "reorder-column-rectangle-3")?.transform).toMatchObject({ x: 280, y: 110 });
+    expect(findNodeById(reordered.document, "reorder-column-rectangle-4")?.transform).toMatchObject({ x: 20, y: 110 });
+    expect(findNodeById(reordered.document, "text-1")?.layout_item).toMatchObject({ grid_column: 3, grid_row: 1 });
+    expect(reordered.history.past).toHaveLength(1);
+
+    const restored = undo(reordered);
+    expect(findNodeById(restored.document, "frame-1")?.layout).toMatchObject({
+      mode: "grid",
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "px", value: 80 },
+        { type: "fr", value: 1 }
+      ]
+    });
+    expect(findNodeById(restored.document, "text-1")?.layout_item).toBeUndefined();
+  });
+
+  test("reorders a grid row with static children in one undoable command", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 300, height: 260 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 3,
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "fr", value: 1 }
+      ],
+      grid_row_tracks: [
+        { type: "px", value: 90 },
+        { type: "px", value: 40 },
+        { type: "fr", value: 1 }
+      ],
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      column_gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    for (const [id, fill] of [
+      ["reorder-row-rectangle-1", "#e0f2fe"],
+      ["reorder-row-rectangle-2", "#fde68a"],
+      ["reorder-row-rectangle-3", "#dcfce7"]
+    ]) {
+      frame.children.push({
+        id,
+        kind: "rectangle",
+        name: id,
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 40 },
+        style: { fill, stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "empty" },
+        children: []
+      });
+    }
+
+    const reordered = executeEditorCommand(createEditorState(document), {
+      type: "reorder_grid_track_with_children",
+      nodeId: "frame-1",
+      axis: "row",
+      fromIndex: 0,
+      toIndex: 2
+    });
+
+    expect(findNodeById(reordered.document, "frame-1")?.layout).toMatchObject({
+      mode: "grid",
+      grid_rows: 3,
+      grid_row_tracks: [
+        { type: "px", value: 40 },
+        { type: "fr", value: 1 },
+        { type: "px", value: 90 }
+      ]
+    });
+    expect(findNodeById(reordered.document, "text-1")?.transform).toMatchObject({ x: 20, y: 150 });
+    expect(findNodeById(reordered.document, "reorder-row-rectangle-1")?.transform).toMatchObject({ x: 150, y: 150 });
+    expect(findNodeById(reordered.document, "reorder-row-rectangle-2")?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(findNodeById(reordered.document, "reorder-row-rectangle-3")?.transform).toMatchObject({ x: 150, y: 20 });
+    expect(findNodeById(reordered.document, "text-1")?.layout_item).toMatchObject({ grid_column: 1, grid_row: 3 });
+  });
+
+  test("does not reorder a grid track when a moving child is locked", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 1,
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "px", value: 120 }
+      ],
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      column_gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.locked = true;
+
+    const reordered = executeEditorCommand(createEditorState(document), {
+      type: "reorder_grid_track_with_children",
+      nodeId: "frame-1",
+      axis: "column",
+      fromIndex: 0,
+      toIndex: 1
+    });
+
+    expect(findNodeById(reordered.document, "text-1")?.locked).toBe(true);
+    expect(findNodeById(reordered.document, "frame-1")?.layout).toMatchObject({
+      mode: "grid",
+      grid_column_tracks: [
+        { type: "px", value: 120 },
+        { type: "px", value: 120 }
+      ]
+    });
+    expect(reordered.history.past).toHaveLength(0);
+  });
+
   test("grid layout places a child into a named area", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

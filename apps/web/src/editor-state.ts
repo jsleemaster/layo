@@ -232,6 +232,14 @@ export type EditorCommand =
       previousNode?: RendererNode;
     }
   | {
+      type: "reorder_grid_track_with_children";
+      nodeId: string;
+      axis: "column" | "row";
+      fromIndex: number;
+      toIndex: number;
+      previousNode?: RendererNode;
+    }
+  | {
       type: "set_node_layout_item";
       nodeId: string;
       layoutItem: NodeLayoutItem | null;
@@ -1886,6 +1894,107 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         selectedNodeId: command.nodeId
       };
     }
+    case "reorder_grid_track_with_children": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node) || (node.kind !== "frame" && node.kind !== "component")) {
+        return { document, inverse: null };
+      }
+
+      if (command.previousNode) {
+        replaceNodeById(next, command.nodeId, structuredClone(command.previousNode));
+        relayoutDocument(next);
+        return {
+          document: next,
+          inverse: {
+            type: "reorder_grid_track_with_children",
+            nodeId: command.nodeId,
+            axis: command.axis,
+            fromIndex: command.fromIndex,
+            toIndex: command.toIndex
+          },
+          selectedNodeId: command.nodeId
+        };
+      }
+
+      const layout = normalizedFlowLayout(node.layout);
+      if (!layout || layout.mode !== "grid") {
+        return { document, inverse: null };
+      }
+
+      const flowChildren = node.children.filter((child) => layoutItemPosition(child.layout_item) === "static");
+      const placementPlan = gridPlacementPlan(layout, flowChildren);
+      const trackCount = command.axis === "column" ? placementPlan.columns : placementPlan.rows;
+      const fromIndex = Math.trunc(command.fromIndex);
+      const toIndex = Math.trunc(command.toIndex);
+      if (
+        trackCount <= 1 ||
+        fromIndex === toIndex ||
+        fromIndex < 0 ||
+        fromIndex >= trackCount ||
+        toIndex < 0 ||
+        toIndex >= trackCount
+      ) {
+        return { document, inverse: null };
+      }
+      if (!gridPlacementsCanReorder(placementPlan.placements, command.axis) || !gridAreasCanReorder(layout, command.axis)) {
+        return { document, inverse: null };
+      }
+      if (
+        flowChildren.some((child) => {
+          const placement = placementPlan.placements.get(child.id);
+          return placement ? isNodeLocked(child) && gridPlacementMoves(placement, command.axis, fromIndex, toIndex) : false;
+        })
+      ) {
+        return { document, inverse: null };
+      }
+
+      const previousNode = structuredClone(node);
+      const columnTracks = resolveGridTracks(layout.grid_column_tracks, placementPlan.columns);
+      const rowTracks = resolveGridTracks(layout.grid_row_tracks, placementPlan.rows);
+      const nextLayout = normalizeNodeLayout({
+        ...layout,
+        grid_columns: placementPlan.columns,
+        grid_rows: placementPlan.rows,
+        grid_column_tracks:
+          command.axis === "column" ? moveArrayItem(columnTracks, fromIndex, toIndex) : columnTracks,
+        grid_row_tracks: command.axis === "row" ? moveArrayItem(rowTracks, fromIndex, toIndex) : rowTracks,
+        grid_areas: moveGridAreas(layout, command.axis, fromIndex, toIndex)
+      });
+      node.layout = nextLayout;
+
+      for (const child of flowChildren) {
+        const placement = placementPlan.placements.get(child.id);
+        if (!placement) {
+          continue;
+        }
+        const nextColumn =
+          command.axis === "column" ? moveTrackIndex(placement.column, fromIndex, toIndex) : placement.column;
+        const nextRow = command.axis === "row" ? moveTrackIndex(placement.row, fromIndex, toIndex) : placement.row;
+        const currentLayoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+        child.layout_item = normalizeNodeLayoutItem({
+          ...currentLayoutItem,
+          grid_area: undefined,
+          grid_column: nextColumn + 1,
+          grid_row: nextRow + 1,
+          grid_column_span: placement.columnSpan,
+          grid_row_span: placement.rowSpan
+        });
+      }
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "reorder_grid_track_with_children",
+          nodeId: command.nodeId,
+          axis: command.axis,
+          fromIndex,
+          toIndex,
+          previousNode
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
     case "set_node_layout": {
       const node = findNodeById(next, command.nodeId);
       if (!node || isNodeLocked(node)) {
@@ -2103,6 +2212,80 @@ function gridPlacementIntersectsTrack(placement: GridPlacement, axis: "column" |
   return axis === "column"
     ? placement.column <= index && index < placement.column + placement.columnSpan
     : placement.row <= index && index < placement.row + placement.rowSpan;
+}
+
+function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+  const nextItems = [...items];
+  const [item] = nextItems.splice(fromIndex, 1);
+  if (item === undefined) {
+    return items;
+  }
+  nextItems.splice(toIndex, 0, item);
+  return nextItems;
+}
+
+function moveTrackIndex(index: number, fromIndex: number, toIndex: number): number {
+  if (index === fromIndex) {
+    return toIndex;
+  }
+  if (fromIndex < toIndex && index > fromIndex && index <= toIndex) {
+    return index - 1;
+  }
+  if (fromIndex > toIndex && index >= toIndex && index < fromIndex) {
+    return index + 1;
+  }
+  return index;
+}
+
+function gridPlacementMoves(
+  placement: GridPlacement,
+  axis: "column" | "row",
+  fromIndex: number,
+  toIndex: number
+): boolean {
+  const currentIndex = axis === "column" ? placement.column : placement.row;
+  return moveTrackIndex(currentIndex, fromIndex, toIndex) !== currentIndex;
+}
+
+function gridPlacementsCanReorder(
+  placements: Map<string, GridPlacement>,
+  axis: "column" | "row"
+): boolean {
+  return [...placements.values()].every((placement) =>
+    axis === "column" ? placement.columnSpan === 1 : placement.rowSpan === 1
+  );
+}
+
+function gridAreasCanReorder(layout: NodeLayout, axis: "column" | "row"): boolean {
+  return (layout.grid_areas ?? []).every((area) =>
+    axis === "column"
+      ? normalizeGridSpan(area.column_span) === undefined || normalizeGridSpan(area.column_span) === 1
+      : normalizeGridSpan(area.row_span) === undefined || normalizeGridSpan(area.row_span) === 1
+  );
+}
+
+function moveGridAreas(
+  layout: NodeLayout,
+  axis: "column" | "row",
+  fromIndex: number,
+  toIndex: number
+): GridArea[] | undefined {
+  const areas = layout.grid_areas ?? [];
+  if (!areas.length) {
+    return undefined;
+  }
+  const columns = gridTrackCount(layout.grid_column_tracks, layout.grid_columns, 2);
+  const rows = gridTrackCount(layout.grid_row_tracks, layout.grid_rows, 2);
+  return areas.map((area) => {
+    const normalizedArea = normalizeGridArea(area, columns, rows);
+    if (!normalizedArea) {
+      return area;
+    }
+    if (axis === "column") {
+      return { ...normalizedArea, column: moveTrackIndex(normalizedArea.column - 1, fromIndex, toIndex) + 1 };
+    }
+    return { ...normalizedArea, row: moveTrackIndex(normalizedArea.row - 1, fromIndex, toIndex) + 1 };
+  });
 }
 
 function relayoutSingleLineChildren(

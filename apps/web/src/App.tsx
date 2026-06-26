@@ -556,6 +556,7 @@ interface GridViewportHeaderControl {
 }
 
 interface GridViewportOverlay {
+  nodeId: string;
   lines: GridViewportLine[];
   handles: GridViewportHandle[];
   addControls: GridViewportAddControl[];
@@ -573,6 +574,12 @@ interface ObjectContextMenuState {
 interface GridTrackContextMenuState {
   left: number;
   top: number;
+  nodeId: string;
+  axis: "column" | "row";
+  index: number;
+}
+
+interface GridTrackDragState {
   nodeId: string;
   axis: "column" | "row";
   index: number;
@@ -1378,7 +1385,7 @@ function createGridViewportOverlay(
     }
   });
 
-  return { lines, handles, addControls, removeControls, headerControls };
+  return { nodeId: frame.id, lines, handles, addControls, removeControls, headerControls };
 }
 
 function addFrameSpacingSegment(
@@ -2970,6 +2977,7 @@ export function App() {
   const resizeSessionRef = useRef<ResizeSession | null>(null);
   const gridResizeSessionRef = useRef<GridResizeSession | null>(null);
   const gridResizeClientPointRef = useRef<{ x: number; y: number } | null>(null);
+  const gridTrackDragRef = useRef<GridTrackDragState | null>(null);
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
   const panSessionRef = useRef<{
@@ -4665,6 +4673,78 @@ export function App() {
     });
   };
 
+  const startGridTrackReorderFromHeader = (
+    control: GridViewportHeaderControl,
+    event: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    event.stopPropagation();
+    if (event.button !== 0) {
+      return;
+    }
+    if (!editor || !selectedNode || selectedNode.id !== editor.selection.nodeId) {
+      return;
+    }
+
+    event.preventDefault();
+    setInlineTextEditingNodeId(null);
+    setMeasurementTargetNodeId(null);
+    setObjectContextMenu(null);
+    setGridTrackContextMenu(null);
+    gridTrackDragRef.current = {
+      nodeId: selectedNode.id,
+      axis: control.axis,
+      index: control.index
+    };
+    document.body.style.cursor = "grabbing";
+  };
+
+  useEffect(() => {
+    const stopGridTrackReorder = (event: MouseEvent) => {
+      const session = gridTrackDragRef.current;
+      if (!session) {
+        return;
+      }
+
+      gridTrackDragRef.current = null;
+      document.body.style.cursor = "";
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      const targetHeader =
+        target instanceof Element ? target.closest<HTMLElement>('[data-grid-track-header="true"]') : null;
+      const targetNodeId = targetHeader?.dataset.gridTrackNodeId;
+      const targetAxis = targetHeader?.dataset.gridTrackAxis;
+      const targetIndex = Number(targetHeader?.dataset.gridTrackIndex);
+      if (
+        targetNodeId !== session.nodeId ||
+        targetAxis !== session.axis ||
+        !Number.isInteger(targetIndex) ||
+        targetIndex === session.index
+      ) {
+        return;
+      }
+
+      dispatch({
+        type: "reorder_grid_track_with_children",
+        nodeId: session.nodeId,
+        axis: session.axis,
+        fromIndex: session.index,
+        toIndex: targetIndex
+      });
+    };
+
+    const cancelGridTrackReorder = () => {
+      gridTrackDragRef.current = null;
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mouseup", stopGridTrackReorder);
+    window.addEventListener("blur", cancelGridTrackReorder);
+    return () => {
+      window.removeEventListener("mouseup", stopGridTrackReorder);
+      window.removeEventListener("blur", cancelGridTrackReorder);
+      cancelGridTrackReorder();
+    };
+  }, [dispatch]);
+
   const layoutForGridTrackContextAction = (
     state: EditorState,
     menu: GridTrackContextMenuState,
@@ -6283,11 +6363,15 @@ export function App() {
                     data-testid={control.testId}
                     aria-label={control.title}
                     title={control.title}
+                    data-grid-track-header="true"
+                    data-grid-track-node-id={gridViewportOverlay.nodeId}
+                    data-grid-track-axis={control.axis}
+                    data-grid-track-index={control.index}
                     style={{
                       left: control.left,
                       top: control.top
                     }}
-                    onMouseDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => startGridTrackReorderFromHeader(control, event)}
                     onContextMenu={(event) => openGridTrackContextMenuFromHeader(control, event)}
                   >
                     {control.label}
