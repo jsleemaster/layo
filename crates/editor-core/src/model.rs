@@ -9,8 +9,27 @@ pub struct DesignFile {
     pub name: String,
     pub version: u32,
     #[serde(default)]
+    pub tokens: Vec<DesignToken>,
+    #[serde(default)]
     pub components: Vec<ComponentDefinition>,
     pub pages: Vec<Page>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct DesignToken {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub token_type: DesignTokenType,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DesignTokenType {
+    Color,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -394,6 +413,8 @@ pub enum NodeKind {
 #[ts(export)]
 pub struct Style {
     pub fill: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_token: Option<String>,
     pub stroke: Option<String>,
     pub stroke_width: f64,
     pub opacity: f64,
@@ -426,6 +447,7 @@ impl DesignFile {
             id: "sample-file".to_string(),
             name: "샘플 파일".to_string(),
             version: 1,
+            tokens: vec![],
             components: vec![],
             pages: vec![Page {
                 id: "page-1".to_string(),
@@ -462,6 +484,7 @@ impl DesignFile {
                         },
                         style: Style {
                             fill: "#111827".to_string(),
+                            fill_token: None,
                             stroke: None,
                             stroke_width: 0.0,
                             opacity: 1.0,
@@ -483,6 +506,7 @@ impl DesignFile {
                     },
                     style: Style {
                         fill: "#ffffff".to_string(),
+                        fill_token: None,
                         stroke: Some("#d1d5db".to_string()),
                         stroke_width: 1.0,
                         opacity: 1.0,

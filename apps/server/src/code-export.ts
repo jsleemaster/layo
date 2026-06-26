@@ -1,6 +1,7 @@
 import type {
   ComponentDefinition,
   DesignFile,
+  DesignToken,
   DesignNode,
   NodeConstraints,
   NodeLayout,
@@ -44,6 +45,7 @@ export interface CodeStructureNode {
   };
   style: {
     fill: string;
+    fillToken?: string;
     stroke: string | null;
     strokeWidth: number;
     opacity: number;
@@ -92,9 +94,14 @@ export interface TokenCandidateSummary {
   spacings: number[];
 }
 
+export interface TokenExportSummary {
+  colors: DesignToken[];
+}
+
 export interface CodeImplementationSpec {
   elements: ElementCodeArtifact[];
   components: ComponentImplementationArtifact[];
+  tokens: TokenExportSummary;
   tokenCandidates: TokenCandidateSummary;
 }
 
@@ -103,25 +110,31 @@ export function exportDesignToCode(
   options: CodeExportOptions = {}
 ): CodeExportResult {
   const roots = document.pages.flatMap((page) => page.children).filter(isNodeExportVisible);
-  const elements = roots.map((root) => exportElement(root));
+  const colorTokens = documentColorTokens(document);
+  const tokenMap = new Map(colorTokens.map((token) => [token.id, token]));
+  const elements = roots.map((root) => exportElement(root, tokenMap));
   const moduleBasePath = options.moduleBasePath ?? ".";
-  const components = (document.components ?? []).map((component) => exportComponent(component));
+  const components = (document.components ?? []).map((component) => exportComponent(component, tokenMap));
 
   return {
     css: [
       ".canvas-export-root {",
+      ...colorTokens.map((token) => `  --${cssTokenName(token.id)}: ${token.value};`),
       "  position: relative;",
       "  width: 100%;",
       "  min-height: 100vh;",
       "  font-family: Arial, sans-serif;",
       "}",
-      ...roots.flatMap((root) => nodeCss(root))
+      ...roots.flatMap((root) => nodeCss(root, tokenMap))
     ].join("\n"),
     html: `<div class="canvas-export-root">\n${roots.map((root) => renderNode(root, 1)).join("\n")}\n</div>`,
     elements,
     implementationSpec: {
       elements,
       components,
+      tokens: {
+        colors: colorTokens
+      },
       tokenCandidates: collectTokenCandidates([
         ...roots,
         ...(document.components ?? []).map((component) => component.source_node)
@@ -131,11 +144,11 @@ export function exportDesignToCode(
   };
 }
 
-function exportElement(root: DesignNode): ElementCodeArtifact {
+function exportElement(root: DesignNode, tokenMap: Map<string, DesignToken>): ElementCodeArtifact {
   const className = classNameFor(root.id);
-  const css = nodeCss(root).join("\n");
+  const css = nodeCss(root, tokenMap).join("\n");
   const html = renderNode(root, 0);
-  const structure = structureFor(root);
+  const structure = structureFor(root, tokenMap);
   const implementation = implementationFor(root);
 
   return {
@@ -165,12 +178,15 @@ function exportElement(root: DesignNode): ElementCodeArtifact {
   };
 }
 
-function exportComponent(component: ComponentDefinition): ComponentImplementationArtifact {
+function exportComponent(
+  component: ComponentDefinition,
+  tokenMap: Map<string, DesignToken>
+): ComponentImplementationArtifact {
   return {
     id: component.id,
     name: component.name,
     sourceNodeId: component.source_node.id,
-    structure: structureFor(component.source_node),
+    structure: structureFor(component.source_node, tokenMap),
     implementation: implementationFor(component.source_node, component.name),
     variants: component.variants.map((variant) => ({
       id: variant.id,
@@ -183,7 +199,7 @@ function exportComponent(component: ComponentDefinition): ComponentImplementatio
   };
 }
 
-function structureFor(node: DesignNode): CodeStructureNode {
+function structureFor(node: DesignNode, tokenMap: Map<string, DesignToken>): CodeStructureNode {
   const base: CodeStructureNode = {
     id: node.id,
     name: node.name,
@@ -197,13 +213,14 @@ function structureFor(node: DesignNode): CodeStructureNode {
       rotation: node.transform.rotation
     },
     style: {
-      fill: node.style.fill,
+      fill: resolvedFill(node, tokenMap),
+      ...(node.style.fill_token ? { fillToken: node.style.fill_token } : {}),
       stroke: node.style.stroke,
       strokeWidth: node.style.stroke_width,
       opacity: node.style.opacity
     },
     content: contentFor(node),
-    children: node.children.filter(isNodeExportVisible).map((child) => structureFor(child))
+    children: node.children.filter(isNodeExportVisible).map((child) => structureFor(child, tokenMap))
   };
 
   if (node.component_instance) {
@@ -345,7 +362,7 @@ function renderNode(node: DesignNode, depth: number): string {
   return `${indent}<div class="${className}" data-node-id="${escapeAttribute(node.id)}">\n${children}\n${indent}</div>`;
 }
 
-function nodeCss(node: DesignNode): string[] {
+function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[] {
   const className = classNameFor(node.id);
   const lines = [
     `.${className} {`,
@@ -362,13 +379,13 @@ function nodeCss(node: DesignNode): string[] {
   }
 
   if (node.kind === "text" && node.content.type === "text") {
-    lines.push(`  color: ${node.style.fill};`);
+    lines.push(`  color: ${cssFillValue(node, tokenMap)};`);
     lines.push(`  font-family: ${fontFamily(node.content.font_family)};`);
     lines.push(`  font-size: ${formatPx(node.content.font_size)};`);
     lines.push("  line-height: 1.25;");
     lines.push("  white-space: pre-wrap;");
   } else {
-    lines.push(`  background-color: ${node.style.fill};`);
+    lines.push(`  background-color: ${cssFillValue(node, tokenMap)};`);
     if (node.style.stroke) {
       lines.push(`  border: ${formatPx(node.style.stroke_width)} solid ${node.style.stroke};`);
     }
@@ -376,7 +393,28 @@ function nodeCss(node: DesignNode): string[] {
 
   lines.push("}");
 
-  return [...lines, ...node.children.filter(isNodeExportVisible).flatMap((child) => nodeCss(child))];
+  return [...lines, ...node.children.filter(isNodeExportVisible).flatMap((child) => nodeCss(child, tokenMap))];
+}
+
+function documentColorTokens(document: DesignFile): DesignToken[] {
+  return (document.tokens ?? []).filter((token) => token.type === "color");
+}
+
+function resolvedFill(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
+  const token = node.style.fill_token ? tokenMap.get(node.style.fill_token) : undefined;
+  return token?.value ?? node.style.fill;
+}
+
+function cssFillValue(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
+  const token = node.style.fill_token ? tokenMap.get(node.style.fill_token) : undefined;
+  if (!token) {
+    return node.style.fill;
+  }
+  return `var(--${cssTokenName(token.id)}, ${token.value})`;
+}
+
+function cssTokenName(tokenId: string): string {
+  return `layo-token-${tokenId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
 function buildIndexModule(elements: ElementCodeArtifact[], moduleBasePath: string): string {

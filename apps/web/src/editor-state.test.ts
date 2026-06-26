@@ -210,6 +210,40 @@ describe("editor state commands", () => {
     });
   });
 
+  test("applies fill token bindings with undo and redo support", () => {
+    const document = sampleDocument() as any;
+    document.tokens = [
+      {
+        id: "color-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#2563eb"
+      }
+    ];
+    const initial = createEditorState(document);
+
+    const bound = executeEditorCommand(initial, {
+      type: "set_fill_token",
+      nodeId: "text-1",
+      tokenId: "color-brand-primary"
+    } as any);
+
+    expect(findNodeById(bound.document, "text-1")?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_token: "color-brand-primary"
+    });
+    expect(findNodeById(undo(bound).document, "text-1")?.style).toEqual({
+      fill: "#111827",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1
+    });
+    expect(findNodeById(redo(undo(bound)).document, "text-1")?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_token: "color-brand-primary"
+    });
+  });
+
   test("creates nodes on the first page and selects the created node", () => {
     const initial = createEditorState(sampleDocument());
 

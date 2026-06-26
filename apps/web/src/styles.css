@@ -1194,6 +1194,16 @@ button:disabled {
   margin-top: var(--editor-space-md);
 }
 
+.inspector-token-readout {
+  display: flex;
+  align-items: center;
+  min-height: var(--editor-space-lg);
+  margin-top: var(--editor-space-xs);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
 .inspector-section {
   display: grid;
   gap: var(--editor-space-sm);

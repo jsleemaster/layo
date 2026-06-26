@@ -408,6 +408,46 @@ describe("FileStorage", () => {
     expect(text.content).toMatchObject({ type: "text", value: "저장된 헤드라인" });
   });
 
+  test("agent commands create color tokens and bind node fills", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        {
+          type: "create_token",
+          token: {
+            id: "color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_token", nodeId: "text-1", tokenId: "color-brand-primary" }
+      ] as any
+    });
+    const persisted = await storage.readFile("sample-file");
+    const frame = result.preview.pages[0].children[0];
+    const text = frame.children.find((node) => node.id === "text-1");
+
+    expect(result.preview.tokens).toEqual([
+      {
+        id: "color-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#2563eb"
+      }
+    ]);
+    expect(text?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_token: "color-brand-primary"
+    });
+    expect(result.validation.issueCount).toBe(0);
+    expect(result.audit.commandTypes).toEqual(["create_token", "set_fill_token"]);
+    expect(JSON.stringify(persisted)).not.toContain("color-brand-primary");
+  });
+
   test("creates a node under a page parent", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

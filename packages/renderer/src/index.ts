@@ -82,6 +82,7 @@ export interface RendererNode {
   size: { width: number; height: number };
   style: {
     fill: string;
+    fill_token?: string | null;
     stroke: string | null;
     stroke_width: number;
     opacity: number;
@@ -118,9 +119,17 @@ export interface ComponentInstance {
   detached: boolean;
 }
 
+export interface DesignToken {
+  id: string;
+  name: string;
+  type: "color";
+  value: string;
+}
+
 export interface RendererDocument {
   id: string;
   name: string;
+  tokens?: DesignToken[];
   components?: ComponentDefinition[];
   pages: Array<{ id: string; name: string; children: RendererNode[] }>;
 }

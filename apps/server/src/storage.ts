@@ -117,6 +117,7 @@ export interface DesignNode {
   size: { width: number; height: number };
   style: {
     fill: string;
+    fill_token?: string | null;
     stroke: string | null;
     stroke_width: number;
     opacity: number;
@@ -147,10 +148,18 @@ export interface ComponentInstance {
   detached: boolean;
 }
 
+export interface DesignToken {
+  id: string;
+  name: string;
+  type: "color";
+  value: string;
+}
+
 export interface DesignFile {
   id: string;
   name: string;
   version?: number;
+  tokens?: DesignToken[];
   components?: ComponentDefinition[];
   pages: Array<{ id: string; name: string; children: DesignNode[] }>;
 }
@@ -593,7 +602,7 @@ export class FileStorage {
       throw new Error(`node not found: ${nodeId}`);
     }
 
-    node.style = { ...node.style, fill };
+    node.style = { ...node.style, fill, fill_token: null };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
     return node;
