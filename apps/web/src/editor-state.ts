@@ -2171,7 +2171,7 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
   const columnStarts = gridTrackStarts(columnSizes, columnGap);
   const rowStarts = gridTrackStarts(rowSizes, rowGap);
 
-  flowChildren.forEach((child) => {
+  const entries = flowChildren.map((child) => {
     const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
     const justifySelf = layoutItem.justify_self ?? justifyItems;
     const alignSelf = layoutItem.align_self ?? layout.align_items;
@@ -2182,20 +2182,39 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
     const placementHeight = gridPlacementTrackSize(rowSizes, row, placement.rowSpan, rowGap);
     const innerWidth = Math.max(0, placementWidth - margin.left - margin.right);
     const innerHeight = Math.max(0, placementHeight - margin.top - margin.bottom);
+    return { child, layoutItem, justifySelf, alignSelf, placement, row, column, margin, innerWidth, innerHeight };
+  });
 
+  for (const entry of entries) {
+    const { child, layoutItem, justifySelf, alignSelf, innerWidth, innerHeight } = entry;
     if (layoutItem.width_sizing === "fill" || justifySelf === "stretch") {
       child.size.width = clampLayoutItemWidth(child, innerWidth);
     }
     if (layoutItem.height_sizing === "fill" || alignSelf === "stretch") {
       child.size.height = clampLayoutItemHeight(child, innerHeight);
     }
+  }
 
+  const rowBaselines = new Map<number, number>();
+  for (const entry of entries) {
+    if (entry.alignSelf === "baseline") {
+      const baseline = entry.margin.top + nodeBaselineOffset(entry.child);
+      rowBaselines.set(entry.row, Math.max(rowBaselines.get(entry.row) ?? 0, baseline));
+    }
+  }
+
+  for (const entry of entries) {
+    const { child, justifySelf, alignSelf, row, column, margin, innerWidth, innerHeight } = entry;
+    const rowBaseline = alignSelf === "baseline" ? rowBaselines.get(row) : undefined;
     child.transform = {
       ...child.transform,
       x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifySelf, innerWidth, child.size.width),
-      y: layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
+      y:
+        rowBaseline === undefined
+          ? layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
+          : layout.padding.top + rowStarts[row] + rowBaseline - nodeBaselineOffset(child)
     };
-  });
+  }
 }
 
 function gridPlacementPlan(layout: NodeLayout, flowChildren: RendererNode[]): GridPlacementPlan {
