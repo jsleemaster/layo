@@ -1707,6 +1707,87 @@ describe("FileStorage", () => {
     expect(title?.transform).toMatchObject({ x: 20, y: 20 });
     expect(caption?.transform).toMatchObject({ x: 150, y: 29 });
   });
+
+  test("agent commands apply wrapped flex baseline alignment per line", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 240, height: 180 },
+        { type: "update_geometry", nodeId: "text-1", width: 90, height: 48 },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "caption-1",
+          name: "캡션",
+          value: "Caption",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 24,
+          fill: "#374151",
+          fontSize: 16,
+          fontFamily: "Inter"
+        },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "label-1",
+          name: "라벨",
+          value: "Label",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 24,
+          fill: "#374151",
+          fontSize: 16,
+          fontFamily: "Inter"
+        },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "subtitle-1",
+          name: "서브타이틀",
+          value: "Sub",
+          x: 0,
+          y: 0,
+          width: 90,
+          height: 48,
+          fill: "#111827",
+          fontSize: 32,
+          fontFamily: "Inter"
+        },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "horizontal",
+            wrap: "wrap",
+            align_content: "start",
+            align_items: "baseline",
+            justify_content: "start",
+            gap: 10,
+            row_gap: 12,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        }
+      ] as any
+    });
+
+    const frame = result.preview.pages[0].children[0];
+    const title = frame.children.find((node) => node.id === "text-1");
+    const caption = frame.children.find((node) => node.id === "caption-1");
+    const label = frame.children.find((node) => node.id === "label-1");
+    const subtitle = frame.children.find((node) => node.id === "subtitle-1");
+    expect(frame.layout).toMatchObject({ mode: "auto", wrap: "wrap", align_items: "baseline" });
+    expect(title?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 120, y: 29 });
+    expect(label?.transform).toMatchObject({ x: 20, y: 93 });
+    expect(subtitle?.transform).toMatchObject({ x: 110, y: 80 });
+  });
 });
 
 async function storageWithDocument(root: string) {

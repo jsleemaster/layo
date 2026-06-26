@@ -2544,6 +2544,107 @@ test("inspector auto layout baseline aligns mixed text baselines", async ({ page
   await expect(page.getByTestId("inspector-y")).toHaveValue("29");
 });
 
+test("inspector wrapped auto layout baseline aligns each row", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "caption-1",
+          name: "캡션",
+          value: "Caption",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 24,
+          fill: "#374151",
+          fontSize: 16,
+          fontFamily: "Inter"
+        },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "label-1",
+          name: "라벨",
+          value: "Label",
+          x: 0,
+          y: 0,
+          width: 80,
+          height: 24,
+          fill: "#374151",
+          fontSize: 16,
+          fontFamily: "Inter"
+        },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "subtitle-1",
+          name: "서브타이틀",
+          value: "Sub",
+          x: 0,
+          y: 0,
+          width: 90,
+          height: 48,
+          fill: "#111827",
+          fontSize: 32,
+          fontFamily: "Inter"
+        }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("240");
+  await page.getByTestId("inspector-height").fill("180");
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-wrap").selectOption("wrap");
+  await page.getByTestId("inspector-layout-align-content").selectOption("start");
+  await page.getByTestId("inspector-layout-align-items").selectOption("baseline");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("10");
+  await page.getByTestId("inspector-layout-row-gap").fill("12");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("20");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("20");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("90");
+  await page.getByTestId("inspector-height").fill("48");
+  await page.getByRole("button", { name: "캡션" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("24");
+  await page.getByRole("button", { name: "라벨" }).click();
+  await page.getByTestId("inspector-width").fill("80");
+  await page.getByTestId("inspector-height").fill("24");
+  await page.getByRole("button", { name: "서브타이틀" }).click();
+  await page.getByTestId("inspector-width").fill("90");
+  await page.getByTestId("inspector-height").fill("48");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-layout-wrap")).toHaveValue("wrap");
+  await expect(page.getByTestId("inspector-layout-align-items")).toHaveValue("baseline");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+  await page.getByRole("button", { name: "캡션" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("120");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("29");
+  await page.getByRole("button", { name: "라벨" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("20");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("93");
+  await page.getByRole("button", { name: "서브타이틀" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("110");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("80");
+});
+
 test("inspector grid item span stretches a child across multiple cells", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
