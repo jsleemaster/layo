@@ -600,6 +600,54 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "track-grid-rectangle-3")?.transform).toMatchObject({ x: 20, y: 110 });
   });
 
+  test("grid layout places a child into a named area", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 390, height: 220 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 3,
+      grid_rows: 2,
+      grid_areas: [{ name: "hero", column: 2, row: 1, column_span: 2, row_span: 2 }],
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 10,
+      column_gap: 12,
+      padding: { top: 20, right: 15, bottom: 20, left: 15 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 80, height: 40 };
+    text.layout_item = {
+      grid_area: "hero",
+      width_sizing: "fill",
+      height_sizing: "fill",
+      margin: { top: 5, right: 6, bottom: 7, left: 8 }
+    };
+    frame.children.push({
+      id: "area-grid-rectangle-1",
+      kind: "rectangle",
+      name: "Area grid rectangle 1",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 40 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "area-grid-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(relaid.document, "text-1")?.layout_item).toMatchObject({ grid_area: "hero" });
+    expect(findNodeById(relaid.document, "text-1")?.transform).toMatchObject({ x: 147, y: 25 });
+    expect(findNodeById(relaid.document, "text-1")?.size).toEqual({ width: 222, height: 168 });
+    expect(findNodeById(relaid.document, "area-grid-rectangle-1")?.transform).toMatchObject({ x: 15, y: 20 });
+  });
+
   test("auto layout includes child margins in flow and cross-axis position", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

@@ -120,7 +120,19 @@ pub struct NodeLayout {
     pub grid_column_tracks: Option<Vec<GridTrack>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_row_tracks: Option<Vec<GridTrack>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_areas: Option<Vec<GridArea>>,
     pub padding: LayoutPadding,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct GridArea {
+    pub name: String,
+    pub column: u32,
+    pub row: u32,
+    pub column_span: u32,
+    pub row_span: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -175,6 +187,8 @@ pub struct NodeLayoutItem {
     pub width_sizing: LayoutItemSizing,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
     pub height_sizing: LayoutItemSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_area: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_column: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

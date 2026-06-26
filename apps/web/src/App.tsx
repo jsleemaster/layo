@@ -13,6 +13,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type GridArea,
   type GridTrack,
   type ImageFitMode,
   type NodeConstraints,
@@ -170,6 +171,49 @@ function parseGridTrackToken(token: string): GridTrack | null {
     return { type: "px", value: Math.max(0, value) };
   }
   return { type: "fr", value: Math.max(0.0001, value) };
+}
+
+function gridAreaInputValue(areas: GridArea[] | undefined) {
+  return (areas ?? [])
+    .map((area) =>
+      `${area.name}:${numericInputValue(area.column)}/${numericInputValue(area.row)}/${numericInputValue(area.column_span)}/${numericInputValue(area.row_span)}`
+    )
+    .join(", ");
+}
+
+function parseGridAreaInput(value: string): GridArea[] | null {
+  const tokens = value.split(",").map((token) => token.trim()).filter(Boolean);
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  const areas = tokens.map(parseGridAreaToken);
+  return areas.every((area): area is GridArea => area !== null) ? areas : null;
+}
+
+function parseGridAreaToken(token: string): GridArea | null {
+  const match = token.match(/^([^:]+):(\d+)\/(\d+)\/(\d+)\/(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, rawName, rawColumn, rawRow, rawColumnSpan, rawRowSpan] = match;
+  const name = rawName.trim();
+  const column = Number(rawColumn);
+  const row = Number(rawRow);
+  const columnSpan = Number(rawColumnSpan);
+  const rowSpan = Number(rawRowSpan);
+  if (!name || ![column, row, columnSpan, rowSpan].every(Number.isFinite)) {
+    return null;
+  }
+
+  return {
+    name,
+    column: Math.max(1, Math.round(column)),
+    row: Math.max(1, Math.round(row)),
+    column_span: Math.max(1, Math.round(columnSpan)),
+    row_span: Math.max(1, Math.round(rowSpan))
+  };
 }
 
 const OBJECT_CONTEXT_MENU_MARGIN = 8;
@@ -2023,6 +2067,22 @@ function Inspector({
             </label>
           </div>
         ) : null}
+        {layout.mode === "grid" ? (
+          <label className="stacked-field">
+            영역
+            <input
+              data-testid="inspector-layout-grid-areas"
+              placeholder="hero:2/1/2/2"
+              value={gridAreaInputValue(layout.grid_areas)}
+              onChange={(event) => {
+                const nextAreas = parseGridAreaInput(event.currentTarget.value);
+                if (nextAreas) {
+                  updateLayout({ grid_areas: nextAreas });
+                }
+              }}
+            />
+          </label>
+        ) : null}
         <label className="stacked-field">
           방향
           <select
@@ -2222,6 +2282,20 @@ function Inspector({
         </label>
         {selectedParentUsesGrid ? (
           <div className="field-grid">
+            <label>
+              그리드 영역
+              <input
+                data-testid="inspector-layout-item-grid-area"
+                value={layoutItem.grid_area ?? ""}
+                onChange={(event) => {
+                  const gridArea = event.currentTarget.value.trim();
+                  onLayoutItemChange(selectedNode.id, {
+                    ...layoutItem,
+                    grid_area: gridArea || undefined
+                  });
+                }}
+              />
+            </label>
             <label>
               그리드 열 위치
               <input

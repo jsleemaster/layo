@@ -24,6 +24,14 @@ const gridTrackSchema = z.object({
   value: z.number().optional()
 });
 
+const gridAreaSchema = z.object({
+  name: z.string(),
+  column: z.number(),
+  row: z.number(),
+  column_span: z.number(),
+  row_span: z.number()
+});
+
 const nodeLayoutSchema = z.object({
   mode: z.enum(["none", "auto", "grid"]),
   direction: z.enum(["horizontal", "vertical"]),
@@ -40,6 +48,7 @@ const nodeLayoutSchema = z.object({
   grid_rows: z.number().optional(),
   grid_column_tracks: z.array(gridTrackSchema).optional(),
   grid_row_tracks: z.array(gridTrackSchema).optional(),
+  grid_areas: z.array(gridAreaSchema).optional(),
   padding: z.object({
     top: z.number(),
     right: z.number(),
@@ -52,6 +61,7 @@ const nodeLayoutItemSchema = z.object({
   position: z.enum(["static", "absolute"]).optional(),
   width_sizing: z.enum(["fixed", "fill"]).optional(),
   height_sizing: z.enum(["fixed", "fill"]).optional(),
+  grid_area: z.string().optional(),
   grid_column: z.number().optional(),
   grid_row: z.number().optional(),
   grid_column_span: z.number().optional(),

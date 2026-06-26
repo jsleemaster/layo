@@ -1219,6 +1219,64 @@ describe("FileStorage", () => {
       y: 110
     });
 
+    const areaGridLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 390, height: 220 },
+        { type: "update_geometry", nodeId: "text-1", width: 80, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "grid",
+            direction: "horizontal",
+            grid_columns: 3,
+            grid_rows: 2,
+            grid_areas: [{ name: "hero", column: 2, row: 1, column_span: 2, row_span: 2 }],
+            align_items: "start",
+            justify_content: "start",
+            gap: 0,
+            row_gap: 10,
+            column_gap: 12,
+            padding: { top: 20, right: 15, bottom: 20, left: 15 }
+          }
+        },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            grid_area: "hero",
+            width_sizing: "fill",
+            height_sizing: "fill",
+            margin: { top: 5, right: 6, bottom: 7, left: 8 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "area-grid-rectangle-1",
+          name: "영역 그리드 사각형 1",
+          width: 80,
+          height: 40
+        }
+      ] as any
+    });
+
+    const areaGridFrame = areaGridLayout.preview.pages[0].children[0];
+    expect(areaGridFrame.layout).toMatchObject({
+      mode: "grid",
+      grid_areas: [{ name: "hero", column: 2, row: 1, column_span: 2, row_span: 2 }]
+    });
+    expect(areaGridFrame.children.find((node) => node.id === "text-1")?.layout_item).toMatchObject({
+      grid_area: "hero"
+    });
+    expect(areaGridFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({ x: 147, y: 25 });
+    expect(areaGridFrame.children.find((node) => node.id === "text-1")?.size).toEqual({ width: 222, height: 168 });
+    expect(areaGridFrame.children.find((node) => node.id === "area-grid-rectangle-1")?.transform).toMatchObject({
+      x: 15,
+      y: 20
+    });
+
     const constrained = await storage.applyAgentCommands("sample-file", {
       dryRun: true,
       commands: [

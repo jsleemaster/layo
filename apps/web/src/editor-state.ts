@@ -1,4 +1,5 @@
 import type {
+  GridArea,
   GridTrack,
   ImageFitMode,
   NodeConstraints,
@@ -1939,11 +1940,12 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
     node.size.height - layout.padding.top - layout.padding.bottom - rowGap * Math.max(0, rows - 1)
   );
   const manualPlacements = new Map<string, GridPlacement>();
+  const areaPlacements = gridAreaPlacementsByName(layout.grid_areas, columns, rows);
   const occupiedCells = new Set<string>();
 
   for (const child of flowChildren) {
     const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
-    const manualPlacement = manualGridPlacement(layoutItem, columns, rows);
+    const manualPlacement = namedGridAreaPlacement(layoutItem, areaPlacements) ?? manualGridPlacement(layoutItem, columns, rows);
     if (manualPlacement) {
       manualPlacements.set(child.id, manualPlacement);
       for (const occupiedCell of gridPlacementCells(manualPlacement)) {
@@ -2367,6 +2369,7 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const gridRows = gridTrackCount(layout.grid_row_tracks, layout.grid_rows, 1);
   const gridColumnTracks = normalizeOptionalGridTracks(layout.grid_column_tracks, gridColumns);
   const gridRowTracks = normalizeOptionalGridTracks(layout.grid_row_tracks, gridRows);
+  const gridAreas = normalizeOptionalGridAreas(layout.grid_areas, gridColumns, gridRows);
   return {
     mode,
     direction: layout.direction === "horizontal" ? "horizontal" : "vertical",
@@ -2384,7 +2387,8 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
           grid_columns: gridColumns,
           grid_rows: gridRows,
           ...(gridColumnTracks ? { grid_column_tracks: gridColumnTracks } : {}),
-          ...(gridRowTracks ? { grid_row_tracks: gridRowTracks } : {})
+          ...(gridRowTracks ? { grid_row_tracks: gridRowTracks } : {}),
+          ...(gridAreas ? { grid_areas: gridAreas } : {})
         }
       : {}),
     padding: {
@@ -2404,10 +2408,12 @@ function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const gridRow = normalizeGridPlacement(layoutItem.grid_row);
   const gridColumnSpan = normalizeGridSpan(layoutItem.grid_column_span);
   const gridRowSpan = normalizeGridSpan(layoutItem.grid_row_span);
+  const gridArea = normalizeGridAreaName(layoutItem.grid_area);
   return {
     ...(position === "absolute" ? { position } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
+    ...(gridArea ? { grid_area: gridArea } : {}),
     ...(gridColumn !== undefined ? { grid_column: gridColumn } : {}),
     ...(gridRow !== undefined ? { grid_row: gridRow } : {}),
     ...(gridColumnSpan !== undefined ? { grid_column_span: gridColumnSpan } : {}),
@@ -2548,6 +2554,32 @@ function normalizeOptionalGridTracks(tracks: GridTrack[] | undefined, count: num
   return Array.from({ length: count }, (_, index) => normalizeGridTrack(tracks[index]));
 }
 
+function normalizeOptionalGridAreas(areas: GridArea[] | undefined, columns: number, rows: number): GridArea[] | undefined {
+  if (!Array.isArray(areas) || areas.length === 0) {
+    return undefined;
+  }
+  const normalizedAreas = areas
+    .map((area) => normalizeGridArea(area, columns, rows))
+    .filter((area): area is GridArea => area !== null);
+  return normalizedAreas.length > 0 ? normalizedAreas : undefined;
+}
+
+function normalizeGridArea(area: GridArea | undefined, columns: number, rows: number): GridArea | null {
+  const name = normalizeGridAreaName(area?.name);
+  if (!name) {
+    return null;
+  }
+  const column = normalizeGridPlacementLine(area?.column, columns, 1);
+  const row = normalizeGridPlacementLine(area?.row, rows, 1);
+  return {
+    name,
+    column,
+    row,
+    column_span: gridPlacementSpan(normalizeGridSpan(area?.column_span), columns - (column - 1)),
+    row_span: gridPlacementSpan(normalizeGridSpan(area?.row_span), rows - (row - 1))
+  };
+}
+
 function resolveGridTracks(tracks: GridTrack[] | undefined, count: number): GridTrack[] {
   return Array.from({ length: count }, (_, index) => normalizeGridTrack(tracks?.[index]));
 }
@@ -2625,6 +2657,42 @@ function normalizeGridPlacement(value: number | undefined): number | undefined {
 function normalizeGridSpan(value: number | undefined): number | undefined {
   const normalized = finiteNumber(value, Number.NaN);
   return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function normalizeGridAreaName(value: string | undefined): string | undefined {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name.length > 0 ? name : undefined;
+}
+
+function normalizeGridPlacementLine(value: number | undefined, max: number, fallback: number): number {
+  return Math.min(normalizeGridPlacement(value) ?? fallback, Math.max(1, max));
+}
+
+function namedGridAreaPlacement(
+  layoutItem: NodeLayoutItem,
+  areaPlacements: Map<string, GridPlacement>
+): GridPlacement | null {
+  const name = normalizeGridAreaName(layoutItem.grid_area);
+  return name ? areaPlacements.get(name) ?? null : null;
+}
+
+function gridAreaPlacementsByName(
+  areas: GridArea[] | undefined,
+  columns: number,
+  rows: number
+): Map<string, GridPlacement> {
+  const placements = new Map<string, GridPlacement>();
+  for (const area of normalizeOptionalGridAreas(areas, columns, rows) ?? []) {
+    if (!placements.has(area.name)) {
+      placements.set(area.name, {
+        column: area.column - 1,
+        row: area.row - 1,
+        columnSpan: area.column_span,
+        rowSpan: area.row_span
+      });
+    }
+  }
+  return placements;
 }
 
 function manualGridPlacement(layoutItem: NodeLayoutItem, columns: number, rows: number): GridPlacement | null {

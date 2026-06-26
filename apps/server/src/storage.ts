@@ -44,6 +44,14 @@ export interface GridTrack {
   value?: number;
 }
 
+export interface GridArea {
+  name: string;
+  column: number;
+  row: number;
+  column_span: number;
+  row_span: number;
+}
+
 export interface NodeLayout {
   mode: "none" | "auto" | "grid";
   direction: "horizontal" | "vertical";
@@ -60,6 +68,7 @@ export interface NodeLayout {
   grid_rows?: number;
   grid_column_tracks?: GridTrack[];
   grid_row_tracks?: GridTrack[];
+  grid_areas?: GridArea[];
   padding: LayoutSpacing;
 }
 
@@ -67,6 +76,7 @@ export interface NodeLayoutItem {
   position?: "static" | "absolute";
   width_sizing?: "fixed" | "fill";
   height_sizing?: "fixed" | "fill";
+  grid_area?: string;
   grid_column?: number;
   grid_row?: number;
   grid_column_span?: number;

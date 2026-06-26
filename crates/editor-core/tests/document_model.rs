@@ -69,6 +69,7 @@ fn layout_metadata_round_trips_through_json() {
                 "grid_rows": 2,
                 "grid_column_tracks": [{ "type": "px", "value": 120 }, { "type": "fr", "value": 2 }],
                 "grid_row_tracks": [{ "type": "auto" }, { "type": "fr", "value": 1 }],
+                "grid_areas": [{ "name": "hero", "column": 2, "row": 1, "column_span": 2, "row_span": 2 }],
                 "wrap": "wrap",
                 "align_items": "center",
                 "justify_content": "space_between",
@@ -90,7 +91,7 @@ fn layout_metadata_round_trips_through_json() {
                   "kind": "rectangle",
                   "name": "Pinned Child",
                   "constraints": { "horizontal": "right", "vertical": "bottom" },
-                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
+                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "grid_area": "hero", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
                   "transform": { "x": 220, "y": 180, "rotation": 0 },
                   "size": { "width": 64, "height": 32 },
                   "style": { "fill": "#e0f2fe", "stroke": null, "stroke_width": 0, "opacity": 1 },
@@ -138,6 +139,16 @@ fn layout_metadata_round_trips_through_json() {
         }
     );
     assert_eq!(
+        frame.layout.as_ref().unwrap().grid_areas.as_ref().unwrap()[0],
+        editor_core::GridArea {
+            name: "hero".to_string(),
+            column: 2,
+            row: 1,
+            column_span: 2,
+            row_span: 2
+        }
+    );
+    assert_eq!(
         frame.layout.as_ref().unwrap().wrap,
         editor_core::LayoutWrap::Wrap
     );
@@ -181,6 +192,10 @@ fn layout_metadata_round_trips_through_json() {
     assert_eq!(child.layout_item.as_ref().unwrap().margin.bottom, 14.0);
     assert_eq!(child.layout_item.as_ref().unwrap().margin.left, 6.0);
     assert_eq!(
+        child.layout_item.as_ref().unwrap().grid_area.as_ref().unwrap(),
+        "hero"
+    );
+    assert_eq!(
         child.layout_item.as_ref().unwrap().position.as_ref().unwrap(),
         &editor_core::LayoutItemPosition::Absolute
     );
@@ -196,6 +211,9 @@ fn layout_metadata_round_trips_through_json() {
     assert!(json.contains("\"grid_row_span\":2"));
     assert!(json.contains("\"grid_column_tracks\""));
     assert!(json.contains("\"grid_row_tracks\""));
+    assert!(json.contains("\"grid_areas\""));
+    assert!(json.contains("\"name\":\"hero\""));
+    assert!(json.contains("\"grid_area\":\"hero\""));
     assert!(json.contains("\"type\":\"px\""));
     assert!(json.contains("\"type\":\"fr\""));
     assert!(json.contains("\"type\":\"auto\""));

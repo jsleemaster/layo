@@ -3,4 +3,4 @@ import type { LayoutItemPosition } from "./LayoutItemPosition";
 import type { LayoutItemSizing } from "./LayoutItemSizing";
 import type { LayoutPadding } from "./LayoutPadding";
 
-export type NodeLayoutItem = { position?: LayoutItemPosition | null, width_sizing?: LayoutItemSizing, height_sizing?: LayoutItemSizing, grid_column?: number | null, grid_row?: number | null, grid_column_span?: number | null, grid_row_span?: number | null, margin: LayoutPadding, };
+export type NodeLayoutItem = { position?: LayoutItemPosition | null, width_sizing?: LayoutItemSizing, height_sizing?: LayoutItemSizing, grid_area?: string | null, grid_column?: number | null, grid_row?: number | null, grid_column_span?: number | null, grid_row_span?: number | null, margin: LayoutPadding, };
