@@ -355,7 +355,7 @@ describe("HTTP server", () => {
 
   test("serves comment mentions and viewer read state routes", async () => {
     const server = await createServerWithDocument();
-    const target = { userId: "minji", displayName: "민지", role: "editor" } as const;
+    const target = { userId: "사용자", displayName: "민지", role: "editor" } as const;
 
     const created = await server.inject({
       method: "POST",
@@ -435,11 +435,13 @@ describe("HTTP server", () => {
     expect(notifications.json().summary).toMatchObject({
       viewerId: "사용자",
       totalUnread: 1,
+      totalMentions: 1,
       projects: [
         {
           projectId: "test-project",
           unreadCount: 1,
-          files: [{ fileId: "sample-file", name: "테스트 문서", unreadCount: 1 }]
+          mentionCount: 1,
+          files: [{ fileId: "sample-file", name: "테스트 문서", unreadCount: 1, mentionCount: 1 }]
         }
       ]
     });
@@ -461,6 +463,7 @@ describe("HTTP server", () => {
     });
     expect(notificationsAfterRead.json().summary).toMatchObject({
       totalUnread: 0,
+      totalMentions: 0,
       projects: []
     });
 

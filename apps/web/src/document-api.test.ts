@@ -83,12 +83,14 @@ describe("parseDocumentPayload", () => {
           summary: {
             viewerId: "사용자",
             totalUnread: 1,
+            totalMentions: 1,
             projects: [
               {
                 projectId: "project-1",
                 name: "브랜드 리뉴얼",
                 unreadCount: 1,
-                files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1 }]
+                mentionCount: 1,
+                files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1, mentionCount: 1 }]
               }
             ]
           }
@@ -124,12 +126,14 @@ describe("parseDocumentPayload", () => {
     await expect(listCommentNotifications("사용자", fetcher as typeof fetch)).resolves.toEqual({
       viewerId: "사용자",
       totalUnread: 1,
+      totalMentions: 1,
       projects: [
         {
           projectId: "project-1",
           name: "브랜드 리뉴얼",
           unreadCount: 1,
-          files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1 }]
+          mentionCount: 1,
+          files: [{ fileId: "sample-file", name: "검수 문서", unreadCount: 1, mentionCount: 1 }]
         }
       ]
     });

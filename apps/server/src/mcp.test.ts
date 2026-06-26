@@ -396,7 +396,7 @@ describe("MCP AI editing workflow", () => {
 
   test("lets an MCP client create, list, and resolve selected-node comments", async () => {
     const client = await connectMcpClient();
-    const target = { userId: "minji", displayName: "민지", role: "editor" } as const;
+    const target = { userId: "사용자", displayName: "민지", role: "editor" } as const;
 
     await client.callTool({
       name: "create_project",
@@ -496,11 +496,13 @@ describe("MCP AI editing workflow", () => {
     expect(notifications.summary).toMatchObject({
       viewerId: "사용자",
       totalUnread: 1,
+      totalMentions: 1,
       projects: [
         {
           projectId: "comment-project",
           unreadCount: 1,
-          files: [{ fileId: "comment-file", name: "코멘트 문서", unreadCount: 1 }]
+          mentionCount: 1,
+          files: [{ fileId: "comment-file", name: "코멘트 문서", unreadCount: 1, mentionCount: 1 }]
         }
       ]
     });
@@ -524,6 +526,7 @@ describe("MCP AI editing workflow", () => {
     );
     expect(notificationsAfterRead.summary).toMatchObject({
       totalUnread: 0,
+      totalMentions: 0,
       projects: []
     });
 

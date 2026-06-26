@@ -7856,26 +7856,44 @@ export function App() {
                 >
                   <div className="comment-notification-heading">
                     <strong>코멘트 알림</strong>
-                    <span
-                      className={
-                        commentNotificationSummary?.totalUnread
-                          ? "comment-notification-pill comment-notification-pill-unread"
-                          : "comment-notification-pill"
-                      }
-                    >
-                      {commentNotificationSummary
-                        ? commentNotificationSummary.totalUnread > 0
-                          ? `읽지 않은 코멘트 ${commentNotificationSummary.totalUnread}개`
-                          : "읽지 않은 코멘트 없음"
-                        : "코멘트 알림 대기 중"}
-                    </span>
+                    <div className="comment-notification-pills">
+                      <span
+                        className={
+                          commentNotificationSummary?.totalUnread
+                            ? "comment-notification-pill comment-notification-pill-unread"
+                            : "comment-notification-pill"
+                        }
+                      >
+                        {commentNotificationSummary
+                          ? commentNotificationSummary.totalUnread > 0
+                            ? `읽지 않은 코멘트 ${commentNotificationSummary.totalUnread}개`
+                            : "읽지 않은 코멘트 없음"
+                          : "코멘트 알림 대기 중"}
+                      </span>
+                      {commentNotificationSummary ? (
+                        <span
+                          className={
+                            commentNotificationSummary.totalMentions > 0
+                              ? "comment-notification-pill comment-notification-pill-mention"
+                              : "comment-notification-pill"
+                          }
+                        >
+                          {commentNotificationSummary.totalMentions > 0
+                            ? `나를 멘션 ${commentNotificationSummary.totalMentions}개`
+                            : "나를 멘션 없음"}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <ul className="comment-notification-list">
                     {currentProjectCommentNotification?.files.length ? (
                       currentProjectCommentNotification.files.map((file) => (
                         <li className="comment-notification-row" key={file.fileId}>
                           <span>{file.name}</span>
-                          <strong>{file.unreadCount}개</strong>
+                          <strong>
+                            {file.unreadCount}개
+                            {file.mentionCount > 0 ? ` · 멘션 ${file.mentionCount}개` : ""}
+                          </strong>
                         </li>
                       ))
                     ) : (

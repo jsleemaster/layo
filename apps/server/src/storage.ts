@@ -325,18 +325,21 @@ export interface CommentNotificationFileSummary {
   fileId: string;
   name: string;
   unreadCount: number;
+  mentionCount: number;
 }
 
 export interface CommentNotificationProjectSummary {
   projectId: string;
   name: string;
   unreadCount: number;
+  mentionCount: number;
   files: CommentNotificationFileSummary[];
 }
 
 export interface CommentNotificationSummary {
   viewerId: string;
   totalUnread: number;
+  totalMentions: number;
   projects: CommentNotificationProjectSummary[];
 }
 
@@ -766,37 +769,47 @@ export class FileStorage {
   ): Promise<CommentNotificationSummary> {
     const viewerId = normalizeName(options.viewerId, "사용자");
     const projects = await this.listProjects();
-    const projectSummaries: CommentNotificationProjectSummary[] = [];
+    const projectSummaries: Array<CommentNotificationProjectSummary & { latestUnreadAt: string }> = [];
 
     for (const project of projects) {
-      const files: CommentNotificationFileSummary[] = [];
+      const files: Array<CommentNotificationFileSummary & { latestUnreadAt: string }> = [];
       for (const document of project.documents) {
         const store = await this.readCommentThreadFile(document.documentId);
-        const unreadCount = countUnreadCommentThreads(store.threads, viewerId);
+        const unreadThreads = unreadCommentThreads(store.threads, viewerId);
+        const unreadCount = unreadThreads.length;
+        const mentionCount = unreadThreads.filter((thread) => isCommentThreadMentionedForViewer(thread, viewerId)).length;
         if (unreadCount > 0) {
           files.push({
             fileId: document.documentId,
             name: document.name,
-            unreadCount
+            unreadCount,
+            mentionCount,
+            latestUnreadAt: latestCommentThreadCreatedAt(unreadThreads)
           });
         }
       }
 
+      files.sort(compareCommentNotificationRecency);
       const unreadCount = files.reduce((total, file) => total + file.unreadCount, 0);
+      const mentionCount = files.reduce((total, file) => total + file.mentionCount, 0);
       if (unreadCount > 0) {
         projectSummaries.push({
           projectId: project.projectId,
           name: project.name,
           unreadCount,
-          files
+          mentionCount,
+          files: files.map(({ latestUnreadAt: _latestUnreadAt, ...file }) => file),
+          latestUnreadAt: files[0]?.latestUnreadAt ?? new Date(0).toISOString()
         });
       }
     }
 
+    projectSummaries.sort(compareCommentNotificationRecency);
     return {
       viewerId,
       totalUnread: projectSummaries.reduce((total, project) => total + project.unreadCount, 0),
-      projects: projectSummaries
+      totalMentions: projectSummaries.reduce((total, project) => total + project.mentionCount, 0),
+      projects: projectSummaries.map(({ latestUnreadAt: _latestUnreadAt, ...project }) => project)
     };
   }
 
@@ -1633,8 +1646,33 @@ function withViewerUnread(thread: StoredCommentThread, viewerId?: string): Store
   };
 }
 
+function unreadCommentThreads(threads: StoredCommentThread[], viewerId: string) {
+  return threads.filter((thread) => thread.resolvedAt === null && !thread.readBy.includes(viewerId));
+}
+
 function countUnreadCommentThreads(threads: StoredCommentThread[], viewerId: string) {
-  return threads.filter((thread) => thread.resolvedAt === null && !thread.readBy.includes(viewerId)).length;
+  return unreadCommentThreads(threads, viewerId).length;
+}
+
+function isCommentThreadMentionedForViewer(thread: StoredCommentThread, viewerId: string) {
+  return thread.mentionTargets.some(
+    (target) => target.userId === viewerId || target.displayName === viewerId
+  );
+}
+
+function latestCommentThreadCreatedAt(threads: StoredCommentThread[]) {
+  return threads.reduce(
+    (latest, thread) => (thread.createdAt.localeCompare(latest) > 0 ? thread.createdAt : latest),
+    new Date(0).toISOString()
+  );
+}
+
+function compareCommentNotificationRecency(
+  a: { latestUnreadAt: string; name: string },
+  b: { latestUnreadAt: string; name: string }
+) {
+  const byRecency = b.latestUnreadAt.localeCompare(a.latestUnreadAt);
+  return byRecency === 0 ? a.name.localeCompare(b.name) : byRecency;
 }
 
 function prependCommentActivity(

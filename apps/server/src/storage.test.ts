@@ -326,6 +326,8 @@ describe("FileStorage", () => {
   test("comment notifications summarize unread threads by project file and mark a file read", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
+    const viewerTarget = { userId: "사용자", displayName: "사용자", role: "editor" as const };
+
     await storage.createProject({
       projectId: "project-alpha",
       name: "알파 프로젝트",
@@ -346,7 +348,8 @@ describe("FileStorage", () => {
     await storage.createCommentThread("document-alpha", {
       nodeId: "text-1",
       body: "@민지 알파 문서 확인 필요",
-      authorName: "디자인 팀"
+      authorName: "디자인 팀",
+      mentionTargets: [viewerTarget]
     });
     const beta = await storage.createCommentThread("document-beta", {
       nodeId: "text-1",
@@ -369,18 +372,21 @@ describe("FileStorage", () => {
     await expect(storage.listCommentNotifications({ viewerId: "사용자" })).resolves.toMatchObject({
       viewerId: "사용자",
       totalUnread: 2,
+      totalMentions: 1,
       projects: [
         {
           projectId: "project-bravo",
           name: "브라보 프로젝트",
           unreadCount: 1,
-          files: [{ fileId: "document-bravo", name: "브라보 문서", unreadCount: 1 }]
+          mentionCount: 0,
+          files: [{ fileId: "document-bravo", name: "브라보 문서", unreadCount: 1, mentionCount: 0 }]
         },
         {
           projectId: "project-alpha",
           name: "알파 프로젝트",
           unreadCount: 1,
-          files: [{ fileId: "document-alpha", name: "알파 문서", unreadCount: 1 }]
+          mentionCount: 1,
+          files: [{ fileId: "document-alpha", name: "알파 문서", unreadCount: 1, mentionCount: 1 }]
         }
       ]
     });
@@ -390,14 +396,53 @@ describe("FileStorage", () => {
     await expect(storage.listCommentNotifications({ viewerId: "사용자" })).resolves.toMatchObject({
       viewerId: "사용자",
       totalUnread: 1,
+      totalMentions: 0,
       projects: [
         {
           projectId: "project-bravo",
           unreadCount: 1,
-          files: [{ fileId: "document-bravo", unreadCount: 1 }]
+          mentionCount: 0,
+          files: [{ fileId: "document-bravo", unreadCount: 1, mentionCount: 0 }]
         }
       ]
     });
+  });
+
+  test("comment notifications order projects by latest unread comment activity", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+
+    await storage.createProject({
+      projectId: "project-old",
+      name: "오래된 프로젝트",
+      documentId: "document-old",
+      documentName: "오래된 문서"
+    });
+    await storage.createProject({
+      projectId: "project-new",
+      name: "최신 프로젝트",
+      documentId: "document-new",
+      documentName: "최신 문서"
+    });
+    await storage.updateProject("project-old", { name: "오래된 프로젝트 수정됨" });
+
+    await storage.createCommentThread("document-old", {
+      nodeId: "text-1",
+      body: "먼저 만든 알림",
+      authorName: "디자인 팀"
+    });
+    await storage.createCommentThread("document-new", {
+      nodeId: "text-1",
+      body: "나중에 만든 알림",
+      authorName: "디자인 팀"
+    });
+
+    const summary = await storage.listCommentNotifications({ viewerId: "사용자" });
+
+    expect(summary.projects.map((project) => project.projectId)).toEqual([
+      "project-new",
+      "project-old"
+    ]);
   });
 
   test("comment activity feed retains project file events in recent order", async () => {

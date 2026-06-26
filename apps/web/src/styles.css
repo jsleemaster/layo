@@ -1604,7 +1604,7 @@ button:disabled {
 
 .comment-notification-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: var(--editor-space-xs);
   min-width: 0;
@@ -1615,6 +1615,13 @@ button:disabled {
   color: var(--editor-color-ink);
   font-size: var(--editor-text-control-size);
   line-height: var(--editor-text-control-line);
+}
+
+.comment-notification-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
 }
 
 .comment-notification-pill {
@@ -1633,6 +1640,12 @@ button:disabled {
   border-color: var(--editor-color-focus);
   color: var(--editor-color-focus);
   background: var(--editor-color-selection-soft);
+}
+
+.comment-notification-pill-mention {
+  border-color: var(--editor-color-mcp);
+  color: var(--editor-color-mcp);
+  background: var(--editor-color-surface);
 }
 
 .comment-notification-list {

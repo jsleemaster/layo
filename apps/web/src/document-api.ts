@@ -61,18 +61,21 @@ export interface CommentNotificationFileSummary {
   fileId: string;
   name: string;
   unreadCount: number;
+  mentionCount: number;
 }
 
 export interface CommentNotificationProjectSummary {
   projectId: string;
   name: string;
   unreadCount: number;
+  mentionCount: number;
   files: CommentNotificationFileSummary[];
 }
 
 export interface CommentNotificationSummary {
   viewerId: string;
   totalUnread: number;
+  totalMentions: number;
   projects: CommentNotificationProjectSummary[];
 }
 

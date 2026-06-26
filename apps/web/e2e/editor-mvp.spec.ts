@@ -1465,6 +1465,28 @@ test("file panel summarizes unread comments and marks the current file read", as
   });
 });
 
+test("file panel shows mention-targeted comment notifications", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "@사용자 파일 멘션 확인",
+      authorName: "디자인 팀",
+      mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  const summary = page.getByTestId("comment-notification-summary");
+  await expect(summary).toContainText("읽지 않은 코멘트 1개");
+  await expect(summary).toContainText("나를 멘션 1개");
+  await expect(summary).toContainText("새 문서");
+  await expect(summary).toContainText("멘션 1개");
+});
+
 test("file panel shows retained recent comment activity", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
