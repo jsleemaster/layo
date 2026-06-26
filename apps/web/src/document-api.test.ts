@@ -4,7 +4,8 @@ import {
   parseDocumentPayload,
   readFileVersion,
   restoreFileVersion,
-  saveFileVersion
+  saveFileVersion,
+  summarizeDocumentChanges
 } from "./document-api";
 
 describe("parseDocumentPayload", () => {
@@ -19,6 +20,47 @@ describe("parseDocumentPayload", () => {
 
     expect(document.id).toBe("sample-file");
     expect(document.name).toBe("샘플 파일");
+  });
+
+  test("summarizes document changes through the agent change-summary route", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const beforeDocument = { id: "sample-file", name: "샘플 파일", pages: [] };
+    const afterDocument = { id: "sample-file", name: "샘플 파일", pages: [] };
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/files/sample-file/agent/change-summary" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({
+          before: beforeDocument,
+          after: afterDocument
+        });
+        return jsonResponse({
+          summary: {
+            createdNodeIds: ["new-node"],
+            updatedNodeIds: ["text-1"],
+            removedNodeIds: ["old-node"],
+            unchangedNodeCount: 2,
+            changedNodeIds: ["new-node", "text-1", "old-node"]
+          }
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(
+      summarizeDocumentChanges("sample-file", beforeDocument, afterDocument, fetcher as typeof fetch)
+    ).resolves.toEqual({
+      createdNodeIds: ["new-node"],
+      updatedNodeIds: ["text-1"],
+      removedNodeIds: ["old-node"],
+      unchangedNodeCount: 2,
+      changedNodeIds: ["new-node", "text-1", "old-node"]
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/files/sample-file/agent/change-summary"), "POST"]
+    ]);
   });
 });
 

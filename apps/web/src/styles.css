@@ -1497,6 +1497,68 @@ button:disabled {
   white-space: nowrap;
 }
 
+.file-version-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--editor-space-xxs);
+}
+
+.file-version-preview {
+  display: grid;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  padding: var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-surface);
+}
+
+.file-version-preview-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+}
+
+.file-version-preview-header > span,
+.file-version-preview-body {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+}
+
+.file-version-preview strong,
+.file-version-preview span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.file-version-preview-header strong,
+.file-version-preview-body strong {
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.file-version-preview-header span,
+.file-version-preview-body span {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.file-version-preview button {
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+  white-space: nowrap;
+}
+
+.file-version-preview-restore {
+  justify-self: stretch;
+}
+
 .team-actions button,
 .project-actions button {
   min-height: var(--editor-space-xl);

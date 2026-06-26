@@ -1228,6 +1228,44 @@ test("file version history saves and restores a document snapshot", async ({ pag
   expect(versionsPayload.versions.map((version: { source: string }) => version.source)).toContain("restore");
 });
 
+test("file version history previews saved version differences before restore", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByTestId("file-version-message").fill("검토 전");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-list")).toContainText("검토 전");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("변경된 헤드라인");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("변경된 헤드라인");
+
+  await expect
+    .poll(async () => {
+      const changedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      if (!changedResponse.ok()) {
+        return "request failed";
+      }
+      return (await changedResponse.json()).file.pages[0].children[0].children[0].content.value;
+    })
+    .toBe("변경된 헤드라인");
+
+  await page.getByRole("button", { name: "검토 전 미리보기" }).click();
+  const preview = page.getByTestId("file-version-preview");
+  await expect(preview).toContainText("검토 전");
+  await expect(preview).toContainText("현재 파일과 비교");
+  await expect(preview).toContainText("변경 1");
+  await expect(preview).toContainText("text-1");
+
+  await page.getByRole("button", { name: "미리보기 닫기" }).click();
+  await expect(preview).toBeHidden();
+
+  await page.getByRole("button", { name: "검토 전 미리보기" }).click();
+  await page.getByRole("button", { name: "이 버전 복원" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("검토 전 복원됨");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
+});
+
 test("file version history shows automatic saved versions from persisted edits", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

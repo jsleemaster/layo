@@ -35,8 +35,11 @@ import {
   importDesignTokensDtcg,
   listFileVersions,
   parseDocumentPayload,
+  readFileVersion,
   restoreFileVersion,
   saveFileVersion,
+  summarizeDocumentChanges,
+  type FileVersionChangeSummary,
   type FileVersionSummary
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
@@ -370,6 +373,17 @@ function formatFileVersionCreatedAt(createdAt: string) {
   return fileVersionDateFormatter.format(date);
 }
 
+function formatFileVersionSource(source: FileVersionSummary["source"]) {
+  switch (source) {
+    case "restore":
+      return "복원 전 자동 저장";
+    case "auto":
+      return "자동 저장";
+    case "manual":
+      return "수동 저장";
+  }
+}
+
 const DEFAULT_NODE_CONSTRAINTS: NodeConstraints = {
   horizontal: "left",
   vertical: "top"
@@ -448,6 +462,11 @@ const FRAME_PRESET_CATEGORIES = [
 ];
 type TeamPanelMode = "local" | "relay" | "manifest";
 type LeftPanelMode = "files" | "assets" | "layers" | "team";
+
+interface FileVersionPreviewState {
+  version: FileVersionSummary;
+  summary: FileVersionChangeSummary;
+}
 
 interface AreaSelectionSession {
   start: { x: number; y: number };
@@ -3805,6 +3824,7 @@ export function App() {
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>([]);
   const [projectStatus, setProjectStatus] = useState("프로젝트 불러오는 중");
   const [fileVersions, setFileVersions] = useState<FileVersionSummary[]>([]);
+  const [fileVersionPreview, setFileVersionPreview] = useState<FileVersionPreviewState | null>(null);
   const [fileVersionMessage, setFileVersionMessage] = useState("검토 전");
   const [fileVersionStatus, setFileVersionStatus] = useState("버전 기록 대기 중");
   const [tokenDtcgDraft, setTokenDtcgDraft] = useState("");
@@ -3868,6 +3888,7 @@ export function App() {
 
   const resetFileVersions = (status = "버전 기록 대기 중") => {
     setFileVersions([]);
+    setFileVersionPreview(null);
     setFileVersionStatus(status);
   };
 
@@ -3875,10 +3896,12 @@ export function App() {
     try {
       const versions = await listFileVersions(fileId);
       setFileVersions(versions);
+      setFileVersionPreview(null);
       setFileVersionStatus(status ?? (versions.length > 0 ? `${versions.length}개 버전` : "저장된 버전 없음"));
     } catch (error) {
       const message = error instanceof Error ? error.message : "버전 기록을 불러오지 못했습니다";
       setFileVersions([]);
+      setFileVersionPreview(null);
       setFileVersionStatus(message);
     }
   };
@@ -6462,6 +6485,28 @@ export function App() {
     }
   };
 
+  const previewCurrentFileVersion = async (version: FileVersionSummary) => {
+    if (!currentProject || !editorRef.current) {
+      setFileVersionStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      const snapshot = await readFileVersion(currentProject.currentDocumentId, version.versionId);
+      const summary = await summarizeDocumentChanges(
+        currentProject.currentDocumentId,
+        snapshot.document,
+        editorRef.current.document
+      );
+      setFileVersionPreview({ version, summary });
+      setFileVersionStatus(`${version.message} 미리보기`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "버전을 미리보지 못했습니다";
+      setFileVersionPreview(null);
+      setFileVersionStatus(message);
+    }
+  };
+
   const restoreCurrentFileVersion = async (version: FileVersionSummary) => {
     if (!currentProject) {
       setFileVersionStatus("프로젝트 없음");
@@ -6474,6 +6519,7 @@ export function App() {
         const nextState = createEditorState(result.file);
         return current ? { ...nextState, viewport: current.viewport } : nextState;
       });
+      setFileVersionPreview(null);
       setTokenDtcgDraft("");
       setTokenDtcgStatus("");
       await refreshFileVersions(currentProject.currentDocumentId, `${version.message} 복원됨`);
@@ -7344,6 +7390,42 @@ export function App() {
                   <div className="project-status" data-testid="file-version-status">
                     {fileVersionStatus}
                   </div>
+                  {fileVersionPreview ? (
+                    <div className="file-version-preview" data-testid="file-version-preview">
+                      <div className="file-version-preview-header">
+                        <span>
+                          <strong>{fileVersionPreview.version.message}</strong>
+                          <span>
+                            {formatFileVersionCreatedAt(fileVersionPreview.version.createdAt)} ·{" "}
+                            {formatFileVersionSource(fileVersionPreview.version.source)}
+                          </span>
+                        </span>
+                        <button type="button" onClick={() => setFileVersionPreview(null)}>
+                          미리보기 닫기
+                        </button>
+                      </div>
+                      <div className="file-version-preview-body">
+                        <strong>현재 파일과 비교</strong>
+                        <span>
+                          생성 {fileVersionPreview.summary.createdNodeIds.length} · 변경{" "}
+                          {fileVersionPreview.summary.updatedNodeIds.length} · 삭제{" "}
+                          {fileVersionPreview.summary.removedNodeIds.length}
+                        </span>
+                        <span>
+                          {fileVersionPreview.summary.changedNodeIds.length > 0
+                            ? fileVersionPreview.summary.changedNodeIds.join(", ")
+                            : "변경된 객체 없음"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="file-version-preview-restore"
+                        onClick={() => void restoreCurrentFileVersion(fileVersionPreview.version)}
+                      >
+                        이 버전 복원
+                      </button>
+                    </div>
+                  ) : null}
                   <ul className="file-version-list" data-testid="file-version-list">
                     {fileVersions.length === 0 ? (
                       <li className="file-version-empty">저장된 버전 없음</li>
@@ -7354,20 +7436,25 @@ export function App() {
                             <strong>{version.message}</strong>
                             <span>
                               {formatFileVersionCreatedAt(version.createdAt)} · {version.nodeCount}개 객체 ·{" "}
-                              {version.source === "restore"
-                                ? "복원 전 자동 저장"
-                                : version.source === "auto"
-                                  ? "자동 저장"
-                                  : "수동 저장"}
+                              {formatFileVersionSource(version.source)}
                             </span>
                           </span>
-                          <button
-                            type="button"
-                            aria-label={`${version.message} 복원`}
-                            onClick={() => void restoreCurrentFileVersion(version)}
-                          >
-                            복원
-                          </button>
+                          <span className="file-version-row-actions">
+                            <button
+                              type="button"
+                              aria-label={`${version.message} 미리보기`}
+                              onClick={() => void previewCurrentFileVersion(version)}
+                            >
+                              미리보기
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`${version.message} 복원`}
+                              onClick={() => void restoreCurrentFileVersion(version)}
+                            >
+                              복원
+                            </button>
+                          </span>
                         </li>
                       ))
                     )}

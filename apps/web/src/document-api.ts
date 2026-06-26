@@ -22,6 +22,14 @@ export interface RestoreFileVersionResult {
   recoveryVersion: FileVersionSummary;
 }
 
+export interface FileVersionChangeSummary {
+  createdNodeIds: string[];
+  updatedNodeIds: string[];
+  removedNodeIds: string[];
+  unchangedNodeCount: number;
+  changedNodeIds: string[];
+}
+
 export function parseDocumentPayload(payload: unknown): RendererDocument {
   if (!payload || typeof payload !== "object" || !("file" in payload)) {
     throw new Error("문서 응답에 파일이 없습니다");
@@ -91,6 +99,21 @@ export async function restoreFileVersion(
     method: "POST"
   });
   return (await readDocumentJson(response)) as RestoreFileVersionResult;
+}
+
+export async function summarizeDocumentChanges(
+  fileId: string,
+  before: RendererDocument,
+  after: RendererDocument,
+  fetcher: typeof fetch = fetch
+): Promise<FileVersionChangeSummary> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/agent/change-summary`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ before, after })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { summary: FileVersionChangeSummary }).summary;
 }
 
 async function readDocumentJson(response: Response): Promise<unknown> {

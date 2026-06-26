@@ -724,6 +724,20 @@ describe("FileStorage", () => {
     expect(summary.updatedNodeIds).toEqual([]);
   });
 
+  test("change summary reports changed descendants without duplicate parent updates", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const before = await storage.readFile("sample-file");
+
+    await storage.updateText("sample-file", "text-1", "변경된 헤드라인");
+    const after = await storage.readFile("sample-file");
+    const summary = await storage.getChangeSummary("sample-file", before, after);
+
+    expect(summary.updatedNodeIds).toEqual(["text-1"]);
+    expect(summary.changedNodeIds).toEqual(["text-1"]);
+    expect(summary.updatedNodeIds).not.toContain("frame-1");
+  });
+
   test("agent commands apply auto layout and constraints deterministically", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

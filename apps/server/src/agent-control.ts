@@ -518,8 +518,10 @@ function validateLayoutSpacingTokenReferences(
   }
 }
 
-function flattenNodeMap(document: DesignFile): Map<string, DesignNode> {
-  const nodes = new Map<string, DesignNode>();
+type ComparableDesignNode = Omit<DesignNode, "children">;
+
+function flattenNodeMap(document: DesignFile): Map<string, ComparableDesignNode> {
+  const nodes = new Map<string, ComparableDesignNode>();
 
   for (const page of document.pages) {
     for (const node of page.children) {
@@ -530,8 +532,10 @@ function flattenNodeMap(document: DesignFile): Map<string, DesignNode> {
   return nodes;
 }
 
-function collectNode(node: DesignNode, nodes: Map<string, DesignNode>) {
-  nodes.set(node.id, node);
+function collectNode(node: DesignNode, nodes: Map<string, ComparableDesignNode>) {
+  const { children, ...comparableNode } = node;
+  void children;
+  nodes.set(node.id, comparableNode);
   for (const child of node.children) {
     collectNode(child, nodes);
   }
