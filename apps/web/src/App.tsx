@@ -578,7 +578,7 @@ interface GridTrackContextMenuState {
   index: number;
 }
 
-type GridTrackContextMenuAction = "insert-before" | "insert-after" | "duplicate" | "delete";
+type GridTrackContextMenuAction = "insert-before" | "insert-after" | "duplicate" | "delete" | "delete-with-children";
 
 const RESIZE_HANDLES: ResizeHandle[] = [
   "top-left",
@@ -4739,6 +4739,17 @@ export function App() {
       return;
     }
 
+    if (action === "delete-with-children") {
+      dispatch({
+        type: "delete_grid_track_with_children",
+        nodeId: gridTrackContextMenu.nodeId,
+        axis: gridTrackContextMenu.axis,
+        index: gridTrackContextMenu.index
+      });
+      setGridTrackContextMenu(null);
+      return;
+    }
+
     const nextLayout = layoutForGridTrackContextAction(currentEditor, gridTrackContextMenu, action);
     if (!nextLayout) {
       setGridTrackContextMenu(null);
@@ -6789,6 +6800,11 @@ export function App() {
                 disabled={!canDeleteGridTrackFromContextMenu}
                 onClick={() => applyGridTrackContextAction("delete")}
               />
+              <ContextMenuItem
+                label="열과 객체 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete-with-children")}
+              />
             </ContextMenuSection>
           ) : (
             <ContextMenuSection label="행">
@@ -6805,6 +6821,11 @@ export function App() {
                 label="행 삭제"
                 disabled={!canDeleteGridTrackFromContextMenu}
                 onClick={() => applyGridTrackContextAction("delete")}
+              />
+              <ContextMenuItem
+                label="행과 객체 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete-with-children")}
               />
             </ContextMenuSection>
           )}

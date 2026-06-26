@@ -1,6 +1,6 @@
 # Figma To Layo Migration Roadmap
 
-Last checked: 2026-06-25
+Last checked: 2026-06-26
 
 This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Layo. It now sits under the broader Penpot-comparable team-product maturity target in `docs/product/penpot-maturity-benchmark.md`: Layo should mature into a professional team design platform while preserving local-first storage and deterministic MCP/HTTP control.
 
@@ -20,7 +20,7 @@ This roadmap translates `docs/product/figma-feature-inventory.md` into implement
 The current main branch already has:
 
 - Rust/TypeScript document primitives for pages, frames, rectangles, text, images, components, instances, and geometry.
-- Browser editor shell with a generated Layo brand logo asset in the left mode rail and browser icon surfaces, a Figma-like left mode rail, default asset-library panel with thumbnail-rich starter kit cards, top file tabs, rulers, bottom floating toolbar, right Inspector action strip, expanded frame preset categories, creation, selection, dragging, corner-only resizing, direct double-click text editing, selection size badges, inspector geometry, grouped Inspector alignment/distribution controls, Inspector auto-layout normal/reverse direction/gap/row-gap/column-gap/padding/child-margin/child fill sizing/equal-cell grid auto-placement/manual grid cell placement/grid item span/cross-axis alignment/main-axis distribution/width-height fit sizing controls, viewport grid resize/add/remove controls, viewport grid row/column header context menus, grouped object context-menu selection/flip/fit/export/style actions with shortcut hints and matching cut/select/fit/style/rename/group/ungroup/alignment keyboard routes, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
+- Browser editor shell with a generated Layo brand logo asset in the left mode rail and browser icon surfaces, a Figma-like left mode rail, default asset-library panel with thumbnail-rich starter kit cards, top file tabs, rulers, bottom floating toolbar, right Inspector action strip, expanded frame preset categories, creation, selection, dragging, corner-only resizing, direct double-click text editing, selection size badges, inspector geometry, grouped Inspector alignment/distribution controls, Inspector auto-layout normal/reverse direction/gap/row-gap/column-gap/padding/child-margin/child fill sizing/equal-cell grid auto-placement/manual grid cell placement/grid item span/cross-axis alignment/main-axis distribution/width-height fit sizing controls, viewport grid resize/add/remove controls, viewport grid row/column header context menus including delete-track-with-shapes actions, grouped object context-menu selection/flip/fit/export/style actions with shortcut hints and matching cut/select/fit/style/rename/group/ungroup/alignment keyboard routes, color/text editing, undo/redo shortcuts, zoom, hover measurement overlays, selected-frame padding/child-spacing guides, and a multi-selection group outline with combined dimensions.
 - Local image asset storage with browser clipboard paste, file drag/drop insertion for image nodes, context-menu image replacement, image fill/fit sizing modes, original image dimensions, and context-menu original-size restore.
 - Shift-click and marquee multi-selection, selected-layer alignment/distribution, grouped selected-layer dragging, transient snap guides for page-level peer bounds/centers, and combined multi-selection group feedback.
 - Component definitions, instances, and detach.
@@ -37,7 +37,7 @@ Figma capabilities to bring over:
 - Constraints for child response when parent frames resize.
 - Auto layout on frames/components with vertical, horizontal, and reverse flow.
 - Cross-axis alignment and main-axis distribution for single-line Flex-like layout.
-- Wrap, fallback gap, row/column gap split, padding, child item margins, child fill width/height sizing, equal-cell grid auto-placement, manual grid cell placement, grid item spans, static/absolute layout item positioning, min/max sizing rules, wrapped-line distribution, reverse row/column flow, viewport grid resize/add/remove controls, viewport grid row/column header context menus, and container fit width/height sizing.
+- Wrap, fallback gap, row/column gap split, padding, child item margins, child fill width/height sizing, equal-cell grid auto-placement, manual grid cell placement, grid item spans, static/absolute layout item positioning, min/max sizing rules, wrapped-line distribution, reverse row/column flow, viewport grid resize/add/remove controls, viewport grid row/column header context menus, viewport delete-track-with-shapes actions, and container fit width/height sizing.
 - Content-driven repositioning after create, resize, and text edits.
 - Layout and layout-item metadata in code export and agent inspection.
 
@@ -46,12 +46,12 @@ Implementation shape:
 - Add optional `layout`, `layout_item`, and `constraints` metadata to the shared node model.
 - Add deterministic layout commands to editor state, server storage, MCP/HTTP agent commands, and Rust model serialization.
 - Implement a small layout solver that runs after document mutations.
-- Add inspector controls for layout mode, flow direction including reverse row/column, wrap, alignment, distribution, fallback gap, row/column gap, padding, child margins, child fill sizing, grid rows/columns, manual child grid cell placement, child grid span, child layout-item positioning, container fit sizing, min/max sizing, and constraints. Add selected-grid viewport controls for direct row/column resize, append, delete, and header-menu insert/duplicate/delete actions.
+- Add inspector controls for layout mode, flow direction including reverse row/column, wrap, alignment, distribution, fallback gap, row/column gap, padding, child margins, child fill sizing, grid rows/columns, manual child grid cell placement, child grid span, child layout-item positioning, container fit sizing, min/max sizing, and constraints. Add selected-grid viewport controls for direct row/column resize, append, delete, header-menu insert/duplicate/delete actions, and header-menu delete-track-with-shapes actions.
 - Add Playwright coverage for automatic sibling repositioning and parent resize behavior.
 
 Non-goals for the first slice:
 
-- Viewport row/column reorder, area editing, delete-with-shapes variants, and advanced resizing semantics.
+- Viewport row/column reorder, area editing, baseline alignment, and advanced resizing semantics.
 - Baseline alignment, percentage child sizing, and advanced intrinsic sizing rules.
 - Full Figma parity for text wrapping and intrinsic measurement.
 
@@ -161,7 +161,7 @@ Implementation shape:
 
 ## Immediate Implementation Order
 
-1. Keep the landed Lane 1 layout foundation, Flex alignment, reverse row/column flow, child-margin flow, child fill sizing, equal-cell grid auto-placement, manual grid cell placement, grid item span, static/absolute layout item positioning, wrap, row/column gap split, container fit sizing, min/max sizing, viewport grid resize/add/remove controls, viewport grid row/column header context menus, and PR #20 navigation fixes green.
+1. Keep the landed Lane 1 layout foundation, Flex alignment, reverse row/column flow, child-margin flow, child fill sizing, equal-cell grid auto-placement, manual grid cell placement, grid item span, static/absolute layout item positioning, wrap, row/column gap split, container fit sizing, min/max sizing, viewport grid resize/add/remove controls, viewport grid row/column header context menus, viewport delete-track-with-shapes actions, and PR #20 navigation fixes green.
 2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, single-object Cmd/Ctrl+C/V/X copy/cut/paste, Cmd/Ctrl+A select all, Shift+Cmd/Ctrl+A select same kind, Shift+1 fit selection, Option/Alt+Cmd/Ctrl+C/V style copy/paste, Cmd/Ctrl+R rename, Cmd/Ctrl+G grouping, Shift+Cmd/Ctrl+G ungrouping, and Option/Alt alignment shortcuts.
 3. Keep Shift-click multi-selection and drag 영역 선택 green.
 4. Keep alignment/distribute commands and grouped Inspector affordances green for selected layers.
