@@ -908,6 +908,105 @@ describe("FileStorage", () => {
       "create_rectangle"
     ]);
 
+    const minMaxLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 420, height: 280 },
+        { type: "update_geometry", nodeId: "text-1", width: 260, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "vertical",
+            align_items: "start",
+            justify_content: "start",
+            width_sizing: "fit",
+            height_sizing: "fit",
+            min_width: 220,
+            max_width: 240,
+            min_height: 160,
+            max_height: 170,
+            gap: 12,
+            padding: { top: 20, right: 24, bottom: 20, left: 24 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "min-max-rectangle-1",
+          name: "최소 최대 사각형",
+          width: 80,
+          height: 30
+        }
+      ] as any
+    });
+
+    const minMaxFrame = minMaxLayout.preview.pages[0].children[0];
+    expect(minMaxFrame.layout).toMatchObject({
+      min_width: 220,
+      max_width: 240,
+      min_height: 160,
+      max_height: 170
+    });
+    expect(minMaxFrame.size).toEqual({ width: 240, height: 160 });
+
+    const minMaxItemLayout = await storage.applyAgentCommands("sample-file", {
+      dryRun: true,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 360, height: 240 },
+        { type: "update_geometry", nodeId: "text-1", width: 100, height: 40 },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "vertical",
+            align_items: "start",
+            justify_content: "start",
+            gap: 12,
+            padding: { top: 20, right: 24, bottom: 20, left: 24 }
+          }
+        },
+        {
+          type: "set_layout_item",
+          nodeId: "text-1",
+          layoutItem: {
+            width_sizing: "fill",
+            height_sizing: "fill",
+            max_width: 180,
+            min_height: 100,
+            max_height: 120,
+            margin: { top: 0, right: 6, bottom: 0, left: 6 }
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "min-max-fill-rectangle-1",
+          name: "채우기 제한 사각형",
+          width: 80,
+          height: 30
+        }
+      ] as any
+    });
+
+    const minMaxItemFrame = minMaxItemLayout.preview.pages[0].children[0];
+    const minMaxText = minMaxItemFrame.children.find((node) => node.id === "text-1");
+    expect(minMaxText?.layout_item).toMatchObject({
+      width_sizing: "fill",
+      height_sizing: "fill",
+      max_width: 180,
+      min_height: 100,
+      max_height: 120
+    });
+    expect(minMaxText?.size).toEqual({ width: 180, height: 120 });
+    expect(minMaxText?.transform).toMatchObject({ x: 30, y: 20 });
+    expect(minMaxItemFrame.children.find((node) => node.id === "min-max-fill-rectangle-1")?.transform).toMatchObject({
+      x: 24,
+      y: 152
+    });
+
 
     const gridLayout = await storage.applyAgentCommands("sample-file", {
       dryRun: true,

@@ -61,6 +61,10 @@ export interface NodeLayout {
   align_content?: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   width_sizing?: "fixed" | "fit";
   height_sizing?: "fixed" | "fit";
+  min_width?: number;
+  max_width?: number;
+  min_height?: number;
+  max_height?: number;
   gap: number;
   row_gap?: number;
   column_gap?: number;
@@ -76,6 +80,10 @@ export interface NodeLayoutItem {
   position?: "static" | "absolute";
   width_sizing?: "fixed" | "fill";
   height_sizing?: "fixed" | "fill";
+  min_width?: number;
+  max_width?: number;
+  min_height?: number;
+  max_height?: number;
   grid_area?: string;
   grid_column?: number;
   grid_row?: number;

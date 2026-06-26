@@ -127,6 +127,10 @@ function numericInputValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
+function optionalNumericInputValue(value: number | undefined) {
+  return value === undefined ? "" : numericInputValue(value);
+}
+
 function gridTrackInputValue(tracks: GridTrack[] | undefined, count: number) {
   return Array.from({ length: count }, (_, index) => gridTrackToken(tracks?.[index])).join(" ");
 }
@@ -1911,6 +1915,38 @@ function Inspector({
         });
       }
     };
+  const updateLayoutSizeLimit =
+    (key: "min_width" | "max_width" | "min_height" | "max_height") =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const rawValue = event.currentTarget.value;
+      if (rawValue.trim() === "") {
+        updateLayout({ [key]: undefined } as Partial<NodeLayout>);
+        return;
+      }
+      const nextValue = Number(rawValue);
+      if (Number.isFinite(nextValue)) {
+        updateLayout({ [key]: nextValue } as Partial<NodeLayout>);
+      }
+    };
+  const updateLayoutItemSizeLimit =
+    (key: "min_width" | "max_width" | "min_height" | "max_height") =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const rawValue = event.currentTarget.value;
+      if (rawValue.trim() === "") {
+        onLayoutItemChange(selectedNode.id, {
+          ...layoutItem,
+          [key]: undefined
+        } as NodeLayoutItem);
+        return;
+      }
+      const nextValue = Number(rawValue);
+      if (Number.isFinite(nextValue)) {
+        onLayoutItemChange(selectedNode.id, {
+          ...layoutItem,
+          [key]: nextValue
+        } as NodeLayoutItem);
+      }
+    };
   const updateConstraints = (patch: Partial<NodeConstraints>) => {
     onConstraintsChange(selectedNode.id, { ...constraints, ...patch });
   };
@@ -2135,6 +2171,48 @@ function Inspector({
             <option value="fit">내용 맞춤</option>
           </select>
         </label>
+        <div className="field-grid">
+          <label>
+            최소 너비
+            <input
+              data-testid="inspector-layout-min-width"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layout.min_width)}
+              onChange={updateLayoutSizeLimit("min_width")}
+            />
+          </label>
+          <label>
+            최대 너비
+            <input
+              data-testid="inspector-layout-max-width"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layout.max_width)}
+              onChange={updateLayoutSizeLimit("max_width")}
+            />
+          </label>
+          <label>
+            최소 높이
+            <input
+              data-testid="inspector-layout-min-height"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layout.min_height)}
+              onChange={updateLayoutSizeLimit("min_height")}
+            />
+          </label>
+          <label>
+            최대 높이
+            <input
+              data-testid="inspector-layout-max-height"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layout.max_height)}
+              onChange={updateLayoutSizeLimit("max_height")}
+            />
+          </label>
+        </div>
         <label className="stacked-field">
           줄 정렬
           <select
@@ -2370,6 +2448,48 @@ function Inspector({
             <option value="fill">채우기</option>
           </select>
         </label>
+        <div className="field-grid">
+          <label>
+            최소 너비
+            <input
+              data-testid="inspector-layout-item-min-width"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layoutItem.min_width)}
+              onChange={updateLayoutItemSizeLimit("min_width")}
+            />
+          </label>
+          <label>
+            최대 너비
+            <input
+              data-testid="inspector-layout-item-max-width"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layoutItem.max_width)}
+              onChange={updateLayoutItemSizeLimit("max_width")}
+            />
+          </label>
+          <label>
+            최소 높이
+            <input
+              data-testid="inspector-layout-item-min-height"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layoutItem.min_height)}
+              onChange={updateLayoutItemSizeLimit("min_height")}
+            />
+          </label>
+          <label>
+            최대 높이
+            <input
+              data-testid="inspector-layout-item-max-height"
+              type="number"
+              min="0"
+              value={optionalNumericInputValue(layoutItem.max_height)}
+              onChange={updateLayoutItemSizeLimit("max_height")}
+            />
+          </label>
+        </div>
         <div className="field-grid">
           <label>
             마진 위

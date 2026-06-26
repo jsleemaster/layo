@@ -300,6 +300,85 @@ describe("editor state commands", () => {
     expect(findNodeById(relaid.document, "fit-rectangle-1")?.transform).toMatchObject({ x: 24, y: 72 });
   });
 
+  test("auto layout clamps fit containers and fill children with min and max sizing rules", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 420, height: 280 };
+    frame.layout = {
+      mode: "auto",
+      direction: "vertical",
+      align_items: "start",
+      justify_content: "start",
+      width_sizing: "fit",
+      height_sizing: "fit",
+      min_width: 220,
+      max_width: 240,
+      min_height: 160,
+      max_height: 170,
+      gap: 12,
+      padding: { top: 20, right: 24, bottom: 20, left: 24 }
+    };
+    const text = findNodeById(document, "text-1") as any;
+    text.size = { width: 260, height: 40 };
+    frame.children.push({
+      id: "max-rectangle-1",
+      kind: "rectangle",
+      name: "최대 사각형",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 30 },
+      style: { fill: "#e0f2fe", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+
+    const fitted = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "max-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(fitted.document, "frame-1")?.size).toEqual({ width: 240, height: 160 });
+
+    const fixedDocument = fitted.document;
+    const fixedFrame = findNodeById(fixedDocument, "frame-1") as any;
+    fixedFrame.layout = {
+      ...fixedFrame.layout,
+      width_sizing: "fixed",
+      height_sizing: "fixed",
+      max_width: undefined,
+      min_height: undefined,
+      max_height: undefined
+    };
+    fixedFrame.size = { width: 360, height: 240 };
+    const fillText = findNodeById(fixedDocument, "text-1") as any;
+    fillText.size = { width: 100, height: 40 };
+    fillText.layout_item = {
+      width_sizing: "fill",
+      height_sizing: "fill",
+      max_width: 180,
+      min_height: 100,
+      max_height: 120,
+      margin: { top: 0, right: 6, bottom: 0, left: 6 }
+    };
+
+    const filled = executeEditorCommand(createEditorState(fixedDocument), {
+      type: "update_node_geometry",
+      nodeId: "max-rectangle-1",
+      patch: { width: 80 }
+    });
+
+    expect(findNodeById(filled.document, "text-1")?.layout_item).toMatchObject({
+      width_sizing: "fill",
+      height_sizing: "fill",
+      max_width: 180,
+      min_height: 100,
+      max_height: 120
+    });
+    expect(findNodeById(filled.document, "text-1")?.size).toEqual({ width: 180, height: 120 });
+    expect(findNodeById(filled.document, "text-1")?.transform).toMatchObject({ x: 30, y: 20 });
+    expect(findNodeById(filled.document, "max-rectangle-1")?.transform).toMatchObject({ x: 24, y: 152 });
+  });
+
   test("auto layout centers children on the cross axis and distributes them on the main axis", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

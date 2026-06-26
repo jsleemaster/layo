@@ -1901,6 +1901,8 @@ function relayoutNode(node: RendererNode): void {
   if (layout) {
     const isVertical = layout.direction === "vertical";
     const flowChildren = node.children.filter((child) => layoutItemPosition(child.layout_item) === "static");
+    applyLayoutContainerSizeLimits(node, layout);
+    flowChildren.forEach(applyLayoutItemSizeLimits);
     if (layout.mode === "grid") {
       relayoutGridChildren(node, layout, flowChildren);
     } else if (layout.wrap === "wrap") {
@@ -1989,10 +1991,10 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
     const innerHeight = Math.max(0, placementHeight - margin.top - margin.bottom);
 
     if (layoutItem.width_sizing === "fill") {
-      child.size.width = clampSize(innerWidth);
+      child.size.width = clampLayoutItemWidth(child, innerWidth);
     }
     if (layoutItem.height_sizing === "fill" || layout.align_items === "stretch") {
-      child.size.height = clampSize(innerHeight);
+      child.size.height = clampLayoutItemHeight(child, innerHeight);
     }
 
     child.transform = {
@@ -2055,11 +2057,16 @@ function relayoutSingleLineChildren(
       metrics.crossAfter
     );
     if (layout.align_items === "stretch") {
-      const stretchedCrossSize = clampSize(availableCross - metrics.crossBefore - metrics.crossAfter);
       if (isVertical) {
-        child.size.width = stretchedCrossSize;
+        child.size.width = clampLayoutItemWidth(
+          child,
+          availableCross - metrics.crossBefore - metrics.crossAfter
+        );
       } else {
-        child.size.height = stretchedCrossSize;
+        child.size.height = clampLayoutItemHeight(
+          child,
+          availableCross - metrics.crossBefore - metrics.crossAfter
+        );
       }
     }
     child.transform = {
@@ -2129,11 +2136,16 @@ function relayoutWrappedChildren(
         metrics.crossAfter
       );
       if (layout.align_items === "stretch") {
-        const stretchedCrossSize = clampSize(line.crossSize - metrics.crossBefore - metrics.crossAfter);
         if (isVertical) {
-          child.size.width = stretchedCrossSize;
+          child.size.width = clampLayoutItemWidth(
+            child,
+            line.crossSize - metrics.crossBefore - metrics.crossAfter
+          );
         } else {
-          child.size.height = stretchedCrossSize;
+          child.size.height = clampLayoutItemHeight(
+            child,
+            line.crossSize - metrics.crossBefore - metrics.crossAfter
+          );
         }
       }
       child.transform = {
@@ -2190,9 +2202,9 @@ function applyFillSizingForSingleLine(
     const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
     for (const child of fillMainChildren) {
       if (isVertical) {
-        child.size.height = filledMainSize;
+        child.size.height = clampLayoutItemHeight(child, filledMainSize);
       } else {
-        child.size.width = filledMainSize;
+        child.size.width = clampLayoutItemWidth(child, filledMainSize);
       }
     }
   }
@@ -2205,9 +2217,9 @@ function applyFillSizingForSingleLine(
       const metrics = childMetrics[index];
       const filledCrossSize = clampSize(availableCross - metrics.crossBefore - metrics.crossAfter);
       if (isVertical) {
-        child.size.width = filledCrossSize;
+        child.size.width = clampLayoutItemWidth(child, filledCrossSize);
       } else {
-        child.size.height = filledCrossSize;
+        child.size.height = clampLayoutItemHeight(child, filledCrossSize);
       }
     });
   }
@@ -2237,9 +2249,9 @@ function applyFillSizingForWrappedLines(
       const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
       for (const entry of fillMainChildren) {
         if (isVertical) {
-          entry.child.size.height = filledMainSize;
+          entry.child.size.height = clampLayoutItemHeight(entry.child, filledMainSize);
         } else {
-          entry.child.size.width = filledMainSize;
+          entry.child.size.width = clampLayoutItemWidth(entry.child, filledMainSize);
         }
       }
     }
@@ -2266,9 +2278,9 @@ function applyFillSizingForWrappedLines(
         }
         const filledCrossSize = clampSize(line.crossSize - entry.metrics.crossBefore - entry.metrics.crossAfter);
         if (isVertical) {
-          entry.child.size.width = filledCrossSize;
+          entry.child.size.width = clampLayoutItemWidth(entry.child, filledCrossSize);
         } else {
-          entry.child.size.height = filledCrossSize;
+          entry.child.size.height = clampLayoutItemHeight(entry.child, filledCrossSize);
         }
       }
       line.children = line.children.map((entry) => ({
@@ -2293,19 +2305,19 @@ function applyFitSizing(
   const fittedCross = clampSize(contentSize.cross);
   if (isVertical) {
     if (layout.width_sizing === "fit") {
-      node.size.width = fittedCross;
+      node.size.width = clampLayoutWidth(layout, fittedCross);
     }
     if (layout.height_sizing === "fit") {
-      node.size.height = fittedMain;
+      node.size.height = clampLayoutHeight(layout, fittedMain);
     }
     return;
   }
 
   if (layout.width_sizing === "fit") {
-    node.size.width = fittedMain;
+    node.size.width = clampLayoutWidth(layout, fittedMain);
   }
   if (layout.height_sizing === "fit") {
-    node.size.height = fittedCross;
+    node.size.height = clampLayoutHeight(layout, fittedCross);
   }
 }
 
@@ -2362,6 +2374,10 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
   const alignContent = isLayoutAlignContent(layout.align_content) ? layout.align_content : "start";
   const widthSizing = isLayoutSizing(layout.width_sizing) ? layout.width_sizing : "fixed";
   const heightSizing = isLayoutSizing(layout.height_sizing) ? layout.height_sizing : "fixed";
+  const minWidth = normalizeMinSizeLimit(layout.min_width);
+  const maxWidth = normalizeMaxSizeLimit(layout.max_width, minWidth);
+  const minHeight = normalizeMinSizeLimit(layout.min_height);
+  const maxHeight = normalizeMaxSizeLimit(layout.max_height, minHeight);
   const gap = Math.max(0, finiteNumber(layout.gap, 0));
   const rowGap = Math.max(0, finiteNumber(layout.row_gap, gap));
   const columnGap = Math.max(0, finiteNumber(layout.column_gap, gap));
@@ -2379,6 +2395,10 @@ function normalizeNodeLayout(layout: NodeLayout): NodeLayout {
     ...(wrap === "wrap" || alignContent !== "start" ? { align_content: alignContent } : {}),
     ...(widthSizing === "fit" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fit" ? { height_sizing: heightSizing } : {}),
+    ...(minWidth !== undefined ? { min_width: minWidth } : {}),
+    ...(maxWidth !== undefined ? { max_width: maxWidth } : {}),
+    ...(minHeight !== undefined ? { min_height: minHeight } : {}),
+    ...(maxHeight !== undefined ? { max_height: maxHeight } : {}),
     gap,
     ...(rowGap !== gap ? { row_gap: rowGap } : {}),
     ...(columnGap !== gap ? { column_gap: columnGap } : {}),
@@ -2404,6 +2424,10 @@ function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const position = layoutItemPosition(layoutItem);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
+  const minWidth = normalizeMinSizeLimit(layoutItem.min_width);
+  const maxWidth = normalizeMaxSizeLimit(layoutItem.max_width, minWidth);
+  const minHeight = normalizeMinSizeLimit(layoutItem.min_height);
+  const maxHeight = normalizeMaxSizeLimit(layoutItem.max_height, minHeight);
   const gridColumn = normalizeGridPlacement(layoutItem.grid_column);
   const gridRow = normalizeGridPlacement(layoutItem.grid_row);
   const gridColumnSpan = normalizeGridSpan(layoutItem.grid_column_span);
@@ -2413,6 +2437,10 @@ function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
     ...(position === "absolute" ? { position } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
+    ...(minWidth !== undefined ? { min_width: minWidth } : {}),
+    ...(maxWidth !== undefined ? { max_width: maxWidth } : {}),
+    ...(minHeight !== undefined ? { min_height: minHeight } : {}),
+    ...(maxHeight !== undefined ? { max_height: maxHeight } : {}),
     ...(gridArea ? { grid_area: gridArea } : {}),
     ...(gridColumn !== undefined ? { grid_column: gridColumn } : {}),
     ...(gridRow !== undefined ? { grid_row: gridRow } : {}),
@@ -3554,6 +3582,55 @@ function renameInstanceTree(node: RendererNode, instanceId: string) {
     child.id = `${instanceId}__${child.id}`;
     renameInstanceTree(child, instanceId);
   }
+}
+
+function applyLayoutContainerSizeLimits(node: RendererNode, layout: NodeLayout): void {
+  node.size = {
+    width: clampLayoutWidth(layout, node.size.width),
+    height: clampLayoutHeight(layout, node.size.height)
+  };
+}
+
+function applyLayoutItemSizeLimits(node: RendererNode): void {
+  node.size = {
+    width: clampLayoutItemWidth(node, node.size.width),
+    height: clampLayoutItemHeight(node, node.size.height)
+  };
+}
+
+function clampLayoutWidth(layout: NodeLayout, value: number): number {
+  return clampSizeWithLimits(value, layout.min_width, layout.max_width);
+}
+
+function clampLayoutHeight(layout: NodeLayout, value: number): number {
+  return clampSizeWithLimits(value, layout.min_height, layout.max_height);
+}
+
+function clampLayoutItemWidth(node: RendererNode, value: number): number {
+  const layoutItem = normalizeNodeLayoutItem(node.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  return clampSizeWithLimits(value, layoutItem.min_width, layoutItem.max_width);
+}
+
+function clampLayoutItemHeight(node: RendererNode, value: number): number {
+  const layoutItem = normalizeNodeLayoutItem(node.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  return clampSizeWithLimits(value, layoutItem.min_height, layoutItem.max_height);
+}
+
+function clampSizeWithLimits(value: number, minLimit: number | undefined, maxLimit: number | undefined): number {
+  const minimum = Math.max(MIN_NODE_SIZE, minLimit ?? MIN_NODE_SIZE);
+  const maximum = maxLimit !== undefined && maxLimit >= minimum ? maxLimit : undefined;
+  return Math.min(maximum ?? Number.POSITIVE_INFINITY, Math.max(minimum, finiteNumber(value, minimum)));
+}
+
+function normalizeMinSizeLimit(value: number | undefined): number | undefined {
+  const normalized = finiteNumber(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.max(0, normalized) : undefined;
+}
+
+function normalizeMaxSizeLimit(value: number | undefined, minLimit: number | undefined): number | undefined {
+  const normalized = normalizeMinSizeLimit(value);
+  const minimum = Math.max(MIN_NODE_SIZE, minLimit ?? MIN_NODE_SIZE);
+  return normalized !== undefined && normalized >= minimum ? normalized : undefined;
 }
 
 function clampSize(value: number): number {

@@ -76,6 +76,10 @@ fn layout_metadata_round_trips_through_json() {
                 "align_content": "space_around",
                 "width_sizing": "fit",
                 "height_sizing": "fit",
+                "min_width": 220,
+                "max_width": 240,
+                "min_height": 160,
+                "max_height": 170,
                 "gap": 12,
                 "row_gap": 24,
                 "column_gap": 6,
@@ -91,7 +95,7 @@ fn layout_metadata_round_trips_through_json() {
                   "kind": "rectangle",
                   "name": "Pinned Child",
                   "constraints": { "horizontal": "right", "vertical": "bottom" },
-                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "grid_area": "hero", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
+                  "layout_item": { "position": "absolute", "width_sizing": "fill", "height_sizing": "fill", "min_width": 120, "max_width": 180, "min_height": 80, "max_height": 120, "grid_area": "hero", "grid_column": 3, "grid_row": 2, "grid_column_span": 2, "grid_row_span": 2, "margin": { "top": 10, "right": 8, "bottom": 14, "left": 6 } },
                   "transform": { "x": 220, "y": 180, "rotation": 0 },
                   "size": { "width": 64, "height": 32 },
                   "style": { "fill": "#e0f2fe", "stroke": null, "stroke_width": 0, "opacity": 1 },
@@ -172,6 +176,10 @@ fn layout_metadata_round_trips_through_json() {
         frame.layout.as_ref().unwrap().height_sizing,
         editor_core::LayoutSizing::Fit
     );
+    assert_eq!(frame.layout.as_ref().unwrap().min_width, Some(220.0));
+    assert_eq!(frame.layout.as_ref().unwrap().max_width, Some(240.0));
+    assert_eq!(frame.layout.as_ref().unwrap().min_height, Some(160.0));
+    assert_eq!(frame.layout.as_ref().unwrap().max_height, Some(170.0));
     assert_eq!(frame.layout.as_ref().unwrap().gap, 12.0);
     assert_eq!(frame.layout.as_ref().unwrap().row_gap, Some(24.0));
     assert_eq!(frame.layout.as_ref().unwrap().column_gap, Some(6.0));
@@ -187,6 +195,10 @@ fn layout_metadata_round_trips_through_json() {
         child.layout_item.as_ref().unwrap().height_sizing,
         editor_core::LayoutItemSizing::Fill
     );
+    assert_eq!(child.layout_item.as_ref().unwrap().min_width, Some(120.0));
+    assert_eq!(child.layout_item.as_ref().unwrap().max_width, Some(180.0));
+    assert_eq!(child.layout_item.as_ref().unwrap().min_height, Some(80.0));
+    assert_eq!(child.layout_item.as_ref().unwrap().max_height, Some(120.0));
     assert_eq!(child.layout_item.as_ref().unwrap().margin.top, 10.0);
     assert_eq!(child.layout_item.as_ref().unwrap().margin.right, 8.0);
     assert_eq!(child.layout_item.as_ref().unwrap().margin.bottom, 14.0);
@@ -209,6 +221,10 @@ fn layout_metadata_round_trips_through_json() {
     assert!(json.contains("\"grid_row\":2"));
     assert!(json.contains("\"grid_column_span\":2"));
     assert!(json.contains("\"grid_row_span\":2"));
+    assert!(json.contains("\"min_width\":220.0"));
+    assert!(json.contains("\"max_width\":240.0"));
+    assert!(json.contains("\"min_height\":160.0"));
+    assert!(json.contains("\"max_height\":170.0"));
     assert!(json.contains("\"grid_column_tracks\""));
     assert!(json.contains("\"grid_row_tracks\""));
     assert!(json.contains("\"grid_areas\""));

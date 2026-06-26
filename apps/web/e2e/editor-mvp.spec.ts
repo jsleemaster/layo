@@ -2079,6 +2079,45 @@ test("inspector layout item fill sizing stretches a child inside fixed auto layo
   await expect(page.getByTestId("inspector-y")).toHaveValue("190");
 });
 
+test("inspector layout min and max sizing clamps fit frames and fill children", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("420");
+  await page.getByTestId("inspector-height").fill("280");
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("vertical");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-width-sizing").selectOption("fit");
+  await page.getByTestId("inspector-layout-height-sizing").selectOption("fit");
+  await expect(page.getByTestId("inspector-layout-min-width")).toBeVisible();
+  await expect(page.getByTestId("inspector-layout-max-width")).toBeVisible();
+  await page.getByTestId("inspector-layout-min-width").fill("220");
+  await page.getByTestId("inspector-layout-max-width").fill("240");
+  await page.getByTestId("inspector-layout-min-height").fill("160");
+  await page.getByTestId("inspector-layout-max-height").fill("170");
+  await page.getByTestId("inspector-layout-gap").fill("12");
+  await page.getByTestId("inspector-layout-padding-top").fill("20");
+  await page.getByTestId("inspector-layout-padding-right").fill("24");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("20");
+  await page.getByTestId("inspector-layout-padding-left").fill("24");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("240");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("160");
+
+  await page.getByTestId("inspector-layout-width-sizing").selectOption("fixed");
+  await page.getByTestId("inspector-layout-height-sizing").selectOption("fixed");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-layout-item-max-width")).toBeVisible();
+  await page.getByTestId("inspector-layout-item-width-sizing").selectOption("fill");
+  await page.getByTestId("inspector-layout-item-height-sizing").selectOption("fill");
+  await page.getByTestId("inspector-layout-item-max-width").fill("180");
+  await page.getByTestId("inspector-layout-item-max-height").fill("110");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("180");
+  await expect(page.getByTestId("inspector-height")).toHaveValue("110");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("24");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("20");
+});
+
 test("inspector layout item margin offsets auto-layout children", async ({ page }) => {
   await createProjectFromEmptyState(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();

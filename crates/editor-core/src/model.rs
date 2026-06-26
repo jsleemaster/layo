@@ -107,6 +107,14 @@ pub struct NodeLayout {
     pub width_sizing: LayoutSizing,
     #[serde(default = "default_layout_sizing", skip_serializing_if = "is_fixed_layout_sizing")]
     pub height_sizing: LayoutSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_height: Option<f64>,
     pub gap: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub row_gap: Option<f64>,
@@ -187,6 +195,14 @@ pub struct NodeLayoutItem {
     pub width_sizing: LayoutItemSizing,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
     pub height_sizing: LayoutItemSizing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_height: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_area: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
