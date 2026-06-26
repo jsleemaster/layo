@@ -530,6 +530,57 @@ describe("MCP AI editing workflow", () => {
     );
     expect(resolved.thread.resolvedAt).toEqual(expect.any(String));
 
+    const activity = parseToolJson(
+      await client.callTool({
+        name: "list_comment_activity",
+        arguments: { viewerId: "사용자", limit: 3 }
+      })
+    );
+    expect(activity.feed).toMatchObject({
+      viewerId: "사용자",
+      events: [
+        {
+          type: "resolved",
+          projectId: "comment-project",
+          projectName: "코멘트 프로젝트",
+          fileId: "comment-file",
+          fileName: "코멘트 문서",
+          threadId: created.thread.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "사용자",
+          body: "@민지 문구 확인 필요",
+          mentions: ["민지"]
+        },
+        {
+          type: "replied",
+          projectId: "comment-project",
+          projectName: "코멘트 프로젝트",
+          fileId: "comment-file",
+          fileName: "코멘트 문서",
+          threadId: created.thread.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "개발 팀",
+          body: "@민지 문구를 더 짧게 줄였어요",
+          mentions: ["민지"]
+        },
+        {
+          type: "created",
+          projectId: "comment-project",
+          projectName: "코멘트 프로젝트",
+          fileId: "comment-file",
+          fileName: "코멘트 문서",
+          threadId: created.thread.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "디자인 팀",
+          body: "@민지 문구 확인 필요",
+          mentions: ["민지"]
+        }
+      ]
+    });
+
     const active = parseToolJson(
       await client.callTool({
         name: "list_comment_threads",

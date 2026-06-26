@@ -752,6 +752,32 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "list_comment_activity",
+    {
+      description: "List recent retained comment activity events across Layo projects and files.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        viewerId: z.string().optional().describe("Viewer id returned with the activity feed"),
+        limit: z.number().optional().describe("Maximum number of recent activity events to return")
+      }
+    },
+    async ({ viewerId, limit }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              feed: await storage.listCommentActivity({ viewerId, limit })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "resolve_comment_thread",
     {
       description: "Resolve one selected-node comment thread for a Layo design file.",

@@ -171,6 +171,15 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
+  server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
+    return {
+      feed: await storage.listCommentActivity({
+        viewerId: request.query.viewerId,
+        limit: request.query.limit ? Number(request.query.limit) : undefined
+      })
+    };
+  });
+
   server.post<{
     Params: { fileId: string };
     Body: { viewerId?: string };

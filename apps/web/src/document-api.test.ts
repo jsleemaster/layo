@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   addCommentReply,
   createCommentThread,
+  listCommentActivity,
   listCommentNotifications,
   listCommentThreads,
   listFileVersions,
@@ -142,6 +143,60 @@ describe("parseDocumentPayload", () => {
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/comments/notifications?viewerId="), "GET"],
       [expect.stringContaining("/files/sample-file/comments/read"), "POST"]
+    ]);
+  });
+
+  test("lists retained comment activity events", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const parsedUrl = new URL(String(url), "http://127.0.0.1:4317");
+
+      if (parsedUrl.pathname === "/comments/activity") {
+        expect(parsedUrl.searchParams.get("viewerId")).toBe("사용자");
+        expect(parsedUrl.searchParams.get("limit")).toBe("3");
+        return jsonResponse({
+          feed: {
+            viewerId: "사용자",
+            events: [
+              {
+                schemaVersion: 1,
+                eventId: "activity-1",
+                type: "resolved",
+                projectId: "project-1",
+                projectName: "브랜드 리뉴얼",
+                fileId: "sample-file",
+                fileName: "검수 문서",
+                threadId: "comment-1",
+                nodeId: "text-1",
+                nodeName: "헤드라인",
+                actorName: "사용자",
+                body: "@민지 문구 확인 필요",
+                mentions: ["민지"],
+                createdAt: "2026-06-27T00:03:00.000Z"
+              }
+            ]
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(listCommentActivity("사용자", 3, fetcher as typeof fetch)).resolves.toEqual({
+      viewerId: "사용자",
+      events: [
+        expect.objectContaining({
+          eventId: "activity-1",
+          type: "resolved",
+          projectId: "project-1",
+          fileName: "검수 문서",
+          body: "@민지 문구 확인 필요"
+        })
+      ]
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/comments/activity?viewerId="), "GET"]
     ]);
   });
 });

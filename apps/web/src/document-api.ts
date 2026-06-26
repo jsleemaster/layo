@@ -66,6 +66,31 @@ export interface CommentNotificationSummary {
   projects: CommentNotificationProjectSummary[];
 }
 
+export type CommentActivityType = "created" | "replied" | "resolved";
+
+export interface CommentActivityEvent {
+  schemaVersion: 1;
+  eventId: string;
+  type: CommentActivityType;
+  projectId: string;
+  projectName: string;
+  fileId: string;
+  fileName: string;
+  threadId: string;
+  replyId?: string;
+  nodeId: string;
+  nodeName: string;
+  actorName: string;
+  body: string;
+  mentions: string[];
+  createdAt: string;
+}
+
+export interface CommentActivityFeed {
+  viewerId: string;
+  events: CommentActivityEvent[];
+}
+
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
@@ -243,6 +268,21 @@ export async function listCommentNotifications(
   const response = await fetcher(apiUrl(`/comments/notifications${query}`));
   const payload = await readDocumentJson(response);
   return (payload as { summary: CommentNotificationSummary }).summary;
+}
+
+export async function listCommentActivity(
+  viewerId = "사용자",
+  limit = 10,
+  fetcher: typeof fetch = fetch
+): Promise<CommentActivityFeed> {
+  const params = new URLSearchParams();
+  if (viewerId.trim()) {
+    params.set("viewerId", viewerId);
+  }
+  params.set("limit", String(limit));
+  const response = await fetcher(apiUrl(`/comments/activity?${params.toString()}`));
+  const payload = await readDocumentJson(response);
+  return (payload as { feed: CommentActivityFeed }).feed;
 }
 
 export async function markFileCommentsRead(

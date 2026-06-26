@@ -458,6 +458,49 @@ describe("HTTP server", () => {
       totalUnread: 0,
       projects: []
     });
+
+    const resolved = await server.inject({
+      method: "POST",
+      url: `/files/sample-file/comments/${created.json().thread.threadId}/resolve`
+    });
+    expect(resolved.statusCode).toBe(200);
+
+    const activity = await server.inject({
+      method: "GET",
+      url: "/comments/activity?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90&limit=2"
+    });
+    expect(activity.statusCode).toBe(200);
+    expect(activity.json().feed).toMatchObject({
+      viewerId: "사용자",
+      events: [
+        {
+          type: "resolved",
+          projectId: "test-project",
+          projectName: "테스트 프로젝트",
+          fileId: "sample-file",
+          fileName: "테스트 문서",
+          threadId: created.json().thread.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "사용자",
+          body: "@민지 문구 확인 필요",
+          mentions: ["민지"]
+        },
+        {
+          type: "replied",
+          projectId: "test-project",
+          projectName: "테스트 프로젝트",
+          fileId: "sample-file",
+          fileName: "테스트 문서",
+          threadId: created.json().thread.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "개발 팀",
+          body: "@민지 수정했어요",
+          mentions: ["민지"]
+        }
+      ]
+    });
   });
 
   test("updates image node assets and persists replacement metadata", async () => {

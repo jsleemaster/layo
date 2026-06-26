@@ -365,6 +365,69 @@ describe("FileStorage", () => {
     });
   });
 
+  test("comment activity feed retains project file events in recent order", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "@민지 첫 검수 요청",
+      authorName: "디자인 팀"
+    });
+    await storage.addCommentReply("sample-file", created.threadId, {
+      body: "문구를 더 짧게 줄였어요",
+      authorName: "개발 팀"
+    });
+    await storage.resolveCommentThread("sample-file", created.threadId);
+
+    await expect(storage.listCommentActivity({ viewerId: "사용자", limit: 2 })).resolves.toMatchObject({
+      viewerId: "사용자",
+      events: [
+        {
+          type: "resolved",
+          projectId: "test-project",
+          projectName: "테스트 프로젝트",
+          fileId: "sample-file",
+          fileName: "테스트 문서",
+          threadId: created.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "사용자",
+          body: "@민지 첫 검수 요청",
+          mentions: ["민지"]
+        },
+        {
+          type: "replied",
+          projectId: "test-project",
+          projectName: "테스트 프로젝트",
+          fileId: "sample-file",
+          fileName: "테스트 문서",
+          threadId: created.threadId,
+          nodeId: "text-1",
+          nodeName: "헤드라인",
+          actorName: "개발 팀",
+          body: "문구를 더 짧게 줄였어요",
+          mentions: []
+        }
+      ]
+    });
+
+    const activity = await storage.listCommentActivity({ viewerId: "사용자", limit: 10 });
+    expect(activity.events.map((event) => event.type)).toEqual(["resolved", "replied", "created"]);
+    expect(activity.events[2]).toMatchObject({
+      actorName: "디자인 팀",
+      body: "@민지 첫 검수 요청",
+      mentions: ["민지"]
+    });
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(sidecar.activity.map((event: { type: string }) => event.type)).toEqual([
+      "resolved",
+      "replied",
+      "created"
+    ]);
+  });
+
   test("comment threads reject a missing body with a validation error", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

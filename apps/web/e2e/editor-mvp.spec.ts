@@ -8,7 +8,7 @@ test.beforeEach(async () => {
 });
 
 async function openFilePanel(page: Page) {
-  await page.getByRole("button", { name: "파일" }).click();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
 }
 
 async function openEmptyEditor(page: Page) {
@@ -1415,6 +1415,42 @@ test("file panel summarizes unread comments and marks the current file read", as
     totalUnread: 0,
     projects: []
   });
+});
+
+test("file panel shows retained recent comment activity", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("@민지 파일 활동 확인");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await page.getByTestId("comment-reply-body").fill("문구를 더 짧게 줄였어요");
+  await page.getByRole("button", { name: "답글 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+
+  await page.getByRole("button", { name: "@민지 파일 활동 확인 해결" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 해결됨");
+
+  await openFilePanel(page);
+  const feed = page.getByTestId("comment-activity-feed");
+  await expect(feed).toContainText("최근 코멘트 활동");
+  await expect(feed).toContainText("해결");
+  await expect(feed).toContainText("답글");
+  await expect(feed).toContainText("새 문서 1");
+  await expect(feed).toContainText("@민지 파일 활동 확인");
+  await expect(feed).toContainText("문구를 더 짧게 줄였어요");
+
+  const response = await page.request.get(
+    `http://127.0.0.1:4317/comments/activity?viewerId=${encodeURIComponent("사용자")}&limit=3`
+  );
+  expect(response.ok()).toBeTruthy();
+  const payload = await response.json();
+  expect(payload.feed.events.map((event: { type: string }) => event.type)).toEqual([
+    "resolved",
+    "replied",
+    "created"
+  ]);
 });
 
 test("canvas comment bubbles open selected-layer threads and disappear after resolve", async ({ page }) => {

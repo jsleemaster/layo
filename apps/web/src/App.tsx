@@ -35,6 +35,7 @@ import {
   createCommentThread,
   exportDesignTokensDtcg,
   importDesignTokensDtcg,
+  listCommentActivity,
   listCommentNotifications,
   listCommentThreads,
   listFileVersions,
@@ -46,6 +47,7 @@ import {
   resolveCommentThread,
   saveFileVersion,
   summarizeDocumentChanges,
+  type CommentActivityFeed,
   type CommentNotificationSummary,
   type CommentThread,
   type FileVersionChangeSummary,
@@ -145,6 +147,17 @@ import {
 } from "./collaboration/remote-overlays";
 
 const LOCAL_COMMENT_VIEWER_ID = "사용자";
+
+function formatCommentActivityType(type: CommentActivityFeed["events"][number]["type"]) {
+  switch (type) {
+    case "created":
+      return "코멘트";
+    case "replied":
+      return "답글";
+    case "resolved":
+      return "해결";
+  }
+}
 
 function numericInputValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
@@ -4018,6 +4031,7 @@ export function App() {
   const [commentStatus, setCommentStatus] = useState("코멘트 대기 중");
   const [commentNotificationSummary, setCommentNotificationSummary] =
     useState<CommentNotificationSummary | null>(null);
+  const [commentActivityFeed, setCommentActivityFeed] = useState<CommentActivityFeed | null>(null);
   const [tokenDtcgDraft, setTokenDtcgDraft] = useState("");
   const [tokenDtcgStatus, setTokenDtcgStatus] = useState("");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
@@ -4108,12 +4122,25 @@ export function App() {
     setCommentNotificationSummary(null);
   };
 
+  const resetCommentActivity = () => {
+    setCommentActivityFeed(null);
+  };
+
   const refreshCommentNotifications = async () => {
     try {
       const summary = await listCommentNotifications(LOCAL_COMMENT_VIEWER_ID);
       setCommentNotificationSummary(summary);
     } catch {
       setCommentNotificationSummary(null);
+    }
+  };
+
+  const refreshCommentActivity = async () => {
+    try {
+      const feed = await listCommentActivity(LOCAL_COMMENT_VIEWER_ID, 8);
+      setCommentActivityFeed(feed);
+    } catch {
+      setCommentActivityFeed(null);
     }
   };
 
@@ -4160,6 +4187,7 @@ export function App() {
     void refreshFileVersions(project.currentDocumentId);
     void refreshCommentThreads(project.currentDocumentId);
     void refreshCommentNotifications();
+    void refreshCommentActivity();
   };
 
   useEffect(() => {
@@ -4185,6 +4213,7 @@ export function App() {
             resetFileVersions("프로젝트 없음");
             resetCommentThreads("프로젝트 없음");
             resetCommentNotifications();
+            resetCommentActivity();
             setEditor(null);
           }
           return;
@@ -4210,12 +4239,14 @@ export function App() {
         void refreshFileVersions(selectedProject.currentDocumentId);
         void refreshCommentThreads(selectedProject.currentDocumentId);
         void refreshCommentNotifications();
+        void refreshCommentActivity();
       } catch {
         if (!cancelled) {
           setProjectStatus("로컬 서버를 시작하면 프로젝트를 불러옵니다");
           resetFileVersions("버전 기록 대기 중");
           resetCommentThreads("코멘트 대기 중");
           resetCommentNotifications();
+          resetCommentActivity();
           setEditor(null);
         }
       }
@@ -4295,6 +4326,13 @@ export function App() {
         (file) => file.fileId === currentProject?.currentDocumentId
       )?.unreadCount ?? 0,
     [currentProject, currentProjectCommentNotification]
+  );
+  const currentProjectCommentActivity = useMemo(
+    () =>
+      currentProject
+        ? (commentActivityFeed?.events.filter((event) => event.projectId === currentProject.projectId) ?? [])
+        : [],
+    [commentActivityFeed, currentProject]
   );
   const selectedParentNode = useMemo(
     () =>
@@ -6817,7 +6855,8 @@ export function App() {
       setCommentBody("");
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 추가됨"),
-        refreshCommentNotifications()
+        refreshCommentNotifications(),
+        refreshCommentActivity()
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 추가하지 못했습니다";
@@ -6844,7 +6883,8 @@ export function App() {
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "답글 추가됨"),
-        refreshCommentNotifications()
+        refreshCommentNotifications(),
+        refreshCommentActivity()
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "답글을 추가하지 못했습니다";
@@ -6862,7 +6902,8 @@ export function App() {
       await resolveCommentThread(currentProject.currentDocumentId, threadId);
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 해결됨"),
-        refreshCommentNotifications()
+        refreshCommentNotifications(),
+        refreshCommentActivity()
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 해결하지 못했습니다";
@@ -7781,6 +7822,30 @@ export function App() {
                   >
                     현재 파일 읽음
                   </button>
+                </section>
+                <section
+                  className="comment-activity-feed"
+                  data-testid="comment-activity-feed"
+                  aria-label="최근 코멘트 활동"
+                >
+                  <div className="comment-activity-heading">
+                    <strong>최근 코멘트 활동</strong>
+                  </div>
+                  <ul className="comment-activity-list">
+                    {currentProjectCommentActivity.length > 0 ? (
+                      currentProjectCommentActivity.map((event) => (
+                        <li className="comment-activity-row" key={event.eventId}>
+                          <span className="comment-activity-meta">
+                            {formatCommentActivityType(event.type)} · {event.fileName}
+                          </span>
+                          <strong>{event.actorName}</strong>
+                          <span className="comment-activity-body">{event.body}</span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="comment-activity-empty">최근 코멘트 활동 없음</li>
+                    )}
+                  </ul>
                 </section>
                 <section className="file-version-panel" data-testid="file-version-panel" aria-label="버전 기록">
                   <div className="file-version-heading">

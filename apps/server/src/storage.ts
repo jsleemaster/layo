@@ -35,6 +35,7 @@ import { sampleDocument } from "./sample-document.js";
 const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
 const DEFAULT_STORAGE_DIR = ".layo";
 const AUTO_FILE_VERSION_EDIT_INTERVAL = 3;
+const COMMENT_ACTIVITY_RETENTION_LIMIT = 50;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -247,6 +248,23 @@ export interface StoredCommentReply {
   mentions: string[];
 }
 
+export type CommentActivityType = "created" | "replied" | "resolved";
+
+export interface StoredCommentActivityEvent {
+  schemaVersion: 1;
+  eventId: string;
+  type: CommentActivityType;
+  fileId: string;
+  threadId: string;
+  replyId?: string;
+  nodeId: string;
+  nodeName: string;
+  actorName: string;
+  body: string;
+  mentions: string[];
+  createdAt: string;
+}
+
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
@@ -275,6 +293,22 @@ export interface MarkFileCommentsReadInput {
   viewerId?: string;
 }
 
+export interface ListCommentActivityOptions {
+  viewerId?: string;
+  limit?: number;
+}
+
+export interface CommentActivityEvent extends StoredCommentActivityEvent {
+  projectId: string;
+  projectName: string;
+  fileName: string;
+}
+
+export interface CommentActivityFeed {
+  viewerId: string;
+  events: CommentActivityEvent[];
+}
+
 export interface CommentNotificationFileSummary {
   fileId: string;
   name: string;
@@ -298,6 +332,7 @@ interface StoredCommentThreadFile {
   schemaVersion: 1;
   fileId: string;
   threads: StoredCommentThread[];
+  activity: StoredCommentActivityEvent[];
 }
 
 interface AutoFileVersionState {
@@ -753,6 +788,34 @@ export class FileStorage {
     };
   }
 
+  async listCommentActivity(options: ListCommentActivityOptions = {}): Promise<CommentActivityFeed> {
+    const viewerId = normalizeName(options.viewerId, "사용자");
+    const limit = normalizeListLimit(options.limit, COMMENT_ACTIVITY_RETENTION_LIMIT);
+    const projects = await this.listProjects();
+    const events: CommentActivityEvent[] = [];
+
+    for (const project of projects) {
+      for (const document of project.documents) {
+        const store = await this.readCommentThreadFile(document.documentId);
+        events.push(
+          ...store.activity.map((event) => ({
+            ...event,
+            projectId: project.projectId,
+            projectName: project.name,
+            fileName: document.name
+          }))
+        );
+      }
+    }
+
+    return {
+      viewerId,
+      events: events
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, limit)
+    };
+  }
+
   async readFile(fileId: string): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const filePath = this.filePathFor(fileId);
@@ -866,7 +929,18 @@ export class FileStorage {
     const store = await this.readCommentThreadFile(fileId);
     await this.writeCommentThreadFile({
       ...store,
-      threads: [thread, ...store.threads]
+      threads: [thread, ...store.threads],
+      activity: prependCommentActivity(store.activity, {
+        type: "created",
+        fileId,
+        threadId: thread.threadId,
+        nodeId: thread.nodeId,
+        nodeName: thread.nodeName,
+        actorName: thread.authorName,
+        body: thread.body,
+        mentions: thread.mentions,
+        createdAt: thread.createdAt
+      })
     });
     return thread;
   }
@@ -903,7 +977,19 @@ export class FileStorage {
       ...store,
       threads: store.threads.map((candidate) =>
         candidate.threadId === threadId ? repliedThread : candidate
-      )
+      ),
+      activity: prependCommentActivity(store.activity, {
+        type: "replied",
+        fileId,
+        threadId,
+        replyId: reply.replyId,
+        nodeId: thread.nodeId,
+        nodeName: thread.nodeName,
+        actorName: reply.authorName,
+        body: reply.body,
+        mentions: reply.mentions,
+        createdAt: reply.createdAt
+      })
     });
     return repliedThread;
   }
@@ -963,15 +1049,27 @@ export class FileStorage {
       throw new Error(`comment thread not found: ${threadId}`);
     }
 
+    const resolvedAt = thread.resolvedAt ?? new Date().toISOString();
     const resolvedThread: StoredCommentThread = {
       ...thread,
-      resolvedAt: thread.resolvedAt ?? new Date().toISOString()
+      resolvedAt
     };
     await this.writeCommentThreadFile({
       ...store,
       threads: store.threads.map((candidate) =>
         candidate.threadId === threadId ? resolvedThread : candidate
-      )
+      ),
+      activity: prependCommentActivity(store.activity, {
+        type: "resolved",
+        fileId,
+        threadId,
+        nodeId: thread.nodeId,
+        nodeName: thread.nodeName,
+        actorName: "사용자",
+        body: thread.body,
+        mentions: thread.mentions,
+        createdAt: resolvedAt
+      })
     });
     return resolvedThread;
   }
@@ -1392,7 +1490,7 @@ export class FileStorage {
     try {
       raw = await readFile(this.commentThreadsPathFor(fileId), "utf8");
     } catch {
-      return { schemaVersion: 1, fileId, threads: [] };
+      return { schemaVersion: 1, fileId, threads: [], activity: [] };
     }
 
     return parseStoredCommentThreadFile(JSON.parse(raw), fileId);
@@ -1416,6 +1514,11 @@ function assertSafeStorageId(value: string) {
 
 function createStorageId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function normalizeListLimit(value: number | undefined, fallback: number) {
+  const limit = Math.floor(Number(value) || fallback);
+  return Math.min(Math.max(limit, 1), fallback);
 }
 
 function normalizeName(value: string | undefined, fallback: string) {
@@ -1475,6 +1578,21 @@ function withViewerUnread(thread: StoredCommentThread, viewerId?: string): Store
 
 function countUnreadCommentThreads(threads: StoredCommentThread[], viewerId: string) {
   return threads.filter((thread) => thread.resolvedAt === null && !thread.readBy.includes(viewerId)).length;
+}
+
+function prependCommentActivity(
+  current: StoredCommentActivityEvent[],
+  input: Omit<StoredCommentActivityEvent, "schemaVersion" | "eventId">
+): StoredCommentActivityEvent[] {
+  const event: StoredCommentActivityEvent = {
+    schemaVersion: 1,
+    eventId: createStorageId("activity"),
+    ...input
+  };
+  return [
+    event,
+    ...current
+  ].slice(0, COMMENT_ACTIVITY_RETENTION_LIMIT);
 }
 
 function priorStorageDirectoryName() {
@@ -1601,7 +1719,10 @@ function parseStoredCommentThreadFile(input: unknown, expectedFileId: string): S
   return {
     schemaVersion: 1,
     fileId: candidate.fileId,
-    threads: candidate.threads.map((thread) => parseStoredCommentThread(thread, expectedFileId))
+    threads: candidate.threads.map((thread) => parseStoredCommentThread(thread, expectedFileId)),
+    activity: Array.isArray(candidate.activity)
+      ? candidate.activity.map((event) => parseStoredCommentActivityEvent(event, expectedFileId))
+      : []
   };
 }
 
@@ -1662,6 +1783,49 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
     authorName: normalizeName(candidate.authorName, "사용자"),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
     mentions: normalizeCommentMentionList(candidate.mentions, body)
+  };
+}
+
+function parseStoredCommentActivityEvent(
+  input: unknown,
+  expectedFileId: string
+): StoredCommentActivityEvent {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid comment activity event");
+  }
+
+  const candidate = input as StoredCommentActivityEvent;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported comment activity event schema: ${String(candidate.schemaVersion)}`);
+  }
+  assertSafeStorageId(candidate.eventId);
+  assertSafeStorageId(candidate.fileId);
+  assertSafeStorageId(candidate.threadId);
+  assertSafeStorageId(candidate.nodeId);
+  if (candidate.replyId) {
+    assertSafeStorageId(candidate.replyId);
+  }
+  if (candidate.fileId !== expectedFileId) {
+    throw new Error(`comment activity file mismatch: ${candidate.fileId}`);
+  }
+  if (!["created", "replied", "resolved"].includes(candidate.type)) {
+    throw new Error(`unsupported comment activity type: ${String(candidate.type)}`);
+  }
+
+  const body = normalizeCommentBody(candidate.body);
+  return {
+    schemaVersion: 1,
+    eventId: candidate.eventId,
+    type: candidate.type,
+    fileId: candidate.fileId,
+    threadId: candidate.threadId,
+    ...(candidate.replyId ? { replyId: candidate.replyId } : {}),
+    nodeId: candidate.nodeId,
+    nodeName: normalizeName(candidate.nodeName, candidate.nodeId),
+    actorName: normalizeName(candidate.actorName, "사용자"),
+    body,
+    mentions: normalizeCommentMentionList(candidate.mentions, body),
+    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
   };
 }
 

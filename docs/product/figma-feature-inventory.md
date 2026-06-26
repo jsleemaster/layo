@@ -1,6 +1,6 @@
 # Figma Feature Inventory
 
-Last checked: 2026-06-17
+Last checked: 2026-06-27
 
 This inventory is based on current Figma Learn and Figma developer documentation. It is intentionally broader than the current Layo MVP so we can decide which Figma behaviors to adopt, adapt, defer, or exclude with a stable record.
 
@@ -72,7 +72,7 @@ Figma currently spans these product surfaces:
 | Variables | Color, number, string, and boolean variables; collections; modes; token-like design values; prototype logic. | Code export has token candidates only. | Adopt. Variables should become first-class document data. |
 | Prototyping | Flows, triggers, actions, transitions, overlays, scroll overflow, smart animate, variables, expressions, conditionals. | Not implemented. | Stage. Basic frame-to-frame interactions first; smart animate and conditionals later. |
 | Presentation view | Play prototypes, responsive prototype viewport, device/background settings. | Not implemented. | Defer until basic prototyping exists. |
-| Comments | Canvas comments, threads, replies, mentions, prototype comments. | Selected-node comments, replies, resolved state, viewport bubbles, persisted mention extraction, local unread/read state, and local project/file unread summaries with current-file mark-read exist. Prototype comments, live sync, real team activity notifications, and real team-member mention targeting are not implemented. | Adopt for collaboration. Comment data can stay local/team-owned. |
+| Comments | Canvas comments, threads, replies, mentions, prototype comments. | Selected-node comments, replies, resolved state, viewport bubbles, persisted mention extraction, local unread/read state, local project/file unread summaries with current-file mark-read, and retained local create/reply/resolve activity feed exist. Prototype comments, live sync, real team activity notifications, and real team-member mention targeting are not implemented. | Adopt for collaboration. Comment data can stay local/team-owned. |
 | Multiplayer | Realtime editing, cursor chat, audio, spotlight, viewer history. | Realtime document sync, presence, remote cursor and selection. No chat/audio/spotlight. | Extend. Cursor chat and comments are nearer than audio. |
 | Dev handoff | Inspect layer properties, measure, export, annotations, ready-for-dev. | MCP/HTTP inspect, validate, change summary, code export. No visual Dev Mode panel. | Adapt. Our structured inspect/export should become a first-class Dev panel. |
 | Code Connect | Map design components to real code components and enrich Dev Mode/MCP output. | Code export produces suggested implementation specs. | Adapt. Add repo component mapping before trying to match Figma Code Connect. |
