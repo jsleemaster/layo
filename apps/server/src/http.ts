@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
 import {
+  FILE_ARCHIVE_MIME_TYPE,
   FileStorage,
   INPUT_VALIDATION_ERROR_CODE,
   type CreateAssetInput,
@@ -144,6 +145,25 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.get("/files", async () => {
     return { files: await storage.listFiles() };
+  });
+
+  server.post<{
+    Body: { archiveBase64: string; fileId?: string; name?: string };
+  }>("/files/import/archive", async (request) => {
+    return {
+      imported: await storage.importFileArchive(Buffer.from(request.body.archiveBase64, "base64"), {
+        fileId: request.body.fileId,
+        name: request.body.name
+      })
+    };
+  });
+
+  server.get<{ Params: { fileId: string } }>("/files/:fileId/export/archive", async (request, reply) => {
+    const exported = await storage.exportFileArchive(request.params.fileId);
+    reply.header("Content-Type", FILE_ARCHIVE_MIME_TYPE);
+    reply.header("Cache-Control", "no-store");
+    reply.header("Content-Disposition", `attachment; filename="${exported.fileName}"`);
+    return reply.send(exported.archive);
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId", async (request) => {

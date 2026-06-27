@@ -60,7 +60,19 @@ describe("MCP AI editing workflow", () => {
       idempotentHint: true,
       openWorldHint: false
     });
+    expect(byName.get("export_file_archive")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
     expect(byName.get("import_design_tokens")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("import_file_archive")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
@@ -334,6 +346,77 @@ describe("MCP AI editing workflow", () => {
         }
       }
     });
+  });
+
+  test("lets an MCP client export and import file archives", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "archive-project",
+        name: "아카이브 프로젝트",
+        documentId: "archive-file",
+        documentName: "아카이브 문서"
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "archive-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "update_text",
+            nodeId: "text-1",
+            value: "아카이브 원본"
+          }
+        ]
+      }
+    });
+
+    const exported = parseToolJson(
+      await client.callTool({
+        name: "export_file_archive",
+        arguments: { fileId: "archive-file" }
+      })
+    );
+
+    expect(exported).toMatchObject({
+      fileId: "archive-file",
+      name: "아카이브 문서",
+      assetCount: 0,
+      mimeType: "application/vnd.layo.file-archive+zip",
+      fileName: "archive-file.layo.zip"
+    });
+    expect(Buffer.from(exported.archiveBase64, "base64").subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const imported = parseToolJson(
+      await client.callTool({
+        name: "import_file_archive",
+        arguments: {
+          archiveBase64: exported.archiveBase64,
+          fileId: "archive-copy",
+          name: "아카이브 사본"
+        }
+      })
+    );
+
+    expect(imported.imported).toMatchObject({
+      fileId: "archive-copy",
+      name: "아카이브 사본",
+      originalFileId: "archive-file",
+      originalName: "아카이브 문서",
+      assetCount: 0
+    });
+
+    const copied = parseToolJson(
+      await client.callTool({
+        name: "get_design_context",
+        arguments: { fileId: "archive-copy" }
+      })
+    );
+    expect(JSON.stringify(copied)).toContain("아카이브 원본");
   });
 
   test("lets an MCP client save, read, list, and restore file versions", async () => {

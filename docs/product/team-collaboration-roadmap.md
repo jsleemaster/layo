@@ -60,6 +60,10 @@ deployment details in `docs/deployment/collaboration.md`.
   snapshots, current-file diff preview, pinned recovery checkpoints, manual
   saved-version delete, and explicit unpinned retention cleanup through storage,
   HTTP, MCP, web API helpers, and the file panel.
+- Saved design files can be exported as a Layo file archive ZIP with readable
+  manifest/document JSON plus referenced image asset metadata and bytes, then
+  imported into another local store through storage, HTTP, or MCP while keeping
+  image asset references intact.
 
 ## Phase 1: Local Team Creation
 
@@ -131,8 +135,8 @@ editing.
 - Add project-level sharing status, including local-only, relay-backed, and
   encrypted relay-backed states.
 - Add team library guidance for reusable components, variables, and assets.
-- Add backup and restore guidance for local files, team manifests, and relay
-  configuration.
+- Add backup and restore guidance for Layo file archives, multi-file projects,
+  team manifests, and relay configuration.
 - Keep code export and MCP inspection tied to the same team-owned document
   identity.
 
@@ -159,6 +163,8 @@ Exit criteria:
 - Document-level permission policies beyond relay connection roles.
 - Shared team libraries for components, variables, assets, and code-export
   mappings.
+- Import review UI for Layo archives, multi-file project archives, and
+  Penpot/Figma migration paths.
 - Admin-facing diagnostics for relay health, room activity, and sync errors.
 
 ## Non-Goals

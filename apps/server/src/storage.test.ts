@@ -227,6 +227,71 @@ describe("FileStorage", () => {
     expect(findTextValue(autoSnapshot.document, "text-1")).toBe("자동 변경 3");
   });
 
+  test("file archive export imports a design file with referenced image assets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "pixel.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "image-archive-1",
+      kind: "image",
+      name: "아카이브 이미지",
+      transform: { x: 120, y: 140, rotation: 0 },
+      size: { width: 320, height: 200 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+
+    const exported = await source.exportFileArchive("sample-file");
+
+    expect(exported).toMatchObject({
+      fileId: "sample-file",
+      name: "테스트 문서",
+      assetCount: 1,
+      mimeType: "application/vnd.layo.file-archive+zip"
+    });
+    expect(exported.archive.subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    const imported = await target.importFileArchive(exported.archive, {
+      fileId: "imported-file",
+      name: "가져온 문서"
+    });
+
+    expect(imported).toMatchObject({
+      fileId: "imported-file",
+      name: "가져온 문서",
+      originalFileId: "sample-file",
+      assetCount: 1
+    });
+    const document = await target.readFile("imported-file");
+    const image = findImageNode(document, "image-archive-1");
+    expect(image?.content).toMatchObject({
+      type: "image",
+      asset_id: asset.assetId,
+      fit_mode: "fit"
+    });
+    const importedAsset = await target.readAsset(asset.assetId);
+    expect(importedAsset).toMatchObject({
+      assetId: asset.assetId,
+      name: "pixel.png",
+      mimeType: "image/png"
+    });
+    expect(importedAsset.data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -2519,6 +2584,21 @@ function findTextValue(document: Awaited<ReturnType<FileStorage["readFile"]>>, n
     }
     if (node.id === nodeId && node.content.type === "text") {
       return node.content.value;
+    }
+    stack.push(...node.children);
+  }
+  return null;
+}
+
+function findImageNode(document: Awaited<ReturnType<FileStorage["readFile"]>>, nodeId: string) {
+  const stack = document.pages.flatMap((page) => page.children);
+  while (stack.length > 0) {
+    const node = stack.shift();
+    if (!node) {
+      continue;
+    }
+    if (node.id === nodeId && node.content.type === "image") {
+      return node;
     }
     stack.push(...node.children);
   }

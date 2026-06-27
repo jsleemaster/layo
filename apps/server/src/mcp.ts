@@ -542,6 +542,72 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "export_file_archive",
+    {
+      description:
+        "Export a Layo design file and referenced image assets as a base64-encoded portable ZIP archive.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files")
+      }
+    },
+    async ({ fileId }) => {
+      const exported = await storage.exportFileArchive(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId: exported.fileId,
+                name: exported.name,
+                assetCount: exported.assetCount,
+                mimeType: exported.mimeType,
+                fileName: exported.fileName,
+                manifest: exported.manifest,
+                archiveBase64: exported.archive.toString("base64")
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "import_file_archive",
+    {
+      description:
+        "Import a base64-encoded Layo file archive into local storage, optionally assigning a new file id or name.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        archiveBase64: z.string().describe("Base64 ZIP payload returned by export_file_archive"),
+        fileId: z.string().optional().describe("Optional safe file id for the imported document"),
+        name: z.string().optional().describe("Optional display name for the imported document")
+      }
+    },
+    async ({ archiveBase64, fileId, name }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              imported: await storage.importFileArchive(Buffer.from(archiveBase64, "base64"), {
+                fileId,
+                name
+              })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "export_design_tokens",
     {
       description: "Export document-local Layo design tokens as W3C/DTCG JSON.",

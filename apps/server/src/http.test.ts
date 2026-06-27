@@ -242,6 +242,92 @@ describe("HTTP server", () => {
     expect(rejected.json()).toEqual({ error: "asset data does not match image/png" });
   });
 
+  test("exports and imports file archives with referenced image assets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const sourceServer = createHttpServer(new FileStorage(path.join(tempRoot, "source")));
+    await sourceServer.inject({
+      method: "POST",
+      url: "/projects",
+      payload: {
+        projectId: "archive-project",
+        name: "아카이브 프로젝트",
+        documentId: "archive-file",
+        documentName: "아카이브 문서"
+      }
+    });
+    const uploaded = await sourceServer.inject({
+      method: "POST",
+      url: "/assets",
+      payload: {
+        name: "pixel.png",
+        mimeType: "image/png",
+        dataBase64: pixelPng
+      }
+    });
+    const asset = uploaded.json().asset as { assetId: string };
+    await sourceServer.inject({
+      method: "POST",
+      url: "/files/archive-file/nodes",
+      payload: {
+        parentId: "page-1",
+        node: {
+          id: "image-archive-http",
+          kind: "image",
+          name: "아카이브 이미지",
+          transform: { x: 100, y: 120, rotation: 0 },
+          size: { width: 240, height: 160 },
+          style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+          content: {
+            type: "image",
+            asset_id: asset.assetId,
+            natural_width: 1,
+            natural_height: 1,
+            fit_mode: "fit"
+          },
+          children: []
+        }
+      }
+    });
+
+    const exported = await sourceServer.inject({
+      method: "GET",
+      url: "/files/archive-file/export/archive"
+    });
+
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["content-type"]).toContain("application/vnd.layo.file-archive+zip");
+    expect(exported.headers["content-disposition"]).toContain("archive-file.layo.zip");
+    expect(exported.rawPayload.subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const targetServer = createHttpServer(new FileStorage(path.join(tempRoot, "target")));
+    const imported = await targetServer.inject({
+      method: "POST",
+      url: "/files/import/archive",
+      payload: {
+        archiveBase64: exported.rawPayload.toString("base64"),
+        fileId: "imported-http-file",
+        name: "HTTP 가져온 문서"
+      }
+    });
+
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().imported).toMatchObject({
+      fileId: "imported-http-file",
+      name: "HTTP 가져온 문서",
+      originalFileId: "archive-file",
+      assetCount: 1
+    });
+    const file = await targetServer.inject({ method: "GET", url: "/files/imported-http-file" });
+    const image = file.json().file.pages[0].children.find((node: { id: string }) => node.id === "image-archive-http");
+    expect(image.content.asset_id).toBe(asset.assetId);
+
+    const importedAsset = await targetServer.inject({ method: "GET", url: `/assets/${asset.assetId}` });
+    expect(importedAsset.statusCode).toBe(200);
+    expect(importedAsset.rawPayload.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+  });
+
   test("updates node geometry, fill, text, and creates nodes", async () => {
     const server = await createServerWithDocument();
 

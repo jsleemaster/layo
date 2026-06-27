@@ -25,6 +25,7 @@ import {
   exportDesignTokensToDtcg,
   importDesignTokensFromDtcg
 } from "./design-token-io.js";
+import { createZipArchive, readZipArchive, type ZipArchiveEntry } from "./file-archive.js";
 import {
   applyConstraintsAfterParentResize,
   normalizeNodeLayoutItem,
@@ -37,6 +38,7 @@ const DEFAULT_STORAGE_DIR = ".layo";
 const AUTO_FILE_VERSION_EDIT_INTERVAL = 3;
 const COMMENT_ACTIVITY_RETENTION_LIMIT = 50;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
+export const FILE_ARCHIVE_MIME_TYPE = "application/vnd.layo.file-archive+zip";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface LayoutSpacing {
@@ -431,6 +433,38 @@ export interface StoredAsset {
 
 export interface StoredAssetData extends StoredAsset {
   data: Buffer;
+}
+
+export interface FileArchiveManifest {
+  schemaVersion: 1;
+  format: "layo.file.archive";
+  exportedAt: string;
+  fileId: string;
+  name: string;
+  assetCount: number;
+}
+
+export interface ExportedFileArchive {
+  fileId: string;
+  name: string;
+  assetCount: number;
+  mimeType: typeof FILE_ARCHIVE_MIME_TYPE;
+  fileName: string;
+  archive: Buffer;
+  manifest: FileArchiveManifest;
+}
+
+export interface ImportedFileArchive {
+  fileId: string;
+  name: string;
+  originalFileId: string;
+  originalName: string;
+  assetCount: number;
+}
+
+export interface ImportFileArchiveOptions {
+  fileId?: string;
+  name?: string;
 }
 
 export class FileStorage {
@@ -869,6 +903,99 @@ export class FileStorage {
     await mkdir(this.filesDir, { recursive: true });
     await writeFile(this.filePathFor(fileId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
     return document;
+  }
+
+  async exportFileArchive(fileId: string): Promise<ExportedFileArchive> {
+    const document = await this.readFile(fileId);
+    const assetIds = collectImageAssetIds(document);
+    const assets = await Promise.all(assetIds.map((assetId) => this.readAsset(assetId)));
+    const manifest: FileArchiveManifest = {
+      schemaVersion: 1,
+      format: "layo.file.archive",
+      exportedAt: new Date().toISOString(),
+      fileId: document.id,
+      name: document.name,
+      assetCount: assets.length
+    };
+    const entries: ZipArchiveEntry[] = [
+      jsonArchiveEntry("manifest.json", manifest),
+      jsonArchiveEntry("document.json", document),
+      ...assets.flatMap((asset) => [
+        jsonArchiveEntry(`assets/${asset.assetId}.json`, {
+          assetId: asset.assetId,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          byteLength: asset.byteLength,
+          url: `/assets/${asset.assetId}`
+        } satisfies StoredAsset),
+        {
+          path: `assets/${asset.assetId}.bin`,
+          data: asset.data
+        }
+      ])
+    ];
+
+    return {
+      fileId: document.id,
+      name: document.name,
+      assetCount: assets.length,
+      mimeType: FILE_ARCHIVE_MIME_TYPE,
+      fileName: `${document.id}.layo.zip`,
+      archive: createZipArchive(entries),
+      manifest
+    };
+  }
+
+  async importFileArchive(
+    archive: Buffer,
+    options: ImportFileArchiveOptions = {}
+  ): Promise<ImportedFileArchive> {
+    const entries = readZipArchive(archive);
+    const manifest = parseFileArchiveManifest(readJsonArchiveEntry(entries, "manifest.json"));
+    const archivedDocument = parseDesignFileArchiveDocument(readJsonArchiveEntry(entries, "document.json"));
+    if (archivedDocument.id !== manifest.fileId) {
+      throw new Error(`file archive document mismatch: ${archivedDocument.id}`);
+    }
+
+    const fileId = options.fileId ?? archivedDocument.id;
+    assertSafeStorageId(fileId);
+    const document: DesignFile = {
+      ...structuredClone(archivedDocument),
+      id: fileId,
+      name: normalizeName(options.name, archivedDocument.name)
+    };
+    const assetIds = collectImageAssetIds(document);
+    if (assetIds.length !== manifest.assetCount) {
+      throw new Error("file archive asset count mismatch");
+    }
+
+    await Promise.all(
+      assetIds.map(async (assetId) => {
+        const metadataPath = `assets/${assetId}.json`;
+        const dataPath = `assets/${assetId}.bin`;
+        const metadata = parseStoredAsset(readJsonArchiveEntry(entries, metadataPath));
+        if (metadata.assetId !== assetId) {
+          throw new Error(`file archive asset mismatch: ${metadata.assetId}`);
+        }
+        const data = entries.get(dataPath);
+        if (!data) {
+          throw new Error(`missing file archive entry: ${dataPath}`);
+        }
+        if (data.length !== metadata.byteLength) {
+          throw new Error(`file archive asset byte length mismatch: ${assetId}`);
+        }
+        assertImageBytesMatchMimeType(data, metadata.mimeType);
+        await this.writeAsset(metadata, data);
+      })
+    );
+    await this.writeFile(fileId, document);
+    return {
+      fileId,
+      name: document.name,
+      originalFileId: manifest.fileId,
+      originalName: manifest.name,
+      assetCount: assetIds.length
+    };
   }
 
   async listFileVersions(fileId: string): Promise<StoredFileVersionSummary[]> {
@@ -1324,6 +1451,19 @@ export class FileStorage {
     await writeFile(this.assetPathFor(assetId), data);
     await writeFile(this.assetMetadataPathFor(assetId), `${JSON.stringify(asset, null, 2)}\n`, "utf8");
     return asset;
+  }
+
+  private async writeAsset(asset: StoredAsset, data: Buffer): Promise<StoredAsset> {
+    const parsed = parseStoredAsset(asset);
+    if (data.length !== parsed.byteLength) {
+      throw new Error(`asset byte length mismatch: ${parsed.assetId}`);
+    }
+    assertImageBytesMatchMimeType(data, parsed.mimeType);
+    await this.adoptPriorDefaultStoreIfNeeded();
+    await mkdir(this.assetsDir, { recursive: true });
+    await writeFile(this.assetPathFor(parsed.assetId), data);
+    await writeFile(this.assetMetadataPathFor(parsed.assetId), `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    return parsed;
   }
 
   async readAsset(assetId: string): Promise<StoredAssetData> {
@@ -1822,6 +1962,76 @@ function parseStoredAsset(input: unknown): StoredAsset {
     byteLength: Math.max(0, Math.round(Number(candidate.byteLength) || 0)),
     url: `/assets/${candidate.assetId}`
   };
+}
+
+function parseFileArchiveManifest(input: unknown): FileArchiveManifest {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid file archive manifest");
+  }
+  const candidate = input as FileArchiveManifest;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported file archive schema: ${String(candidate.schemaVersion)}`);
+  }
+  if (candidate.format !== "layo.file.archive") {
+    throw new Error(`unsupported file archive format: ${String(candidate.format)}`);
+  }
+  assertSafeStorageId(candidate.fileId);
+  return {
+    schemaVersion: 1,
+    format: "layo.file.archive",
+    exportedAt: normalizeName(candidate.exportedAt, new Date(0).toISOString()),
+    fileId: candidate.fileId,
+    name: normalizeName(candidate.name, candidate.fileId),
+    assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0))
+  };
+}
+
+function parseDesignFileArchiveDocument(input: unknown): DesignFile {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid file archive document");
+  }
+  const candidate = input as DesignFile;
+  assertSafeStorageId(candidate.id);
+  if (!Array.isArray(candidate.pages)) {
+    throw new Error("file archive document pages are required");
+  }
+  return {
+    ...candidate,
+    name: normalizeName(candidate.name, candidate.id),
+    pages: candidate.pages
+  };
+}
+
+function readJsonArchiveEntry(entries: Map<string, Buffer>, entryPath: string): unknown {
+  const entry = entries.get(entryPath);
+  if (!entry) {
+    throw new Error(`missing file archive entry: ${entryPath}`);
+  }
+  return JSON.parse(entry.toString("utf8"));
+}
+
+function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
+  return {
+    path: pathName,
+    data: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8")
+  };
+}
+
+function collectImageAssetIds(document: DesignFile): string[] {
+  const assetIds = new Set<string>();
+  const stack = document.pages.flatMap((page) => page.children);
+  while (stack.length > 0) {
+    const node = stack.shift();
+    if (!node) {
+      continue;
+    }
+    if (node.content.type === "image") {
+      assertSafeStorageId(node.content.asset_id);
+      assetIds.add(node.content.asset_id);
+    }
+    stack.push(...node.children);
+  }
+  return [...assetIds].sort();
 }
 
 function parseStoredFileVersion(input: unknown, expectedFileId: string): StoredFileVersion {
