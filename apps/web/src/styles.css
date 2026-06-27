@@ -797,6 +797,37 @@ button:disabled {
   white-space: nowrap;
 }
 
+.component-variant-area-gap-handle {
+  position: absolute;
+  z-index: 2;
+  pointer-events: auto;
+  box-sizing: border-box;
+  border: 0;
+  background: transparent;
+}
+
+.component-variant-area-gap-handle::after {
+  content: "";
+  position: absolute;
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-selection);
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-stage);
+}
+
+.component-variant-area-gap-handle-horizontal::after {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - var(--editor-border-hairline));
+  width: calc(var(--editor-border-hairline) * 2);
+}
+
+.component-variant-area-gap-handle-vertical::after {
+  right: 0;
+  bottom: calc(50% - var(--editor-border-hairline));
+  left: 0;
+  height: calc(var(--editor-border-hairline) * 2);
+}
+
 .grid-viewport-overlay {
   position: absolute;
   inset: 0;

@@ -762,6 +762,28 @@ interface ComponentVariantAreaOverlay {
   width: number;
   height: number;
   label: string;
+  gapHandles: ComponentVariantAreaGapHandle[];
+}
+
+interface ComponentVariantAreaGapHandle {
+  id: string;
+  testId: string;
+  componentId: string;
+  axis: "horizontal" | "vertical";
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  cursor: "col-resize" | "row-resize";
+  title: string;
+}
+
+interface ComponentVariantAreaGapSession {
+  componentId: string;
+  axis: "horizontal" | "vertical";
+  startClientPoint: { x: number; y: number };
+  startArea: ComponentVariantArea;
+  viewportScale: number;
 }
 
 interface InlineTextEditorOverlay {
@@ -955,6 +977,7 @@ const GRID_ADD_CONTROL_SIZE = 22;
 const GRID_ADD_CONTROL_OFFSET = 8;
 const GRID_HEADER_CONTROL_OFFSET = GRID_ADD_CONTROL_SIZE * 2 + GRID_ADD_CONTROL_OFFSET * 2;
 const GRID_AREA_BOUNDARY_HANDLE_SIZE = 14;
+const COMPONENT_VARIANT_AREA_GAP_HANDLE_SIZE = 14;
 const GRID_MIN_TRACK_SIZE = 1;
 const IMPORTED_IMAGE_MIN_DIMENSION = 96;
 const IMPORTED_IMAGE_MAX_DIMENSION = 480;
@@ -1712,10 +1735,55 @@ function createComponentVariantAreaOverlay(
     },
     viewport
   );
+  const gapHandles: ComponentVariantAreaGapHandle[] = [];
+  const firstSource = sources[0];
+  const secondSource = sources[1];
+  if (firstSource && secondSource) {
+    if (area.layout === "horizontal") {
+      const firstRight = firstSource.transform.x + firstSource.size.width;
+      const secondLeft = secondSource.transform.x;
+      const gapCenter = documentPointToViewport(
+        { x: (firstRight + secondLeft) / 2, y: top, space: "document" },
+        viewport
+      );
+      gapHandles.push({
+        id: "horizontal-gap",
+        testId: "component-variant-area-gap-handle-horizontal",
+        componentId: component.id,
+        axis: "horizontal",
+        left: Math.round(gapCenter.x - COMPONENT_VARIANT_AREA_GAP_HANDLE_SIZE / 2),
+        top: bounds.top,
+        width: COMPONENT_VARIANT_AREA_GAP_HANDLE_SIZE,
+        height: bounds.height,
+        cursor: "col-resize",
+        title: "컴포넌트 변형 간격 조절"
+      });
+    } else {
+      const firstBottom = firstSource.transform.y + firstSource.size.height;
+      const secondTop = secondSource.transform.y;
+      const gapCenter = documentPointToViewport(
+        { x: left, y: (firstBottom + secondTop) / 2, space: "document" },
+        viewport
+      );
+      gapHandles.push({
+        id: "vertical-gap",
+        testId: "component-variant-area-gap-handle-vertical",
+        componentId: component.id,
+        axis: "vertical",
+        left: bounds.left,
+        top: Math.round(gapCenter.y - COMPONENT_VARIANT_AREA_GAP_HANDLE_SIZE / 2),
+        width: bounds.width,
+        height: COMPONENT_VARIANT_AREA_GAP_HANDLE_SIZE,
+        cursor: "row-resize",
+        title: "컴포넌트 변형 간격 조절"
+      });
+    }
+  }
 
   return {
     ...bounds,
-    label: `${sources.length} variants`
+    label: `${sources.length} variants`,
+    gapHandles
   };
 }
 
@@ -6981,6 +7049,8 @@ export function App() {
   const [gridTrackContextMenu, setGridTrackContextMenu] = useState<GridTrackContextMenuState | null>(null);
   const [gridCellContextMenu, setGridCellContextMenu] = useState<GridCellContextMenuState | null>(null);
   const [gridCellSelection, setGridCellSelection] = useState<GridCellSelectionState | null>(null);
+  const [componentVariantAreaGapSession, setComponentVariantAreaGapSession] =
+    useState<ComponentVariantAreaGapSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
@@ -6989,6 +7059,7 @@ export function App() {
   const gridResizeClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridAreaBoundarySessionRef = useRef<GridAreaBoundarySession | null>(null);
   const gridAreaBoundaryClientPointRef = useRef<{ x: number; y: number } | null>(null);
+  const componentVariantAreaGapClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridTrackDragRef = useRef<GridTrackDragState | null>(null);
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
@@ -8780,6 +8851,86 @@ export function App() {
         setProjectStatus(message);
       });
   };
+
+  const startComponentVariantAreaGapResize = (
+    handle: ComponentVariantAreaGapHandle,
+    event: React.MouseEvent<HTMLDivElement>
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const currentEditor = editorRef.current;
+    const component = currentEditor?.document.components?.find((candidate) => candidate.id === handle.componentId);
+    if (!currentEditor || !component?.variant_area) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    setInlineTextEditingNodeId(null);
+    setMeasurementTargetNodeId(null);
+    setObjectContextMenu(null);
+    setGridCellContextMenu(null);
+    setGridTrackContextMenu(null);
+    setGridCellSelection(null);
+    componentVariantAreaGapClientPointRef.current = { x: event.clientX, y: event.clientY };
+    setComponentVariantAreaGapSession({
+      componentId: handle.componentId,
+      axis: handle.axis,
+      startClientPoint: { x: event.clientX, y: event.clientY },
+      startArea: structuredClone(component.variant_area),
+      viewportScale: currentEditor.viewport.scale
+    });
+    document.body.style.cursor = handle.cursor;
+  };
+
+  useEffect(() => {
+    if (!componentVariantAreaGapSession) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      componentVariantAreaGapClientPointRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const stopComponentVariantAreaGapResize = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lastPoint = componentVariantAreaGapClientPointRef.current ?? componentVariantAreaGapSession.startClientPoint;
+      const clientDelta =
+        componentVariantAreaGapSession.axis === "horizontal"
+          ? lastPoint.x - componentVariantAreaGapSession.startClientPoint.x
+          : lastPoint.y - componentVariantAreaGapSession.startClientPoint.y;
+      const nextGap = Math.max(
+        0,
+        Math.round(componentVariantAreaGapSession.startArea.gap + clientDelta / componentVariantAreaGapSession.viewportScale)
+      );
+      updateComponentDefinitionVariantArea(componentVariantAreaGapSession.componentId, {
+        ...componentVariantAreaGapSession.startArea,
+        gap: nextGap
+      });
+      componentVariantAreaGapClientPointRef.current = null;
+      setComponentVariantAreaGapSession(null);
+      document.body.style.cursor = "";
+    };
+    const cancelComponentVariantAreaGapResize = () => {
+      componentVariantAreaGapClientPointRef.current = null;
+      setComponentVariantAreaGapSession(null);
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", handlePointerMove, { capture: true });
+    window.addEventListener("mouseup", stopComponentVariantAreaGapResize, { capture: true, once: true });
+    window.addEventListener("blur", cancelComponentVariantAreaGapResize, { once: true });
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove, { capture: true });
+      window.removeEventListener("mouseup", stopComponentVariantAreaGapResize, { capture: true });
+      window.removeEventListener("blur", cancelComponentVariantAreaGapResize);
+      componentVariantAreaGapClientPointRef.current = null;
+      document.body.style.cursor = "";
+    };
+  }, [componentVariantAreaGapSession]);
 
   const dispatchPreservingSelection = (
     command: Parameters<typeof executeEditorCommand>[1],
@@ -12801,7 +12952,6 @@ export function App() {
               <div
                 className="component-variant-area-outline"
                 data-testid="component-variant-area-outline"
-                aria-hidden="true"
                 style={{
                   left: componentVariantAreaOverlay.left,
                   top: componentVariantAreaOverlay.top,
@@ -12810,6 +12960,23 @@ export function App() {
                 }}
               >
                 <span>{componentVariantAreaOverlay.label}</span>
+                {componentVariantAreaOverlay.gapHandles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`component-variant-area-gap-handle component-variant-area-gap-handle-${handle.axis}`}
+                    data-testid={handle.testId}
+                    aria-label={handle.title}
+                    title={handle.title}
+                    style={{
+                      left: handle.left - componentVariantAreaOverlay.left,
+                      top: handle.top - componentVariantAreaOverlay.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startComponentVariantAreaGapResize(handle, event)}
+                  />
+                ))}
               </div>
             ) : null}
             {selectionChromeOverlay ? (

@@ -824,6 +824,28 @@ test("combines selected components as variants from the context menu", async ({ 
   ).toHaveValue("Secondary");
   await expect(page.getByTestId("component-variant-area-outline")).toBeVisible();
 
+  const horizontalGapHandle = page.getByTestId("component-variant-area-gap-handle-horizontal");
+  await expect(horizontalGapHandle).toBeVisible();
+  const horizontalGapHandleBox = await horizontalGapHandle.boundingBox();
+  if (!horizontalGapHandleBox) {
+    throw new Error("component variant horizontal gap handle did not expose a bounding box");
+  }
+  await page.mouse.move(
+    horizontalGapHandleBox.x + horizontalGapHandleBox.width / 2,
+    horizontalGapHandleBox.y + horizontalGapHandleBox.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    horizontalGapHandleBox.x + horizontalGapHandleBox.width / 2 + 24,
+    horizontalGapHandleBox.y + horizontalGapHandleBox.height / 2
+  );
+  await page.mouse.up();
+  await expect(page.getByTestId("inspector-component-variant-area-gap")).toHaveValue("56");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 영역 저장됨");
+  await page.getByRole("button", { name: "Button / Secondary" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("356");
+  await page.getByRole("button", { name: "Button / Primary" }).click();
+
   await page.getByTestId("inspector-component-variant-area-layout").selectOption("vertical");
   await page.getByTestId("inspector-component-variant-area-gap").fill("48");
   await page.getByTestId("inspector-component-variant-area-padding-top").fill("12");
@@ -837,9 +859,28 @@ test("combines selected components as variants from the context menu", async ({ 
   expect(areaOutlineBox!.height).toBeGreaterThan(190);
   expect(areaOutlineBox!.width).toBeLessThan(240);
 
+  const verticalGapHandle = page.getByTestId("component-variant-area-gap-handle-vertical");
+  await expect(verticalGapHandle).toBeVisible();
+  const verticalGapHandleBox = await verticalGapHandle.boundingBox();
+  if (!verticalGapHandleBox) {
+    throw new Error("component variant vertical gap handle did not expose a bounding box");
+  }
+  await page.mouse.move(
+    verticalGapHandleBox.x + verticalGapHandleBox.width / 2,
+    verticalGapHandleBox.y + verticalGapHandleBox.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    verticalGapHandleBox.x + verticalGapHandleBox.width / 2,
+    verticalGapHandleBox.y + verticalGapHandleBox.height / 2 + 16
+  );
+  await page.mouse.up();
+  await expect(page.getByTestId("inspector-component-variant-area-gap")).toHaveValue("64");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 영역 저장됨");
+
   await page.getByRole("button", { name: "Button / Secondary" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("176");
-  await expect(page.getByTestId("inspector-y")).toHaveValue("244");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("260");
   await page.getByRole("button", { name: "Button / Primary" }).click();
 
   await page.mouse.click(stageBox.x + 190, stageBox.y + 148, { button: "right" });
