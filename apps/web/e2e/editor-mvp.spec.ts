@@ -561,6 +561,64 @@ test("inspector dev panel saves and batch-downloads selected layer export preset
   await expect(page.getByTestId("dev-panel-export-presets")).toContainText("SVG 1x");
 });
 
+test("inspector dev panel reviews multi-selection export presets before download", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "rectangle-review",
+          name: "검사기",
+          x: 320,
+          y: 132,
+          width: 144,
+          height: 88,
+          fill: "#dbeafe"
+        },
+        {
+          type: "set_export_presets",
+          nodeId: "text-1",
+          presets: [{ id: "text-review-png", format: "png", scale: 3, suffix: "@hero" }]
+        },
+        {
+          type: "set_export_presets",
+          nodeId: "rectangle-review",
+          presets: [{ id: "rectangle-review-svg", format: "svg", scale: 1, suffix: "" }]
+        }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  const headlineLayer = page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" });
+  const inspectorLayer = page.getByTestId("layer-panel").getByRole("button", { name: "검사기" });
+  await expect(inspectorLayer).toBeVisible();
+
+  await headlineLayer.click();
+  await inspectorLayer.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const review = page.getByTestId("dev-panel-export-review");
+  await expect(review).toContainText("헤드라인 PNG 3x");
+  await expect(review).toContainText("text-1@hero.png");
+  await expect(review).toContainText("검사기 SVG 1x");
+  await expect(review).toContainText("rectangle-review.svg");
+
+  await page.getByTestId("dev-panel-export-review-toggle-rectangle-review:rectangle-review-svg").uncheck();
+  const downloadedNames: string[] = [];
+  page.on("download", (download) => downloadedNames.push(download.suggestedFilename()));
+  await page.getByTestId("dev-panel-export-review-download").click();
+  await expect.poll(() => [...downloadedNames].sort()).toEqual(["text-1@hero.png"]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset 다운로드됨");
+});
+
 function pngDimensions(png: Buffer) {
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return {

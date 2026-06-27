@@ -1379,6 +1379,50 @@ button:disabled {
   border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
 }
 
+.dev-panel-export-review-card {
+  display: grid;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  padding-top: var(--editor-space-xs);
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.dev-panel-export-review-list {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+}
+
+.dev-panel-export-review-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 var(--editor-space-xs);
+  align-items: center;
+  min-width: 0;
+  padding: var(--editor-space-xxs);
+  border-radius: var(--editor-radius-sm);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-export-review-row input {
+  grid-row: span 2;
+}
+
+.dev-panel-export-review-label,
+.dev-panel-export-review-filename {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-panel-export-review-label {
+  color: var(--editor-color-ink);
+  font-weight: var(--editor-text-control-weight);
+}
+
 .dev-panel-export-preset-builder {
   display: grid;
   grid-template-columns: minmax(78px, 1fr) minmax(0, 1.4fr);
