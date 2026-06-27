@@ -1268,6 +1268,7 @@ button:disabled {
 }
 
 .dev-panel-status,
+.dev-panel-copy-status,
 .dev-panel-selected-node span,
 .dev-panel-specs span {
   color: var(--editor-color-muted);
@@ -1295,6 +1296,30 @@ button:disabled {
   border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
   border-radius: var(--editor-radius-sm);
   background: var(--editor-color-control);
+}
+
+.dev-panel-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-copy-button {
+  flex: 0 0 auto;
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: var(--editor-text-small-line);
 }
 
 .dev-panel-code-block pre {

@@ -386,6 +386,35 @@ test("inspector dev panel shows selected layer handoff specs and code", async ({
   await expect(page.getByTestId("dev-panel-structure")).toContainText('"id": "frame-1"');
 });
 
+test("inspector dev panel copies generated handoff snippets to the clipboard", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: "http://127.0.0.1:5173"
+  });
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-css")).toContainText(".node-text-1");
+  await expect(page.getByTestId("dev-panel-html")).toContainText('data-node-id="text-1"');
+  await expect(page.getByTestId("dev-panel-structure")).toContainText('"id": "text-1"');
+
+  await page.getByTestId("dev-panel-copy-css").click();
+  await expect(page.getByTestId("dev-panel-copy-status")).toContainText("CSS 복사됨");
+  const cssClipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(cssClipboard).toContain(".node-text-1");
+  expect(cssClipboard).toContain("font-size");
+
+  await page.getByTestId("dev-panel-copy-html").click();
+  await expect(page.getByTestId("dev-panel-copy-status")).toContainText("HTML 복사됨");
+  const htmlClipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(htmlClipboard).toContain('data-node-id="text-1"');
+
+  await page.getByTestId("dev-panel-copy-structure").click();
+  await expect(page.getByTestId("dev-panel-copy-status")).toContainText("구조 복사됨");
+  const structureClipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(structureClipboard).toContain('"id": "text-1"');
+});
+
 test("file panel exports a project archive and reviews every document before import", async ({ page }) => {
   const { projectId } = await createProjectFromEmptyState(page);
   const secondDocument = await page.request.post(`http://127.0.0.1:4317/projects/${projectId}/documents`, {

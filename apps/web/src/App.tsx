@@ -3075,10 +3075,31 @@ function DevPanel({
   codeExport: CodeExportPayload | null;
   codeExportStatus: string;
 }) {
+  const [copyStatus, setCopyStatus] = useState("복사 대기 중");
   const codeStructure = selectedNode ? findCodeStructureForNode(codeExport, selectedNode.id) : null;
   const cssSnippet = codeExport && codeStructure ? cssSnippetForCodeNode(codeExport.css, codeStructure.className) : "";
   const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
   const structureSnippet = codeStructure ? JSON.stringify(codeStructure, null, 2) : "";
+
+  useEffect(() => {
+    setCopyStatus(selectedNode ? "복사 대기 중" : "레이어 선택 대기 중");
+  }, [selectedNode?.id]);
+
+  const copySnippet = async (label: string, value: string) => {
+    if (!value) {
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      setCopyStatus(`${label} 복사 실패`);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus(`${label} 복사됨`);
+    } catch {
+      setCopyStatus(`${label} 복사 실패`);
+    }
+  };
 
   return (
     <section className="inspector-section dev-panel" data-testid="dev-panel" aria-label="개발 핸드오프">
@@ -3103,18 +3124,54 @@ function DevPanel({
             <span>Fill {selectedNode.style.fill}</span>
             <span>Opacity {numericInputValue(selectedNode.style.opacity)}</span>
           </div>
-          <label className="stacked-field dev-panel-code-block">
-            CSS
+          <div className="dev-panel-copy-status" data-testid="dev-panel-copy-status" aria-live="polite">
+            {copyStatus}
+          </div>
+          <div className="stacked-field dev-panel-code-block">
+            <div className="dev-panel-code-header">
+              <span>CSS</span>
+              <button
+                type="button"
+                className="dev-panel-copy-button"
+                data-testid="dev-panel-copy-css"
+                disabled={!cssSnippet}
+                onClick={() => void copySnippet("CSS", cssSnippet)}
+              >
+                CSS 복사
+              </button>
+            </div>
             <pre data-testid="dev-panel-css">{cssSnippet || "코드 내보내기 데이터를 기다리는 중"}</pre>
-          </label>
-          <label className="stacked-field dev-panel-code-block">
-            HTML
+          </div>
+          <div className="stacked-field dev-panel-code-block">
+            <div className="dev-panel-code-header">
+              <span>HTML</span>
+              <button
+                type="button"
+                className="dev-panel-copy-button"
+                data-testid="dev-panel-copy-html"
+                disabled={!htmlSnippet}
+                onClick={() => void copySnippet("HTML", htmlSnippet)}
+              >
+                HTML 복사
+              </button>
+            </div>
             <pre data-testid="dev-panel-html">{htmlSnippet || "코드 내보내기 데이터를 기다리는 중"}</pre>
-          </label>
-          <label className="stacked-field dev-panel-code-block">
-            구조
+          </div>
+          <div className="stacked-field dev-panel-code-block">
+            <div className="dev-panel-code-header">
+              <span>구조</span>
+              <button
+                type="button"
+                className="dev-panel-copy-button"
+                data-testid="dev-panel-copy-structure"
+                disabled={!structureSnippet}
+                onClick={() => void copySnippet("구조", structureSnippet)}
+              >
+                구조 복사
+              </button>
+            </div>
             <pre data-testid="dev-panel-structure">{structureSnippet || "구조 데이터를 기다리는 중"}</pre>
-          </label>
+          </div>
         </>
       )}
     </section>
