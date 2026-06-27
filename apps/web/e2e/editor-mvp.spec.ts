@@ -543,6 +543,62 @@ test("right inspector authors component variants on selected main components", a
   await expect(page.getByTestId("inspector-component-variant-surface")).toHaveValue("elevated");
 });
 
+test("right inspector edits component variant area layout metadata", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-component-definition-variants")).toBeVisible();
+
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-0").fill("flat");
+  await page.getByTestId("inspector-component-variant-add").click();
+  await page.getByTestId("inspector-component-definition-variant-name-variant-2").fill("Elevated");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("elevated");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+
+  const area = page.getByTestId("inspector-component-variant-area");
+  await expect(area).toBeVisible();
+  await expect(page.getByTestId("inspector-component-variant-area-layout")).toHaveValue("horizontal");
+  await expect(page.getByTestId("inspector-component-variant-area-gap")).toHaveValue("32");
+
+  await page.getByTestId("inspector-component-variant-area-layout").selectOption("vertical");
+  await page.getByTestId("inspector-component-variant-area-gap").fill("48");
+  await page.getByTestId("inspector-component-variant-area-padding-top").fill("12");
+  await page.getByTestId("inspector-component-variant-area-padding-right").fill("16");
+  await page.getByTestId("inspector-component-variant-area-padding-bottom").fill("12");
+  await page.getByTestId("inspector-component-variant-area-padding-left").fill("16");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 영역 저장됨");
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/components`);
+      const payload = await response.json();
+      return payload.components[0].variant_area;
+    })
+    .toEqual({
+      layout: "vertical",
+      gap: 48,
+      padding: { top: 12, right: 16, bottom: 12, left: 16 }
+    });
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-component-variant-area-layout")).toHaveValue("vertical");
+  await expect(page.getByTestId("inspector-component-variant-area-gap")).toHaveValue("48");
+  await expect(page.getByTestId("inspector-component-variant-area-padding-top")).toHaveValue("12");
+  await expect(page.getByTestId("inspector-component-variant-area-padding-right")).toHaveValue("16");
+  await expect(page.getByTestId("inspector-component-variant-area-padding-bottom")).toHaveValue("12");
+  await expect(page.getByTestId("inspector-component-variant-area-padding-left")).toHaveValue("16");
+});
+
 test("right inspector authors multi-property component variant combinations", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

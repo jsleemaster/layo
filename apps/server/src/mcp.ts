@@ -32,6 +32,19 @@ const gridAreaSchema = z.object({
   row_span: z.number()
 });
 
+const layoutSpacingSchema = z.object({
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+  left: z.number()
+});
+
+const componentVariantAreaSchema = z.object({
+  layout: z.enum(["horizontal", "vertical"]).describe("Variant area flow direction"),
+  gap: z.number().min(0).describe("Spacing between variants in the variant area"),
+  padding: layoutSpacingSchema.describe("Variant area padding")
+});
+
 const commentMentionTargetSchema = z.object({
   userId: z.string().describe("Stable team member id"),
   displayName: z.string().describe("Team member display name"),
@@ -311,6 +324,11 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     componentId: z.string(),
     nodeIds: z.array(z.string()).min(2),
     propertyName: z.string().optional()
+  }),
+  z.object({
+    type: z.literal("set_component_variant_area"),
+    componentId: z.string(),
+    area: componentVariantAreaSchema.nullable()
   }),
   z.object({
     type: z.literal("set_export_presets"),

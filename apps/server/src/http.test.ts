@@ -1105,6 +1105,11 @@ describe("HTTP server", () => {
     expect(listed.json().components[0]).toMatchObject({
       id: "component-button-primary",
       name: "Button",
+      variant_area: {
+        layout: "horizontal",
+        gap: 32,
+        padding: { top: 0, right: 0, bottom: 0, left: 0 }
+      },
       variants: [
         {
           id: "variant-button-primary",
@@ -1117,6 +1122,45 @@ describe("HTTP server", () => {
           properties: [{ name: "variant", value: "Secondary", type: "select" }]
         }
       ]
+    });
+  });
+
+  test("serves agent commands that edit component variant area layout", async () => {
+    const server = await createServerWithDocument();
+
+    const result = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_component",
+            nodeId: "frame-1",
+            componentId: "component-card",
+            name: "Card"
+          },
+          {
+            type: "set_component_variant_area",
+            componentId: "component-card",
+            area: {
+              layout: "vertical",
+              gap: 48,
+              padding: { top: 12, right: 16, bottom: 12, left: 16 }
+            }
+          }
+        ]
+      }
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.json().result.audit.commandTypes).toEqual(["create_component", "set_component_variant_area"]);
+
+    const listed = await server.inject({ method: "GET", url: "/files/sample-file/components" });
+    expect(listed.json().components[0].variant_area).toEqual({
+      layout: "vertical",
+      gap: 48,
+      padding: { top: 12, right: 16, bottom: 12, left: 16 }
     });
   });
 

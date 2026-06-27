@@ -4010,4 +4010,94 @@ describe("editor state commands", () => {
       size: { width: 180, height: 64 }
     });
   });
+
+  test("combines selected main components into a horizontal variant area layout", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    const frame = document.pages[0].children[0];
+    const rectangle = document.pages[0].children[1];
+    frame.kind = "component";
+    frame.name = "Button / Primary";
+    rectangle.kind = "component";
+    rectangle.name = "Button / Secondary";
+    document.components = [
+      {
+        id: "component-primary",
+        name: "Button / Primary",
+        source_node: structuredClone(frame),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      },
+      {
+        id: "component-secondary",
+        name: "Button / Secondary",
+        source_node: structuredClone(rectangle),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      }
+    ];
+
+    const combined = executeEditorCommand(
+      setMultiSelection(createEditorState(document), ["frame-1", "rectangle-1"], "frame-1"),
+      {
+        type: "combine_components_as_variants",
+        componentId: "component-primary",
+        nodeIds: ["frame-1", "rectangle-1"],
+        propertyName: "variant"
+      }
+    );
+
+    expect((combined.document.components?.[0] as any).variant_area).toEqual({
+      layout: "horizontal",
+      gap: 32,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 }
+    });
+  });
+
+  test("sets component variant area layout with undo and redo", () => {
+    const document = sampleDocument();
+    document.components = [
+      {
+        id: "component-1",
+        name: "Button",
+        source_node: structuredClone(document.pages[0].children[0]),
+        variants: [
+          { id: "variant-primary", name: "Primary", properties: [{ name: "variant", value: "Primary" }] },
+          { id: "variant-secondary", name: "Secondary", properties: [{ name: "variant", value: "Secondary" }] }
+        ],
+        variant_area: {
+          layout: "horizontal",
+          gap: 32,
+          padding: { top: 0, right: 0, bottom: 0, left: 0 }
+        }
+      } as any
+    ];
+
+    const updated = executeEditorCommand(createEditorState(document), {
+      type: "set_component_variant_area",
+      componentId: "component-1",
+      area: {
+        layout: "vertical",
+        gap: 48,
+        padding: { top: 12, right: 16, bottom: 12, left: 16 }
+      }
+    } as any);
+
+    expect((updated.document.components?.[0] as any).variant_area).toEqual({
+      layout: "vertical",
+      gap: 48,
+      padding: { top: 12, right: 16, bottom: 12, left: 16 }
+    });
+
+    const undone = undo(updated);
+    expect((undone.document.components?.[0] as any).variant_area).toEqual({
+      layout: "horizontal",
+      gap: 32,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 }
+    });
+
+    const redone = redo(undone);
+    expect((redone.document.components?.[0] as any).variant_area).toEqual({
+      layout: "vertical",
+      gap: 48,
+      padding: { top: 12, right: 16, bottom: 12, left: 16 }
+    });
+  });
 });

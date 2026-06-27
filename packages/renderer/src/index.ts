@@ -134,7 +134,16 @@ export interface ComponentDefinition {
   id: string;
   name: string;
   source_node: RendererNode;
+  variant_area?: ComponentVariantArea | null;
   variants: ComponentVariant[];
+}
+
+export type ComponentVariantAreaLayout = "horizontal" | "vertical";
+
+export interface ComponentVariantArea {
+  layout: ComponentVariantAreaLayout;
+  gap: number;
+  padding: LayoutSpacing;
 }
 
 export type ComponentPropertyType = "select" | "boolean";

@@ -149,6 +149,7 @@ impl DesignFile {
                     id: component_id.clone(),
                     name,
                     source_node,
+                    variant_area: None,
                     variants: vec![ComponentVariant {
                         id: "default".to_string(),
                         name: "Default".to_string(),

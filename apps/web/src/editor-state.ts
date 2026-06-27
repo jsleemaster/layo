@@ -1,5 +1,6 @@
 import type {
   ComponentDefinition,
+  ComponentVariantArea,
   ComponentVariant,
   DesignStyle,
   DesignToken,
@@ -349,6 +350,11 @@ export type EditorCommand =
       instanceVariantIds?: Record<string, string | null>;
     }
   | {
+      type: "set_component_variant_area";
+      componentId: string;
+      area: ComponentVariantArea | null;
+    }
+  | {
       type: "combine_components_as_variants";
       componentId: string;
       nodeIds: string[];
@@ -462,6 +468,31 @@ function isDefaultOnlyComponent(component: ComponentDefinition): boolean {
     component.variants[0]?.id === "default" &&
     component.variants[0]?.properties.length === 0
   );
+}
+
+function defaultComponentVariantArea(): ComponentVariantArea {
+  return {
+    layout: "horizontal",
+    gap: 32,
+    padding: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
+}
+
+function normalizeComponentVariantArea(area: ComponentVariantArea | null | undefined): ComponentVariantArea | null {
+  if (!area) {
+    return null;
+  }
+
+  return {
+    layout: area.layout === "vertical" ? "vertical" : "horizontal",
+    gap: Math.max(0, Number.isFinite(area.gap) ? area.gap : 0),
+    padding: {
+      top: Math.max(0, Number.isFinite(area.padding?.top) ? area.padding.top : 0),
+      right: Math.max(0, Number.isFinite(area.padding?.right) ? area.padding.right : 0),
+      bottom: Math.max(0, Number.isFinite(area.padding?.bottom) ? area.padding.bottom : 0),
+      left: Math.max(0, Number.isFinite(area.padding?.left) ? area.padding.left : 0)
+    }
+  };
 }
 
 function isVerticalTextWritingMode(mode: TextWritingMode | undefined): boolean {
@@ -2885,6 +2916,9 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       const previousInstanceVariantIds: Record<string, string | null> = {};
 
       component.variants = nextVariants;
+      if (nextVariants.length > 1 && !component.variant_area) {
+        component.variant_area = defaultComponentVariantArea();
+      }
       forEachNode(next, (node) => {
         if (node.component_instance?.definition_id !== command.componentId) {
           return;
@@ -2932,6 +2966,25 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         selectedNodeId: component.source_node.id
       };
     }
+    case "set_component_variant_area": {
+      const component = (next.components ?? []).find((candidate) => candidate.id === command.componentId);
+      if (!component) {
+        return { document, inverse: null };
+      }
+
+      const previousArea = structuredClone(component.variant_area ?? null);
+      component.variant_area = normalizeComponentVariantArea(command.area);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_component_variant_area",
+          componentId: command.componentId,
+          area: previousArea
+        },
+        selectedNodeId: component.source_node.id
+      };
+    }
     case "combine_components_as_variants": {
       const components = next.components ?? [];
       const baseComponent = components.find((component) => component.id === command.componentId);
@@ -2974,6 +3027,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           ...baseComponent,
           name: baseName,
           source_node: structuredClone(selectedComponents.find(({ component }) => component.id === command.componentId)?.node ?? baseComponent.source_node),
+          variant_area: defaultComponentVariantArea(),
           variants: combinedVariants
         });
 

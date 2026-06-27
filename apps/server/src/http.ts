@@ -11,6 +11,7 @@ import {
   LIBRARY_ARCHIVE_MIME_TYPE,
   PROJECT_ARCHIVE_MIME_TYPE,
   type CodeComponentMapping,
+  type ComponentVariantArea,
   type CreateAssetInput,
   type DesignNode,
   type GeometryPatch
@@ -665,6 +666,19 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         request.params.fileId,
         request.params.componentId,
         Array.isArray(request.body.variants) ? request.body.variants : []
+      )
+    };
+  });
+
+  server.patch<{
+    Params: { fileId: string; componentId: string };
+    Body: { area: ComponentVariantArea | null };
+  }>("/files/:fileId/components/:componentId/variant-area", async (request) => {
+    return {
+      component: await storage.setComponentVariantArea(
+        request.params.fileId,
+        request.params.componentId,
+        request.body.area ?? null
       )
     };
   });

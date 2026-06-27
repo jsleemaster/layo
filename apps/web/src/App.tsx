@@ -24,6 +24,7 @@ import {
   type ComponentDefinition,
   type ComponentProperty,
   type ComponentPropertyType,
+  type ComponentVariantArea,
   type ComponentVariant,
   type NodeConstraints,
   type NodeExportPreset,
@@ -1215,6 +1216,18 @@ async function persistComponentVariants(fileId: string, componentId: string, var
 
   if (!response.ok) {
     throw new Error(`컴포넌트 변형 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistComponentVariantArea(fileId: string, componentId: string, area: ComponentVariantArea | null) {
+  const response = await fetch(apiUrl(`/files/${fileId}/components/${componentId}/variant-area`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ area })
+  });
+
+  if (!response.ok) {
+    throw new Error(`컴포넌트 변형 영역 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -4907,6 +4920,7 @@ function Inspector({
   onConstraintsChange,
   onComponentVariantChange,
   onComponentDefinitionVariantsChange,
+  onComponentDefinitionVariantAreaChange,
   onAlign,
   onDistribute,
   zoomLabel,
@@ -4979,6 +4993,7 @@ function Inspector({
   onConstraintsChange: (nodeId: string, constraints: NodeConstraints) => void;
   onComponentVariantChange: (nodeId: string, variantId: string) => void;
   onComponentDefinitionVariantsChange: (componentId: string, variants: ComponentVariant[]) => void;
+  onComponentDefinitionVariantAreaChange: (componentId: string, area: ComponentVariantArea | null) => void;
   onAlign: (mode: AlignmentMode) => void;
   onDistribute: (mode: DistributionMode) => void;
   zoomLabel: string;
@@ -5363,11 +5378,38 @@ function Inspector({
       : [];
   const componentDefinitionVariants = selectedComponentDefinition?.variants ?? [];
   const componentDefinitionVariantMatrix = componentVariantMatrix(componentDefinitionVariants);
+  const componentDefinitionVariantArea: ComponentVariantArea = selectedComponentDefinition?.variant_area ?? {
+    layout: "horizontal",
+    gap: 32,
+    padding: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
   const updateComponentDefinitionVariants = (variants: ComponentVariant[]) => {
     if (selectedComponentDefinition) {
       onComponentDefinitionVariantsChange(selectedComponentDefinition.id, variants);
     }
   };
+  const updateComponentDefinitionVariantArea = (patch: Partial<ComponentVariantArea>) => {
+    if (!selectedComponentDefinition) {
+      return;
+    }
+    onComponentDefinitionVariantAreaChange(selectedComponentDefinition.id, {
+      ...componentDefinitionVariantArea,
+      ...patch,
+      padding: patch.padding ?? componentDefinitionVariantArea.padding
+    });
+  };
+  const updateComponentDefinitionVariantAreaPadding =
+    (side: keyof ComponentVariantArea["padding"]) => (event: React.ChangeEvent<HTMLInputElement>) => {
+      const nextValue = Number(event.currentTarget.value);
+      if (Number.isFinite(nextValue)) {
+        updateComponentDefinitionVariantArea({
+          padding: {
+            ...componentDefinitionVariantArea.padding,
+            [side]: nextValue
+          }
+        });
+      }
+    };
   const addComponentDefinitionVariant = () => {
     if (!selectedComponentDefinition) {
       return;
@@ -5630,6 +5672,50 @@ function Inspector({
                 변형 추가
               </button>
             </div>
+          </div>
+          <div className="field-grid component-variant-area-grid" data-testid="inspector-component-variant-area">
+            <label>
+              배치
+              <select
+                data-testid="inspector-component-variant-area-layout"
+                value={componentDefinitionVariantArea.layout}
+                onChange={(event) =>
+                  updateComponentDefinitionVariantArea({
+                    layout: event.currentTarget.value === "vertical" ? "vertical" : "horizontal"
+                  })
+                }
+              >
+                <option value="horizontal">가로</option>
+                <option value="vertical">세로</option>
+              </select>
+            </label>
+            <label>
+              간격
+              <input
+                type="number"
+                min="0"
+                data-testid="inspector-component-variant-area-gap"
+                value={componentDefinitionVariantArea.gap}
+                onChange={(event) => {
+                  const nextValue = Number(event.currentTarget.value);
+                  if (Number.isFinite(nextValue)) {
+                    updateComponentDefinitionVariantArea({ gap: nextValue });
+                  }
+                }}
+              />
+            </label>
+            {(["top", "right", "bottom", "left"] as const).map((side) => (
+              <label key={side}>
+                {side === "top" ? "위" : side === "right" ? "오른쪽" : side === "bottom" ? "아래" : "왼쪽"}
+                <input
+                  type="number"
+                  min="0"
+                  data-testid={`inspector-component-variant-area-padding-${side}`}
+                  value={componentDefinitionVariantArea.padding[side]}
+                  onChange={updateComponentDefinitionVariantAreaPadding(side)}
+                />
+              </label>
+            ))}
           </div>
           <div className="component-variant-editor-list">
             {componentDefinitionVariants.map((variant) => {
@@ -8619,6 +8705,27 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "컴포넌트 변형 저장 실패";
+        setProjectStatus(message);
+      });
+  };
+
+  const updateComponentDefinitionVariantArea = (componentId: string, area: ComponentVariantArea | null) => {
+    dispatch({ type: "set_component_variant_area", componentId, area });
+    if (!currentProject) {
+      return;
+    }
+
+    const fileId = currentProject.currentDocumentId;
+    componentVariantSaveRef.current = componentVariantSaveRef.current
+      .catch(() => undefined)
+      .then(() => persistComponentVariantArea(fileId, componentId, area));
+    void componentVariantSaveRef.current
+      .then(() => {
+        setProjectStatus("컴포넌트 변형 영역 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "컴포넌트 변형 영역 저장 실패";
         setProjectStatus(message);
       });
   };
@@ -12829,6 +12936,7 @@ export function App() {
         onConstraintsChange={updateConstraints}
         onComponentVariantChange={updateComponentInstanceVariant}
         onComponentDefinitionVariantsChange={updateComponentDefinitionVariants}
+        onComponentDefinitionVariantAreaChange={updateComponentDefinitionVariantArea}
         onAlign={(mode) =>
           updateViewportFromInteraction((current) =>
             current.selection.nodeIds.length === 1

@@ -147,7 +147,25 @@ pub struct ComponentDefinition {
     pub id: String,
     pub name: String,
     pub source_node: Node,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_area: Option<ComponentVariantArea>,
     pub variants: Vec<ComponentVariant>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct ComponentVariantArea {
+    pub layout: ComponentVariantAreaLayout,
+    pub gap: f64,
+    pub padding: LayoutPadding,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ComponentVariantAreaLayout {
+    Horizontal,
+    Vertical,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

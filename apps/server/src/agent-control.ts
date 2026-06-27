@@ -8,6 +8,7 @@ import {
 import { createActiveDesignTokenReferenceMap } from "./design-token-io.js";
 import type {
   ComponentDefinition,
+  ComponentVariantArea,
   DesignFile,
   DesignStyle,
   DesignToken,
@@ -65,7 +66,7 @@ export interface CanvasInspection {
   tokenSets: DesignTokenSet[];
   tokenThemes: DesignTokenTheme[];
   styles: StyleInspection[];
-  components: Array<{ id: string; name: string; variantCount: number }>;
+  components: Array<{ id: string; name: string; variantCount: number; variantArea?: ComponentVariantArea | null }>;
   nodes: AgentNodeSummary[];
   validation: DocumentValidation;
 }
@@ -156,6 +157,7 @@ export type AgentCommand =
       nodeIds: string[];
       propertyName?: string;
     }
+  | { type: "set_component_variant_area"; componentId: string; area: ComponentVariantArea | null }
   | { type: "set_export_presets"; nodeId: string; presets: NodeExportPreset[] }
   | { type: "set_layout"; nodeId: string; layout: NodeLayout }
   | { type: "set_layout_item"; nodeId: string; layoutItem: NodeLayoutItem }
@@ -254,7 +256,8 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
     components: components.map((component) => ({
       id: component.id,
       name: component.name,
-      variantCount: component.variants.length
+      variantCount: component.variants.length,
+      variantArea: component.variant_area ?? null
     })),
     nodes,
     validation: validateDocument(document)
@@ -973,6 +976,31 @@ function isDefaultOnlyComponent(component: ComponentDefinition): boolean {
   );
 }
 
+function defaultComponentVariantArea(): ComponentVariantArea {
+  return {
+    layout: "horizontal",
+    gap: 32,
+    padding: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
+}
+
+function normalizeComponentVariantArea(area: ComponentVariantArea | null | undefined): ComponentVariantArea | null {
+  if (!area) {
+    return null;
+  }
+
+  return {
+    layout: area.layout === "vertical" ? "vertical" : "horizontal",
+    gap: Math.max(0, Number.isFinite(area.gap) ? area.gap : 0),
+    padding: {
+      top: Math.max(0, Number.isFinite(area.padding?.top) ? area.padding.top : 0),
+      right: Math.max(0, Number.isFinite(area.padding?.right) ? area.padding.right : 0),
+      bottom: Math.max(0, Number.isFinite(area.padding?.bottom) ? area.padding.bottom : 0),
+      left: Math.max(0, Number.isFinite(area.padding?.left) ? area.padding.left : 0)
+    }
+  };
+}
+
 function applyAgentCommand(document: DesignFile, command: AgentCommand): string {
   switch (command.type) {
     case "update_geometry": {
@@ -1295,6 +1323,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
         ...baseComponent,
         name: baseName,
         source_node: structuredClone(sourceNode),
+        variant_area: defaultComponentVariantArea(),
         variants: selectedComponents.map(({ node }) => {
           const value = componentVariantValueFromName(node.name, node.id);
           return {
@@ -1310,6 +1339,14 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
         component.id === command.componentId ? combinedComponent : component
       ).filter((component) => component.id === command.componentId || !combinedComponentIds.has(component.id));
       return sourceNode.id;
+    }
+    case "set_component_variant_area": {
+      const component = (document.components ?? []).find((candidate) => candidate.id === command.componentId);
+      if (!component) {
+        throw new Error(`component not found: ${command.componentId}`);
+      }
+      component.variant_area = normalizeComponentVariantArea(command.area);
+      return component.source_node.id;
     }
     case "set_export_presets": {
       const node = requireNode(document, command.nodeId);

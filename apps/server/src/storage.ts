@@ -179,7 +179,16 @@ export interface ComponentDefinition {
   id: string;
   name: string;
   source_node: DesignNode;
+  variant_area?: ComponentVariantArea | null;
   variants: Array<{ id: string; name: string; properties: ComponentProperty[]; source_node?: DesignNode | null }>;
+}
+
+export type ComponentVariantAreaLayout = "horizontal" | "vertical";
+
+export interface ComponentVariantArea {
+  layout: ComponentVariantAreaLayout;
+  gap: number;
+  padding: LayoutSpacing;
 }
 
 export type ComponentPropertyType = "select" | "boolean";
@@ -2092,6 +2101,9 @@ export class FileStorage {
     }
 
     component.variants = normalizedVariants;
+    if (normalizedVariants.length > 1 && !component.variant_area) {
+      component.variant_area = defaultComponentVariantArea();
+    }
     const validVariantIds = new Set(normalizedVariants.map((variant) => variant.id));
     const fallbackVariantId = normalizedVariants[0]?.id ?? null;
     forEachNode(document, (node) => {
@@ -2116,6 +2128,23 @@ export class FileStorage {
         replaceNodeById(document, node.id, nextNode);
       }
     });
+    await this.writeFile(fileId, document);
+    await this.recordFileEditForAutoVersion(fileId, document);
+    return component;
+  }
+
+  async setComponentVariantArea(
+    fileId: string,
+    componentId: string,
+    area: ComponentVariantArea | null
+  ): Promise<ComponentDefinition> {
+    const document = await this.readFile(fileId);
+    const component = (document.components ?? []).find((candidate) => candidate.id === componentId);
+    if (!component) {
+      throw new Error(`component not found: ${componentId}`);
+    }
+
+    component.variant_area = normalizeComponentVariantArea(area);
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
     return component;
@@ -2834,6 +2863,7 @@ function parseLibraryArchiveComponent(input: unknown): ComponentDefinition {
     id: candidate.id,
     name: normalizeName(candidate.name, candidate.id),
     source_node: candidate.source_node,
+    variant_area: normalizeComponentVariantArea(candidate.variant_area),
     variants: Array.isArray(candidate.variants) ? candidate.variants : []
   };
 }
@@ -3394,6 +3424,31 @@ function normalizeComponentVariant(input: {
     variant.source_node = input.source_node ? structuredClone(input.source_node) : null;
   }
   return variant;
+}
+
+function defaultComponentVariantArea(): ComponentVariantArea {
+  return {
+    layout: "horizontal",
+    gap: 32,
+    padding: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
+}
+
+function normalizeComponentVariantArea(area: ComponentVariantArea | null | undefined): ComponentVariantArea | null {
+  if (!area) {
+    return null;
+  }
+
+  return {
+    layout: area.layout === "vertical" ? "vertical" : "horizontal",
+    gap: Math.max(0, Number.isFinite(area.gap) ? area.gap : 0),
+    padding: {
+      top: Math.max(0, Number.isFinite(area.padding?.top) ? area.padding.top : 0),
+      right: Math.max(0, Number.isFinite(area.padding?.right) ? area.padding.right : 0),
+      bottom: Math.max(0, Number.isFinite(area.padding?.bottom) ? area.padding.bottom : 0),
+      left: Math.max(0, Number.isFinite(area.padding?.left) ? area.padding.left : 0)
+    }
+  };
 }
 
 async function readProjectIfPresent(projectPath: string): Promise<ProjectManifest | null> {
