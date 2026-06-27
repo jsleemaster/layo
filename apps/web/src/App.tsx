@@ -35,6 +35,7 @@ import {
   addCommentReply,
   createCommentThread,
   deleteFileVersion,
+  exportCode,
   exportFileArchive,
   exportLibraryArchive,
   exportDesignTokensDtcg,
@@ -62,6 +63,8 @@ import {
   type CommentMentionTarget,
   type CommentNotificationSummary,
   type CommentThread,
+  type CodeExportPayload,
+  type CodeStructureNode,
   type FileArchiveReview,
   type FileVersionChangeSummary,
   type FileVersionSummary,
@@ -187,6 +190,7 @@ function optionalNumericInputValue(value: number | undefined) {
 }
 
 type LayoutSpacingTokenKey = keyof NonNullable<NodeLayout["spacing_tokens"]>;
+type InspectorTab = "design" | "prototype" | "dev";
 
 function spacingTokenNumber(token: DesignToken): number | null {
   const match = token.value.trim().match(/^(\d+(?:\.\d+)?)(px)?$/i);
@@ -202,6 +206,56 @@ function uniformTokenValue(
     return "";
   }
   return first;
+}
+
+function findCodeStructureNode(root: CodeStructureNode | null | undefined, nodeId: string): CodeStructureNode | null {
+  if (!root) {
+    return null;
+  }
+  if (root.id === nodeId) {
+    return root;
+  }
+  for (const child of root.children) {
+    const match = findCodeStructureNode(child, nodeId);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function findCodeStructureForNode(exportPayload: CodeExportPayload | null, nodeId: string): CodeStructureNode | null {
+  if (!exportPayload) {
+    return null;
+  }
+  for (const element of exportPayload.elements) {
+    const match = findCodeStructureNode(element.structure, nodeId);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function cssSnippetForCodeNode(css: string, className: string) {
+  const lines = css.split("\n");
+  const startIndex = lines.findIndex((line) => line.trim() === `.${className} {`);
+  if (startIndex === -1) {
+    return css;
+  }
+  const endIndex = lines.findIndex((line, index) => index > startIndex && line.trim() === "}");
+  return lines.slice(startIndex, endIndex === -1 ? startIndex + 12 : endIndex + 1).join("\n");
+}
+
+function htmlSnippetForCodeNode(html: string, nodeId: string) {
+  const lines = html.split("\n");
+  const matchIndex = lines.findIndex((line) => line.includes(`data-node-id="${nodeId}"`));
+  if (matchIndex === -1) {
+    return html;
+  }
+  const startIndex = Math.max(0, matchIndex - 1);
+  const endIndex = Math.min(lines.length, matchIndex + 4);
+  return lines.slice(startIndex, endIndex).join("\n");
 }
 
 function gridTrackInputValue(tracks: GridTrack[] | undefined, count: number) {
@@ -2881,12 +2935,22 @@ function InspectorAlignmentControls({
 function InspectorHeader({
   zoomLabel,
   canShare,
+  activeTab,
+  onTabChange,
   onShare
 }: {
   zoomLabel: string;
   canShare: boolean;
+  activeTab: InspectorTab;
+  onTabChange: (tab: InspectorTab) => void;
   onShare: () => void;
 }) {
+  const tabs: Array<{ id: InspectorTab; label: string; testId: string }> = [
+    { id: "design", label: "디자인", testId: "inspector-tab-design" },
+    { id: "prototype", label: "프로토타입", testId: "inspector-tab-prototype" },
+    { id: "dev", label: "개발", testId: "inspector-tab-dev" }
+  ];
+
   return (
     <>
       <div className="inspector-action-strip" data-testid="inspector-action-strip" aria-label="검사기 빠른 작업">
@@ -2902,7 +2966,7 @@ function InspectorHeader({
           <button type="button" aria-label="미리보기" title="미리보기">
             ▷
           </button>
-          <button type="button" aria-label="코드 보기" title="코드 보기">
+          <button type="button" aria-label="코드 보기" title="코드 보기" onClick={() => onTabChange("dev")}>
             &lt;/&gt;
           </button>
           <button type="button" className="inspector-share-button" onClick={onShare} disabled={!canShare}>
@@ -2915,12 +2979,18 @@ function InspectorHeader({
       </div>
       <h2 className="visually-hidden">검사기</h2>
       <div className="inspector-tabs" data-testid="inspector-tabs" role="tablist" aria-label="검사기 모드">
-        <button type="button" role="tab" aria-selected="true">
-          디자인
-        </button>
-        <button type="button" role="tab" aria-selected="false">
-          프로토타입
-        </button>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            data-testid={tab.testId}
+            aria-selected={activeTab === tab.id}
+            onClick={() => onTabChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
     </>
   );
@@ -2996,10 +3066,77 @@ function InspectorTokenControls({
   );
 }
 
+function DevPanel({
+  selectedNode,
+  codeExport,
+  codeExportStatus
+}: {
+  selectedNode: RendererNode | null;
+  codeExport: CodeExportPayload | null;
+  codeExportStatus: string;
+}) {
+  const codeStructure = selectedNode ? findCodeStructureForNode(codeExport, selectedNode.id) : null;
+  const cssSnippet = codeExport && codeStructure ? cssSnippetForCodeNode(codeExport.css, codeStructure.className) : "";
+  const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
+  const structureSnippet = codeStructure ? JSON.stringify(codeStructure, null, 2) : "";
+
+  return (
+    <section className="inspector-section dev-panel" data-testid="dev-panel" aria-label="개발 핸드오프">
+      <h3>개발</h3>
+      <div className="dev-panel-status" data-testid="dev-panel-status" aria-live="polite">
+        {codeExportStatus}
+      </div>
+      {!selectedNode ? (
+        <p className="empty-state">레이어를 선택하면 개발 스펙을 볼 수 있습니다.</p>
+      ) : (
+        <>
+          <div className="dev-panel-selected-node" data-testid="dev-panel-selected-node">
+            <strong>{selectedNode.name}</strong>
+            <span>{selectedNode.id}</span>
+            <span>{nodeKindLabel(selectedNode.kind)}</span>
+          </div>
+          <div className="dev-panel-specs" data-testid="dev-panel-specs">
+            <span>X {numericInputValue(selectedNode.transform.x)}</span>
+            <span>Y {numericInputValue(selectedNode.transform.y)}</span>
+            <span>W {numericInputValue(selectedNode.size.width)}</span>
+            <span>H {numericInputValue(selectedNode.size.height)}</span>
+            <span>Fill {selectedNode.style.fill}</span>
+            <span>Opacity {numericInputValue(selectedNode.style.opacity)}</span>
+          </div>
+          <label className="stacked-field dev-panel-code-block">
+            CSS
+            <pre data-testid="dev-panel-css">{cssSnippet || "코드 내보내기 데이터를 기다리는 중"}</pre>
+          </label>
+          <label className="stacked-field dev-panel-code-block">
+            HTML
+            <pre data-testid="dev-panel-html">{htmlSnippet || "코드 내보내기 데이터를 기다리는 중"}</pre>
+          </label>
+          <label className="stacked-field dev-panel-code-block">
+            구조
+            <pre data-testid="dev-panel-structure">{structureSnippet || "구조 데이터를 기다리는 중"}</pre>
+          </label>
+        </>
+      )}
+    </section>
+  );
+}
+
+function PrototypePanel() {
+  return (
+    <section className="inspector-section" data-testid="prototype-panel" aria-label="프로토타입">
+      <h3>프로토타입</h3>
+      <p className="empty-state">프로토타입 연결은 아직 구현 대기 중입니다.</p>
+    </section>
+  );
+}
+
 function Inspector({
+  activeTab,
   selectedNode,
   selectedParentNode,
   selectedNodeCount,
+  codeExport,
+  codeExportStatus,
   documentTokens,
   canAlign,
   canDistribute,
@@ -3030,11 +3167,15 @@ function Inspector({
   onCreateComment,
   onCreateCommentReply,
   onResolveComment,
-  onMarkCommentRead
+  onMarkCommentRead,
+  onTabChange
 }: {
+  activeTab: InspectorTab;
   selectedNode: RendererNode | null;
   selectedParentNode: RendererNode | null;
   selectedNodeCount: number;
+  codeExport: CodeExportPayload | null;
+  codeExportStatus: string;
   documentTokens: DesignToken[];
   canAlign: boolean;
   canDistribute: boolean;
@@ -3066,6 +3207,7 @@ function Inspector({
   onCreateCommentReply: (threadId: string) => void;
   onResolveComment: (threadId: string) => void;
   onMarkCommentRead: (threadId: string) => void;
+  onTabChange: (tab: InspectorTab) => void;
 }) {
   const tokenControls = (
     <InspectorTokenControls
@@ -3081,18 +3223,32 @@ function Inspector({
   if (selectedNodeCount > 1) {
     return (
       <aside className="inspector">
-        <InspectorHeader zoomLabel={zoomLabel} canShare={canShare} onShare={onShare} />
+        <InspectorHeader
+          zoomLabel={zoomLabel}
+          canShare={canShare}
+          activeTab={activeTab}
+          onTabChange={onTabChange}
+          onShare={onShare}
+        />
         <div className="node-summary">
           <strong>{selectedNodeCount}개 레이어 선택됨</strong>
           <span>다중 선택</span>
         </div>
-        <InspectorAlignmentControls
-          canAlign={canAlign}
-          canDistribute={canDistribute}
-          onAlign={onAlign}
-          onDistribute={onDistribute}
-        />
-        {tokenControls}
+        {activeTab === "dev" ? (
+          <DevPanel selectedNode={selectedNode} codeExport={codeExport} codeExportStatus={codeExportStatus} />
+        ) : activeTab === "prototype" ? (
+          <PrototypePanel />
+        ) : (
+          <>
+            <InspectorAlignmentControls
+              canAlign={canAlign}
+              canDistribute={canDistribute}
+              onAlign={onAlign}
+              onDistribute={onDistribute}
+            />
+            {tokenControls}
+          </>
+        )}
       </aside>
     );
   }
@@ -3100,10 +3256,24 @@ function Inspector({
   if (!selectedNode) {
     return (
       <aside className="inspector">
-        <InspectorHeader zoomLabel={zoomLabel} canShare={canShare} onShare={onShare} />
-        <p className="empty-state">레이어 또는 캔버스 요소를 선택하세요.</p>
-        <InspectorEmptySections />
-        {tokenControls}
+        <InspectorHeader
+          zoomLabel={zoomLabel}
+          canShare={canShare}
+          activeTab={activeTab}
+          onTabChange={onTabChange}
+          onShare={onShare}
+        />
+        {activeTab === "dev" ? (
+          <DevPanel selectedNode={selectedNode} codeExport={codeExport} codeExportStatus={codeExportStatus} />
+        ) : activeTab === "prototype" ? (
+          <PrototypePanel />
+        ) : (
+          <>
+            <p className="empty-state">레이어 또는 캔버스 요소를 선택하세요.</p>
+            <InspectorEmptySections />
+            {tokenControls}
+          </>
+        )}
       </aside>
     );
   }
@@ -3306,11 +3476,23 @@ function Inspector({
 
   return (
     <aside className="inspector">
-      <InspectorHeader zoomLabel={zoomLabel} canShare={canShare} onShare={onShare} />
+      <InspectorHeader
+        zoomLabel={zoomLabel}
+        canShare={canShare}
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        onShare={onShare}
+      />
       <div className="node-summary">
         <strong>{selectedNode.name}</strong>
         <span>{nodeKindLabel(selectedNode.kind)}</span>
       </div>
+      {activeTab === "dev" ? (
+        <DevPanel selectedNode={selectedNode} codeExport={codeExport} codeExportStatus={codeExportStatus} />
+      ) : activeTab === "prototype" ? (
+        <PrototypePanel />
+      ) : (
+        <>
       <InspectorAlignmentControls
         canAlign={canAlign}
         canDistribute={canDistribute}
@@ -4127,6 +4309,8 @@ function Inspector({
           </select>
         </label>
       </section>
+        </>
+      )}
     </aside>
   );
 }
@@ -4172,6 +4356,9 @@ export function App() {
   const [commentActivityFeed, setCommentActivityFeed] = useState<CommentActivityFeed | null>(null);
   const [tokenDtcgDraft, setTokenDtcgDraft] = useState("");
   const [tokenDtcgStatus, setTokenDtcgStatus] = useState("");
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("design");
+  const [codeExportPayload, setCodeExportPayload] = useState<CodeExportPayload | null>(null);
+  const [codeExportStatus, setCodeExportStatus] = useState("코드 내보내기 대기 중");
   const [encryptionEnabled, setEncryptionEnabled] = useState(false);
   const [encryptionPassphrase, setEncryptionPassphrase] = useState("");
   const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
@@ -4344,6 +4531,43 @@ export function App() {
       }
     });
   }, [currentProject?.currentDocumentId]);
+
+  useEffect(() => {
+    if (inspectorTab !== "dev") {
+      return undefined;
+    }
+
+    const fileId = currentProject?.currentDocumentId;
+    if (!fileId) {
+      setCodeExportPayload(null);
+      setCodeExportStatus("코드 내보내기 대기 중");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCodeExportPayload(null);
+    setCodeExportStatus("코드 내보내기 불러오는 중");
+    void exportCode(fileId, { moduleBasePath: "./elements" })
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        setCodeExportPayload(payload);
+        setCodeExportStatus("코드 내보내기 준비됨");
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : "코드 내보내기를 불러오지 못했습니다";
+        setCodeExportPayload(null);
+        setCodeExportStatus(message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject?.currentDocumentId, inspectorTab]);
 
   useEffect(() => {
     editorRef.current = editor;
@@ -9564,9 +9788,12 @@ export function App() {
         </div>
       </section>
       <Inspector
+        activeTab={inspectorTab}
         selectedNode={selectedNode}
         selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}
+        codeExport={codeExportPayload}
+        codeExportStatus={codeExportStatus}
         documentTokens={editor?.document.tokens ?? []}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}
@@ -9592,6 +9819,7 @@ export function App() {
         onCreateCommentReply={(threadId) => void createSelectedNodeCommentReply(threadId)}
         onResolveComment={(threadId) => void resolveSelectedNodeComment(threadId)}
         onMarkCommentRead={(threadId) => void markSelectedNodeCommentRead(threadId)}
+        onTabChange={setInspectorTab}
         onGeometryChange={updateGeometry}
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onTextChange={updateTextNode}

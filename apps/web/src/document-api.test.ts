@@ -3,6 +3,7 @@ import {
   addCommentReply,
   createCommentThread,
   deleteFileVersion,
+  exportCode,
   exportFileArchive,
   exportLibraryArchive,
   importFileArchive,
@@ -433,6 +434,83 @@ describe("file version API helpers", () => {
       [expect.stringContaining("/files/document-1/import/library/review"), "POST"],
       [expect.stringContaining("/files/document-1/import/library"), "POST"],
       [expect.stringContaining("/files/document-1/export/library"), "GET"]
+    ]);
+  });
+
+  test("exports developer handoff code", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const parsedUrl = new URL(String(url), "http://127.0.0.1:4317");
+
+      if (parsedUrl.pathname === "/files/sample-file/export/code") {
+        expect(parsedUrl.searchParams.get("moduleBasePath")).toBe("./elements");
+        return jsonResponse({
+          export: {
+            html: '<div class="canvas-export-root"></div>',
+            css: ".canvas-export-root { position: relative; }",
+            elements: [
+              {
+                id: "text-1",
+                name: "헤드라인",
+                className: "node-text-1",
+                html: '<p class="node-text-1">Layo</p>',
+                css: ".node-text-1 { color: #111827; }",
+                jsModule: "export default {};",
+                structure: {
+                  id: "text-1",
+                  name: "헤드라인",
+                  kind: "text",
+                  className: "node-text-1",
+                  bounds: { x: 10, y: 20, width: 120, height: 32, rotation: 0 },
+                  style: { fill: "#111827", stroke: null, strokeWidth: 0, opacity: 1 },
+                  content: { type: "text", value: "Layo", fontSize: 24, fontFamily: "Inter" },
+                  children: []
+                },
+                implementation: {
+                  componentName: "Headline",
+                  suggestedProps: [],
+                  slots: [],
+                  cssClassNames: ["node-text-1"],
+                  sourceNodeIds: ["text-1"]
+                }
+              }
+            ],
+            implementationSpec: {
+              elements: [],
+              components: [],
+              tokens: { colors: [], spacing: [] },
+              tokenCandidates: { colors: ["#111827"], fontFamilies: ["Inter"], fontSizes: [24], spacings: [] }
+            },
+            indexModule: "export { default as Headline } from './elements/text-1.js';"
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(
+      exportCode("sample-file", { moduleBasePath: "./elements" }, fetcher as typeof fetch)
+    ).resolves.toMatchObject({
+      html: '<div class="canvas-export-root"></div>',
+      css: expect.stringContaining("canvas-export-root"),
+      elements: [
+        expect.objectContaining({
+          id: "text-1",
+          name: "헤드라인",
+          className: "node-text-1",
+          html: expect.stringContaining("Layo"),
+          css: expect.stringContaining("node-text-1")
+        })
+      ],
+      implementationSpec: expect.objectContaining({
+        tokenCandidates: expect.objectContaining({ colors: ["#111827"] })
+      }),
+      indexModule: expect.stringContaining("Headline")
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/files/sample-file/export/code?moduleBasePath=.%2Felements"), "GET"]
     ]);
   });
 
