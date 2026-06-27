@@ -993,8 +993,22 @@ describe("HTTP server", () => {
       url: "/files/sample-file/components/component-card/variants",
       payload: {
         variants: [
-          { id: "card-flat", name: "Flat", properties: [{ name: "surface", value: "flat" }] },
-          { id: "card-elevated", name: "Elevated", properties: [{ name: "surface", value: "elevated" }] }
+          {
+            id: "card-flat",
+            name: "Flat",
+            properties: [
+              { name: "surface", value: "flat" },
+              { name: "enabled", value: "true", type: "boolean" }
+            ]
+          },
+          {
+            id: "card-elevated",
+            name: "Elevated",
+            properties: [
+              { name: "surface", value: "elevated" },
+              { name: "enabled", value: "false", type: "boolean" }
+            ]
+          }
         ]
       }
     });
@@ -1024,6 +1038,10 @@ describe("HTTP server", () => {
 
     const listed = await server.inject({ method: "GET", url: "/files/sample-file/components" });
     expect(listed.json().components[0].variants).toHaveLength(2);
+    expect(listed.json().components[0].variants[0].properties).toEqual([
+      { name: "surface", value: "flat", type: "select" },
+      { name: "enabled", value: "true", type: "boolean" }
+    ]);
   });
 
   test("serves repo component mappings and includes them in code export", async () => {

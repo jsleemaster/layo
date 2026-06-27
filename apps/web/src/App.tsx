@@ -21,6 +21,8 @@ import {
   type GridTrack,
   type ImageFitMode,
   type ComponentDefinition,
+  type ComponentProperty,
+  type ComponentPropertyType,
   type ComponentVariant,
   type NodeConstraints,
   type NodeExportPreset,
@@ -4046,6 +4048,7 @@ function PrototypePanel() {
 
 type ComponentVariantControl = {
   name: string;
+  propertyType: ComponentPropertyType;
   selectedValue: string;
   values: string[];
   booleanPair: { onValue: string; offValue: string } | null;
@@ -4150,6 +4153,20 @@ function booleanVariantPair(values: string[]) {
   };
 }
 
+function componentPropertyType(property: Pick<ComponentProperty, "type">): ComponentPropertyType {
+  return property.type === "boolean" ? "boolean" : "select";
+}
+
+function explicitComponentPropertyType(
+  component: ComponentDefinition,
+  propertyName: string
+): ComponentPropertyType | null {
+  const property = component.variants
+    .flatMap((variant) => variant.properties)
+    .find((candidate) => candidate.name === propertyName && candidate.type);
+  return property ? componentPropertyType(property) : null;
+}
+
 function componentVariantControls(component: ComponentDefinition, variantId?: string | null): ComponentVariantControl[] {
   const propertyNames = Array.from(
     new Set(component.variants.flatMap((variant) => variant.properties.map((property) => property.name)))
@@ -4168,20 +4185,28 @@ function componentVariantControls(component: ComponentDefinition, variantId?: st
     if (values.length === 0) {
       return [];
     }
+    const explicitType = explicitComponentPropertyType(component, name);
+    const booleanPair =
+      explicitType === "select"
+        ? null
+        : explicitType === "boolean"
+          ? booleanVariantPair(values)
+          : booleanVariantPair(values);
     return [
       {
         name,
+        propertyType: explicitType ?? (booleanPair ? "boolean" : "select"),
         selectedValue:
           selectedVariant?.properties.find((property) => property.name === name)?.value ?? values[0] ?? "",
         values,
-        booleanPair: booleanVariantPair(values)
+        booleanPair
       }
     ];
   });
 }
 
 function visibleVariantProperties(variant: ComponentVariant) {
-  return variant.properties.length > 0 ? variant.properties : [{ name: "", value: "" }];
+  return variant.properties.length > 0 ? variant.properties : [{ name: "", value: "", type: "select" as const }];
 }
 
 function componentVariantMatrix(variants: ComponentVariant[]): ComponentVariantMatrix {
@@ -4257,7 +4282,7 @@ function updateComponentVariantPropertyAt(
   variants: ComponentVariant[],
   variantId: string,
   propertyIndex: number,
-  patch: Partial<{ name: string; value: string }>
+  patch: Partial<ComponentProperty>
 ): ComponentVariant[] {
   return variants.map((variant) => {
     if (variant.id !== variantId) {
@@ -4265,7 +4290,7 @@ function updateComponentVariantPropertyAt(
     }
 
     const properties = visibleVariantProperties(variant);
-    const currentProperty = properties[propertyIndex] ?? { name: "", value: "" };
+    const currentProperty = properties[propertyIndex] ?? { name: "", value: "", type: "select" as const };
     const nextProperties = [...properties];
     nextProperties[propertyIndex] = { ...currentProperty, ...patch };
     return {
@@ -4282,9 +4307,26 @@ function updateComponentVariantPropertyNameAcrossVariants(
 ): ComponentVariant[] {
   return variants.map((variant) => {
     const properties = visibleVariantProperties(variant);
-    const currentProperty = properties[propertyIndex] ?? { name: "", value: "" };
+    const currentProperty = properties[propertyIndex] ?? { name: "", value: "", type: "select" as const };
     const nextProperties = [...properties];
     nextProperties[propertyIndex] = { ...currentProperty, name };
+    return {
+      ...variant,
+      properties: nextProperties
+    };
+  });
+}
+
+function updateComponentVariantPropertyTypeAcrossVariants(
+  variants: ComponentVariant[],
+  propertyIndex: number,
+  type: ComponentPropertyType
+): ComponentVariant[] {
+  return variants.map((variant) => {
+    const properties = visibleVariantProperties(variant);
+    const currentProperty = properties[propertyIndex] ?? { name: "", value: "", type: "select" as const };
+    const nextProperties = [...properties];
+    nextProperties[propertyIndex] = { ...currentProperty, type };
     return {
       ...variant,
       properties: nextProperties
@@ -4295,7 +4337,7 @@ function updateComponentVariantPropertyNameAcrossVariants(
 function addComponentVariantPropertyAcrossVariants(variants: ComponentVariant[]) {
   return variants.map((variant) => ({
     ...variant,
-    properties: [...visibleVariantProperties(variant), { name: "", value: "" }]
+    properties: [...visibleVariantProperties(variant), { name: "", value: "", type: "select" as const }]
   }));
 }
 
@@ -4823,15 +4865,18 @@ function Inspector({
       return;
     }
     const variantId = nextComponentVariantId(componentDefinitionVariants);
-    const propertyNames = visibleVariantProperties(componentDefinitionVariants[0] ?? { id: "", name: "", properties: [] }).map(
-      (property) => property.name
+    const propertyTemplates = visibleVariantProperties(componentDefinitionVariants[0] ?? { id: "", name: "", properties: [] }).map(
+      (property) => ({
+        name: property.name,
+        type: componentPropertyType(property)
+      })
     );
     updateComponentDefinitionVariants([
       ...componentDefinitionVariants,
       {
         id: variantId,
         name: `Variant ${componentDefinitionVariants.length + 1}`,
-        properties: propertyNames.map((name) => ({ name, value: "" }))
+        properties: propertyTemplates.map((property) => ({ ...property, value: "" }))
       }
     ]);
   };
@@ -5085,7 +5130,7 @@ function Inspector({
                     />
                   </label>
                   {properties.map((property, propertyIndex) => (
-                    <div className="field-grid" key={`${variant.id}-${propertyIndex}`}>
+                    <div className="field-grid component-variant-property-grid" key={`${variant.id}-${propertyIndex}`}>
                       <label>
                         속성
                         <input
@@ -5115,6 +5160,25 @@ function Inspector({
                             )
                           }
                         />
+                      </label>
+                      <label>
+                        타입
+                        <select
+                          data-testid={`inspector-component-definition-variant-property-type-${variantTestId}-${propertyIndex}`}
+                          value={componentPropertyType(property)}
+                          onChange={(event) =>
+                            updateComponentDefinitionVariants(
+                              updateComponentVariantPropertyTypeAcrossVariants(
+                                componentDefinitionVariants,
+                                propertyIndex,
+                                event.currentTarget.value as ComponentPropertyType
+                              )
+                            )
+                          }
+                        >
+                          <option value="select">선택</option>
+                          <option value="boolean">불리언</option>
+                        </select>
                       </label>
                     </div>
                   ))}

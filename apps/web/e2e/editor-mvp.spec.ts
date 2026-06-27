@@ -662,6 +662,7 @@ test("component instances render boolean variant properties as toggles", async (
 
   await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("enabled");
   await page.getByTestId("inspector-component-definition-variant-property-value-default-0").fill("true");
+  await page.getByTestId("inspector-component-definition-variant-property-type-default-0").selectOption("boolean");
   await page.getByTestId("inspector-component-variant-add").click();
   await page.getByTestId("inspector-component-definition-variant-name-variant-2").fill("Disabled");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
@@ -689,6 +690,75 @@ test("component instances render boolean variant properties as toggles", async (
 
   await toggle.click();
   await expect(toggle).not.toBeChecked();
+});
+
+test("component variant property types choose toggle or select controls explicitly", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-component-definition-variants")).toBeVisible();
+
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("enabled");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-0").fill("true");
+  const enabledType = page.getByTestId("inspector-component-definition-variant-property-type-default-0");
+  await expect(enabledType).toBeVisible();
+  await enabledType.selectOption("boolean");
+
+  await page.getByTestId("inspector-component-variant-property-add").click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-1").fill("surface");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-1").fill("true");
+  await expect(page.getByTestId("inspector-component-definition-variant-property-type-default-1")).toHaveValue(
+    "select"
+  );
+
+  await page.getByTestId("inspector-component-variant-add").click();
+  await page.getByTestId("inspector-component-definition-variant-name-variant-2").fill("Disabled");
+  await expect(page.getByTestId("inspector-component-definition-variant-property-name-variant-2-0")).toHaveValue(
+    "enabled"
+  );
+  await expect(page.getByTestId("inspector-component-definition-variant-property-type-variant-2-0")).toHaveValue(
+    "boolean"
+  );
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("false");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+
+  const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
+    data: {
+      parentId: "page-1",
+      definitionId: "component-card",
+      instanceId: "instance-card",
+      x: 520,
+      y: 140
+    }
+  });
+  expect(instance.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "Card 인스턴스" }).click();
+
+  const toggle = page.getByTestId("inspector-component-variant-enabled-toggle");
+  await expect(page.getByTestId("inspector-component-variant-enabled")).toHaveCount(0);
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeChecked();
+
+  const surfaceSelect = page.getByTestId("inspector-component-variant-surface");
+  await expect(page.getByTestId("inspector-component-variant-surface-toggle")).toHaveCount(0);
+  await expect(surfaceSelect).toBeVisible();
+  await expect(surfaceSelect.locator("option")).toHaveText(["true", "false"]);
+  await expect(surfaceSelect).toHaveValue("true");
+
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await expect(surfaceSelect).toHaveValue("false");
 });
 
 test("inspector dev panel copies generated handoff snippets to the clipboard", async ({ page }) => {

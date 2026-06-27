@@ -137,10 +137,18 @@ export interface ComponentDefinition {
   variants: ComponentVariant[];
 }
 
+export type ComponentPropertyType = "select" | "boolean";
+
+export interface ComponentProperty {
+  name: string;
+  value: string;
+  type?: ComponentPropertyType;
+}
+
 export interface ComponentVariant {
   id: string;
   name: string;
-  properties: Array<{ name: string; value: string }>;
+  properties: ComponentProperty[];
 }
 
 export interface ComponentInstance {

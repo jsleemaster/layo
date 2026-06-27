@@ -652,7 +652,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.put<{
     Params: { fileId: string; componentId: string };
-    Body: { variants: Array<{ id: string; name: string; properties: Array<{ name: string; value: string }> }> };
+    Body: {
+      variants: Array<{
+        id: string;
+        name: string;
+        properties: Array<{ name: string; value: string; type?: "select" | "boolean" }>;
+      }>;
+    };
   }>("/files/:fileId/components/:componentId/variants", async (request) => {
     return {
       component: await storage.setComponentVariants(
