@@ -100,6 +100,7 @@ export type AgentCommand =
   | { type: "create_token"; token: DesignToken }
   | { type: "create_style"; style: DesignStyle }
   | { type: "rename_style"; styleId: string; name: string }
+  | { type: "duplicate_style"; styleId: string; newStyleId: string; name: string }
   | { type: "delete_style"; styleId: string }
   | { type: "set_token_set_enabled"; tokenSetId: string; enabled: boolean }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
@@ -929,6 +930,28 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       }
       style.name = name;
       return style.id;
+    }
+    case "duplicate_style": {
+      const source = requireStyle(document, command.styleId);
+      const newStyleId = command.newStyleId.trim();
+      const name = command.name.trim();
+      if (!newStyleId) {
+        throw new Error("style id is required");
+      }
+      if (!name) {
+        throw new Error("style name is required");
+      }
+      document.styles = document.styles ?? [];
+      if (document.styles.some((style) => style.id === newStyleId)) {
+        throw new Error(`style already exists: ${newStyleId}`);
+      }
+      document.styles.push({
+        id: newStyleId,
+        name,
+        type: source.type,
+        value: source.value
+      });
+      return newStyleId;
     }
     case "delete_style": {
       requireStyle(document, command.styleId);

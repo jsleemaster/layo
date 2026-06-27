@@ -1323,6 +1323,21 @@ async function persistDeleteStyle(fileId: string, styleId: string) {
   }
 }
 
+async function persistDuplicateStyle(fileId: string, styleId: string, newStyleId: string, name: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "duplicate_style", styleId, newStyleId, name }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`스타일 복제 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 async function persistCreateTypographyStyle(fileId: string, nodeId: string, style: DesignStyle) {
   const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
     method: "POST",
@@ -4055,6 +4070,36 @@ function safeTestId(value: string) {
     .replace(/^-+|-+$/g, "") || "property";
 }
 
+function styleGroupName(styleName: string) {
+  const [group] = styleName.split("/");
+  return group?.trim() || "기본";
+}
+
+function uniqueStyleCopyName(styles: DesignStyle[], sourceName: string) {
+  const existingNames = new Set(styles.map((style) => style.name));
+  const baseName = `${sourceName} Copy`;
+  let candidate = baseName;
+  let suffix = 2;
+  while (existingNames.has(candidate)) {
+    candidate = `${baseName} ${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function uniqueStyleCopyId(styles: DesignStyle[], styleType: DesignStyle["type"], styleName: string) {
+  const existingIds = new Set(styles.map((style) => style.id));
+  const prefix = styleType === "color" ? "style-color" : "style-typography";
+  const baseId = `${prefix}-${safeTestId(styleName)}`;
+  let candidate = baseId;
+  let suffix = 2;
+  while (existingIds.has(candidate)) {
+    candidate = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
 function countStyleUsage(document: RendererDocument | null): Record<string, number> {
   const counts: Record<string, number> = {};
   if (!document) {
@@ -4317,6 +4362,7 @@ function Inspector({
   onFillStyleChange,
   onCreateFillStyle,
   onRenameStyle,
+  onDuplicateStyle,
   onDeleteStyle,
   onTextChange,
   onTextWritingModeChange,
@@ -4382,6 +4428,7 @@ function Inspector({
   onFillStyleChange: (nodeId: string, styleId: string) => void;
   onCreateFillStyle: (nodeId: string, style: DesignStyle) => void;
   onRenameStyle: (styleId: string, name: string) => void;
+  onDuplicateStyle: (styleId: string, newStyleId: string, name: string) => void;
   onDeleteStyle: (styleId: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onTextWritingModeChange: (nodeId: string, writingMode: TextWritingMode) => void;
@@ -4437,6 +4484,9 @@ function Inspector({
   const [pendingStyleKind, setPendingStyleKind] = useState<"color" | "typography" | null>(null);
   const [styleNameDraft, setStyleNameDraft] = useState("");
   const [styleRenameDrafts, setStyleRenameDrafts] = useState<Record<string, string>>({});
+  const [styleSearchQuery, setStyleSearchQuery] = useState("");
+  const [styleTypeFilter, setStyleTypeFilter] = useState<"all" | "color" | "typography">("all");
+  const [styleSort, setStyleSort] = useState<"az" | "za" | "usage_desc">("az");
 
   useEffect(() => {
     setPendingStyleKind(null);
@@ -4626,46 +4676,134 @@ function Inspector({
     onRenameStyle(style.id, name);
     setStyleRenameDrafts((current) => ({ ...current, [style.id]: name }));
   };
+  const duplicateStyle = (style: DesignStyle) => {
+    const name = uniqueStyleCopyName(documentStyles, style.name);
+    const newStyleId = uniqueStyleCopyId(documentStyles, style.type, name);
+    onDuplicateStyle(style.id, newStyleId, name);
+    setStyleRenameDrafts((current) => ({ ...current, [newStyleId]: name }));
+  };
+  const normalizedStyleSearchQuery = styleSearchQuery.trim().toLowerCase();
+  const visibleStyles = documentStyles
+    .filter((style) => styleTypeFilter === "all" || style.type === styleTypeFilter)
+    .filter((style) => {
+      if (!normalizedStyleSearchQuery) {
+        return true;
+      }
+      return (
+        style.name.toLowerCase().includes(normalizedStyleSearchQuery) ||
+        style.id.toLowerCase().includes(normalizedStyleSearchQuery)
+      );
+    })
+    .sort((left, right) => {
+      if (styleSort === "za") {
+        return right.name.localeCompare(left.name);
+      }
+      if (styleSort === "usage_desc") {
+        return (documentStyleUsageCounts[right.id] ?? 0) - (documentStyleUsageCounts[left.id] ?? 0);
+      }
+      return left.name.localeCompare(right.name);
+    });
+  const groupedStyles = visibleStyles.reduce<Array<{ groupName: string; styles: DesignStyle[] }>>((groups, style) => {
+    const groupName = styleGroupName(style.name);
+    const existingGroup = groups.find((group) => group.groupName === groupName);
+    if (existingGroup) {
+      existingGroup.styles.push(style);
+    } else {
+      groups.push({ groupName, styles: [style] });
+    }
+    return groups;
+  }, []);
   const styleManagement = documentStyles.length ? (
     <section className="inspector-section style-management-section" data-testid="style-management-section">
       <h3>스타일</h3>
+      <div className="style-management-controls">
+        <input
+          data-testid="style-search-input"
+          placeholder="스타일 검색"
+          value={styleSearchQuery}
+          onChange={(event) => setStyleSearchQuery(event.currentTarget.value)}
+        />
+        <select
+          aria-label="스타일 유형"
+          data-testid="style-type-filter"
+          value={styleTypeFilter}
+          onChange={(event) => setStyleTypeFilter(event.currentTarget.value as "all" | "color" | "typography")}
+        >
+          <option value="all">전체</option>
+          <option value="color">색상</option>
+          <option value="typography">타이포</option>
+        </select>
+        <select
+          aria-label="스타일 정렬"
+          data-testid="style-sort-select"
+          value={styleSort}
+          onChange={(event) => setStyleSort(event.currentTarget.value as "az" | "za" | "usage_desc")}
+        >
+          <option value="az">이름 A-Z</option>
+          <option value="za">이름 Z-A</option>
+          <option value="usage_desc">사용 많은 순</option>
+        </select>
+      </div>
       <div className="style-management-list">
-        {documentStyles.map((style) => {
-          const styleTestId = safeTestId(style.id);
-          const usageCount = documentStyleUsageCounts[style.id] ?? 0;
-          const draft = styleRenameDrafts[style.id] ?? style.name;
-          return (
-            <div className="style-management-row" data-testid={`style-management-row-${styleTestId}`} key={style.id}>
-              <div className="style-management-meta">
-                <strong>{style.type === "color" ? "색상" : "타이포"}</strong>
-                <span data-testid={`style-usage-count-${styleTestId}`}>{usageCount}곳</span>
-              </div>
-              <input
-                data-testid={`style-rename-input-${styleTestId}`}
-                value={draft}
-                onChange={(event) => updateStyleRenameDraft(style.id, event.currentTarget.value)}
-              />
-              <div className="style-management-actions">
-                <button
-                  type="button"
-                  className="inspector-compact-button"
-                  data-testid={`style-rename-button-${styleTestId}`}
-                  onClick={() => renameStyleFromDraft(style)}
-                >
-                  이름 변경
-                </button>
-                <button
-                  type="button"
-                  className="inspector-compact-button"
-                  data-testid={`style-delete-button-${styleTestId}`}
-                  onClick={() => onDeleteStyle(style.id)}
-                >
-                  삭제
-                </button>
+        {groupedStyles.length ? (
+          groupedStyles.map((group) => (
+            <div className="style-management-group" data-testid={`style-group-${safeTestId(group.groupName)}`} key={group.groupName}>
+              <strong>{group.groupName}</strong>
+              <div className="style-management-group-list">
+                {group.styles.map((style) => {
+                  const styleTestId = safeTestId(style.id);
+                  const usageCount = documentStyleUsageCounts[style.id] ?? 0;
+                  const draft = styleRenameDrafts[style.id] ?? style.name;
+                  return (
+                    <div data-testid={`style-management-row-${styleTestId}`} key={style.id}>
+                      <div className="style-management-row" data-testid="style-management-row">
+                        <div className="style-management-meta">
+                          <strong>{style.name}</strong>
+                          <span data-testid={`style-usage-count-${styleTestId}`}>
+                            {style.type === "color" ? "색상" : "타이포"} · {usageCount}곳
+                          </span>
+                        </div>
+                        <input
+                          data-testid={`style-rename-input-${styleTestId}`}
+                          value={draft}
+                          onChange={(event) => updateStyleRenameDraft(style.id, event.currentTarget.value)}
+                        />
+                        <div className="style-management-actions">
+                          <button
+                            type="button"
+                            className="inspector-compact-button"
+                            data-testid={`style-duplicate-button-${styleTestId}`}
+                            onClick={() => duplicateStyle(style)}
+                          >
+                            복제
+                          </button>
+                          <button
+                            type="button"
+                            className="inspector-compact-button"
+                            data-testid={`style-rename-button-${styleTestId}`}
+                            onClick={() => renameStyleFromDraft(style)}
+                          >
+                            이름 변경
+                          </button>
+                          <button
+                            type="button"
+                            className="inspector-compact-button"
+                            data-testid={`style-delete-button-${styleTestId}`}
+                            onClick={() => onDeleteStyle(style.id)}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          );
-        })}
+          ))
+        ) : (
+          <p className="inspector-empty-state">일치하는 스타일 없음</p>
+        )}
       </div>
     </section>
   ) : null;
@@ -7947,6 +8085,23 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "스타일 이름을 변경하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const duplicateStyle = (styleId: string, newStyleId: string, name: string) => {
+    dispatch({ type: "duplicate_style", styleId, newStyleId, name });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistDuplicateStyle(currentProject.currentDocumentId, styleId, newStyleId, name)
+      .then(() => {
+        setProjectStatus("스타일 복제됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "스타일을 복제하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -11889,6 +12044,7 @@ export function App() {
         onFillStyleChange={updateFillStyle}
         onCreateFillStyle={createFillStyle}
         onRenameStyle={renameStyle}
+        onDuplicateStyle={duplicateStyle}
         onDeleteStyle={deleteStyle}
         onTextChange={updateTextNode}
         onTextWritingModeChange={updateTextWritingMode}

@@ -1404,6 +1404,86 @@ describe("FileStorage", () => {
     expect(deleted.audit.commandTypes).toEqual(["delete_style"]);
   });
 
+  test("agent commands duplicate reusable styles without carrying bindings", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_style", nodeId: "text-1", styleId: "style-color-brand-primary" }
+      ] as any
+    });
+
+    const duplicated = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "duplicate_style",
+          styleId: "style-color-brand-primary",
+          newStyleId: "style-color-brand-accent",
+          name: "Brand / Accent"
+        }
+      ] as any
+    });
+
+    expect(duplicated.preview.styles).toContainEqual(
+      expect.objectContaining({
+        id: "style-color-brand-accent",
+        name: "Brand / Accent",
+        type: "color",
+        value: "#2563eb"
+      })
+    );
+    expect((duplicated.inspection.styles as any[]).find((style) => style.id === "style-color-brand-primary")).toMatchObject({
+      usageCount: 1
+    });
+    expect((duplicated.inspection.styles as any[]).find((style) => style.id === "style-color-brand-accent")).toMatchObject({
+      usageCount: 0
+    });
+    expect(findNode(await storage.readFile("sample-file"), "text-1")?.style.fill_style).toBe(
+      "style-color-brand-primary"
+    );
+    expect(duplicated.audit.commandTypes).toEqual(["duplicate_style"]);
+
+    await expect(
+      storage.applyAgentCommands("sample-file", {
+        dryRun: false,
+        commands: [
+          {
+            type: "duplicate_style",
+            styleId: "style-color-missing",
+            newStyleId: "style-color-missing-copy",
+            name: "Missing / Copy"
+          }
+        ] as any
+      })
+    ).rejects.toThrow("style not found: style-color-missing");
+
+    await expect(
+      storage.applyAgentCommands("sample-file", {
+        dryRun: false,
+        commands: [
+          {
+            type: "duplicate_style",
+            styleId: "style-color-brand-primary",
+            newStyleId: "style-color-brand-accent",
+            name: "Brand / Accent Again"
+          }
+        ] as any
+      })
+    ).rejects.toThrow("style already exists: style-color-brand-accent");
+  });
+
   test("agent commands toggle token sets and rematerialize active color bindings", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

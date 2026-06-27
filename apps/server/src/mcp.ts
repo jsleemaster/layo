@@ -184,6 +184,12 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     name: z.string()
   }),
   z.object({
+    type: z.literal("duplicate_style"),
+    styleId: z.string(),
+    newStyleId: z.string(),
+    name: z.string()
+  }),
+  z.object({
     type: z.literal("delete_style"),
     styleId: z.string()
   }),

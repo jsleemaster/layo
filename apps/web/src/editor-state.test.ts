@@ -410,6 +410,45 @@ describe("editor state commands", () => {
     expect(findNodeById(redoneDelete.document, "text-1")?.style.fill_style).toBeNull();
   });
 
+  test("duplicates reusable styles with undo and redo", () => {
+    const document = sampleDocument() as any;
+    document.styles = [{ id: "style-color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }];
+    const initial = createEditorState(document);
+
+    const duplicated = executeEditorCommand(initial, {
+      type: "duplicate_style",
+      styleId: "style-color-brand-primary",
+      newStyleId: "style-color-brand-accent",
+      name: "Brand / Accent"
+    } as any);
+
+    expect(duplicated.document.styles).toContainEqual({
+      id: "style-color-brand-accent",
+      name: "Brand / Accent",
+      type: "color",
+      value: "#2563eb"
+    });
+    expect(duplicated.document.styles).toContainEqual({
+      id: "style-color-brand-primary",
+      name: "Brand / Primary",
+      type: "color",
+      value: "#2563eb"
+    });
+
+    const undone = undo(duplicated);
+    expect(undone.document.styles).toEqual([
+      { id: "style-color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+    ]);
+
+    const redone = redo(undone);
+    expect(redone.document.styles).toContainEqual({
+      id: "style-color-brand-accent",
+      name: "Brand / Accent",
+      type: "color",
+      value: "#2563eb"
+    });
+  });
+
   test("toggles token sets with undo and rematerializes active fill bindings", () => {
     const document = sampleDocument() as any;
     document.token_sets = [

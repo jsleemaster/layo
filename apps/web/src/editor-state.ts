@@ -123,6 +123,12 @@ export type EditorCommand =
       name: string;
     }
   | {
+      type: "duplicate_style";
+      styleId: string;
+      newStyleId: string;
+      name: string;
+    }
+  | {
       type: "delete_style";
       styleId: string;
     }
@@ -1557,6 +1563,30 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       return {
         document: next,
         inverse: { type: "rename_style", styleId: command.styleId, name: previousName }
+      };
+    }
+    case "duplicate_style": {
+      const previousStyles = [...(next.styles ?? [])];
+      const source = previousStyles.find((style) => style.id === command.styleId);
+      const newStyleId = command.newStyleId.trim();
+      const name = command.name.trim();
+      if (!source || !newStyleId || !name || previousStyles.some((style) => style.id === newStyleId)) {
+        return { document, inverse: null };
+      }
+
+      next.styles = [
+        ...previousStyles,
+        {
+          id: newStyleId,
+          name,
+          type: source.type,
+          value: source.value
+        }
+      ];
+
+      return {
+        document: next,
+        inverse: { type: "set_document_styles", styles: previousStyles }
       };
     }
     case "delete_style": {

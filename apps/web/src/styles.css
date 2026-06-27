@@ -1263,6 +1263,35 @@ button:disabled {
   gap: var(--editor-space-sm);
 }
 
+.style-management-controls {
+  display: grid;
+  gap: var(--editor-space-xs);
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: var(--editor-space-sm);
+}
+
+.style-management-controls select,
+.style-management-controls input {
+  min-width: 0;
+}
+
+.style-management-group {
+  display: grid;
+  gap: var(--editor-space-xs);
+}
+
+.style-management-group > strong {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-micro-size);
+  line-height: var(--editor-text-micro-line);
+  text-transform: uppercase;
+}
+
+.style-management-group-list {
+  display: grid;
+  gap: var(--editor-space-sm);
+}
+
 .style-management-row {
   display: grid;
   gap: var(--editor-space-xs);
@@ -1273,9 +1302,13 @@ button:disabled {
 .style-management-meta,
 .style-management-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--editor-space-xs);
   align-items: center;
+}
+
+.style-management-actions button {
+  min-width: 0;
 }
 
 .style-management-meta strong {

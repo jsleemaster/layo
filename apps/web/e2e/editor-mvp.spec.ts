@@ -2854,6 +2854,105 @@ test("right inspector creates and applies reusable styles", async ({ page }) => 
     .toEqual({ styles: [], fill: "#2563eb", fillStyle: null });
 });
 
+test("right inspector organizes reusable styles with search filter sort groups and duplicate", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-brand-accent",
+            name: "Brand / Accent",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-neutral",
+            name: "Base / Neutral",
+            type: "color",
+            value: "#111827"
+          }
+        },
+        {
+          type: "create_style",
+          style: {
+            id: "style-typography-heading",
+            name: "Typography / Heading",
+            type: "typography",
+            value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+          }
+        },
+        { type: "set_fill_style", nodeId: "text-1", styleId: "style-color-brand-accent" }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+
+  await expect(page.getByTestId("style-group-brand")).toBeVisible();
+  await expect(page.getByTestId("style-management-row-style-color-brand-accent")).toBeVisible();
+
+  await page.getByTestId("style-search-input").fill("Neutral");
+  await expect(page.getByTestId("style-management-row-style-color-neutral")).toBeVisible();
+  await expect(page.getByTestId("style-management-row-style-color-brand-accent")).toBeHidden();
+
+  await page.getByTestId("style-search-input").fill("");
+  await page.getByTestId("style-type-filter").selectOption("typography");
+  await expect(page.getByTestId("style-management-row-style-typography-heading")).toBeVisible();
+  await expect(page.getByTestId("style-management-row-style-color-brand-accent")).toBeHidden();
+
+  await page.getByTestId("style-type-filter").selectOption("all");
+  await page.getByTestId("style-sort-select").selectOption("za");
+  const sortedNames = await page
+    .getByTestId("style-management-row")
+    .evaluateAll((rows) => rows.map((row) => row.querySelector("strong")?.textContent?.trim()));
+  expect(sortedNames.slice(0, 3)).toEqual(["Typography / Heading", "Brand / Accent", "Base / Neutral"]);
+
+  await page.getByTestId("style-duplicate-button-style-color-brand-accent").click();
+  await expect(page.getByTestId("style-management-row-style-color-brand-accent-copy")).toContainText(
+    "Brand / Accent Copy"
+  );
+
+  await expect
+    .poll(async () => {
+      const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(fileResponse.ok()).toBeTruthy();
+      const styles = (await fileResponse.json()).file.styles as Array<{
+        id: string;
+        name: string;
+        type: string;
+        value: string;
+      }>;
+      return styles
+        .filter((style) => style.id === "style-color-brand-accent" || style.id === "style-color-brand-accent-copy")
+        .map((style) => ({ id: style.id, name: style.name, type: style.type, value: style.value }))
+        .sort((left, right) => left.id.localeCompare(right.id));
+    })
+    .toEqual([
+      {
+        id: "style-color-brand-accent",
+        name: "Brand / Accent",
+        type: "color",
+        value: "#2563eb"
+      },
+      {
+        id: "style-color-brand-accent-copy",
+        name: "Brand / Accent Copy",
+        type: "color",
+        value: "#2563eb"
+      }
+    ]);
+});
+
 test("right inspector imports and exports DTCG token JSON", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const importedTokenJson = JSON.stringify(
