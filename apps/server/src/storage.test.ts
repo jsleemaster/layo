@@ -1716,6 +1716,91 @@ describe("FileStorage", () => {
     expect(detached.component_instance).toBeNull();
   });
 
+  test("component instance variant source tree persists after switching variants", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const component = await storage.createComponent("sample-file", "frame-1", {
+      componentId: "component-1",
+      name: "Card"
+    });
+    const primarySource = structuredClone(component.source_node);
+    primarySource.name = "Card / Primary";
+    primarySource.size = { width: 360, height: 220 };
+    primarySource.children[0].content = {
+      type: "text",
+      value: "Primary source",
+      font_size: 28,
+      font_family: "Inter"
+    };
+    const secondarySource = structuredClone(component.source_node);
+    secondarySource.name = "Card / Secondary";
+    secondarySource.size = { width: 280, height: 180 };
+    secondarySource.style = { ...secondarySource.style, fill: "#f8fafc", stroke: "#0f766e" };
+    secondarySource.children[0].content = {
+      type: "text",
+      value: "Secondary source",
+      font_size: 20,
+      font_family: "Inter"
+    };
+    secondarySource.children.push({
+      id: "badge-1",
+      kind: "rectangle",
+      name: "배지",
+      transform: { x: 24, y: 104, rotation: 0 },
+      size: { width: 80, height: 28 },
+      style: { fill: "#ccfbf1", stroke: "#0f766e", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    await storage.setComponentVariants(
+      "sample-file",
+      "component-1",
+      [
+        {
+          id: "variant-primary",
+          name: "Primary",
+          properties: [{ name: "variant", value: "primary" }],
+          source_node: primarySource
+        },
+        {
+          id: "variant-secondary",
+          name: "Secondary",
+          properties: [{ name: "variant", value: "secondary" }],
+          source_node: secondarySource
+        }
+      ] as any
+    );
+
+    const instance = await storage.createComponentInstance("sample-file", {
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+    expect(instance).toMatchObject({
+      size: { width: 360, height: 220 },
+      component_instance: { variant_id: "variant-primary" }
+    });
+    expect(findTextValue(await storage.readFile("sample-file"), "instance-1__text-1")).toBe("Primary source");
+
+    await storage.updateText("sample-file", "instance-1__text-1", "Custom headline");
+    const switched = await storage.setComponentInstanceVariant("sample-file", "instance-1", "variant-secondary");
+    const persisted = await storage.readFile("sample-file");
+
+    expect(switched).toMatchObject({
+      size: { width: 280, height: 180 },
+      style: { fill: "#f8fafc", stroke: "#0f766e" },
+      component_instance: {
+        variant_id: "variant-secondary",
+        overrides: [{ node_id: "text-1", field: "text", value: "Custom headline" }]
+      }
+    });
+    expect(findTextValue(persisted, "instance-1__text-1")).toBe("Custom headline");
+    expect(findNode(persisted, "instance-1__badge-1")).toMatchObject({ kind: "rectangle", name: "배지" });
+  });
+
   test("inspects and searches canvas nodes for agent workflows", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

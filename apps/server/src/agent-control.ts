@@ -1274,7 +1274,8 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
           return {
             id: `variant-${safeComponentSlug(node.id)}`,
             name: value,
-            properties: [{ name: propertyName, value, type: "select" }]
+            properties: [{ name: propertyName, value, type: "select" }],
+            source_node: structuredClone(node)
           };
         })
       };
@@ -1317,7 +1318,9 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
         throw new Error(`component not found: ${command.definitionId}`);
       }
 
-      const node = structuredClone(component.source_node);
+      const variantId = component.variants[0]?.id ?? null;
+      const sourceNode = componentSourceNodeForVariant(component, variantId);
+      const node = structuredClone(sourceNode);
       renameInstanceTree(node, command.instanceId);
       node.id = command.instanceId;
       node.name = `${component.name} 인스턴스`;
@@ -1325,6 +1328,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       node.transform = { ...node.transform, x: command.x ?? 520, y: command.y ?? 140 };
       node.component_instance = {
         definition_id: command.definitionId,
+        variant_id: variantId,
         overrides: [],
         detached: false
       };
@@ -1803,4 +1807,12 @@ function renameInstanceTree(node: DesignNode, instanceId: string) {
     child.id = `${instanceId}__${child.id}`;
     renameInstanceTree(child, instanceId);
   }
+}
+
+function componentSourceNodeForVariant(
+  definition: ComponentDefinition,
+  variantId: string | null | undefined
+): DesignNode {
+  const variant = variantId ? definition.variants.find((candidate) => candidate.id === variantId) : null;
+  return variant?.source_node ?? definition.source_node;
 }

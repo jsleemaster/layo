@@ -179,7 +179,7 @@ export interface ComponentDefinition {
   id: string;
   name: string;
   source_node: DesignNode;
-  variants: Array<{ id: string; name: string; properties: ComponentProperty[] }>;
+  variants: Array<{ id: string; name: string; properties: ComponentProperty[]; source_node?: DesignNode | null }>;
 }
 
 export type ComponentPropertyType = "select" | "boolean";
@@ -1839,6 +1839,7 @@ export class FileStorage {
     }
 
     node.content = { ...node.content, value };
+    syncComponentInstanceTextOverride(document, nodeId, value);
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
@@ -2031,18 +2032,18 @@ export class FileStorage {
       throw new Error(`component not found: ${input.definitionId}`);
     }
 
-    const node = structuredClone(definition.source_node);
-    renameInstanceTree(node, input.instanceId);
-    node.id = input.instanceId;
-    node.name = `${definition.name} 인스턴스`;
-    node.kind = "component_instance";
-    node.transform = { ...node.transform, x: input.x, y: input.y };
-    node.component_instance = {
-      definition_id: input.definitionId,
-      variant_id: definition.variants[0]?.id ?? null,
-      overrides: [],
-      detached: false
-    };
+    const variantId = definition.variants[0]?.id ?? null;
+    const sourceNode = componentSourceNodeForVariant(definition, variantId);
+    const node = materializeComponentInstanceNode(definition, variantId, input.instanceId, {
+      name: `${definition.name} 인스턴스`,
+      transform: { ...sourceNode.transform, x: input.x, y: input.y },
+      componentInstance: {
+        definition_id: input.definitionId,
+        variant_id: variantId,
+        overrides: [],
+        detached: false
+      }
+    });
     parent.children.push(node);
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
@@ -2057,6 +2058,7 @@ export class FileStorage {
       id: string;
       name: string;
       properties: Array<{ name: string; value: string; type?: ComponentPropertyType }>;
+      source_node?: DesignNode | null;
     }>
   ): Promise<ComponentDefinition> {
     const document = await this.readFile(fileId);
@@ -2078,7 +2080,21 @@ export class FileStorage {
         return;
       }
       if (!node.component_instance.variant_id || !validVariantIds.has(node.component_instance.variant_id)) {
-        node.component_instance.variant_id = fallbackVariantId;
+        const nextNode = materializeComponentInstanceNode(component, fallbackVariantId, node.id, {
+          name: node.name,
+          transform: structuredClone(node.transform),
+          componentInstance: {
+            ...node.component_instance,
+            variant_id: fallbackVariantId,
+            overrides: structuredClone(node.component_instance.overrides ?? [])
+          },
+          locked: node.locked,
+          visible: node.visible,
+          layoutItem: node.layout_item,
+          constraints: node.constraints,
+          exportPresets: node.export_presets
+        });
+        replaceNodeById(document, node.id, nextNode);
       }
     });
     await this.writeFile(fileId, document);
@@ -2106,10 +2122,24 @@ export class FileStorage {
       throw new Error(`component variant not found: ${variantId}`);
     }
 
-    node.component_instance.variant_id = variantId;
+    const nextNode = materializeComponentInstanceNode(component, variantId, nodeId, {
+      name: node.name,
+      transform: structuredClone(node.transform),
+      componentInstance: {
+        ...node.component_instance,
+        variant_id: variantId,
+        overrides: structuredClone(node.component_instance.overrides ?? [])
+      },
+      locked: node.locked,
+      visible: node.visible,
+      layoutItem: node.layout_item,
+      constraints: node.constraints,
+      exportPresets: node.export_presets
+    });
+    replaceNodeById(document, nodeId, nextNode);
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+    return nextNode;
   }
 
   async detachInstance(fileId: string, nodeId: string): Promise<DesignNode> {
@@ -3323,13 +3353,14 @@ function normalizeComponentVariant(input: {
   id: string;
   name: string;
   properties: Array<{ name: string; value: string; type?: ComponentPropertyType }>;
-}): { id: string; name: string; properties: ComponentProperty[] } {
+  source_node?: DesignNode | null;
+}): { id: string; name: string; properties: ComponentProperty[]; source_node?: DesignNode | null } {
   const id = input.id.trim();
   if (!id) {
     throw new Error("component variant id is required");
   }
   const name = input.name.trim() || id;
-  return {
+  const variant: { id: string; name: string; properties: ComponentProperty[]; source_node?: DesignNode | null } = {
     id,
     name,
     properties: Array.isArray(input.properties)
@@ -3340,6 +3371,10 @@ function normalizeComponentVariant(input: {
         }))
       : []
   };
+  if (input.source_node !== undefined) {
+    variant.source_node = input.source_node ? structuredClone(input.source_node) : null;
+  }
+  return variant;
 }
 
 async function readProjectIfPresent(projectPath: string): Promise<ProjectManifest | null> {
@@ -3442,6 +3477,213 @@ function findInNode(node: DesignNode, nodeId: string): DesignNode | null {
   }
 
   return null;
+}
+
+function replaceNodeById(document: DesignFile, nodeId: string, replacement: DesignNode): boolean {
+  for (const page of document.pages) {
+    const index = page.children.findIndex((node) => node.id === nodeId);
+    if (index !== -1) {
+      page.children[index] = replacement;
+      return true;
+    }
+
+    for (const node of page.children) {
+      if (replaceInNode(node, nodeId, replacement)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function replaceInNode(node: DesignNode, nodeId: string, replacement: DesignNode): boolean {
+  const index = node.children.findIndex((child) => child.id === nodeId);
+  if (index !== -1) {
+    node.children[index] = replacement;
+    return true;
+  }
+
+  for (const child of node.children) {
+    if (replaceInNode(child, nodeId, replacement)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function syncComponentInstanceTextOverride(document: DesignFile, nodeId: string, value: string): void {
+  const owner = findComponentInstanceOwner(document, nodeId);
+  if (!owner || !owner.instance.component_instance) {
+    return;
+  }
+
+  const sourceValue = findComponentSourceTextValue(document, owner.instance, owner.sourceNodeId);
+  if (sourceValue === null) {
+    return;
+  }
+
+  const existingOverrides = owner.instance.component_instance.overrides ?? [];
+  const nextOverrides = existingOverrides.filter(
+    (override) => !(override.node_id === owner.sourceNodeId && override.field === "text")
+  );
+  if (value !== sourceValue) {
+    nextOverrides.push({ node_id: owner.sourceNodeId, field: "text", value });
+  }
+
+  owner.instance.component_instance = {
+    ...owner.instance.component_instance,
+    overrides: nextOverrides
+  };
+}
+
+function findComponentInstanceOwner(
+  document: DesignFile,
+  nodeId: string
+): { instance: DesignNode; sourceNodeId: string } | null {
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      const found = findComponentInstanceOwnerInNode(document, node, nodeId, null);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findComponentInstanceOwnerInNode(
+  document: DesignFile,
+  node: DesignNode,
+  nodeId: string,
+  currentInstance: DesignNode | null
+): { instance: DesignNode; sourceNodeId: string } | null {
+  const nextInstance = node.component_instance ? node : currentInstance;
+  if (node.id === nodeId) {
+    if (node.component_instance) {
+      const sourceNodeId = findComponentSourceRootNodeId(document, node);
+      return sourceNodeId ? { instance: node, sourceNodeId } : null;
+    }
+    if (!nextInstance || nextInstance.id === nodeId) {
+      return null;
+    }
+    const sourceNodeId = sourceNodeIdFromInstanceNodeId(nextInstance.id, nodeId);
+    return sourceNodeId ? { instance: nextInstance, sourceNodeId } : null;
+  }
+
+  for (const child of node.children) {
+    const found = findComponentInstanceOwnerInNode(document, child, nodeId, nextInstance);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function sourceNodeIdFromInstanceNodeId(instanceId: string, nodeId: string): string | null {
+  const prefix = `${instanceId}__`;
+  if (!nodeId.startsWith(prefix)) {
+    return null;
+  }
+  const sourceNodeId = nodeId.slice(prefix.length);
+  return sourceNodeId ? sourceNodeId : null;
+}
+
+function findComponentSourceRootNodeId(document: DesignFile, instance: DesignNode): string | null {
+  return componentSourceNodeForInstance(document, instance)?.id ?? null;
+}
+
+function findComponentSourceTextValue(
+  document: DesignFile,
+  instance: DesignNode,
+  sourceNodeId: string
+): string | null {
+  const sourceNode = componentSourceNodeForInstance(document, instance);
+  if (!sourceNode) {
+    return null;
+  }
+  const textNode = findInNode(sourceNode, sourceNodeId);
+  return textNode?.content.type === "text" ? textNode.content.value : null;
+}
+
+function componentSourceNodeForVariant(
+  definition: ComponentDefinition,
+  variantId: string | null | undefined
+): DesignNode {
+  const variant = variantId ? definition.variants.find((candidate) => candidate.id === variantId) : null;
+  return variant?.source_node ?? definition.source_node;
+}
+
+function componentSourceNodeForInstance(document: DesignFile, instance: DesignNode): DesignNode | null {
+  const definitionId = instance.component_instance?.definition_id;
+  const definition = (document.components ?? []).find((component) => component.id === definitionId);
+  return definition ? componentSourceNodeForVariant(definition, instance.component_instance?.variant_id ?? null) : null;
+}
+
+function materializeComponentInstanceNode(
+  definition: ComponentDefinition,
+  variantId: string | null | undefined,
+  instanceId: string,
+  options: {
+    name: string;
+    transform: DesignNode["transform"];
+    componentInstance: DesignNode["component_instance"];
+    locked?: boolean;
+    visible?: boolean;
+    layoutItem?: DesignNode["layout_item"];
+    constraints?: DesignNode["constraints"];
+    exportPresets?: DesignNode["export_presets"];
+  }
+): DesignNode {
+  const sourceNode = componentSourceNodeForVariant(definition, variantId);
+  const node = structuredClone(sourceNode);
+  renameInstanceTree(node, instanceId);
+  node.id = instanceId;
+  node.kind = "component_instance";
+  node.name = options.name;
+  node.transform = structuredClone(options.transform);
+  node.component_instance = options.componentInstance
+    ? {
+        ...options.componentInstance,
+        variant_id: variantId ?? null,
+        overrides: structuredClone(options.componentInstance.overrides ?? [])
+      }
+    : null;
+  if (options.locked !== undefined) {
+    node.locked = options.locked;
+  }
+  if (options.visible !== undefined) {
+    node.visible = options.visible;
+  }
+  if (options.layoutItem !== undefined) {
+    node.layout_item = structuredClone(options.layoutItem);
+  }
+  if (options.constraints !== undefined) {
+    node.constraints = structuredClone(options.constraints);
+  }
+  if (options.exportPresets !== undefined) {
+    node.export_presets = structuredClone(options.exportPresets);
+  }
+  applyComponentInstanceTextOverrides(node, sourceNode.id);
+  return node;
+}
+
+function applyComponentInstanceTextOverrides(instance: DesignNode, sourceRootNodeId: string): void {
+  const overrides = instance.component_instance?.overrides ?? [];
+  for (const override of overrides) {
+    if (override.field !== "text") {
+      continue;
+    }
+    const targetNodeId = override.node_id === sourceRootNodeId ? instance.id : `${instance.id}__${override.node_id}`;
+    const target = findInNode(instance, targetNodeId);
+    if (target?.content.type !== "text") {
+      continue;
+    }
+    target.content = { ...target.content, value: override.value };
+  }
 }
 
 function pinDirectGeometryResizeLayoutItemAxes(

@@ -156,6 +156,8 @@ pub struct ComponentVariant {
     pub id: String,
     pub name: String,
     pub properties: Vec<ComponentProperty>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_node: Option<Node>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

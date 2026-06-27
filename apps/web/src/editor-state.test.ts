@@ -3529,6 +3529,159 @@ describe("editor state commands", () => {
     expect((findNodeById(undoneText.document, "text-instance")?.component_instance as any)?.overrides).toEqual([]);
   });
 
+  test("creates component instances from the first variant source tree", () => {
+    const document = sampleDocument();
+    const primarySource = structuredClone(document.pages[0].children[0]);
+    primarySource.name = "Card / Primary";
+    primarySource.size = { width: 360, height: 220 };
+    primarySource.children[0].content = {
+      type: "text",
+      value: "Primary source",
+      font_size: 28,
+      font_family: "Inter"
+    };
+    document.components = [
+      {
+        id: "component-1",
+        name: "Card",
+        source_node: structuredClone(document.pages[0].children[0]),
+        variants: [
+          {
+            id: "variant-primary",
+            name: "Primary",
+            properties: [{ name: "variant", value: "primary" }],
+            source_node: primarySource
+          }
+        ]
+      } as any
+    ];
+
+    const state = executeEditorCommand(createEditorState(document), {
+      type: "create_component_instance",
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+
+    const instanceNode = findNodeById(state.document, "instance-1");
+    const textNode = findNodeById(state.document, "instance-1__text-1");
+    expect(instanceNode).toMatchObject({
+      size: { width: 360, height: 220 },
+      component_instance: { variant_id: "variant-primary" }
+    });
+    expect(textNode?.content).toMatchObject({ type: "text", value: "Primary source" });
+  });
+
+  test("variant source tree switches preserve compatible text overrides with undo and redo", () => {
+    const document = sampleDocument();
+    const primarySource = structuredClone(document.pages[0].children[0]);
+    primarySource.name = "Card / Primary";
+    primarySource.size = { width: 360, height: 220 };
+    primarySource.children[0].content = {
+      type: "text",
+      value: "Primary source",
+      font_size: 28,
+      font_family: "Inter"
+    };
+    const secondarySource = structuredClone(document.pages[0].children[0]);
+    secondarySource.name = "Card / Secondary";
+    secondarySource.size = { width: 280, height: 180 };
+    secondarySource.style = { ...secondarySource.style, fill: "#f8fafc", stroke: "#0f766e" };
+    secondarySource.children[0].content = {
+      type: "text",
+      value: "Secondary source",
+      font_size: 20,
+      font_family: "Inter"
+    };
+    secondarySource.children.push({
+      id: "badge-1",
+      kind: "rectangle",
+      name: "배지",
+      transform: { x: 24, y: 104, rotation: 0 },
+      size: { width: 80, height: 28 },
+      style: { fill: "#ccfbf1", stroke: "#0f766e", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    document.components = [
+      {
+        id: "component-1",
+        name: "Card",
+        source_node: structuredClone(document.pages[0].children[0]),
+        variants: [
+          {
+            id: "variant-primary",
+            name: "Primary",
+            properties: [{ name: "variant", value: "primary" }],
+            source_node: primarySource
+          },
+          {
+            id: "variant-secondary",
+            name: "Secondary",
+            properties: [{ name: "variant", value: "secondary" }],
+            source_node: secondarySource
+          }
+        ]
+      } as any
+    ];
+
+    const instance = executeEditorCommand(createEditorState(document), {
+      type: "create_component_instance",
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+    const edited = executeEditorCommand(instance, {
+      type: "update_text",
+      nodeId: "instance-1__text-1",
+      value: "Custom headline"
+    });
+    const switched = executeEditorCommand(edited, {
+      type: "set_component_instance_variant",
+      nodeId: "instance-1",
+      variantId: "variant-secondary"
+    });
+
+    expect(findNodeById(switched.document, "instance-1")).toMatchObject({
+      size: { width: 280, height: 180 },
+      style: { fill: "#f8fafc", stroke: "#0f766e" },
+      component_instance: {
+        variant_id: "variant-secondary",
+        overrides: [{ node_id: "text-1", field: "text", value: "Custom headline" }]
+      }
+    });
+    expect(findNodeById(switched.document, "instance-1__text-1")?.content).toMatchObject({
+      type: "text",
+      value: "Custom headline"
+    });
+    expect(findNodeById(switched.document, "instance-1__badge-1")).toMatchObject({
+      kind: "rectangle",
+      name: "배지"
+    });
+
+    const undone = undo(switched);
+    expect(findNodeById(undone.document, "instance-1")).toMatchObject({
+      size: { width: 360, height: 220 },
+      component_instance: { variant_id: "variant-primary" }
+    });
+    expect(findNodeById(undone.document, "instance-1__text-1")?.content).toMatchObject({
+      type: "text",
+      value: "Custom headline"
+    });
+    expect(findNodeById(undone.document, "instance-1__badge-1")).toBeNull();
+
+    const redone = redo(undone);
+    expect(findNodeById(redone.document, "instance-1")).toMatchObject({
+      size: { width: 280, height: 180 },
+      component_instance: { variant_id: "variant-secondary" }
+    });
+    expect(findNodeById(redone.document, "instance-1__badge-1")).toMatchObject({ kind: "rectangle" });
+  });
+
   test("sets component definition variants and resets invalid instance selections with undo and redo", () => {
     const document = sampleDocument();
     document.components = [
@@ -3667,5 +3820,51 @@ describe("editor state commands", () => {
       "Primary",
       "Secondary"
     ]);
+  });
+
+  test("combines selected main components into generated variants with source trees", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    const frame = document.pages[0].children[0];
+    const rectangle = document.pages[0].children[1];
+    frame.kind = "component";
+    frame.name = "Button / Primary";
+    rectangle.kind = "component";
+    rectangle.name = "Button / Secondary";
+    rectangle.size = { width: 180, height: 64 };
+    rectangle.style = { fill: "#fee2e2", stroke: "#991b1b", stroke_width: 1, opacity: 1 };
+    document.components = [
+      {
+        id: "component-primary",
+        name: "Button / Primary",
+        source_node: structuredClone(frame),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      },
+      {
+        id: "component-secondary",
+        name: "Button / Secondary",
+        source_node: structuredClone(rectangle),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      }
+    ];
+
+    const combined = executeEditorCommand(
+      setMultiSelection(createEditorState(document), ["frame-1", "rectangle-1"], "frame-1"),
+      {
+        type: "combine_components_as_variants",
+        componentId: "component-primary",
+        nodeIds: ["frame-1", "rectangle-1"],
+        propertyName: "variant"
+      }
+    );
+
+    expect((combined.document.components?.[0].variants[0] as any).source_node).toMatchObject({
+      id: "frame-1",
+      name: "Button / Primary"
+    });
+    expect((combined.document.components?.[0].variants[1] as any).source_node).toMatchObject({
+      id: "rectangle-1",
+      name: "Button / Secondary",
+      size: { width: 180, height: 64 }
+    });
   });
 });

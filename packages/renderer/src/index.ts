@@ -149,6 +149,7 @@ export interface ComponentVariant {
   id: string;
   name: string;
   properties: ComponentProperty[];
+  source_node?: RendererNode | null;
 }
 
 export interface ComponentInstance {

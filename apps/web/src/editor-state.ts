@@ -2780,18 +2780,18 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         return { document, inverse: null };
       }
 
-      const node = structuredClone(definition.source_node);
-      renameInstanceTree(node, command.instanceId);
-      node.id = command.instanceId;
-      node.kind = "component_instance";
-      node.name = `${definition.name} 인스턴스`;
-      node.transform = { ...node.transform, x: command.x, y: command.y };
-      node.component_instance = {
-        definition_id: command.definitionId,
-        variant_id: definition.variants[0]?.id ?? null,
-        overrides: [],
-        detached: false
-      };
+      const variantId = definition.variants[0]?.id ?? null;
+      const sourceNode = componentSourceNodeForVariant(definition, variantId);
+      const node = materializeComponentInstanceNode(definition, variantId, command.instanceId, {
+        name: `${definition.name} 인스턴스`,
+        transform: { ...sourceNode.transform, x: command.x, y: command.y },
+        componentInstance: {
+          definition_id: command.definitionId,
+          variant_id: variantId,
+          overrides: [],
+          detached: false
+        }
+      });
       parent.children.push(node);
       relayoutDocument(next);
 
@@ -2822,10 +2822,22 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         return { document, inverse: null };
       }
 
-      node.component_instance = {
-        ...node.component_instance,
-        variant_id: command.variantId
-      };
+      const nextNode = materializeComponentInstanceNode(definition, command.variantId, command.nodeId, {
+        name: node.name,
+        transform: structuredClone(node.transform),
+        componentInstance: {
+          ...node.component_instance,
+          variant_id: command.variantId,
+          overrides: structuredClone(node.component_instance.overrides ?? [])
+        },
+        locked: node.locked,
+        visible: node.visible,
+        layoutItem: node.layout_item,
+        constraints: node.constraints,
+        exportPresets: node.export_presets
+      });
+      replaceNodeById(next, command.nodeId, nextNode);
+      relayoutDocument(next);
 
       return {
         document: next,
@@ -2869,10 +2881,21 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         }
 
         previousInstanceVariantIds[node.id] = previousVariantId;
-        node.component_instance = {
-          ...node.component_instance,
-          variant_id: nextVariantId
-        };
+        const nextNode = materializeComponentInstanceNode(component, nextVariantId, node.id, {
+          name: node.name,
+          transform: structuredClone(node.transform),
+          componentInstance: {
+            ...node.component_instance,
+            variant_id: nextVariantId,
+            overrides: structuredClone(node.component_instance.overrides ?? [])
+          },
+          locked: node.locked,
+          visible: node.visible,
+          layoutItem: node.layout_item,
+          constraints: node.constraints,
+          exportPresets: node.export_presets
+        });
+        replaceNodeById(next, node.id, nextNode);
       });
 
       return {
@@ -2917,7 +2940,8 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         return {
           id: `variant-${safeComponentSlug(node.id)}`,
           name: value,
-          properties: [{ name: propertyName, value, type: "select" as const }]
+          properties: [{ name: propertyName, value, type: "select" as const }],
+          source_node: structuredClone(node)
         };
       });
 
@@ -4799,6 +4823,80 @@ function syncComponentInstanceTextOverride(document: RendererDocument, nodeId: s
   };
 }
 
+function componentSourceNodeForVariant(definition: ComponentDefinition, variantId: string | null | undefined): RendererNode {
+  const variant = variantId ? definition.variants.find((candidate) => candidate.id === variantId) : null;
+  return variant?.source_node ?? definition.source_node;
+}
+
+function componentSourceNodeForInstance(document: RendererDocument, instance: RendererNode): RendererNode | null {
+  const definitionId = instance.component_instance?.definition_id;
+  const definition = (document.components ?? []).find((component) => component.id === definitionId);
+  return definition ? componentSourceNodeForVariant(definition, instance.component_instance?.variant_id ?? null) : null;
+}
+
+function materializeComponentInstanceNode(
+  definition: ComponentDefinition,
+  variantId: string | null | undefined,
+  instanceId: string,
+  options: {
+    name: string;
+    transform: RendererNode["transform"];
+    componentInstance: RendererNode["component_instance"];
+    locked?: boolean;
+    visible?: boolean;
+    layoutItem?: RendererNode["layout_item"];
+    constraints?: RendererNode["constraints"];
+    exportPresets?: RendererNode["export_presets"];
+  }
+): RendererNode {
+  const sourceNode = componentSourceNodeForVariant(definition, variantId);
+  const node = structuredClone(sourceNode);
+  renameInstanceTree(node, instanceId);
+  node.id = instanceId;
+  node.kind = "component_instance";
+  node.name = options.name;
+  node.transform = structuredClone(options.transform);
+  node.component_instance = options.componentInstance
+    ? {
+        ...options.componentInstance,
+        variant_id: variantId ?? null,
+        overrides: structuredClone(options.componentInstance.overrides ?? [])
+      }
+    : null;
+  if (options.locked !== undefined) {
+    node.locked = options.locked;
+  }
+  if (options.visible !== undefined) {
+    node.visible = options.visible;
+  }
+  if (options.layoutItem !== undefined) {
+    node.layout_item = structuredClone(options.layoutItem);
+  }
+  if (options.constraints !== undefined) {
+    node.constraints = structuredClone(options.constraints);
+  }
+  if (options.exportPresets !== undefined) {
+    node.export_presets = structuredClone(options.exportPresets);
+  }
+  applyComponentInstanceTextOverrides(node, sourceNode.id);
+  return node;
+}
+
+function applyComponentInstanceTextOverrides(instance: RendererNode, sourceRootNodeId: string): void {
+  const overrides = instance.component_instance?.overrides ?? [];
+  for (const override of overrides) {
+    if (override.field !== "text") {
+      continue;
+    }
+    const targetNodeId = override.node_id === sourceRootNodeId ? instance.id : `${instance.id}__${override.node_id}`;
+    const target = findInNode(instance, targetNodeId);
+    if (target?.content.type !== "text") {
+      continue;
+    }
+    target.content = { ...target.content, value: override.value };
+  }
+}
+
 function findComponentInstanceOwner(
   document: RendererDocument,
   nodeId: string
@@ -4854,9 +4952,7 @@ function sourceNodeIdFromInstanceNodeId(instanceId: string, nodeId: string): str
 }
 
 function findComponentSourceRootNodeId(document: RendererDocument, instance: RendererNode): string | null {
-  const definitionId = instance.component_instance?.definition_id;
-  const definition = (document.components ?? []).find((component) => component.id === definitionId);
-  return definition?.source_node.id ?? null;
+  return componentSourceNodeForInstance(document, instance)?.id ?? null;
 }
 
 function findComponentSourceTextValue(
@@ -4869,7 +4965,7 @@ function findComponentSourceTextValue(
   if (!definition) {
     return null;
   }
-  const sourceNode = findInNode(definition.source_node, sourceNodeId);
+  const sourceNode = findInNode(componentSourceNodeForVariant(definition, instance.component_instance?.variant_id ?? null), sourceNodeId);
   return sourceNode?.content.type === "text" ? sourceNode.content.value : null;
 }
 

@@ -153,6 +153,7 @@ impl DesignFile {
                         id: "default".to_string(),
                         name: "Default".to_string(),
                         properties: vec![],
+                        source_node: None,
                     }],
                 });
 

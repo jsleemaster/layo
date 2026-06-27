@@ -80,6 +80,34 @@ fn component_property_types_round_trip_through_json() {
 }
 
 #[test]
+fn component_variant_source_node_round_trips() {
+    let mut file = DesignFile::sample();
+    file.apply_command(editor_core::Command::CreateComponent {
+        node_id: "frame-1".to_string(),
+        component_id: "component-1".to_string(),
+        name: "Card".to_string(),
+    })
+    .unwrap();
+
+    let mut raw = serde_json::to_value(&file).unwrap();
+    raw["components"][0]["variants"][0]["source_node"] = raw["components"][0]["source_node"].clone();
+    raw["components"][0]["variants"][0]["source_node"]["name"] = json!("Card / Primary");
+    raw["components"][0]["variants"][0]["source_node"]["size"]["width"] = json!(360.0);
+
+    let parsed: DesignFile = serde_json::from_value(raw).unwrap();
+    let serialized = serde_json::to_value(&parsed).unwrap();
+
+    assert_eq!(
+        serialized["components"][0]["variants"][0]["source_node"]["name"],
+        "Card / Primary"
+    );
+    assert_eq!(
+        serialized["components"][0]["variants"][0]["source_node"]["size"]["width"],
+        360.0
+    );
+}
+
+#[test]
 fn legacy_component_property_type_defaults_to_select() {
     let mut file = DesignFile::sample();
     file.apply_command(editor_core::Command::CreateComponent {

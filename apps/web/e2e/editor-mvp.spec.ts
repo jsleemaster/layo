@@ -714,7 +714,7 @@ test("combines selected components as variants from the context menu", async ({ 
           name: "Button / Secondary",
           x: 340,
           y: 120,
-          width: 140,
+          width: 180,
           height: 64,
           fill: "#0f766e"
         },
@@ -777,6 +777,8 @@ test("combines selected components as variants from the context menu", async ({ 
   await expect(selector.locator("option")).toHaveText(["Primary", "Secondary"]);
   await selector.selectOption("Secondary");
   await expect(selector).toHaveValue("Secondary");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("180");
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#0f766e");
 });
 
 test("component instances render boolean variant properties as toggles", async ({ page }) => {
