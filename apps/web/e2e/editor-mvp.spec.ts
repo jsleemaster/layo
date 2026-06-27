@@ -1266,6 +1266,32 @@ test("file version history previews saved version differences before restore", a
   await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
 });
 
+test("file version history pins and unpins recovery checkpoints", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByTestId("file-version-message").fill("릴리즈 검토");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("릴리즈 검토 저장됨");
+
+  const versionRow = () =>
+    page.getByTestId("file-version-list").locator(".file-version-row").filter({ hasText: "릴리즈 검토" });
+
+  await versionRow().getByRole("button", { name: "릴리즈 검토 고정" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("릴리즈 검토 고정됨");
+  await expect(versionRow()).toContainText("고정됨");
+
+  const pinnedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/versions`);
+  expect(pinnedResponse.ok()).toBeTruthy();
+  const pinnedPayload = await pinnedResponse.json();
+  expect(
+    pinnedPayload.versions.find((version: { message: string; pinned: boolean }) => version.message === "릴리즈 검토")
+  ).toMatchObject({ pinned: true });
+
+  await versionRow().getByRole("button", { name: "릴리즈 검토 고정 해제" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("릴리즈 검토 고정 해제됨");
+  await expect(versionRow()).not.toContainText("고정됨");
+});
+
 test("comments panel creates and resolves a selected-layer thread", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

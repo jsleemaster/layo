@@ -817,6 +817,37 @@ describe("HTTP server", () => {
     expect(restored.json().recoveryVersion.source).toBe("restore");
   });
 
+  test("pins and unpins a file version through HTTP", async () => {
+    const server = await createServerWithDocument();
+
+    const saved = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/versions",
+      payload: { message: "릴리즈 검토" }
+    });
+    expect(saved.statusCode).toBe(200);
+    const versionId = saved.json().version.versionId;
+
+    const pinned = await server.inject({
+      method: "PATCH",
+      url: `/files/sample-file/versions/${versionId}/pin`,
+      payload: { pinned: true }
+    });
+    expect(pinned.statusCode).toBe(200);
+    expect(pinned.json().version).toMatchObject({ versionId, pinned: true });
+
+    const listed = await server.inject({ method: "GET", url: "/files/sample-file/versions" });
+    expect(listed.json().versions[0]).toMatchObject({ versionId, pinned: true });
+
+    const unpinned = await server.inject({
+      method: "PATCH",
+      url: `/files/sample-file/versions/${versionId}/pin`,
+      payload: { pinned: false }
+    });
+    expect(unpinned.statusCode).toBe(200);
+    expect(unpinned.json().version).toMatchObject({ versionId, pinned: false });
+  });
+
   test("serves automatic file versions created by persisted agent commands", async () => {
     const server = await createServerWithDocument();
 

@@ -394,6 +394,53 @@ describe("MCP AI editing workflow", () => {
     expect(restored.recoveryVersion.source).toBe("restore");
   });
 
+  test("lets an MCP client pin a file version", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "pinned-history-project",
+        name: "고정 히스토리 프로젝트",
+        documentId: "pinned-history-file",
+        documentName: "고정 히스토리 문서"
+      }
+    });
+
+    const saved = parseToolJson(
+      await client.callTool({
+        name: "save_file_version",
+        arguments: { fileId: "pinned-history-file", message: "릴리즈 검토" }
+      })
+    );
+
+    const pinned = parseToolJson(
+      await client.callTool({
+        name: "pin_file_version",
+        arguments: {
+          fileId: "pinned-history-file",
+          versionId: saved.version.versionId,
+          pinned: true
+        }
+      })
+    );
+    expect(pinned.version).toMatchObject({
+      versionId: saved.version.versionId,
+      pinned: true
+    });
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_file_versions",
+        arguments: { fileId: "pinned-history-file" }
+      })
+    );
+    expect(listed.versions[0]).toMatchObject({
+      versionId: saved.version.versionId,
+      pinned: true
+    });
+  });
+
   test("lets an MCP client create, list, and resolve selected-node comments", async () => {
     const client = await connectMcpClient();
     const target = { userId: "사용자", displayName: "민지", role: "editor" } as const;

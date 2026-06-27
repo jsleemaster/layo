@@ -1805,6 +1805,16 @@ button:disabled {
   font-weight: var(--editor-text-control-weight);
 }
 
+.file-version-summary .file-version-pin-badge {
+  width: fit-content;
+  padding: var(--editor-border-hairline) var(--editor-space-xxs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-surface);
+  color: var(--editor-color-ink);
+  font-weight: var(--editor-text-control-weight);
+}
+
 .file-version-row button {
   min-height: var(--editor-space-xl);
   padding: var(--editor-space-xxs) var(--editor-space-xs);

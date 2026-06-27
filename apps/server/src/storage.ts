@@ -204,6 +204,7 @@ export interface StoredFileVersionSummary {
   name: string;
   message: string;
   source: FileVersionSource;
+  pinned: boolean;
   createdAt: string;
   nodeCount: number;
 }
@@ -878,7 +879,10 @@ export class FileStorage {
     );
 
     return versions.sort(
-      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.versionId.localeCompare(a.versionId)
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) ||
+        b.createdAt.localeCompare(a.createdAt) ||
+        b.versionId.localeCompare(a.versionId)
     );
   }
 
@@ -894,6 +898,18 @@ export class FileStorage {
     await this.adoptPriorDefaultStoreIfNeeded();
     const raw = await readFile(this.fileVersionPathFor(fileId, versionId), "utf8");
     return parseStoredFileVersion(JSON.parse(raw), fileId);
+  }
+
+  async setFileVersionPinned(
+    fileId: string,
+    versionId: string,
+    pinned: boolean
+  ): Promise<StoredFileVersionSummary> {
+    await this.adoptPriorDefaultStoreIfNeeded();
+    const version = await this.readFileVersion(fileId, versionId);
+    const updated: StoredFileVersion = { ...version, pinned };
+    await writeFile(this.fileVersionPathFor(fileId, versionId), `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+    return summarizeStoredFileVersion(updated);
   }
 
   async restoreFileVersion(fileId: string, versionId: string): Promise<RestoreFileVersionResult> {
@@ -1444,6 +1460,7 @@ export class FileStorage {
       name: document.name,
       message: normalizeName(input.message, "저장된 버전"),
       source: input.source ?? "manual",
+      pinned: false,
       createdAt,
       nodeCount: countDocumentNodes(document),
       document: structuredClone(document)
@@ -1797,6 +1814,7 @@ function parseStoredFileVersion(input: unknown, expectedFileId: string): StoredF
     name: normalizeName(candidate.name, candidate.document.name),
     message: normalizeName(candidate.message, "저장된 버전"),
     source: candidate.source,
+    pinned: Boolean(candidate.pinned),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
     nodeCount: Math.max(0, Math.round(Number(candidate.nodeCount) || countDocumentNodes(candidate.document))),
     document: candidate.document
@@ -1944,6 +1962,7 @@ function summarizeStoredFileVersion(version: StoredFileVersion): StoredFileVersi
     name: version.name,
     message: version.message,
     source: version.source,
+    pinned: version.pinned,
     createdAt: version.createdAt,
     nodeCount: version.nodeCount
   };

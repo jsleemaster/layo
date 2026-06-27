@@ -46,6 +46,7 @@ import {
   restoreFileVersion,
   resolveCommentThread,
   saveFileVersion,
+  setFileVersionPinned,
   subscribeToCommentEvents,
   summarizeDocumentChanges,
   type CommentActivityFeed,
@@ -6942,6 +6943,28 @@ export function App() {
     }
   };
 
+  const toggleFileVersionPinned = async (version: FileVersionSummary) => {
+    if (!currentProject) {
+      setFileVersionStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      const updated = await setFileVersionPinned(
+        currentProject.currentDocumentId,
+        version.versionId,
+        !version.pinned
+      );
+      await refreshFileVersions(
+        currentProject.currentDocumentId,
+        updated.pinned ? `${updated.message} 고정됨` : `${updated.message} 고정 해제됨`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "버전 고정 상태를 저장하지 못했습니다";
+      setFileVersionStatus(message);
+    }
+  };
+
   const createSelectedNodeComment = async (nodeId: string) => {
     if (!currentProject) {
       setCommentStatus("프로젝트 없음");
@@ -8046,12 +8069,20 @@ export function App() {
                         <li className="file-version-row" key={version.versionId}>
                           <span className="file-version-summary">
                             <strong>{version.message}</strong>
+                            {version.pinned ? <span className="file-version-pin-badge">고정됨</span> : null}
                             <span>
                               {formatFileVersionCreatedAt(version.createdAt)} · {version.nodeCount}개 객체 ·{" "}
                               {formatFileVersionSource(version.source)}
                             </span>
                           </span>
                           <span className="file-version-row-actions">
+                            <button
+                              type="button"
+                              aria-label={`${version.message} ${version.pinned ? "고정 해제" : "고정"}`}
+                              onClick={() => void toggleFileVersionPinned(version)}
+                            >
+                              {version.pinned ? "고정 해제" : "고정"}
+                            </button>
                             <button
                               type="button"
                               aria-label={`${version.message} 미리보기`}

@@ -648,6 +648,34 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "pin_file_version",
+    {
+      description: "Pin or unpin a saved Layo file version so important recovery checkpoints stay visible first.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        versionId: z.string().describe("Saved version id returned by list_file_versions"),
+        pinned: z.boolean().optional().describe("Set false to unpin the version")
+      }
+    },
+    async ({ fileId, versionId, pinned }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              fileId,
+              version: await storage.setFileVersionPinned(fileId, versionId, pinned !== false)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "restore_file_version",
     {
       description:

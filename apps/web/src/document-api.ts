@@ -8,6 +8,7 @@ export interface FileVersionSummary {
   name: string;
   message: string;
   source: "manual" | "restore" | "auto";
+  pinned: boolean;
   createdAt: string;
   nodeCount: number;
 }
@@ -213,6 +214,21 @@ export async function restoreFileVersion(
     method: "POST"
   });
   return (await readDocumentJson(response)) as RestoreFileVersionResult;
+}
+
+export async function setFileVersionPinned(
+  fileId: string,
+  versionId: string,
+  pinned: boolean,
+  fetcher: typeof fetch = fetch
+): Promise<FileVersionSummary> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/versions/${versionId}/pin`), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { version: FileVersionSummary }).version;
 }
 
 export async function listCommentThreads(

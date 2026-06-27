@@ -170,6 +170,19 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
   );
 
+  server.patch<{
+    Params: { fileId: string; versionId: string };
+    Body: { pinned?: boolean };
+  }>("/files/:fileId/versions/:versionId/pin", async (request) => {
+    return {
+      version: await storage.setFileVersionPinned(
+        request.params.fileId,
+        request.params.versionId,
+        request.body?.pinned !== false
+      )
+    };
+  });
+
   server.post<{ Params: { fileId: string; versionId: string } }>(
     "/files/:fileId/versions/:versionId/restore",
     async (request) => {

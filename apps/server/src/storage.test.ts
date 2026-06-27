@@ -142,6 +142,29 @@ describe("FileStorage", () => {
     expect(versions.map((item) => item.source)).toContain("restore");
   });
 
+  test("pins file versions and sorts pinned checkpoints first", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const first = await storage.saveFileVersion("sample-file", { message: "검토 전" });
+    await storage.updateText("sample-file", "text-1", "릴리즈 검토 대상");
+    const second = await storage.saveFileVersion("sample-file", { message: "릴리즈 전" });
+
+    await expect(storage.setFileVersionPinned("sample-file", first.versionId, true)).resolves.toMatchObject({
+      versionId: first.versionId,
+      pinned: true
+    });
+
+    const versions = await storage.listFileVersions("sample-file");
+    expect(versions[0]).toMatchObject({ versionId: first.versionId, pinned: true });
+    expect(versions.find((version) => version.versionId === second.versionId)).toMatchObject({
+      pinned: false
+    });
+    await expect(storage.readFileVersion("sample-file", first.versionId)).resolves.toMatchObject({
+      pinned: true
+    });
+  });
+
   test("creates an automatic file version after the third persisted edit", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

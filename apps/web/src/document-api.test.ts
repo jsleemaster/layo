@@ -13,6 +13,7 @@ import {
   resolveCommentThread,
   restoreFileVersion,
   saveFileVersion,
+  setFileVersionPinned,
   subscribeToCommentEvents,
   summarizeDocumentChanges
 } from "./document-api";
@@ -307,6 +308,18 @@ describe("file version API helpers", () => {
           recoveryVersion: { versionId: "version-2", source: "restore" }
         });
       }
+      if (pathname === "/files/sample-file/versions/version-1/pin" && init?.method === "PATCH") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ pinned: true });
+        return jsonResponse({
+          version: {
+            versionId: "version-1",
+            fileId: "sample-file",
+            message: "검토 전",
+            pinned: true
+          }
+        });
+      }
       return new Response("not found", { status: 404 });
     };
 
@@ -325,11 +338,16 @@ describe("file version API helpers", () => {
       file: { id: "sample-file" },
       recoveryVersion: { source: "restore" }
     });
+    await expect(setFileVersionPinned("sample-file", "version-1", true, fetcher as typeof fetch)).resolves.toMatchObject({
+      versionId: "version-1",
+      pinned: true
+    });
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/files/sample-file/versions"), "GET"],
       [expect.stringContaining("/files/sample-file/versions"), "POST"],
       [expect.stringContaining("/files/sample-file/versions/version-1"), "GET"],
-      [expect.stringContaining("/files/sample-file/versions/version-1/restore"), "POST"]
+      [expect.stringContaining("/files/sample-file/versions/version-1/restore"), "POST"],
+      [expect.stringContaining("/files/sample-file/versions/version-1/pin"), "PATCH"]
     ]);
   });
 });
