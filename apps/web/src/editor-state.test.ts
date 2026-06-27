@@ -668,6 +668,88 @@ describe("editor state commands", () => {
     expect(findNodeById(redone.document, "text-1")?.style.fill).toBe("#f8fafc");
   });
 
+  test("reorders token themes and theme token set priority with undo redo", () => {
+    const document = sampleDocument() as any;
+    document.token_sets = [
+      { id: "base", name: "base", enabled: false },
+      { id: "light", name: "light", enabled: false },
+      { id: "dark", name: "dark", enabled: false }
+    ];
+    document.token_themes = [
+      { id: "theme-review", name: "Review", group: "mode", enabled: true, token_set_ids: ["base", "light", "dark"] },
+      { id: "theme-alt", name: "Alt", group: "preview", enabled: false, token_set_ids: ["base", "light"] }
+    ];
+    document.tokens = [
+      {
+        id: "color-base-surface-canvas",
+        name: "Surface / Canvas",
+        type: "color",
+        value: "#f8fafc",
+        set_id: "base"
+      },
+      {
+        id: "color-light-surface-canvas",
+        name: "Surface / Canvas",
+        type: "color",
+        value: "#ffffff",
+        set_id: "light"
+      },
+      {
+        id: "color-dark-surface-canvas",
+        name: "Surface / Canvas",
+        type: "color",
+        value: "#0f172a",
+        set_id: "dark"
+      }
+    ];
+
+    const bound = executeEditorCommand(createEditorState(document), {
+      type: "set_fill_token",
+      nodeId: "text-1",
+      tokenId: "color-base-surface-canvas"
+    } as any);
+    expect(findNodeById(bound.document, "text-1")?.style.fill).toBe("#0f172a");
+
+    const themeMoved = executeEditorCommand(bound, {
+      type: "reorder_token_theme",
+      tokenThemeId: "theme-review",
+      direction: "down"
+    } as any);
+    expect(themeMoved.document.token_themes?.map((theme) => theme.id)).toEqual(["theme-alt", "theme-review"]);
+
+    const setMoved = executeEditorCommand(themeMoved, {
+      type: "reorder_token_theme_set",
+      tokenThemeId: "theme-review",
+      tokenSetId: "light",
+      direction: "down"
+    } as any);
+    expect(setMoved.document.token_themes?.find((theme) => theme.id === "theme-review")?.token_set_ids).toEqual([
+      "base",
+      "dark",
+      "light"
+    ]);
+    expect(findNodeById(setMoved.document, "text-1")?.style.fill).toBe("#ffffff");
+
+    const undoneSetMove = undo(setMoved);
+    expect(undoneSetMove.document.token_themes?.find((theme) => theme.id === "theme-review")?.token_set_ids).toEqual([
+      "base",
+      "light",
+      "dark"
+    ]);
+    expect(findNodeById(undoneSetMove.document, "text-1")?.style.fill).toBe("#0f172a");
+
+    const redoneSetMove = redo(undoneSetMove);
+    expect(redoneSetMove.document.token_themes?.find((theme) => theme.id === "theme-review")?.token_set_ids).toEqual([
+      "base",
+      "dark",
+      "light"
+    ]);
+    expect(findNodeById(redoneSetMove.document, "text-1")?.style.fill).toBe("#ffffff");
+
+    const undoneThemeMove = undo(undoneSetMove);
+    expect(undoneThemeMove.document.token_themes?.map((theme) => theme.id)).toEqual(["theme-review", "theme-alt"]);
+  });
+
   test("preserves layout spacing token bindings and clears them on manual override", () => {
     const document = sampleDocument() as any;
     document.tokens = [

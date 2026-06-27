@@ -168,6 +168,17 @@ export type EditorCommand =
       tokenThemeId: string;
     }
   | {
+      type: "reorder_token_theme";
+      tokenThemeId: string;
+      direction: "up" | "down";
+    }
+  | {
+      type: "reorder_token_theme_set";
+      tokenThemeId: string;
+      tokenSetId: string;
+      direction: "up" | "down";
+    }
+  | {
       type: "set_document_token_themes";
       tokenThemes: DesignTokenTheme[];
     }
@@ -536,7 +547,7 @@ export function resolveActiveDesignTokens(
     return [...tokens];
   }
 
-  const enabledSetIds = activeTokenSetIds(tokenSets, tokenThemes);
+  const tokenSetOrder = activeTokenSetOrder(tokenSets, tokenThemes);
   const winners = new Map<string, DesignToken>();
   const keyOrder: string[] = [];
   const remember = (token: DesignToken) => {
@@ -550,11 +561,8 @@ export function resolveActiveDesignTokens(
   for (const token of tokens.filter((token) => !token.set_id)) {
     remember(token);
   }
-  for (const tokenSet of tokenSets) {
-    if (!enabledSetIds.has(tokenSet.id)) {
-      continue;
-    }
-    for (const token of tokens.filter((candidate) => candidate.set_id === tokenSet.id)) {
+  for (const tokenSetId of tokenSetOrder) {
+    for (const token of tokens.filter((candidate) => candidate.set_id === tokenSetId)) {
       remember(token);
     }
   }
@@ -562,17 +570,28 @@ export function resolveActiveDesignTokens(
   return keyOrder.map((key) => winners.get(key)).filter((token): token is DesignToken => Boolean(token));
 }
 
-function activeTokenSetIds(tokenSets: DesignTokenSet[], tokenThemes: DesignTokenTheme[]): Set<string> {
-  const enabledSetIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+function activeTokenSetOrder(tokenSets: DesignTokenSet[], tokenThemes: DesignTokenTheme[]): string[] {
+  const activeIds = tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id);
+  const knownTokenSetIds = new Set(tokenSets.map((tokenSet) => tokenSet.id));
+  const appendActiveId = (tokenSetId: string) => {
+    const existingIndex = activeIds.indexOf(tokenSetId);
+    if (existingIndex >= 0) {
+      activeIds.splice(existingIndex, 1);
+    }
+    activeIds.push(tokenSetId);
+  };
+
   for (const theme of tokenThemes) {
     if (!theme.enabled) {
       continue;
     }
     for (const tokenSetId of theme.token_set_ids) {
-      enabledSetIds.add(tokenSetId);
+      if (knownTokenSetIds.has(tokenSetId)) {
+        appendActiveId(tokenSetId);
+      }
     }
   }
-  return enabledSetIds;
+  return activeIds;
 }
 
 function tokenResolutionKey(token: DesignToken): string {
@@ -777,6 +796,17 @@ function normalizeTokenThemeSetIds(document: RendererDocument, tokenSetIds: stri
   }
 
   return normalized;
+}
+
+function moveArrayItemInDirection<T>(items: T[], index: number, direction: "up" | "down"): T[] | null {
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (index < 0 || nextIndex < 0 || nextIndex >= items.length) {
+    return null;
+  }
+  const nextItems = [...items];
+  const [moved] = nextItems.splice(index, 1);
+  nextItems.splice(nextIndex, 0, moved);
+  return nextItems;
 }
 
 export function getNodeAbsolutePosition(
@@ -1931,6 +1961,54 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       }
 
       next.token_themes = previousThemes.filter((theme) => theme.id !== command.tokenThemeId);
+      materializeTokenBindings(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_document_token_themes",
+          tokenThemes: previousThemes
+        }
+      };
+    }
+    case "reorder_token_theme": {
+      const previousThemes = cloneTokenThemes(next.token_themes ?? []);
+      const index = previousThemes.findIndex((theme) => theme.id === command.tokenThemeId);
+      const nextThemes = moveArrayItemInDirection(previousThemes, index, command.direction);
+      if (!nextThemes) {
+        return { document, inverse: null };
+      }
+
+      next.token_themes = nextThemes;
+      materializeTokenBindings(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_document_token_themes",
+          tokenThemes: previousThemes
+        }
+      };
+    }
+    case "reorder_token_theme_set": {
+      const previousThemes = cloneTokenThemes(next.token_themes ?? []);
+      const themeIndex = previousThemes.findIndex((theme) => theme.id === command.tokenThemeId);
+      const theme = previousThemes[themeIndex];
+      if (!theme || !(next.token_sets ?? []).some((tokenSet) => tokenSet.id === command.tokenSetId)) {
+        return { document, inverse: null };
+      }
+      const tokenSetIndex = theme.token_set_ids.indexOf(command.tokenSetId);
+      const tokenSetIds = moveArrayItemInDirection(theme.token_set_ids, tokenSetIndex, command.direction);
+      if (!tokenSetIds) {
+        return { document, inverse: null };
+      }
+
+      const nextThemes = cloneTokenThemes(previousThemes);
+      nextThemes[themeIndex] = {
+        ...nextThemes[themeIndex],
+        token_set_ids: tokenSetIds
+      };
+      next.token_themes = nextThemes;
       materializeTokenBindings(next);
 
       return {

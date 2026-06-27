@@ -106,6 +106,8 @@ export type AgentCommand =
   | { type: "delete_style"; styleId: string }
   | { type: "upsert_token_theme"; tokenTheme: DesignTokenTheme }
   | { type: "delete_token_theme"; tokenThemeId: string }
+  | { type: "reorder_token_theme"; tokenThemeId: string; direction: "up" | "down" }
+  | { type: "reorder_token_theme_set"; tokenThemeId: string; tokenSetId: string; direction: "up" | "down" }
   | { type: "set_token_set_enabled"; tokenSetId: string; enabled: boolean }
   | { type: "set_token_theme_enabled"; tokenThemeId: string; enabled: boolean }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
@@ -1057,6 +1059,16 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       materializeTokenBindings(document);
       return command.tokenThemeId;
     }
+    case "reorder_token_theme": {
+      reorderTokenTheme(document, command.tokenThemeId, command.direction);
+      materializeTokenBindings(document);
+      return command.tokenThemeId;
+    }
+    case "reorder_token_theme_set": {
+      reorderTokenThemeSet(document, command.tokenThemeId, command.tokenSetId, command.direction);
+      materializeTokenBindings(document);
+      return command.tokenThemeId;
+    }
     case "set_token_set_enabled": {
       const tokenSet = (document.token_sets ?? []).find((candidate) => candidate.id === command.tokenSetId);
       if (!tokenSet) {
@@ -1599,6 +1611,45 @@ function upsertTokenTheme(document: DesignFile, input: DesignTokenTheme): Design
     }
   }
 
+  return theme;
+}
+
+function reorderTokenTheme(document: DesignFile, tokenThemeId: string, direction: "up" | "down"): DesignTokenTheme {
+  const theme = requireTokenTheme(document, tokenThemeId);
+  const themes = document.token_themes ?? [];
+  const index = themes.findIndex((candidate) => candidate.id === tokenThemeId);
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (nextIndex < 0 || nextIndex >= themes.length) {
+    return theme;
+  }
+  const [moved] = themes.splice(index, 1);
+  themes.splice(nextIndex, 0, moved);
+  return moved;
+}
+
+function reorderTokenThemeSet(
+  document: DesignFile,
+  tokenThemeId: string,
+  tokenSetId: string,
+  direction: "up" | "down"
+): DesignTokenTheme {
+  const theme = requireTokenTheme(document, tokenThemeId);
+  const knownTokenSetIds = new Set((document.token_sets ?? []).map((tokenSet) => tokenSet.id));
+  if (!knownTokenSetIds.has(tokenSetId)) {
+    throw new Error(`token set not found: ${tokenSetId}`);
+  }
+  const index = theme.token_set_ids.indexOf(tokenSetId);
+  if (index < 0) {
+    throw new Error(`token theme does not include token set: ${tokenThemeId} -> ${tokenSetId}`);
+  }
+  const nextIndex = direction === "up" ? index - 1 : index + 1;
+  if (nextIndex < 0 || nextIndex >= theme.token_set_ids.length) {
+    return theme;
+  }
+  const tokenSetIds = [...theme.token_set_ids];
+  const [moved] = tokenSetIds.splice(index, 1);
+  tokenSetIds.splice(nextIndex, 0, moved);
+  theme.token_set_ids = tokenSetIds;
   return theme;
 }
 

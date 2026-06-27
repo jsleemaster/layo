@@ -210,6 +210,17 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     tokenThemeId: z.string()
   }),
   z.object({
+    type: z.literal("reorder_token_theme"),
+    tokenThemeId: z.string(),
+    direction: z.enum(["up", "down"])
+  }),
+  z.object({
+    type: z.literal("reorder_token_theme_set"),
+    tokenThemeId: z.string(),
+    tokenSetId: z.string(),
+    direction: z.enum(["up", "down"])
+  }),
+  z.object({
     type: z.literal("set_token_set_enabled"),
     tokenSetId: z.string(),
     enabled: z.boolean()

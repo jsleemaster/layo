@@ -1404,6 +1404,133 @@ describe("HTTP server", () => {
     expect(inspect.json().inspection.tokenThemes).toEqual([]);
   });
 
+  test("agent commands reorder token themes and theme token set priority", async () => {
+    const server = await createServerWithDocument();
+
+    await server.inject({
+      method: "PUT",
+      url: "/files/sample-file/tokens/dtcg",
+      payload: {
+        $metadata: {
+          tokenSetOrder: ["base", "light", "dark"]
+        },
+        base: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#f8fafc"
+            }
+          }
+        },
+        light: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#ffffff"
+            }
+          }
+        },
+        dark: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#0f172a"
+            }
+          }
+        }
+      }
+    });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-review",
+              name: "Review",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "light", "dark"]
+            }
+          },
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-alt",
+              name: "Alt",
+              group: "preview",
+              enabled: false,
+              token_set_ids: ["base", "light"]
+            }
+          },
+          {
+            type: "set_fill_token",
+            nodeId: "text-1",
+            tokenId: "color-base-surface-canvas"
+          }
+        ]
+      }
+    });
+    expect(created.statusCode).toBe(200);
+
+    const reordered = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          { type: "reorder_token_theme", tokenThemeId: "theme-review", direction: "down" },
+          {
+            type: "reorder_token_theme_set",
+            tokenThemeId: "theme-review",
+            tokenSetId: "light",
+            direction: "down"
+          }
+        ]
+      }
+    });
+    expect(reordered.statusCode).toBe(200);
+    expect(reordered.json().result.audit.commandTypes).toEqual([
+      "reorder_token_theme",
+      "reorder_token_theme_set"
+    ]);
+
+    const file = await server.inject({ method: "GET", url: "/files/sample-file" });
+    expect(file.json().file.token_themes).toEqual([
+      {
+        id: "theme-alt",
+        name: "Alt",
+        group: "preview",
+        enabled: false,
+        token_set_ids: ["base", "light"]
+      },
+      {
+        id: "theme-review",
+        name: "Review",
+        group: "mode",
+        enabled: true,
+        token_set_ids: ["base", "dark", "light"]
+      }
+    ]);
+    expect(file.json().file.pages[0].children[0].children[0].style).toMatchObject({
+      fill: "#ffffff",
+      fill_token: "color-base-surface-canvas"
+    });
+
+    const exported = await server.inject({ method: "GET", url: "/files/sample-file/tokens/dtcg" });
+    expect(exported.json().tokens.$themes.map((theme: { id: string }) => theme.id)).toEqual([
+      "theme-alt",
+      "theme-review"
+    ]);
+    expect(
+      exported.json().tokens.$themes.find((theme: { id: string }) => theme.id === "theme-review").selectedTokenSets
+    ).toEqual(["base", "dark", "light"]);
+  });
+
   test("serves repo component mappings and includes them in code export", async () => {
     const server = await createServerWithDocument();
 

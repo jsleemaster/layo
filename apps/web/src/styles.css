@@ -1391,6 +1391,14 @@ button:disabled {
   background: var(--editor-color-panel);
 }
 
+.token-theme-row-actions,
+.token-theme-set-order {
+  display: flex;
+  align-items: center;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+}
+
 .token-theme-toggle,
 .token-theme-set-option {
   display: inline-flex;
@@ -1400,6 +1408,17 @@ button:disabled {
   color: var(--editor-color-ink);
   font-size: var(--editor-text-small-size);
   line-height: var(--editor-text-small-line);
+}
+
+.token-theme-set-option {
+  justify-content: space-between;
+}
+
+.token-theme-set-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--editor-space-xs);
+  min-width: 0;
 }
 
 .token-theme-fields {

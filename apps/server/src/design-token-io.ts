@@ -112,8 +112,7 @@ export function resolveActiveDesignTokens(
     return [...tokens];
   }
 
-  const tokenSetOrder = tokenSets.map((tokenSet) => tokenSet.id);
-  const enabledTokenSetIds = activeTokenSetIdsForResolution(tokenSets, tokenThemes);
+  const tokenSetOrder = activeTokenSetOrderForResolution(tokenSets, tokenThemes);
   const winners = new Map<string, DesignToken>();
   const keyOrder: string[] = [];
   const remember = (token: DesignToken) => {
@@ -128,9 +127,6 @@ export function resolveActiveDesignTokens(
     remember(token);
   }
   for (const tokenSetId of tokenSetOrder) {
-    if (!enabledTokenSetIds.has(tokenSetId)) {
-      continue;
-    }
     for (const token of tokens.filter((candidate) => candidate.set_id === tokenSetId)) {
       remember(token);
     }
@@ -490,19 +486,27 @@ function normalizeTokenThemesForExport(
     .filter((theme) => theme.token_set_ids.length > 0);
 }
 
-function activeTokenSetIdsForResolution(
+function activeTokenSetOrderForResolution(
   tokenSets: DesignTokenSet[],
   tokenThemes: DesignTokenTheme[] = []
-): Set<string> {
-  const activeIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+): string[] {
+  const activeIds: string[] = tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id);
   const knownTokenSetIds = new Set(tokenSets.map((tokenSet) => tokenSet.id));
+  const appendActiveId = (tokenSetId: string) => {
+    const existingIndex = activeIds.indexOf(tokenSetId);
+    if (existingIndex >= 0) {
+      activeIds.splice(existingIndex, 1);
+    }
+    activeIds.push(tokenSetId);
+  };
+
   for (const theme of tokenThemes) {
     if (!theme.enabled) {
       continue;
     }
     for (const tokenSetId of theme.token_set_ids) {
       if (knownTokenSetIds.has(tokenSetId)) {
-        activeIds.add(tokenSetId);
+        appendActiveId(tokenSetId);
       }
     }
   }

@@ -1434,6 +1434,41 @@ async function persistDeleteTokenTheme(fileId: string, tokenThemeId: string) {
   }
 }
 
+async function persistReorderTokenTheme(fileId: string, tokenThemeId: string, direction: "up" | "down") {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "reorder_token_theme", tokenThemeId, direction }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`토큰 테마 순서 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistReorderTokenThemeSet(
+  fileId: string,
+  tokenThemeId: string,
+  tokenSetId: string,
+  direction: "up" | "down"
+) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "reorder_token_theme_set", tokenThemeId, tokenSetId, direction }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`토큰 세트 우선순위 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 function CanvasImageBody({
   assetId,
   width,
@@ -3410,7 +3445,9 @@ function InspectorTokenControls({
   onTokenSetEnabledChange,
   onTokenThemeEnabledChange,
   onTokenThemeUpsert,
-  onTokenThemeDelete
+  onTokenThemeDelete,
+  onTokenThemeReorder,
+  onTokenThemeSetReorder
 }: {
   draft: string;
   status: string;
@@ -3424,6 +3461,8 @@ function InspectorTokenControls({
   onTokenThemeEnabledChange: (tokenThemeId: string, enabled: boolean) => void;
   onTokenThemeUpsert: (tokenTheme: DesignTokenTheme) => void;
   onTokenThemeDelete: (tokenThemeId: string) => void;
+  onTokenThemeReorder: (tokenThemeId: string, direction: "up" | "down") => void;
+  onTokenThemeSetReorder: (tokenThemeId: string, tokenSetId: string, direction: "up" | "down") => void;
 }) {
   const themesByGroup = groupTokenThemes(tokenThemes);
   const createTokenTheme = () => {
@@ -3450,6 +3489,7 @@ function InspectorTokenControls({
       : currentSetIds.filter((id) => id !== tokenSetId);
     updateTokenTheme(theme, { token_set_ids: tokenSetIds });
   };
+  const themeIndexById = new Map(tokenThemes.map((theme, index) => [theme.id, index]));
 
   return (
     <section className="inspector-section" data-testid="inspector-section-tokens" aria-label="토큰">
@@ -3504,6 +3544,26 @@ function InspectorTokenControls({
                   className="token-theme-row"
                   data-testid={`token-theme-row-${theme.id}`}
                 >
+                  <div className="token-theme-row-actions" aria-label={`${theme.name} 순서`}>
+                    <button
+                      type="button"
+                      className="inspector-compact-button"
+                      data-testid={`token-theme-move-up-${theme.id}`}
+                      disabled={!canEdit || (themeIndexById.get(theme.id) ?? 0) <= 0}
+                      onClick={() => onTokenThemeReorder(theme.id, "up")}
+                    >
+                      위
+                    </button>
+                    <button
+                      type="button"
+                      className="inspector-compact-button"
+                      data-testid={`token-theme-move-down-${theme.id}`}
+                      disabled={!canEdit || (themeIndexById.get(theme.id) ?? 0) >= tokenThemes.length - 1}
+                      onClick={() => onTokenThemeReorder(theme.id, "down")}
+                    >
+                      아래
+                    </button>
+                  </div>
                   <label className="token-theme-toggle">
                     <input
                       data-testid={`token-theme-enabled-${theme.id}`}
@@ -3547,19 +3607,43 @@ function InspectorTokenControls({
                     </label>
                   </div>
                   <div className="token-theme-sets" aria-label={`${theme.name} 토큰 세트`}>
-                    {tokenSets.map((tokenSet) => (
-                      <label key={tokenSet.id} className="token-theme-set-option">
-                        <input
-                          data-testid={`token-theme-set-${theme.id}-${tokenSet.id}`}
-                          type="checkbox"
-                          checked={(theme.token_set_ids ?? []).includes(tokenSet.id)}
-                          disabled={!canEdit}
-                          onChange={(event) =>
-                            updateTokenThemeSetMembership(theme, tokenSet.id, event.currentTarget.checked)
-                          }
-                        />
-                        <span>{tokenSet.name}</span>
-                      </label>
+                    {orderedTokenSetsForTheme(theme, tokenSets).map(({ tokenSet, included, includedIndex }) => (
+                      <div key={tokenSet.id} className="token-theme-set-option">
+                        <label className="token-theme-set-check">
+                          <input
+                            data-testid={`token-theme-set-${theme.id}-${tokenSet.id}`}
+                            type="checkbox"
+                            checked={included}
+                            disabled={!canEdit}
+                            onChange={(event) =>
+                              updateTokenThemeSetMembership(theme, tokenSet.id, event.currentTarget.checked)
+                            }
+                          />
+                          <span>{tokenSet.name}</span>
+                        </label>
+                        {included ? (
+                          <span className="token-theme-set-order">
+                            <button
+                              type="button"
+                              className="inspector-compact-button"
+                              data-testid={`token-theme-set-move-up-${theme.id}-${tokenSet.id}`}
+                              disabled={!canEdit || includedIndex <= 0}
+                              onClick={() => onTokenThemeSetReorder(theme.id, tokenSet.id, "up")}
+                            >
+                              위
+                            </button>
+                            <button
+                              type="button"
+                              className="inspector-compact-button"
+                              data-testid={`token-theme-set-move-down-${theme.id}-${tokenSet.id}`}
+                              disabled={!canEdit || includedIndex >= (theme.token_set_ids ?? []).length - 1}
+                              onClick={() => onTokenThemeSetReorder(theme.id, tokenSet.id, "down")}
+                            >
+                              아래
+                            </button>
+                          </span>
+                        ) : null}
+                      </div>
                     ))}
                   </div>
                   <button
@@ -3610,6 +3694,26 @@ function groupTokenThemes(tokenThemes: DesignTokenTheme[]): Array<{ name: string
     groups.set(groupName, [...(groups.get(groupName) ?? []), theme]);
   }
   return [...groups.entries()].map(([name, themes]) => ({ name, themes }));
+}
+
+function orderedTokenSetsForTheme(
+  theme: DesignTokenTheme,
+  tokenSets: DesignTokenSet[]
+): Array<{ tokenSet: DesignTokenSet; included: boolean; includedIndex: number }> {
+  const tokenSetById = new Map(tokenSets.map((tokenSet) => [tokenSet.id, tokenSet]));
+  const orderedIncluded = (theme.token_set_ids ?? [])
+    .map((tokenSetId, index) => ({ tokenSet: tokenSetById.get(tokenSetId), includedIndex: index }))
+    .filter((entry): entry is { tokenSet: DesignTokenSet; includedIndex: number } => Boolean(entry.tokenSet));
+  const includedIds = new Set(orderedIncluded.map((entry) => entry.tokenSet.id));
+  const unselected = tokenSets
+    .filter((tokenSet) => !includedIds.has(tokenSet.id))
+    .map((tokenSet) => ({ tokenSet, includedIndex: -1 }));
+
+  return [...orderedIncluded, ...unselected].map((entry) => ({
+    tokenSet: entry.tokenSet,
+    included: entry.includedIndex >= 0,
+    includedIndex: entry.includedIndex
+  }));
 }
 
 const PNG_EXPORT_SCALES = [1, 2, 3] as const;
@@ -4752,6 +4856,8 @@ function Inspector({
   onTokenThemeEnabledChange,
   onTokenThemeUpsert,
   onTokenThemeDelete,
+  onTokenThemeReorder,
+  onTokenThemeSetReorder,
   onCommentBodyChange,
   onCommentReplyBodyChange,
   onCreateComment,
@@ -4822,6 +4928,8 @@ function Inspector({
   onTokenThemeEnabledChange: (tokenThemeId: string, enabled: boolean) => void;
   onTokenThemeUpsert: (tokenTheme: DesignTokenTheme) => void;
   onTokenThemeDelete: (tokenThemeId: string) => void;
+  onTokenThemeReorder: (tokenThemeId: string, direction: "up" | "down") => void;
+  onTokenThemeSetReorder: (tokenThemeId: string, tokenSetId: string, direction: "up" | "down") => void;
   onCommentBodyChange: (value: string) => void;
   onCommentReplyBodyChange: (threadId: string, value: string) => void;
   onCreateComment: (nodeId: string) => void;
@@ -4872,6 +4980,8 @@ function Inspector({
       onTokenThemeEnabledChange={onTokenThemeEnabledChange}
       onTokenThemeUpsert={onTokenThemeUpsert}
       onTokenThemeDelete={onTokenThemeDelete}
+      onTokenThemeReorder={onTokenThemeReorder}
+      onTokenThemeSetReorder={onTokenThemeSetReorder}
     />
   );
 
@@ -10494,6 +10604,42 @@ export function App() {
       });
   };
 
+  const reorderTokenTheme = (tokenThemeId: string, direction: "up" | "down") => {
+    dispatch({ type: "reorder_token_theme", tokenThemeId, direction });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistReorderTokenTheme(currentProject.currentDocumentId, tokenThemeId, direction)
+      .then(() => {
+        setTokenDtcgStatus("토큰 테마 순서 저장됨");
+        setProjectStatus("토큰 테마 순서 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "토큰 테마 순서를 저장하지 못했습니다";
+        setTokenDtcgStatus(message);
+      });
+  };
+
+  const reorderTokenThemeSet = (tokenThemeId: string, tokenSetId: string, direction: "up" | "down") => {
+    dispatch({ type: "reorder_token_theme_set", tokenThemeId, tokenSetId, direction });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistReorderTokenThemeSet(currentProject.currentDocumentId, tokenThemeId, tokenSetId, direction)
+      .then(() => {
+        setTokenDtcgStatus("토큰 세트 우선순위 저장됨");
+        setProjectStatus("토큰 세트 우선순위 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "토큰 세트 우선순위를 저장하지 못했습니다";
+        setTokenDtcgStatus(message);
+      });
+  };
+
   const createNode = (kind: "rectangle" | "text") => {
     if (!editor) {
       return;
@@ -12578,6 +12724,8 @@ export function App() {
         onTokenThemeEnabledChange={updateTokenThemeEnabled}
         onTokenThemeUpsert={upsertTokenTheme}
         onTokenThemeDelete={deleteTokenTheme}
+        onTokenThemeReorder={reorderTokenTheme}
+        onTokenThemeSetReorder={reorderTokenThemeSet}
         onCommentBodyChange={setCommentBody}
         onCommentReplyBodyChange={(threadId, value) =>
           setCommentReplyBodies((current) => ({ ...current, [threadId]: value }))
