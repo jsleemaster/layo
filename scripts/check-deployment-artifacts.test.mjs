@@ -12,6 +12,20 @@ test("web static GitHub Pages workflow is not installed", async () => {
   });
 });
 
+test("vercel production workflow deploys prebuilt output and verifies the live Layo site", async () => {
+  const workflow = await readText(".github/workflows/vercel-production.yml");
+
+  assert.match(workflow, /VERCEL_TOKEN/);
+  assert.match(workflow, /VERCEL_ORG_ID/);
+  assert.match(workflow, /VERCEL_PROJECT_ID/);
+  assert.match(workflow, /vercel@50\.9\.6/);
+  assert.match(workflow, /vercel pull --yes --environment=production/);
+  assert.match(workflow, /vercel build --prod/);
+  assert.match(workflow, /vercel deploy --prebuilt --prod/);
+  assert.match(workflow, /pnpm run check:live-deployment -- --url https:\/\/layo\.vercel\.app/);
+  assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
+});
+
 test("relay Docker artifacts expose team-owned relay configuration", async () => {
   const dockerfile = await readText("apps/collab-relay/Dockerfile");
   const compose = await readText("deploy/collab-relay/docker-compose.yml");

@@ -50,6 +50,25 @@ vercel build --yes
 vercel deploy --prebuilt --prod
 ```
 
+## GitHub Actions production deployment
+
+Production Vercel deployment is owned by `.github/workflows/vercel-production.yml`.
+The workflow runs on `main` pushes and manual dispatch, then:
+
+1. Fails before install if `VERCEL_TOKEN`, `VERCEL_ORG_ID`, or
+   `VERCEL_PROJECT_ID` is missing from repository secrets.
+2. Installs dependencies with pinned pnpm.
+3. Runs deployment artifact, Penpot maturity, and design-rule gates.
+4. Installs pinned `vercel@50.9.6`.
+5. Runs `vercel pull --yes --environment=production`,
+   `vercel build --prod`, and `vercel deploy --prebuilt --prod`.
+6. Runs `pnpm run check:live-deployment -- --url https://layo.vercel.app`
+   after deploy.
+
+Do not report production as deployed from the GitHub About link alone. The
+workflow or the live smoke command must prove that the public Vercel URL serves
+the Layo Vite shell marker and same-origin `/health`.
+
 After a production deployment, run the live smoke check before reporting that
 the Vercel site is actually serving Layo:
 
