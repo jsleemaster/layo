@@ -150,6 +150,8 @@ Expected: all PASS.
 
 Observed: PASS for `pnpm run check:penpot-maturity`, `pnpm run check:design-rules`, `pnpm typecheck`, `pnpm test`, `pnpm --filter @layo/web build`, `pnpm test:e2e` with 130 passing tests, and `git diff --check`. `cargo fmt --check` was also sampled but failed on pre-existing Rust formatting drift outside this slice, so no broad rustfmt churn was introduced.
 
-- [ ] **Step 3: Commit, push, PR, merge, cleanup**
+- [x] **Step 3: Commit, push, PR, merge, cleanup**
 
 Commit with `feat: add token themes baseline`, push, create PR via GitHub REST, merge via GitHub REST if rules permit, then run post-merge cleanup.
+
+Observed: PR #163, `https://github.com/jsleemaster/layo/pull/163`, was squash-merged as `8d222cf4519e5f4d37a3906aa869e27d73a2b831`. A docs-only finalization pass records the merge/cleanup evidence after the merge because this step cannot be truthfully checked before publication.
