@@ -163,6 +163,8 @@ pnpm test:e2e
 # 123 passed
 ```
 
-- [ ] **Step 3: Publish and merge**
+- [x] **Step 3: Publish and merge**
 
 Push branch, create PR with Penpot reference and RED/GREEN evidence, merge after checks, sync `main`, and run post-merge cleanup.
+
+Observed: PR #154, `https://github.com/jsleemaster/layo/pull/154`, was squash-merged as `b731a356dcd1e1faeaebffdfba5898129d072b34`; main was fast-forwarded, the feature worktree was removed, and the local and remote feature branches were deleted.
