@@ -4,6 +4,8 @@ import { imageAssetIdsForNode, pdfForNode, svgForNode, type NodeArtifactAsset } 
 
 const pixelPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 const pixelWebpBase64 = "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA=";
+const pixelSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#7c3aed"/></svg>`;
+const pixelSvgBase64 = Buffer.from(pixelSvg).toString("base64");
 
 const nestedFrame: RendererNode = {
   id: "frame-1",
@@ -60,6 +62,14 @@ const webpImageAsset: NodeArtifactAsset & { pdfPreviewPngBase64: string } = {
   mimeType: "image/webp",
   dataBase64: pixelWebpBase64,
   name: "pixel.webp",
+  pdfPreviewPngBase64: pixelPngBase64
+};
+
+const svgImageAsset: NodeArtifactAsset & { pdfPreviewPngBase64: string } = {
+  assetId: "asset-pixel",
+  mimeType: "image/svg+xml",
+  dataBase64: pixelSvgBase64,
+  name: "pixel.svg",
   pdfPreviewPngBase64: pixelPngBase64
 };
 
@@ -137,6 +147,21 @@ describe("node artifact exports", () => {
 
     expect(pdfText).toContain("/Subtype /image#2Fwebp");
     expect(Buffer.from(pdf).includes(Buffer.from(pixelWebpBase64, "base64"))).toBe(true);
+    expect(pdfText).toContain("/Subtype /Image");
+    expect(pdfText).toContain("/Filter /FlateDecode");
+    expect(pdfText).toContain("/ColorSpace /DeviceRGB");
+    expect(pdfText).toContain("/SMask");
+    expect(pdfText).toContain("/Im1 Do");
+    expect(pdfText).not.toContain("0.953 0.957 0.965 rg");
+    expect(pdfText).not.toContain("0 0 80 48 re");
+  });
+
+  test("renders SVG image nodes visibly in selected-layer PDFs from a PNG preview", () => {
+    const pdf = pdfForNode(imageNode, { assets: { "asset-pixel": svgImageAsset } });
+    const pdfText = new TextDecoder().decode(pdf);
+
+    expect(pdfText).toContain("/Subtype /image#2Fsvg#2Bxml");
+    expect(Buffer.from(pdf).includes(Buffer.from(pixelSvg))).toBe(true);
     expect(pdfText).toContain("/Subtype /Image");
     expect(pdfText).toContain("/Filter /FlateDecode");
     expect(pdfText).toContain("/ColorSpace /DeviceRGB");

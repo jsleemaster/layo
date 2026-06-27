@@ -2311,6 +2311,7 @@ function normalizeImageMimeType(value: string) {
     mimeType !== "image/png" &&
     mimeType !== "image/jpeg" &&
     mimeType !== "image/webp" &&
+    mimeType !== "image/svg+xml" &&
     mimeType !== "image/gif"
   ) {
     throw new Error(`unsupported image mime type: ${value}`);
@@ -2334,6 +2335,11 @@ function assertImageBytesMatchMimeType(data: Buffer, mimeType: string) {
   }
 
   if (mimeType === "image/webp" && header.startsWith("RIFF") && header.slice(8, 12) === "WEBP") {
+    return;
+  }
+
+  const textHeader = data.subarray(0, 512).toString("utf8").replace(/^\uFEFF/, "").trimStart();
+  if (mimeType === "image/svg+xml" && (textHeader.startsWith("<svg") || (textHeader.startsWith("<?xml") && textHeader.includes("<svg")))) {
     return;
   }
 

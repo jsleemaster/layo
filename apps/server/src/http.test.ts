@@ -180,6 +180,37 @@ describe("HTTP server", () => {
     expect(served.rawPayload.length).toBe(asset.byteLength);
   });
 
+  test("stores and serves svg image assets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const server = createHttpServer(new FileStorage(tempRoot));
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="14"><rect width="18" height="14" fill="#0891b2"/></svg>`;
+
+    const uploaded = await server.inject({
+      method: "POST",
+      url: "/assets",
+      payload: {
+        name: "vector.svg",
+        mimeType: "image/svg+xml",
+        dataBase64: Buffer.from(svg).toString("base64")
+      }
+    });
+
+    expect(uploaded.statusCode).toBe(200);
+    const asset = uploaded.json().asset as {
+      assetId: string;
+      mimeType: string;
+      url: string;
+      byteLength: number;
+    };
+    expect(asset.mimeType).toBe("image/svg+xml");
+    expect(asset.byteLength).toBe(Buffer.byteLength(svg));
+
+    const served = await server.inject({ method: "GET", url: asset.url });
+    expect(served.statusCode).toBe(200);
+    expect(served.headers["content-type"]).toContain("image/svg+xml");
+    expect(served.body).toBe(svg);
+  });
+
   test("serves built web assets under /app without intercepting API assets", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const webDistDir = path.join(tempRoot, "web-dist");

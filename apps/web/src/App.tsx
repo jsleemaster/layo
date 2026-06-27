@@ -1002,6 +1002,10 @@ async function renderImageBlobToPngBase64(blob: Blob): Promise<string> {
   }
 }
 
+function shouldRenderPdfPreviewForImageAsset(mimeType: string) {
+  return mimeType === "image/webp" || mimeType === "image/svg+xml";
+}
+
 async function loadArtifactAssetsForNode(node: RendererNode): Promise<Record<string, NodeArtifactAsset>> {
   const assetIds = imageAssetIdsForNode(node);
   if (assetIds.length === 0) {
@@ -1016,7 +1020,7 @@ async function loadArtifactAssetsForNode(node: RendererNode): Promise<Record<str
       }
       const blob = await response.blob();
       const mimeType = blob.type || response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
-      const pdfPreviewPngBase64 = mimeType === "image/webp" ? await renderImageBlobToPngBase64(blob) : undefined;
+      const pdfPreviewPngBase64 = shouldRenderPdfPreviewForImageAsset(mimeType) ? await renderImageBlobToPngBase64(blob) : undefined;
       return [
         assetId,
         {
@@ -1058,10 +1062,14 @@ function fitImportedImageSize(size: { width: number; height: number }) {
 
 async function readImageFileSize(file: File): Promise<{ width: number; height: number }> {
   if ("createImageBitmap" in window) {
-    const bitmap = await createImageBitmap(file);
-    const size = { width: bitmap.width, height: bitmap.height };
-    bitmap.close();
-    return size;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const size = { width: bitmap.width, height: bitmap.height };
+      bitmap.close();
+      return size;
+    } catch {
+      // SVG files are browser-decodable through Image even when createImageBitmap rejects them.
+    }
   }
 
   return new Promise((resolve, reject) => {

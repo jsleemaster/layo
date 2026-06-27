@@ -137,6 +137,21 @@ async function createImageDataTransfer(
   }, { fileName: name, imageSize: size, color: fillColor, imageMimeType: mimeType });
 }
 
+async function createSvgImageDataTransfer(
+  page: Page,
+  name: string,
+  size: { width: number; height: number } = { width: 18, height: 14 },
+  fillColor = "#7c3aed"
+) {
+  return page.evaluateHandle(({ fileName, imageSize, color }) => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${imageSize.width}" height="${imageSize.height}" viewBox="0 0 ${imageSize.width} ${imageSize.height}"><rect width="${imageSize.width}" height="${imageSize.height}" fill="${color}"/><circle cx="9" cy="7" r="4" fill="#ffffff"/></svg>`;
+    const file = new File([svg], fileName, { type: "image/svg+xml" });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    return dataTransfer;
+  }, { fileName: name, imageSize: size, color: fillColor });
+}
+
 async function createImageUploadFile(
   page: Page,
   name: string,
@@ -657,6 +672,50 @@ test("inspector dev panel downloads webp image artifacts with rendered pdf previ
   expect(pdfText).toContain("/EmbeddedFiles");
   expect(pdfText).toContain("/Type /EmbeddedFile");
   expect(pdfText).toContain("/Subtype /image#2Fwebp");
+  expect(pdfText).toContain("/Subtype /Image");
+  expect(pdfText).toContain("/Filter /FlateDecode");
+  expect(pdfText).toContain("/ColorSpace /DeviceRGB");
+  expect(pdfText).toContain("/Im1 Do");
+  expect(pdfText).not.toContain("0.953 0.957 0.965 rg");
+  expect(pdfText).not.toContain("0 0 96 75 re");
+  expect(pdfText.trimEnd().endsWith("%%EOF")).toBe(true);
+});
+
+test("inspector dev panel downloads svg image artifacts with rendered pdf preview", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  const imageTransfer = await createSvgImageDataTransfer(page, "export-image.svg", { width: 18, height: 14 }, "#0891b2");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 340,
+    clientY: stageBox.y + 280
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+
+  await page.getByRole("button", { name: "이미지 3" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-pdf").click();
+  const pdfDownload = await pdfDownloadPromise;
+  expect(pdfDownload.suggestedFilename()).toBe("image-3.pdf");
+  const pdfPath = await pdfDownload.path();
+  if (!pdfPath) {
+    throw new Error("svg image pdf download path missing");
+  }
+  const pdf = await readFile(pdfPath);
+  const pdfText = pdf.toString("utf8");
+  expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  expect(pdfText).toContain("/Title (이미지 3)");
+  expect(pdfText).toContain("/EmbeddedFiles");
+  expect(pdfText).toContain("/Type /EmbeddedFile");
+  expect(pdfText).toContain("/Subtype /image#2Fsvg#2Bxml");
+  expect(pdfText).toContain("<svg");
   expect(pdfText).toContain("/Subtype /Image");
   expect(pdfText).toContain("/Filter /FlateDecode");
   expect(pdfText).toContain("/ColorSpace /DeviceRGB");
