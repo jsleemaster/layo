@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 const LAYO_DEPLOYMENT_MARKER = '<meta name="layo-app" content="vite-editor"';
 
 export async function checkLiveDeployment({ url, fetcher = fetch } = {}) {
-  const baseUrl = normalizeDeploymentUrl(url ?? process.env.LAYO_PRODUCTION_URL ?? "https://layo.vercel.app");
+  const baseUrl = normalizeDeploymentUrl(url ?? process.env.LAYO_PRODUCTION_URL);
   const htmlResponse = await fetcher(baseUrl.href);
   if (!htmlResponse.ok) {
     throw new Error(`Expected ${baseUrl.href} to return 200, got ${htmlResponse.status}`);

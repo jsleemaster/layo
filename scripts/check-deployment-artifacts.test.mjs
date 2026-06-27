@@ -22,7 +22,14 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.match(workflow, /vercel pull --yes --environment=production/);
   assert.match(workflow, /vercel build --prod/);
   assert.match(workflow, /vercel deploy --prebuilt --prod/);
-  assert.match(workflow, /pnpm run check:live-deployment -- --url https:\/\/layo\.vercel\.app/);
+  assert.match(workflow, /LAYO_REPOSITORY_ADMIN_TOKEN/);
+  assert.match(workflow, /id: deploy-production/);
+  assert.match(workflow, /deployment_url="\$\(printf '%s\\n' "\$deployment_output"/);
+  assert.match(workflow, /printf 'url=%s\\n' "\$deployment_url" >> "\$GITHUB_OUTPUT"/);
+  assert.match(workflow, /pnpm run check:live-deployment -- --url "\$\{\{ steps\.deploy-production\.outputs\.url \}\}"/);
+  assert.match(workflow, /Update GitHub About homepage/);
+  assert.match(workflow, /homepage: process\.env\.LAYO_DEPLOYMENT_URL/);
+  assert.doesNotMatch(workflow, /pnpm run check:live-deployment -- --url https:\/\/layo\.vercel\.app/);
   assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
 });
 

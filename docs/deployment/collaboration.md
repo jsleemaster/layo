@@ -55,15 +55,19 @@ vercel deploy --prebuilt --prod
 Production Vercel deployment is owned by `.github/workflows/vercel-production.yml`.
 The workflow runs on `main` pushes and manual dispatch, then:
 
-1. Fails before install if `VERCEL_TOKEN`, `VERCEL_ORG_ID`, or
-   `VERCEL_PROJECT_ID` is missing from repository secrets.
+1. Fails before install if `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+   `VERCEL_PROJECT_ID`, or `LAYO_REPOSITORY_ADMIN_TOKEN` is missing from
+   repository secrets.
 2. Installs dependencies with pinned pnpm.
 3. Runs deployment artifact, Penpot maturity, and design-rule gates.
 4. Installs pinned `vercel@50.9.6`.
 5. Runs `vercel pull --yes --environment=production`,
    `vercel build --prod`, and `vercel deploy --prebuilt --prod`.
-6. Runs `pnpm run check:live-deployment -- --url https://layo.vercel.app`
-   after deploy.
+6. Captures the URL returned by `vercel deploy`.
+7. Runs `pnpm run check:live-deployment -- --url <deployment-url>` against
+   that returned URL.
+8. Updates the GitHub About homepage to the verified deployment URL only after
+   the smoke check passes.
 
 Do not report production as deployed from the GitHub About link alone. The
 workflow or the live smoke command must prove that the public Vercel URL serves
@@ -73,13 +77,15 @@ After a production deployment, run the live smoke check before reporting that
 the Vercel site is actually serving Layo:
 
 ```bash
-pnpm run check:live-deployment -- --url https://layo.vercel.app
+pnpm run check:live-deployment -- --url <verified-vercel-url>
 ```
 
 The smoke check fetches the public URL, rejects unrelated Next.js or portfolio
 pages, verifies the Layo Vite shell marker, and checks the same-origin `/health`
-route. If this command fails, the GitHub About link may point at Vercel, but the
-production site is not verified as the Layo editor.
+route. The command intentionally has no hard-coded production URL fallback; if
+no URL is provided through `--url` or `LAYO_PRODUCTION_URL`, it fails before
+fetching anything. If this command fails, the GitHub About link may point at
+Vercel, but the production site is not verified as the Layo editor.
 
 By default, Vercel runtime writes use `/tmp/layo` because the deployment
 filesystem is otherwise read-only. This is useful for validating the deployed
