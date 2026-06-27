@@ -972,6 +972,36 @@ function artifactFileNameForAsset(assetId: string, mimeType: string) {
   return `${assetId}.${extension}`;
 }
 
+async function renderImageBlobToPngBase64(blob: Blob): Promise<string> {
+  const imageUrl = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    image.src = imageUrl;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, image.naturalWidth || image.width);
+    canvas.height = Math.max(1, image.naturalHeight || image.height);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("artifact preview canvas context missing");
+    }
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("artifact preview png blob missing"));
+        }
+      }, "image/png");
+    });
+    return readFileAsBase64(pngBlob);
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+}
+
 async function loadArtifactAssetsForNode(node: RendererNode): Promise<Record<string, NodeArtifactAsset>> {
   const assetIds = imageAssetIdsForNode(node);
   if (assetIds.length === 0) {
@@ -986,12 +1016,14 @@ async function loadArtifactAssetsForNode(node: RendererNode): Promise<Record<str
       }
       const blob = await response.blob();
       const mimeType = blob.type || response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+      const pdfPreviewPngBase64 = mimeType === "image/webp" ? await renderImageBlobToPngBase64(blob) : undefined;
       return [
         assetId,
         {
           assetId,
           mimeType,
           dataBase64: await readFileAsBase64(blob),
+          pdfPreviewPngBase64,
           name: artifactFileNameForAsset(assetId, mimeType)
         }
       ];

@@ -3,6 +3,7 @@ import type { RendererNode } from "@layo/renderer";
 import { imageAssetIdsForNode, pdfForNode, svgForNode, type NodeArtifactAsset } from "./node-artifacts";
 
 const pixelPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const pixelWebpBase64 = "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEAAQAcJaQAA3AA/vuUAAA=";
 
 const nestedFrame: RendererNode = {
   id: "frame-1",
@@ -52,6 +53,14 @@ const imageAsset: NodeArtifactAsset = {
   mimeType: "image/png",
   dataBase64: pixelPngBase64,
   name: "pixel.png"
+};
+
+const webpImageAsset: NodeArtifactAsset & { pdfPreviewPngBase64: string } = {
+  assetId: "asset-pixel",
+  mimeType: "image/webp",
+  dataBase64: pixelWebpBase64,
+  name: "pixel.webp",
+  pdfPreviewPngBase64: pixelPngBase64
 };
 
 describe("node artifact exports", () => {
@@ -113,6 +122,21 @@ describe("node artifact exports", () => {
     const pdf = pdfForNode(imageNode, { assets: { "asset-pixel": imageAsset } });
     const pdfText = new TextDecoder().decode(pdf);
 
+    expect(pdfText).toContain("/Subtype /Image");
+    expect(pdfText).toContain("/Filter /FlateDecode");
+    expect(pdfText).toContain("/ColorSpace /DeviceRGB");
+    expect(pdfText).toContain("/SMask");
+    expect(pdfText).toContain("/Im1 Do");
+    expect(pdfText).not.toContain("0.953 0.957 0.965 rg");
+    expect(pdfText).not.toContain("0 0 80 48 re");
+  });
+
+  test("renders WEBP image nodes visibly in selected-layer PDFs from a PNG preview", () => {
+    const pdf = pdfForNode(imageNode, { assets: { "asset-pixel": webpImageAsset } });
+    const pdfText = new TextDecoder().decode(pdf);
+
+    expect(pdfText).toContain("/Subtype /image#2Fwebp");
+    expect(Buffer.from(pdf).includes(Buffer.from(pixelWebpBase64, "base64"))).toBe(true);
     expect(pdfText).toContain("/Subtype /Image");
     expect(pdfText).toContain("/Filter /FlateDecode");
     expect(pdfText).toContain("/ColorSpace /DeviceRGB");

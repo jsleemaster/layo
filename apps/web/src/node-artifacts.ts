@@ -5,6 +5,7 @@ export interface NodeArtifactAsset {
   assetId: string;
   mimeType: string;
   dataBase64: string;
+  pdfPreviewPngBase64?: string;
   name?: string;
 }
 
@@ -570,7 +571,8 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
       )}) >>`
     );
 
-    const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : null;
+    const previewBytes = entry.asset.pdfPreviewPngBase64 ? bytesFromBase64(entry.asset.pdfPreviewPngBase64) : null;
+    const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : previewBytes ? decodePng(previewBytes) : null;
     if (png) {
       entry.xObjectName = `Im${index + 1}`;
       const rgbBytes = zlibSync(png.rgb);
