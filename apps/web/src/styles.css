@@ -1603,6 +1603,17 @@ button:disabled {
   min-width: 0;
 }
 
+.component-variant-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-sm);
+  color: var(--editor-color-text-muted);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: var(--editor-text-small-line);
+}
+
 .comment-target,
 .comment-summary {
   display: grid;
