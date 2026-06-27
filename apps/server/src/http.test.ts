@@ -368,6 +368,75 @@ describe("HTTP server", () => {
     expect(missing.statusCode).toBe(404);
   });
 
+  test("exports reviews and imports library archives", async () => {
+    const server = await createServerWithDocument();
+    await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_token",
+            token: {
+              id: "color-brand-primary",
+              name: "Brand / Primary",
+              type: "color",
+              value: "#2563eb"
+            }
+          },
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-card",
+            name: "Library Card",
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+          { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+        ]
+      }
+    });
+
+    const exported = await server.inject({ method: "GET", url: "/files/sample-file/export/library" });
+
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["content-type"]).toContain("application/vnd.layo.library-archive+zip");
+    expect(exported.headers["content-disposition"]).toContain("sample-file.layo-library.zip");
+    expect(exported.rawPayload.subarray(0, 2).toString("utf8")).toBe("PK");
+    const archiveBase64 = exported.rawPayload.toString("base64");
+
+    const reviewed = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/import/library/review",
+      payload: { archiveBase64 }
+    });
+    expect(reviewed.statusCode).toBe(200);
+    expect(reviewed.json().review).toMatchObject({
+      originalFileId: "sample-file",
+      componentCount: 1,
+      tokenCount: 1,
+      components: [expect.objectContaining({ originalComponentId: "component-card", conflict: true })],
+      tokens: [expect.objectContaining({ originalTokenId: "color-brand-primary", conflict: false })]
+    });
+
+    const imported = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/import/library",
+      payload: { archiveBase64, idPrefix: "shared" }
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().imported).toMatchObject({
+      fileId: "sample-file",
+      componentCount: 1,
+      tokenCount: 1,
+      componentIdMap: { "component-card": "shared-component-card" },
+      tokenIdMap: { "color-brand-primary": "color-brand-primary" }
+    });
+  });
+
   test("exports reviews and imports project archives", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const sourceServer = createHttpServer(new FileStorage(path.join(tempRoot, "source")));

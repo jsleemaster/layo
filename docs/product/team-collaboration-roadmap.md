@@ -72,6 +72,11 @@ deployment details in `docs/deployment/collaboration.md`.
   file to another machine, review the project/document/asset counts before
   import, and restore it as a fresh private local project with fresh document
   ids.
+- The file panel exposes package-style shared library archive controls. A team
+  member can export reusable components, tokens, and component image assets as
+  one `.layo-library.zip`, send it to another teammate, review component/token
+  conflicts against the current target file, choose an id prefix, and merge the
+  reviewed library without overwriting existing target tokens or components.
 
 ## Phase 1: Local Team Creation
 
@@ -142,7 +147,9 @@ editing.
   members.
 - Add project-level sharing status, including local-only, relay-backed, and
   encrypted relay-backed states.
-- Add team library guidance for reusable components, variables, and assets.
+- Add team library guidance for the package-style reusable component/token
+  handoff flow, then define hosted registry, publish/subscribe, and update
+  notification expectations.
 - Add backup and restore guidance for Layo file archives, project archives,
   team manifests, and relay configuration.
 - Keep code export and MCP inspection tied to the same team-owned document
@@ -169,9 +176,9 @@ Exit criteria:
   delivery, and retained local activity feed foundation.
 - Branch, review, and merge flows for design changes.
 - Document-level permission policies beyond relay connection roles.
-- Shared team libraries for components, variables, assets, and code-export
-  mappings.
-- Shared-library archive packaging and Penpot/Figma migration paths.
+- Hosted/shared team libraries for components, variables, assets, update
+  notifications, live library sync, and code-export mappings.
+- Penpot/Figma migration paths.
 - Admin-facing diagnostics for relay health, room activity, and sync errors.
 
 ## Non-Goals

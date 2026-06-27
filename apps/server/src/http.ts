@@ -8,6 +8,7 @@ import {
   FILE_ARCHIVE_MIME_TYPE,
   FileStorage,
   INPUT_VALIDATION_ERROR_CODE,
+  LIBRARY_ARCHIVE_MIME_TYPE,
   PROJECT_ARCHIVE_MIME_TYPE,
   type CreateAssetInput,
   type DesignNode,
@@ -199,6 +200,41 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     reply.header("Cache-Control", "no-store");
     reply.header("Content-Disposition", `attachment; filename="${exported.fileName}"`);
     return reply.send(exported.archive);
+  });
+
+  server.get<{ Params: { fileId: string } }>("/files/:fileId/export/library", async (request, reply) => {
+    const exported = await storage.exportLibraryArchive(request.params.fileId);
+    reply.header("Content-Type", LIBRARY_ARCHIVE_MIME_TYPE);
+    reply.header("Cache-Control", "no-store");
+    reply.header("Content-Disposition", `attachment; filename="${exported.fileName}"`);
+    return reply.send(exported.archive);
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { archiveBase64: string };
+  }>("/files/:fileId/import/library/review", async (request) => {
+    return {
+      review: await storage.reviewLibraryArchive(
+        request.params.fileId,
+        Buffer.from(request.body.archiveBase64, "base64")
+      )
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { archiveBase64: string; idPrefix?: string };
+  }>("/files/:fileId/import/library", async (request) => {
+    return {
+      imported: await storage.importLibraryArchive(
+        request.params.fileId,
+        Buffer.from(request.body.archiveBase64, "base64"),
+        {
+          idPrefix: request.body.idPrefix
+        }
+      )
+    };
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId", async (request) => {
