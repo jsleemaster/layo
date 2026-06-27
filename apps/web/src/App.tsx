@@ -445,6 +445,73 @@ function svgForNode(node: RendererNode) {
   ].join("\n");
 }
 
+function pdfEscapeString(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)").replaceAll("\r", " ").replaceAll("\n", " ");
+}
+
+function pdfColorOperands(fill: string) {
+  const match = /^#([0-9a-f]{6})$/i.exec(fill.trim());
+  if (!match) {
+    return "0 0 0";
+  }
+  const hex = match[1];
+  return [0, 2, 4]
+    .map((index) => {
+      const channel = Number.parseInt(hex.slice(index, index + 2), 16) / 255;
+      return channel.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+    })
+    .join(" ");
+}
+
+function pdfForNode(node: RendererNode) {
+  const encoder = new TextEncoder();
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const fill = pdfColorOperands(node.style.fill);
+  const escapedName = pdfEscapeString(node.name);
+  const escapedNodeId = pdfEscapeString(node.id);
+  const content =
+    node.content.type === "text"
+      ? [
+          "BT",
+          `/F1 ${Math.max(1, Math.round(node.content.font_size))} Tf`,
+          `${fill} rg`,
+          `0 ${Math.max(0, height - Math.max(1, Math.round(node.content.font_size)))} Td`,
+          `(${pdfEscapeString(node.content.value)}) Tj`,
+          "ET",
+          ""
+        ].join("\n")
+      : ["q", `${fill} rg`, `0 0 ${width} ${height} re`, "f", "Q", ""].join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 6 0 R >> >> /Contents 4 0 R >>`,
+    `<< /Length ${encoder.encode(content).length} >>\nstream\n${content}endstream`,
+    `<< /Title (${escapedName}) /Subject (${escapedNodeId}) /Creator (Layo) >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+  let pdf = "%PDF-1.4\n% Layo selected layer export\n";
+  const offsets: number[] = [];
+  objects.forEach((object, index) => {
+    offsets.push(encoder.encode(pdf).length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = encoder.encode(pdf).length;
+  const xrefRows = ["0000000000 65535 f ", ...offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n `)];
+  pdf += [
+    "xref",
+    `0 ${objects.length + 1}`,
+    ...xrefRows,
+    "trailer",
+    `<< /Size ${objects.length + 1} /Root 1 0 R /Info 5 0 R >>`,
+    "startxref",
+    String(xrefOffset),
+    "%%EOF",
+    ""
+  ].join("\n");
+  return pdf;
+}
+
 function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3181,6 +3248,18 @@ function DevPanel({
     setAssetStatus(nextStatus ?? "WEBP 다운로드 실패");
   };
 
+  const downloadSelectedPdf = () => {
+    if (!selectedNode) {
+      return;
+    }
+    try {
+      downloadBlob(new Blob([pdfForNode(selectedNode)], { type: "application/pdf" }), `${selectedNode.id}.pdf`);
+      setAssetStatus(`${selectedNode.name} PDF 다운로드됨`);
+    } catch {
+      setAssetStatus("PDF 다운로드 실패");
+    }
+  };
+
   return (
     <section className="inspector-section dev-panel" data-testid="dev-panel" aria-label="개발 핸드오프">
       <h3>개발</h3>
@@ -3241,6 +3320,14 @@ function DevPanel({
                 onClick={downloadSelectedWebp}
               >
                 WEBP 다운로드
+              </button>
+              <button
+                type="button"
+                className="dev-panel-copy-button"
+                data-testid="dev-panel-download-pdf"
+                onClick={downloadSelectedPdf}
+              >
+                PDF 다운로드
               </button>
             </div>
             <div
