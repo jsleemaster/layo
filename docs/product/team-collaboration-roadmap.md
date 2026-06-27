@@ -67,6 +67,11 @@ deployment details in `docs/deployment/collaboration.md`.
 - The file panel exposes single-file Layo archive export/import controls. Import
   starts with a server-validated review summary, then creates a fresh project
   shell and writes the reviewed archive into that new document.
+- The file panel also exposes project archive export/import controls. A team
+  member can export the current project as one `.layo-project.zip`, send that
+  file to another machine, review the project/document/asset counts before
+  import, and restore it as a fresh private local project with fresh document
+  ids.
 
 ## Phase 1: Local Team Creation
 
@@ -138,7 +143,7 @@ editing.
 - Add project-level sharing status, including local-only, relay-backed, and
   encrypted relay-backed states.
 - Add team library guidance for reusable components, variables, and assets.
-- Add backup and restore guidance for Layo file archives, multi-file projects,
+- Add backup and restore guidance for Layo file archives, project archives,
   team manifests, and relay configuration.
 - Keep code export and MCP inspection tied to the same team-owned document
   identity.
@@ -166,8 +171,7 @@ Exit criteria:
 - Document-level permission policies beyond relay connection roles.
 - Shared team libraries for components, variables, assets, and code-export
   mappings.
-- Import review UI for multi-file project archives and Penpot/Figma migration
-  paths.
+- Shared-library archive packaging and Penpot/Figma migration paths.
 - Admin-facing diagnostics for relay health, room activity, and sync errors.
 
 ## Non-Goals

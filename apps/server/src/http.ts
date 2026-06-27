@@ -8,6 +8,7 @@ import {
   FILE_ARCHIVE_MIME_TYPE,
   FileStorage,
   INPUT_VALIDATION_ERROR_CODE,
+  PROJECT_ARCHIVE_MIME_TYPE,
   type CreateAssetInput,
   type DesignNode,
   type GeometryPatch
@@ -103,6 +104,32 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Body: { projectId?: string; name?: string; documentId?: string; documentName?: string };
   }>("/projects", async (request) => {
     return { project: await storage.createProject(request.body) };
+  });
+
+  server.post<{ Body: { archiveBase64: string } }>("/projects/import/archive/review", async (request) => {
+    return {
+      review: await storage.reviewProjectArchive(Buffer.from(request.body.archiveBase64, "base64"))
+    };
+  });
+
+  server.post<{
+    Body: { archiveBase64: string; projectId?: string; name?: string; documentIdPrefix?: string };
+  }>("/projects/import/archive", async (request) => {
+    return {
+      imported: await storage.importProjectArchive(Buffer.from(request.body.archiveBase64, "base64"), {
+        projectId: request.body.projectId,
+        name: request.body.name,
+        documentIdPrefix: request.body.documentIdPrefix
+      })
+    };
+  });
+
+  server.get<{ Params: { projectId: string } }>("/projects/:projectId/export/archive", async (request, reply) => {
+    const exported = await storage.exportProjectArchive(request.params.projectId);
+    reply.header("Content-Type", PROJECT_ARCHIVE_MIME_TYPE);
+    reply.header("Cache-Control", "no-store");
+    reply.header("Content-Disposition", `attachment; filename="${exported.fileName}"`);
+    return reply.send(exported.archive);
   });
 
   server.get<{ Params: { projectId: string } }>("/projects/:projectId", async (request) => {

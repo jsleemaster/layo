@@ -81,9 +81,13 @@ import {
   createProject as createSavedProject,
   deleteProject,
   duplicateProject,
+  exportProjectArchive,
   fetchProjects,
+  importProjectArchive,
+  reviewProjectArchive,
   setProjectSharing,
   updateProject,
+  type ProjectArchiveReview,
   type ProjectManifest
 } from "./project-api";
 import { getVisibleProjects, promoteRecentProject } from "./project-list";
@@ -531,6 +535,12 @@ interface FileVersionPreviewState {
 
 interface FileArchiveReviewState {
   review: FileArchiveReview;
+  archiveBase64: string;
+  sourceFileName: string;
+}
+
+interface ProjectArchiveReviewState {
+  review: ProjectArchiveReview;
   archiveBase64: string;
   sourceFileName: string;
 }
@@ -4137,6 +4147,9 @@ export function App() {
   const [fileArchiveReview, setFileArchiveReview] = useState<FileArchiveReviewState | null>(null);
   const [fileArchiveImportName, setFileArchiveImportName] = useState("");
   const [fileArchiveStatus, setFileArchiveStatus] = useState("아카이브 대기 중");
+  const [projectArchiveReview, setProjectArchiveReview] = useState<ProjectArchiveReviewState | null>(null);
+  const [projectArchiveImportName, setProjectArchiveImportName] = useState("");
+  const [projectArchiveStatus, setProjectArchiveStatus] = useState("프로젝트 아카이브 대기 중");
   const [commentThreads, setCommentThreads] = useState<CommentThread[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [commentReplyBodies, setCommentReplyBodies] = useState<Record<string, string>>({});
@@ -4186,6 +4199,7 @@ export function App() {
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
   const manifestFileInputRef = useRef<HTMLInputElement | null>(null);
   const fileArchiveInputRef = useRef<HTMLInputElement | null>(null);
+  const projectArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementNodeIdRef = useRef<string | null>(null);
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
@@ -6915,6 +6929,92 @@ export function App() {
     }
   };
 
+  const exportCurrentProjectArchive = async () => {
+    if (!currentProject) {
+      setProjectArchiveStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      const archive = await exportProjectArchive(currentProject.projectId);
+      downloadBlob(archive.blob, archive.fileName);
+      setProjectArchiveStatus(`${archive.fileName} 내보냄`);
+      setProjectStatus("프로젝트 아카이브 내보냄");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 아카이브를 내보내지 못했습니다";
+      setProjectArchiveStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
+  const reviewSelectedProjectArchive = async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setProjectArchiveStatus("프로젝트 아카이브 검토 중");
+      const archiveBase64 = await readFileAsBase64(file);
+      const review = await reviewProjectArchive(archiveBase64);
+      setProjectArchiveReview({
+        review,
+        archiveBase64,
+        sourceFileName: file.name
+      });
+      setProjectArchiveImportName(review.suggestedName || review.originalName);
+      setProjectArchiveStatus(`${review.suggestedName || review.originalName} 검토됨`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 아카이브를 검토하지 못했습니다";
+      setProjectArchiveReview(null);
+      setProjectArchiveImportName("");
+      setProjectArchiveStatus(message);
+    } finally {
+      input.value = "";
+    }
+  };
+
+  const cancelProjectArchiveImport = () => {
+    setProjectArchiveReview(null);
+    setProjectArchiveImportName("");
+    setProjectArchiveStatus("프로젝트 아카이브 가져오기 취소됨");
+  };
+
+  const importReviewedProjectArchive = async () => {
+    if (!projectArchiveReview) {
+      setProjectArchiveStatus("검토된 프로젝트 아카이브 없음");
+      return;
+    }
+
+    const archiveName =
+      projectArchiveImportName.trim() ||
+      projectArchiveReview.review.suggestedName ||
+      projectArchiveReview.review.originalName ||
+      "가져온 프로젝트";
+
+    try {
+      setProjectArchiveStatus("프로젝트 아카이브 가져오는 중");
+      const imported = await importProjectArchive({
+        archiveBase64: projectArchiveReview.archiveBase64,
+        name: archiveName
+      });
+      const nextProjects = [
+        imported.project,
+        ...projects.filter((candidate) => candidate.projectId !== imported.project.projectId)
+      ];
+      await loadProjectDocument(imported.project, nextProjects);
+      setProjectArchiveReview(null);
+      setProjectArchiveImportName("");
+      setProjectArchiveStatus(`${imported.project.name} 가져옴`);
+      setProjectStatus(`${imported.project.name} 가져옴`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "프로젝트 아카이브를 가져오지 못했습니다";
+      setProjectArchiveStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
   const saveProjectName = async () => {
     if (!currentProject) {
       return;
@@ -8165,6 +8265,77 @@ export function App() {
                         onClick={() => void importReviewedFileArchive()}
                       >
                         검토한 아카이브 가져오기
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+                <section
+                  className="file-archive-panel"
+                  data-testid="project-archive-panel"
+                  aria-label="프로젝트 아카이브"
+                >
+                  <div className="file-archive-heading">
+                    <strong>프로젝트 아카이브</strong>
+                  </div>
+                  <div className="project-actions file-archive-actions">
+                    <button type="button" onClick={() => void exportCurrentProjectArchive()} disabled={!currentProject}>
+                      현재 프로젝트 아카이브 내보내기
+                    </button>
+                    <button type="button" onClick={() => projectArchiveInputRef.current?.click()}>
+                      프로젝트 아카이브 가져오기
+                    </button>
+                  </div>
+                  <input
+                    ref={projectArchiveInputRef}
+                    className="visually-hidden"
+                    data-testid="project-archive-upload"
+                    type="file"
+                    accept=".layo-project.zip,.zip,application/zip,application/vnd.layo.project-archive+zip"
+                    onChange={(event) => void reviewSelectedProjectArchive(event)}
+                  />
+                  <div className="project-status" data-testid="project-archive-status">
+                    {projectArchiveStatus}
+                  </div>
+                  {projectArchiveReview ? (
+                    <div className="file-archive-review" data-testid="project-archive-review">
+                      <div className="file-archive-review-header">
+                        <span>
+                          <strong>가져오기 전 프로젝트 검토</strong>
+                          <span>
+                            {projectArchiveReview.review.suggestedName} · {projectArchiveReview.sourceFileName}
+                          </span>
+                        </span>
+                        <button type="button" onClick={cancelProjectArchiveImport}>
+                          검토 취소
+                        </button>
+                      </div>
+                      <div className="file-archive-review-body">
+                        <strong>{projectArchiveReview.review.originalName}</strong>
+                        <span>
+                          문서 {projectArchiveReview.review.documentCount}개 · 에셋{" "}
+                          {projectArchiveReview.review.assetCount}개
+                        </span>
+                        <span>원본 프로젝트 {projectArchiveReview.review.originalProjectId}</span>
+                        {projectArchiveReview.review.documents.map((document) => (
+                          <span key={document.originalFileId}>
+                            {document.originalName} · 페이지 {document.pageCount}개 · 객체 {document.nodeCount}개
+                          </span>
+                        ))}
+                      </div>
+                      <label>
+                        가져올 프로젝트 이름
+                        <input
+                          data-testid="project-archive-import-name"
+                          value={projectArchiveImportName}
+                          onChange={(event) => setProjectArchiveImportName(event.currentTarget.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="file-archive-import"
+                        onClick={() => void importReviewedProjectArchive()}
+                      >
+                        검토한 프로젝트 아카이브 가져오기
                       </button>
                     </div>
                   ) : null}

@@ -368,6 +368,68 @@ describe("HTTP server", () => {
     expect(missing.statusCode).toBe(404);
   });
 
+  test("exports reviews and imports project archives", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const sourceServer = createHttpServer(new FileStorage(path.join(tempRoot, "source")));
+    await sourceServer.inject({
+      method: "POST",
+      url: "/projects",
+      payload: {
+        projectId: "archive-project",
+        name: "프로젝트 묶음",
+        documentId: "archive-file",
+        documentName: "첫 문서"
+      }
+    });
+    await sourceServer.inject({
+      method: "POST",
+      url: "/projects/archive-project/documents",
+      payload: { documentId: "archive-file-2", name: "두 번째 문서" }
+    });
+
+    const exported = await sourceServer.inject({
+      method: "GET",
+      url: "/projects/archive-project/export/archive"
+    });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers["content-type"]).toContain("application/vnd.layo.project-archive+zip");
+    expect(exported.headers["content-disposition"]).toContain("archive-project.layo-project.zip");
+    expect(exported.rawPayload.subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const targetServer = createHttpServer(new FileStorage(path.join(tempRoot, "target")));
+    const review = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive/review",
+      payload: { archiveBase64: exported.rawPayload.toString("base64") }
+    });
+    expect(review.statusCode).toBe(200);
+    expect(review.json().review).toMatchObject({
+      originalProjectId: "archive-project",
+      documentCount: 2,
+      documents: [
+        expect.objectContaining({ originalFileId: "archive-file", originalName: "첫 문서" }),
+        expect.objectContaining({ originalFileId: "archive-file-2", originalName: "두 번째 문서" })
+      ]
+    });
+
+    const imported = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive",
+      payload: {
+        archiveBase64: exported.rawPayload.toString("base64"),
+        projectId: "restored-project",
+        name: "복원 묶음",
+        documentIdPrefix: "restored"
+      }
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().imported.project).toMatchObject({
+      projectId: "restored-project",
+      name: "복원 묶음",
+      currentDocumentId: "restored-archive-file-2"
+    });
+  });
+
   test("updates node geometry, fill, text, and creates nodes", async () => {
     const server = await createServerWithDocument();
 

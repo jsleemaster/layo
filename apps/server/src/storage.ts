@@ -39,6 +39,7 @@ const AUTO_FILE_VERSION_EDIT_INTERVAL = 3;
 const COMMENT_ACTIVITY_RETENTION_LIMIT = 50;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 export const FILE_ARCHIVE_MIME_TYPE = "application/vnd.layo.file-archive+zip";
+export const PROJECT_ARCHIVE_MIME_TYPE = "application/vnd.layo.project-archive+zip";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface LayoutSpacing {
@@ -474,6 +475,59 @@ export interface ReviewedFileArchive {
 export interface ImportFileArchiveOptions {
   fileId?: string;
   name?: string;
+}
+
+export interface ProjectArchiveManifest {
+  schemaVersion: 1;
+  format: "layo.project.archive";
+  exportedAt: string;
+  projectId: string;
+  name: string;
+  currentDocumentId: string;
+  documentCount: number;
+  assetCount: number;
+}
+
+export interface ExportedProjectArchive {
+  projectId: string;
+  name: string;
+  documentCount: number;
+  assetCount: number;
+  mimeType: typeof PROJECT_ARCHIVE_MIME_TYPE;
+  fileName: string;
+  archive: Buffer;
+  manifest: ProjectArchiveManifest;
+}
+
+export interface ReviewedProjectArchiveDocument {
+  originalFileId: string;
+  originalName: string;
+  pageCount: number;
+  nodeCount: number;
+}
+
+export interface ReviewedProjectArchive {
+  originalProjectId: string;
+  originalName: string;
+  suggestedName: string;
+  documentCount: number;
+  assetCount: number;
+  documents: ReviewedProjectArchiveDocument[];
+}
+
+export interface ImportedProjectArchive {
+  project: ProjectManifest;
+  originalProjectId: string;
+  originalName: string;
+  documentCount: number;
+  assetCount: number;
+  documentIdMap: Record<string, string>;
+}
+
+export interface ImportProjectArchiveOptions {
+  projectId?: string;
+  name?: string;
+  documentIdPrefix?: string;
 }
 
 export class FileStorage {
@@ -1011,6 +1065,141 @@ export class FileStorage {
       assetCount: assetIds.length,
       pageCount: archivedDocument.pages.length,
       nodeCount: countDocumentNodes(archivedDocument)
+    };
+  }
+
+  async exportProjectArchive(projectId: string): Promise<ExportedProjectArchive> {
+    const project = await this.readProject(projectId);
+    const documents = await Promise.all(project.documents.map((document) => this.readFile(document.documentId)));
+    const assetIds = collectProjectImageAssetIds(documents);
+    const assets = await Promise.all(assetIds.map((assetId) => this.readAsset(assetId)));
+    const manifest: ProjectArchiveManifest = {
+      schemaVersion: 1,
+      format: "layo.project.archive",
+      exportedAt: new Date().toISOString(),
+      projectId: project.projectId,
+      name: project.name,
+      currentDocumentId: project.currentDocumentId,
+      documentCount: documents.length,
+      assetCount: assets.length
+    };
+    const entries: ZipArchiveEntry[] = [
+      jsonArchiveEntry("manifest.json", manifest),
+      jsonArchiveEntry("project.json", project),
+      ...documents.map((document) => jsonArchiveEntry(`documents/${document.id}.json`, document)),
+      ...assets.flatMap((asset) => [
+        jsonArchiveEntry(`assets/${asset.assetId}.json`, {
+          assetId: asset.assetId,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          byteLength: asset.byteLength,
+          url: `/assets/${asset.assetId}`
+        } satisfies StoredAsset),
+        {
+          path: `assets/${asset.assetId}.bin`,
+          data: asset.data
+        }
+      ])
+    ];
+
+    return {
+      projectId: project.projectId,
+      name: project.name,
+      documentCount: documents.length,
+      assetCount: assets.length,
+      mimeType: PROJECT_ARCHIVE_MIME_TYPE,
+      fileName: `${project.projectId}.layo-project.zip`,
+      archive: createZipArchive(entries),
+      manifest
+    };
+  }
+
+  async reviewProjectArchive(archive: Buffer): Promise<ReviewedProjectArchive> {
+    const archiveProject = readProjectArchivePayload(readZipArchive(archive));
+    return {
+      originalProjectId: archiveProject.manifest.projectId,
+      originalName: archiveProject.manifest.name,
+      suggestedName: archiveProject.project.name,
+      documentCount: archiveProject.documents.length,
+      assetCount: archiveProject.assetIds.length,
+      documents: archiveProject.documents.map((document) => ({
+        originalFileId: document.id,
+        originalName: document.name,
+        pageCount: document.pages.length,
+        nodeCount: countDocumentNodes(document)
+      }))
+    };
+  }
+
+  async importProjectArchive(
+    archive: Buffer,
+    options: ImportProjectArchiveOptions = {}
+  ): Promise<ImportedProjectArchive> {
+    const archiveProject = readProjectArchivePayload(readZipArchive(archive));
+    const now = new Date().toISOString();
+    const projectId = options.projectId ?? createStorageId("project");
+    assertSafeStorageId(projectId);
+    if (options.documentIdPrefix !== undefined) {
+      assertSafeStorageId(options.documentIdPrefix);
+    }
+    if (await pathExists(this.projectPathFor(projectId))) {
+      throw new Error(`project already exists: ${projectId}`);
+    }
+
+    const documentIdMap: Record<string, string> = {};
+    for (const document of archiveProject.documents) {
+      const nextDocumentId = options.documentIdPrefix
+        ? `${options.documentIdPrefix}-${document.id}`
+        : createStorageId("document");
+      assertSafeStorageId(nextDocumentId);
+      if (await pathExists(this.filePathFor(nextDocumentId))) {
+        throw new Error(`document already exists: ${nextDocumentId}`);
+      }
+      documentIdMap[document.id] = nextDocumentId;
+    }
+
+    await Promise.all(archiveProject.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
+
+    const documents: ProjectDocumentSummary[] = [];
+    for (const archivedSummary of archiveProject.project.documents) {
+      const archivedDocument = archiveProject.documentsById.get(archivedSummary.documentId);
+      const documentId = documentIdMap[archivedSummary.documentId];
+      if (!archivedDocument || !documentId) {
+        throw new Error(`project archive document missing: ${archivedSummary.documentId}`);
+      }
+      const document: DesignFile = {
+        ...structuredClone(archivedDocument),
+        id: documentId,
+        name: normalizeName(archivedDocument.name, archivedSummary.name)
+      };
+      await this.writeFile(documentId, document);
+      documents.push({
+        documentId,
+        name: document.name,
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+
+    const currentDocumentId = documentIdMap[archiveProject.project.currentDocumentId] ?? documents[0].documentId;
+    const project = await this.writeProject({
+      schemaVersion: 1,
+      projectId,
+      name: normalizeName(options.name, archiveProject.project.name),
+      createdAt: now,
+      updatedAt: now,
+      currentDocumentId,
+      documents,
+      sharing: { mode: "private" }
+    });
+
+    return {
+      project,
+      originalProjectId: archiveProject.manifest.projectId,
+      originalName: archiveProject.manifest.name,
+      documentCount: archiveProject.documents.length,
+      assetCount: archiveProject.assetIds.length,
+      documentIdMap
     };
   }
 
@@ -2002,6 +2191,31 @@ function parseFileArchiveManifest(input: unknown): FileArchiveManifest {
   };
 }
 
+function parseProjectArchiveManifest(input: unknown): ProjectArchiveManifest {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid project archive manifest");
+  }
+  const candidate = input as ProjectArchiveManifest;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported project archive schema: ${String(candidate.schemaVersion)}`);
+  }
+  if (candidate.format !== "layo.project.archive") {
+    throw new Error(`unsupported project archive format: ${String(candidate.format)}`);
+  }
+  assertSafeStorageId(candidate.projectId);
+  assertSafeStorageId(candidate.currentDocumentId);
+  return {
+    schemaVersion: 1,
+    format: "layo.project.archive",
+    exportedAt: normalizeName(candidate.exportedAt, new Date(0).toISOString()),
+    projectId: candidate.projectId,
+    name: normalizeName(candidate.name, candidate.projectId),
+    currentDocumentId: candidate.currentDocumentId,
+    documentCount: Math.max(0, Math.round(Number(candidate.documentCount) || 0)),
+    assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0))
+  };
+}
+
 function parseDesignFileArchiveDocument(input: unknown): DesignFile {
   if (!input || typeof input !== "object") {
     throw new Error("invalid file archive document");
@@ -2015,6 +2229,56 @@ function parseDesignFileArchiveDocument(input: unknown): DesignFile {
     ...candidate,
     name: normalizeName(candidate.name, candidate.id),
     pages: candidate.pages
+  };
+}
+
+interface ProjectArchivePayload {
+  manifest: ProjectArchiveManifest;
+  project: ProjectManifest;
+  documents: DesignFile[];
+  documentsById: Map<string, DesignFile>;
+  assetIds: string[];
+  assets: Array<{ metadata: StoredAsset; data: Buffer }>;
+}
+
+function readProjectArchivePayload(entries: Map<string, Buffer>): ProjectArchivePayload {
+  const manifest = parseProjectArchiveManifest(readJsonArchiveEntry(entries, "manifest.json"));
+  const project = parseProjectManifest(readJsonArchiveEntry(entries, "project.json"));
+  if (project.projectId !== manifest.projectId) {
+    throw new Error(`project archive manifest mismatch: ${project.projectId}`);
+  }
+  if (project.currentDocumentId !== manifest.currentDocumentId) {
+    throw new Error(`project archive current document mismatch: ${project.currentDocumentId}`);
+  }
+  if (project.documents.length !== manifest.documentCount) {
+    throw new Error("project archive document count mismatch");
+  }
+
+  const seenDocumentIds = new Set<string>();
+  const documents = project.documents.map((summary) => {
+    if (seenDocumentIds.has(summary.documentId)) {
+      throw new Error(`project archive duplicate document: ${summary.documentId}`);
+    }
+    seenDocumentIds.add(summary.documentId);
+    const document = parseDesignFileArchiveDocument(readJsonArchiveEntry(entries, `documents/${summary.documentId}.json`));
+    if (document.id !== summary.documentId) {
+      throw new Error(`project archive document mismatch: ${document.id}`);
+    }
+    return document;
+  });
+
+  const assetIds = collectProjectImageAssetIds(documents);
+  if (assetIds.length !== manifest.assetCount) {
+    throw new Error("project archive asset count mismatch");
+  }
+  const assets = readFileArchiveAssets(entries, assetIds);
+  return {
+    manifest,
+    project,
+    documents,
+    documentsById: new Map(documents.map((document) => [document.id, document])),
+    assetIds,
+    assets
   };
 }
 
@@ -2054,6 +2318,10 @@ function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
     path: pathName,
     data: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8")
   };
+}
+
+function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
+  return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
 }
 
 function collectImageAssetIds(document: DesignFile): string[] {

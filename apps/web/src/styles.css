@@ -1512,7 +1512,8 @@ button:disabled {
   line-height: var(--editor-text-control-line);
 }
 
-.team-panel input.visually-hidden {
+.team-panel input.visually-hidden,
+.project-panel input.visually-hidden {
   width: var(--editor-border-hairline);
   height: var(--editor-border-hairline);
   padding: 0;
