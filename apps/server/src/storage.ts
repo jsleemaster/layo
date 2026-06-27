@@ -179,7 +179,15 @@ export interface ComponentDefinition {
   id: string;
   name: string;
   source_node: DesignNode;
-  variants: Array<{ id: string; name: string; properties: Array<{ name: string; value: string }> }>;
+  variants: Array<{ id: string; name: string; properties: ComponentProperty[] }>;
+}
+
+export type ComponentPropertyType = "select" | "boolean";
+
+export interface ComponentProperty {
+  name: string;
+  value: string;
+  type: ComponentPropertyType;
 }
 
 export interface ComponentInstance {
@@ -2031,7 +2039,11 @@ export class FileStorage {
   async setComponentVariants(
     fileId: string,
     componentId: string,
-    variants: Array<{ id: string; name: string; properties: Array<{ name: string; value: string }> }>
+    variants: Array<{
+      id: string;
+      name: string;
+      properties: Array<{ name: string; value: string; type?: ComponentPropertyType }>;
+    }>
   ): Promise<ComponentDefinition> {
     const document = await this.readFile(fileId);
     const component = (document.components ?? []).find((candidate) => candidate.id === componentId);
@@ -3296,8 +3308,8 @@ function forEachNode(document: DesignFile, callback: (node: DesignNode) => void)
 function normalizeComponentVariant(input: {
   id: string;
   name: string;
-  properties: Array<{ name: string; value: string }>;
-}): { id: string; name: string; properties: Array<{ name: string; value: string }> } {
+  properties: Array<{ name: string; value: string; type?: ComponentPropertyType }>;
+}): { id: string; name: string; properties: ComponentProperty[] } {
   const id = input.id.trim();
   if (!id) {
     throw new Error("component variant id is required");
@@ -3309,7 +3321,8 @@ function normalizeComponentVariant(input: {
     properties: Array.isArray(input.properties)
       ? input.properties.map((property) => ({
           name: property.name.trim(),
-          value: property.value.trim()
+          value: property.value.trim(),
+          type: property.type === "boolean" ? "boolean" : "select"
         }))
       : []
   };

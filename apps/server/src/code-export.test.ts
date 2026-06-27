@@ -311,7 +311,7 @@ describe("code export", () => {
         {
           id: "component-button-primary",
           name: "Primary",
-          properties: [{ name: "tone", value: "primary" }]
+          properties: [{ name: "tone", value: "primary", type: "select" }]
         }
       ]
     });
@@ -402,7 +402,7 @@ describe("code export", () => {
     fixture.components[0].variants.push({
       id: "component-button-secondary",
       name: "Secondary",
-      properties: [{ name: "tone", value: "secondary" }]
+      properties: [{ name: "tone", value: "secondary", type: "select" }]
     });
     fixture.pages[0].children[0].component_instance.variant_id = "component-button-secondary";
     fixture.code_mappings = [
@@ -803,7 +803,7 @@ function componentFixture(): DesignFile {
           {
             id: "component-button-primary",
             name: "Primary",
-            properties: [{ name: "tone", value: "primary" }]
+            properties: [{ name: "tone", value: "primary", type: "select" }]
           }
         ]
       }

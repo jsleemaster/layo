@@ -145,10 +145,26 @@ pub struct ComponentVariant {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ComponentPropertyType {
+    Select,
+    Boolean,
+}
+
+impl Default for ComponentPropertyType {
+    fn default() -> Self {
+        Self::Select
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct ComponentProperty {
     pub name: String,
     pub value: String,
+    #[serde(default, rename = "type")]
+    pub r#type: ComponentPropertyType,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

@@ -3196,13 +3196,27 @@ describe("editor state commands", () => {
       componentId: "component-1",
       variants: [
         { id: "variant-flat", name: "Flat", properties: [{ name: "surface", value: "flat" }] },
-        { id: "variant-outline", name: "Outline", properties: [{ name: "surface", value: "outline" }] }
+        {
+          id: "variant-outline",
+          name: "Outline",
+          properties: [
+            { name: "surface", value: "outline" },
+            { name: "enabled", value: "true", type: "boolean" }
+          ]
+        }
       ]
     } as any);
 
     expect(updated.document.components?.[0].variants).toEqual([
       { id: "variant-flat", name: "Flat", properties: [{ name: "surface", value: "flat" }] },
-      { id: "variant-outline", name: "Outline", properties: [{ name: "surface", value: "outline" }] }
+      {
+        id: "variant-outline",
+        name: "Outline",
+        properties: [
+          { name: "surface", value: "outline" },
+          { name: "enabled", value: "true", type: "boolean" }
+        ]
+      }
     ]);
     expect((findNodeById(updated.document, "instance-1")?.component_instance as any)?.variant_id).toBe(
       "variant-flat"
@@ -3218,7 +3232,10 @@ describe("editor state commands", () => {
     const redone = redo(undone);
     expect(redone.document.components?.[0].variants[1]).toMatchObject({
       id: "variant-outline",
-      properties: [{ name: "surface", value: "outline" }]
+      properties: [
+        { name: "surface", value: "outline" },
+        { name: "enabled", value: "true", type: "boolean" }
+      ]
     });
     expect((findNodeById(redone.document, "instance-1")?.component_instance as any)?.variant_id).toBe(
       "variant-flat"

@@ -121,7 +121,11 @@ export interface ComponentImplementationArtifact {
   structure: CodeStructureNode;
   implementation: ElementImplementationSpec;
   repoMapping?: CodeComponentMappingArtifact;
-  variants: Array<{ id: string; name: string; properties: Array<{ name: string; value: string }> }>;
+  variants: Array<{
+    id: string;
+    name: string;
+    properties: Array<{ name: string; value: string; type?: "select" | "boolean" }>;
+  }>;
 }
 
 export interface CodeComponentMappingArtifact {
@@ -291,7 +295,8 @@ function exportComponent(
       name: variant.name,
       properties: variant.properties.map((property) => ({
         name: property.name,
-        value: property.value
+        value: property.value,
+        type: property.type === "boolean" ? "boolean" : "select"
       }))
     }))
   };

@@ -1,4 +1,5 @@
 use editor_core::DesignFile;
+use serde_json::json;
 
 #[test]
 fn sample_document_round_trips_through_json() {
@@ -51,6 +52,54 @@ fn component_document_round_trips_through_json() {
             .variant_id
             .as_deref(),
         Some("default")
+    );
+}
+
+#[test]
+fn component_property_types_round_trip_through_json() {
+    let mut file = DesignFile::sample();
+    file.apply_command(editor_core::Command::CreateComponent {
+        node_id: "frame-1".to_string(),
+        component_id: "component-1".to_string(),
+        name: "Card".to_string(),
+    })
+    .unwrap();
+
+    let mut raw = serde_json::to_value(&file).unwrap();
+    raw["components"][0]["variants"][0]["properties"] = json!([
+        { "name": "enabled", "value": "true", "type": "boolean" }
+    ]);
+
+    let parsed: DesignFile = serde_json::from_value(raw).unwrap();
+    let serialized = serde_json::to_value(&parsed).unwrap();
+
+    assert_eq!(
+        serialized["components"][0]["variants"][0]["properties"][0]["type"],
+        "boolean"
+    );
+}
+
+#[test]
+fn legacy_component_property_type_defaults_to_select() {
+    let mut file = DesignFile::sample();
+    file.apply_command(editor_core::Command::CreateComponent {
+        node_id: "frame-1".to_string(),
+        component_id: "component-1".to_string(),
+        name: "Card".to_string(),
+    })
+    .unwrap();
+
+    let mut raw = serde_json::to_value(&file).unwrap();
+    raw["components"][0]["variants"][0]["properties"] = json!([
+        { "name": "surface", "value": "flat" }
+    ]);
+
+    let parsed: DesignFile = serde_json::from_value(raw).unwrap();
+    let serialized = serde_json::to_value(&parsed).unwrap();
+
+    assert_eq!(
+        serialized["components"][0]["variants"][0]["properties"][0]["type"],
+        "select"
     );
 }
 
