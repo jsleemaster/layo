@@ -1,4 +1,4 @@
-import type { NodeExportPreset, RendererNode } from "@layo/renderer";
+import type { NodeExportPreset, RendererDocument, RendererNode } from "@layo/renderer";
 
 export interface ExportPresetReviewItem {
   key: string;
@@ -30,4 +30,18 @@ export function buildExportPresetReviewItems(nodes: RendererNode[]): ExportPrese
       label: `${node.name} ${preset.format.toUpperCase()} ${preset.scale}x`
     }))
   );
+}
+
+function flattenPageNodes(nodes: RendererNode[]): RendererNode[] {
+  return nodes.flatMap((node) => [node, ...flattenPageNodes(node.children)]);
+}
+
+export function buildPageExportPresetReviewItems(
+  document: RendererDocument,
+  pageId?: string
+): ExportPresetReviewItem[] {
+  const page = pageId
+    ? document.pages.find((candidate) => candidate.id === pageId)
+    : document.pages[0] ?? null;
+  return page ? buildExportPresetReviewItems(flattenPageNodes(page.children)) : [];
 }

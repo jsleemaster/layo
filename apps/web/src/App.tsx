@@ -87,6 +87,7 @@ import {
 } from "./collaboration/team-store";
 import {
   buildExportPresetReviewItems,
+  buildPageExportPresetReviewItems,
   exportPresetExtension,
   type ExportPresetReviewItem
 } from "./export-presets";
@@ -3207,6 +3208,9 @@ function exportPresetFormatLabel(format: ExportPresetFormat) {
 function DevPanel({
   selectedNode,
   selectedNodes,
+  pageName,
+  pageExportNodes,
+  pageExportReviewItems,
   codeExport,
   codeExportStatus,
   onDownloadPng,
@@ -3218,6 +3222,9 @@ function DevPanel({
 }: {
   selectedNode: RendererNode | null;
   selectedNodes: RendererNode[];
+  pageName: string;
+  pageExportNodes: RendererNode[];
+  pageExportReviewItems: ExportPresetReviewItem[];
   codeExport: CodeExportPayload | null;
   codeExportStatus: string;
   onDownloadPng: (scale: PngExportScale) => string | null;
@@ -3244,13 +3251,25 @@ function DevPanel({
   const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
   const structureSnippet = codeStructure ? JSON.stringify(codeStructure, null, 2) : "";
   const exportPresets = selectedNode?.export_presets ?? [];
-  const exportReviewItems = selectedNodes.length > 1 ? buildExportPresetReviewItems(selectedNodes) : [];
-  const exportReviewSignature = exportReviewItems.map((item) => item.key).join("|");
+  const selectedExportReviewItems = selectedNodes.length > 1 ? buildExportPresetReviewItems(selectedNodes) : [];
+  const isPageExportReview = !selectedNode && selectedExportReviewItems.length === 0;
+  const exportReviewItems = isPageExportReview ? pageExportReviewItems : selectedExportReviewItems;
+  const exportReviewNodes = isPageExportReview ? pageExportNodes : selectedNodes;
+  const exportReviewScopeLabel = isPageExportReview
+    ? `페이지 export review · ${pageName}`
+    : "선택 레이어 export review";
+  const exportReviewSignature = `${exportReviewScopeLabel}|${exportReviewItems.map((item) => item.key).join("|")}`;
 
   useEffect(() => {
     setCopyStatus(selectedNode ? "복사 대기 중" : "레이어 선택 대기 중");
-    setAssetStatus(selectedNode ? "에셋 다운로드 대기 중" : "레이어 선택 대기 중");
-  }, [selectedNode?.id]);
+    setAssetStatus(
+      selectedNode
+        ? "에셋 다운로드 대기 중"
+        : pageExportReviewItems.length > 0
+          ? "페이지 export review 대기 중"
+          : "레이어 선택 대기 중"
+    );
+  }, [pageExportReviewItems.length, selectedNode?.id]);
 
   useEffect(() => {
     setExcludedReviewItemKeys([]);
@@ -3387,7 +3406,7 @@ function DevPanel({
   };
 
   const downloadExportReviewItem = (item: ExportPresetReviewItem): boolean => {
-    const node = selectedNodes.find((candidate) => candidate.id === item.nodeId);
+    const node = exportReviewNodes.find((candidate) => candidate.id === item.nodeId);
     if (!node) {
       return false;
     }
@@ -3423,6 +3442,44 @@ function DevPanel({
     );
   };
 
+  const renderExportReviewCard = () =>
+    exportReviewItems.length > 0 ? (
+      <div className="dev-panel-export-review-card" data-testid="dev-panel-export-review">
+        <div className="dev-panel-code-header">
+          <span data-testid="dev-panel-export-review-scope">{exportReviewScopeLabel}</span>
+          <button
+            type="button"
+            className="dev-panel-copy-button"
+            data-testid="dev-panel-export-review-download"
+            onClick={downloadSelectedExportReviewItems}
+          >
+            선택 항목 다운로드
+          </button>
+        </div>
+        <div className="dev-panel-export-review-list">
+          {exportReviewItems.map((item) => {
+            const checked = !excludedReviewItemKeys.includes(item.key);
+            return (
+              <label
+                key={item.key}
+                className="dev-panel-export-review-row"
+                data-testid={`dev-panel-export-review-row-${item.key}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  data-testid={`dev-panel-export-review-toggle-${item.key}`}
+                  onChange={(event) => toggleReviewItem(item.key, event.currentTarget.checked)}
+                />
+                <span className="dev-panel-export-review-label">{item.label}</span>
+                <span className="dev-panel-export-review-filename">{item.filename}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <section className="inspector-section dev-panel" data-testid="dev-panel" aria-label="개발 핸드오프">
       <h3>개발</h3>
@@ -3430,7 +3487,17 @@ function DevPanel({
         {codeExportStatus}
       </div>
       {!selectedNode ? (
-        <p className="empty-state">레이어를 선택하면 개발 스펙을 볼 수 있습니다.</p>
+        <>
+          <p className="empty-state">레이어를 선택하면 개발 스펙을 볼 수 있습니다.</p>
+          {exportReviewItems.length > 0 ? (
+            <div className="dev-panel-asset-card" data-testid="dev-panel-page-export-assets">
+              <div className="dev-panel-asset-status" data-testid="dev-panel-asset-status" aria-live="polite">
+                {assetStatus}
+              </div>
+              {renderExportReviewCard()}
+            </div>
+          ) : null}
+        </>
       ) : (
         <>
           <div className="dev-panel-selected-node" data-testid="dev-panel-selected-node">
@@ -3519,42 +3586,7 @@ function DevPanel({
             <div className="dev-panel-asset-status" data-testid="dev-panel-asset-status" aria-live="polite">
               {assetStatus}
             </div>
-            {exportReviewItems.length > 0 ? (
-              <div className="dev-panel-export-review-card" data-testid="dev-panel-export-review">
-                <div className="dev-panel-code-header">
-                  <span>Export review</span>
-                  <button
-                    type="button"
-                    className="dev-panel-copy-button"
-                    data-testid="dev-panel-export-review-download"
-                    onClick={downloadSelectedExportReviewItems}
-                  >
-                    선택 항목 다운로드
-                  </button>
-                </div>
-                <div className="dev-panel-export-review-list">
-                  {exportReviewItems.map((item) => {
-                    const checked = !excludedReviewItemKeys.includes(item.key);
-                    return (
-                      <label
-                        key={item.key}
-                        className="dev-panel-export-review-row"
-                        data-testid={`dev-panel-export-review-row-${item.key}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          data-testid={`dev-panel-export-review-toggle-${item.key}`}
-                          onChange={(event) => toggleReviewItem(item.key, event.currentTarget.checked)}
-                        />
-                        <span className="dev-panel-export-review-label">{item.label}</span>
-                        <span className="dev-panel-export-review-filename">{item.filename}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : null}
+            {renderExportReviewCard()}
             <div className="dev-panel-export-presets-card">
               <div className="dev-panel-code-header">
                 <span>Export presets</span>
@@ -3712,6 +3744,9 @@ function Inspector({
   activeTab,
   selectedNode,
   selectedNodes,
+  pageName,
+  pageExportNodes,
+  pageExportReviewItems,
   selectedParentNode,
   selectedNodeCount,
   codeExport,
@@ -3758,6 +3793,9 @@ function Inspector({
   activeTab: InspectorTab;
   selectedNode: RendererNode | null;
   selectedNodes: RendererNode[];
+  pageName: string;
+  pageExportNodes: RendererNode[];
+  pageExportReviewItems: ExportPresetReviewItem[];
   selectedParentNode: RendererNode | null;
   selectedNodeCount: number;
   codeExport: CodeExportPayload | null;
@@ -3839,6 +3877,9 @@ function Inspector({
           <DevPanel
             selectedNode={selectedNode}
             selectedNodes={selectedNodes}
+            pageName={pageName}
+            pageExportNodes={pageExportNodes}
+            pageExportReviewItems={pageExportReviewItems}
             codeExport={codeExport}
             codeExportStatus={codeExportStatus}
             onDownloadPng={onDownloadSelectedPng}
@@ -3879,6 +3920,9 @@ function Inspector({
           <DevPanel
             selectedNode={selectedNode}
             selectedNodes={selectedNodes}
+            pageName={pageName}
+            pageExportNodes={pageExportNodes}
+            pageExportReviewItems={pageExportReviewItems}
             codeExport={codeExport}
             codeExportStatus={codeExportStatus}
             onDownloadPng={onDownloadSelectedPng}
@@ -4114,6 +4158,9 @@ function Inspector({
         <DevPanel
           selectedNode={selectedNode}
           selectedNodes={selectedNodes}
+          pageName={pageName}
+          pageExportNodes={pageExportNodes}
+          pageExportReviewItems={pageExportReviewItems}
           codeExport={codeExport}
           codeExportStatus={codeExportStatus}
           onDownloadPng={onDownloadSelectedPng}
@@ -5337,6 +5384,11 @@ export function App() {
   const nodes = useMemo(
     () => (editor ? flattenRendererNodes(editor.document) : []),
     [editor]
+  );
+  const activePage = editor?.document.pages[0] ?? null;
+  const pageExportReviewItems = useMemo(
+    () => (editor ? buildPageExportPresetReviewItems(editor.document, activePage?.id) : []),
+    [activePage?.id, editor]
   );
   const selectedNode = useMemo(
     () => (editor?.selection.nodeId ? findNodeById(editor.document, editor.selection.nodeId) : null),
@@ -10527,6 +10579,9 @@ export function App() {
         activeTab={inspectorTab}
         selectedNode={selectedNode}
         selectedNodes={selectedNodes}
+        pageName={activePage?.name ?? currentDocumentName}
+        pageExportNodes={nodes}
+        pageExportReviewItems={pageExportReviewItems}
         selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}
         codeExport={codeExportPayload}

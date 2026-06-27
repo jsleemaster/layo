@@ -619,6 +619,59 @@ test("inspector dev panel reviews multi-selection export presets before download
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset 다운로드됨");
 });
 
+test("inspector dev panel reviews page export presets when no layer is selected", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "rectangle-page-review",
+          name: "검사기",
+          x: 336,
+          y: 136,
+          width: 152,
+          height: 92,
+          fill: "#dbeafe"
+        },
+        {
+          type: "set_export_presets",
+          nodeId: "text-1",
+          presets: [{ id: "text-page-png", format: "png", scale: 2, suffix: "@page" }]
+        },
+        {
+          type: "set_export_presets",
+          nodeId: "rectangle-page-review",
+          presets: [{ id: "rectangle-page-svg", format: "svg", scale: 1, suffix: "" }]
+        }
+      ]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const review = page.getByTestId("dev-panel-export-review");
+  await expect(page.getByTestId("dev-panel-export-review-scope")).toContainText("페이지 export review");
+  await expect(review).toContainText("헤드라인 PNG 2x");
+  await expect(review).toContainText("text-1@page.png");
+  await expect(review).toContainText("검사기 SVG 1x");
+  await expect(review).toContainText("rectangle-page-review.svg");
+
+  await page.getByTestId("dev-panel-export-review-toggle-rectangle-page-review:rectangle-page-svg").uncheck();
+  const downloadedNames: string[] = [];
+  page.on("download", (download) => downloadedNames.push(download.suggestedFilename()));
+  await page.getByTestId("dev-panel-export-review-download").click();
+  await expect.poll(() => [...downloadedNames].sort()).toEqual(["text-1@page.png"]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset 다운로드됨");
+});
+
 function pngDimensions(png: Buffer) {
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return {
