@@ -115,6 +115,13 @@ const designTokenSchema = z.object({
   value: z.string()
 });
 
+const designStyleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(["color", "typography"]),
+  value: z.string()
+});
+
 const nodeExportPresetSchema = z.object({
   id: z.string(),
   format: z.enum(["png", "jpeg", "webp", "svg", "pdf"]),
@@ -168,14 +175,28 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     token: designTokenSchema
   }),
   z.object({
+    type: z.literal("create_style"),
+    style: designStyleSchema
+  }),
+  z.object({
     type: z.literal("set_fill_token"),
     nodeId: z.string(),
     tokenId: z.string()
   }),
   z.object({
+    type: z.literal("set_fill_style"),
+    nodeId: z.string(),
+    styleId: z.string()
+  }),
+  z.object({
     type: z.literal("set_text_typography_token"),
     nodeId: z.string(),
     tokenId: z.string()
+  }),
+  z.object({
+    type: z.literal("set_text_typography_style"),
+    nodeId: z.string(),
+    styleId: z.string()
   }),
   z.object({
     type: z.literal("set_layout_spacing_token"),

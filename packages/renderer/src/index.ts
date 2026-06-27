@@ -104,6 +104,7 @@ export interface RendererNode {
   style: {
     fill: string;
     fill_token?: string | null;
+    fill_style?: string | null;
     stroke: string | null;
     stroke_width: number;
     opacity: number;
@@ -117,6 +118,7 @@ export interface RendererNode {
         font_family: string;
         writing_mode?: TextWritingMode;
         typography_token?: string | null;
+        typography_style?: string | null;
       }
     | {
         type: "image";
@@ -189,11 +191,19 @@ export interface DesignTokenSet {
   enabled: boolean;
 }
 
+export interface DesignStyle {
+  id: string;
+  name: string;
+  type: "color" | "typography";
+  value: string;
+}
+
 export interface RendererDocument {
   id: string;
   name: string;
   tokens?: DesignToken[];
   token_sets?: DesignTokenSet[];
+  styles?: DesignStyle[];
   components?: ComponentDefinition[];
   code_mappings?: CodeComponentMapping[];
   pages: Array<{ id: string; name: string; children: RendererNode[] }>;

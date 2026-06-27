@@ -1290,6 +1290,68 @@ describe("FileStorage", () => {
     expect(JSON.stringify(persisted)).not.toContain("color-brand-primary");
   });
 
+  test("agent commands create reusable styles and apply them to selected node fields", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_style", nodeId: "text-1", styleId: "style-color-brand-primary" }
+      ] as any
+    });
+    const persisted = await storage.readFile("sample-file");
+
+    expect((result.preview as any).styles).toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary" })
+    );
+    expect(findNode(persisted, "text-1")?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_style: "style-color-brand-primary"
+    });
+    expect(result.validation.issueCount).toBe(0);
+    expect(result.audit.commandTypes).toEqual(["create_style", "set_fill_style"]);
+  });
+
+  test("manual fill updates clear reusable fill style bindings", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_style", nodeId: "text-1", styleId: "style-color-brand-primary" }
+      ] as any
+    });
+
+    const updated = await storage.setNodeFill("sample-file", "text-1", "#111827");
+
+    expect(updated.style).toMatchObject({
+      fill: "#111827",
+      fill_token: null,
+      fill_style: null
+    });
+    expect(findNode(await storage.readFile("sample-file"), "text-1")?.style.fill_style).toBeNull();
+  });
+
   test("agent commands toggle token sets and rematerialize active color bindings", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -3055,6 +3117,21 @@ function findTextValue(document: Awaited<ReturnType<FileStorage["readFile"]>>, n
     }
     if (node.id === nodeId && node.content.type === "text") {
       return node.content.value;
+    }
+    stack.push(...node.children);
+  }
+  return null;
+}
+
+function findNode(document: Awaited<ReturnType<FileStorage["readFile"]>>, nodeId: string) {
+  const stack = document.pages.flatMap((page) => page.children);
+  while (stack.length > 0) {
+    const node = stack.shift();
+    if (!node) {
+      continue;
+    }
+    if (node.id === nodeId) {
+      return node;
     }
     stack.push(...node.children);
   }

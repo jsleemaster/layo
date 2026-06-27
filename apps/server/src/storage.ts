@@ -149,6 +149,7 @@ export interface DesignNode {
   style: {
     fill: string;
     fill_token?: string | null;
+    fill_style?: string | null;
     stroke: string | null;
     stroke_width: number;
     opacity: number;
@@ -162,6 +163,7 @@ export interface DesignNode {
         font_family: string;
         writing_mode?: TextWritingMode;
         typography_token?: string | null;
+        typography_style?: string | null;
       }
     | {
         type: "image";
@@ -232,12 +234,20 @@ export interface DesignTokenSet {
   enabled: boolean;
 }
 
+export interface DesignStyle {
+  id: string;
+  name: string;
+  type: "color" | "typography";
+  value: string;
+}
+
 export interface DesignFile {
   id: string;
   name: string;
   version?: number;
   tokens?: DesignToken[];
   token_sets?: DesignTokenSet[];
+  styles?: DesignStyle[];
   components?: ComponentDefinition[];
   code_mappings?: CodeComponentMapping[];
   pages: Array<{ id: string; name: string; children: DesignNode[] }>;
@@ -1788,7 +1798,7 @@ export class FileStorage {
       throw new Error(`node not found: ${nodeId}`);
     }
 
-    node.style = { ...node.style, fill, fill_token: null };
+    node.style = { ...node.style, fill, fill_token: null, fill_style: null };
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);

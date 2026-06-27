@@ -9,6 +9,7 @@ import { createActiveDesignTokenReferenceMap } from "./design-token-io.js";
 import type {
   ComponentDefinition,
   DesignFile,
+  DesignStyle,
   DesignToken,
   DesignTokenSet,
   DesignNode,
@@ -61,6 +62,7 @@ export interface CanvasInspection {
   componentCount: number;
   tokens: DesignToken[];
   tokenSets: DesignTokenSet[];
+  styles: DesignStyle[];
   components: Array<{ id: string; name: string; variantCount: number }>;
   nodes: AgentNodeSummary[];
   validation: DocumentValidation;
@@ -85,9 +87,12 @@ export type AgentCommand =
     }
   | { type: "set_fill"; nodeId: string; fill: string }
   | { type: "create_token"; token: DesignToken }
+  | { type: "create_style"; style: DesignStyle }
   | { type: "set_token_set_enabled"; tokenSetId: string; enabled: boolean }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
+  | { type: "set_fill_style"; nodeId: string; styleId: string }
   | { type: "set_text_typography_token"; nodeId: string; tokenId: string }
+  | { type: "set_text_typography_style"; nodeId: string; styleId: string }
   | {
       type: "set_layout_spacing_token";
       nodeId: string;
@@ -197,6 +202,7 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
     componentCount: components.length,
     tokens: document.tokens ?? [],
     tokenSets: document.token_sets ?? [],
+    styles: document.styles ?? [],
     components: components.map((component) => ({
       id: component.id,
       name: component.name,
@@ -242,6 +248,7 @@ export function validateDocument(document: DesignFile): DocumentValidation {
   const componentIds = new Set<string>();
   const tokenTypes = new Map<string, DesignToken["type"]>();
   const tokenSetIds = new Set<string>();
+  const styleTypes = new Map<string, DesignStyle["type"]>();
 
   for (const tokenSet of document.token_sets ?? []) {
     if (tokenSetIds.has(tokenSet.id)) {
@@ -307,10 +314,48 @@ export function validateDocument(document: DesignFile): DocumentValidation {
     }
   }
 
+  for (const style of document.styles ?? []) {
+    if (styleTypes.has(style.id)) {
+      issues.push({
+        code: "duplicate_style_id",
+        message: `duplicate style id: ${style.id}`
+      });
+    }
+    styleTypes.set(style.id, style.type);
+    if (style.type !== "color" && style.type !== "typography") {
+      issues.push({
+        code: "invalid_style_type",
+        message: `unsupported style type: ${style.id}`
+      });
+    }
+    if (!style.name.trim()) {
+      issues.push({
+        code: "invalid_style_name",
+        message: `style must have a non-empty name: ${style.id}`
+      });
+    }
+    if (!style.value.trim()) {
+      issues.push({
+        code: "invalid_style_value",
+        message: `style must have a non-empty value: ${style.id}`
+      });
+    }
+    if (style.type === "typography") {
+      try {
+        parseTypographyValue(style);
+      } catch {
+        issues.push({
+          code: "invalid_typography_style_value",
+          message: `typography style value is invalid: ${style.id}`
+        });
+      }
+    }
+  }
+
   for (const page of document.pages) {
     registerId(ids, page.id, [page.id]);
     for (const node of page.children) {
-      validateNode(node, [page.id, node.id], ids, componentIds, tokenTypes, issues);
+      validateNode(node, [page.id, node.id], ids, componentIds, tokenTypes, styleTypes, issues);
     }
   }
 
@@ -465,6 +510,7 @@ function validateNode(
   ids: Map<string, string[][]>,
   componentIds: Set<string>,
   tokenTypes: Map<string, DesignToken["type"]>,
+  styleTypes: Map<string, DesignStyle["type"]>,
   issues: DocumentValidationIssue[]
 ) {
   registerId(ids, node.id, path);
@@ -496,8 +542,10 @@ function validateNode(
     });
   }
 
+  validateFillStyleReference(node, path, styleTypes, issues);
   validateLayoutSpacingTokenReferences(node, path, tokenTypes, issues);
   validateTextTypographyTokenReference(node, path, tokenTypes, issues);
+  validateTextTypographyStyleReference(node, path, styleTypes, issues);
   validateExportPresets(node, path, issues);
 
   if (node.kind === "text" && node.content.type !== "text") {
@@ -528,7 +576,35 @@ function validateNode(
   }
 
   for (const child of node.children) {
-    validateNode(child, [...path, child.id], ids, componentIds, tokenTypes, issues);
+    validateNode(child, [...path, child.id], ids, componentIds, tokenTypes, styleTypes, issues);
+  }
+}
+
+function validateFillStyleReference(
+  node: DesignNode,
+  path: string[],
+  styleTypes: Map<string, DesignStyle["type"]>,
+  issues: DocumentValidationIssue[]
+) {
+  const styleId = node.style.fill_style;
+  if (!styleId) {
+    return;
+  }
+  const styleType = styleTypes.get(styleId);
+  if (!styleType) {
+    issues.push({
+      code: "missing_fill_style",
+      message: `node references missing fill style: ${styleId}`,
+      nodeId: node.id,
+      path
+    });
+  } else if (styleType !== "color") {
+    issues.push({
+      code: "invalid_fill_style_type",
+      message: `node fill style is not color: ${styleId}`,
+      nodeId: node.id,
+      path
+    });
   }
 }
 
@@ -594,37 +670,69 @@ function validateTextTypographyTokenReference(
   }
 }
 
+function validateTextTypographyStyleReference(
+  node: DesignNode,
+  path: string[],
+  styleTypes: Map<string, DesignStyle["type"]>,
+  issues: DocumentValidationIssue[]
+) {
+  const styleId = node.content.type === "text" ? node.content.typography_style : undefined;
+  if (!styleId) {
+    return;
+  }
+  const styleType = styleTypes.get(styleId);
+  if (!styleType) {
+    issues.push({
+      code: "missing_text_typography_style",
+      message: `node references missing typography style: ${styleId}`,
+      nodeId: node.id,
+      path
+    });
+  } else if (styleType !== "typography") {
+    issues.push({
+      code: "invalid_text_typography_style_type",
+      message: `node typography style is not typography: ${styleId}`,
+      nodeId: node.id,
+      path
+    });
+  }
+}
+
 interface TypographyTokenValue {
   fontFamily: string;
   fontSize: number;
   lineHeight?: number;
 }
 
-function parseTypographyTokenValue(token: DesignToken): TypographyTokenValue {
+function parseTypographyValue(source: Pick<DesignToken | DesignStyle, "id" | "value">): TypographyTokenValue {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(token.value);
+    parsed = JSON.parse(source.value);
   } catch {
-    throw new Error(`typography token value must be JSON: ${token.id}`);
+    throw new Error(`typography value must be JSON: ${source.id}`);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`typography token value must be an object: ${token.id}`);
+    throw new Error(`typography value must be an object: ${source.id}`);
   }
   const candidate = parsed as Partial<TypographyTokenValue>;
   const fontFamily = typeof candidate.fontFamily === "string" ? candidate.fontFamily.trim() : "";
   const fontSize = Number(candidate.fontSize);
   const lineHeight = candidate.lineHeight === undefined ? undefined : Number(candidate.lineHeight);
   if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
-    throw new Error(`typography token must include fontFamily and positive fontSize: ${token.id}`);
+    throw new Error(`typography must include fontFamily and positive fontSize: ${source.id}`);
   }
   if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
-    throw new Error(`typography token lineHeight must be positive: ${token.id}`);
+    throw new Error(`typography lineHeight must be positive: ${source.id}`);
   }
   return {
     fontFamily,
     fontSize,
     ...(lineHeight !== undefined ? { lineHeight } : {})
   };
+}
+
+function parseTypographyTokenValue(token: DesignToken): TypographyTokenValue {
+  return parseTypographyValue(token);
 }
 
 function validateExportPresets(
@@ -716,7 +824,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     }
     case "set_fill": {
       const node = requireNode(document, command.nodeId);
-      node.style = { ...node.style, fill: command.fill, fill_token: null };
+      node.style = { ...node.style, fill: command.fill, fill_token: null, fill_style: null };
       return node.id;
     }
     case "create_token": {
@@ -736,6 +844,23 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       }
       return token.id;
     }
+    case "create_style": {
+      document.styles = document.styles ?? [];
+      const existingIndex = document.styles.findIndex((style) => style.id === command.style.id);
+      const style = {
+        id: command.style.id,
+        name: command.style.name,
+        type: command.style.type,
+        value: command.style.value
+      };
+      if (existingIndex >= 0) {
+        document.styles[existingIndex] = style;
+      } else {
+        document.styles.push(style);
+      }
+      materializeStyleBindings(document);
+      return style.id;
+    }
     case "set_token_set_enabled": {
       const tokenSet = (document.token_sets ?? []).find((candidate) => candidate.id === command.tokenSetId);
       if (!tokenSet) {
@@ -748,7 +873,13 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     case "set_fill_token": {
       const node = requireNode(document, command.nodeId);
       const token = requireColorToken(document, command.tokenId);
-      node.style = { ...node.style, fill: token.value, fill_token: command.tokenId };
+      node.style = { ...node.style, fill: token.value, fill_token: command.tokenId, fill_style: null };
+      return node.id;
+    }
+    case "set_fill_style": {
+      const node = requireNode(document, command.nodeId);
+      const style = requireColorStyle(document, command.styleId);
+      node.style = { ...node.style, fill: style.value, fill_token: null, fill_style: command.styleId };
       return node.id;
     }
     case "set_text_typography_token": {
@@ -762,7 +893,24 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
         ...node.content,
         font_family: typography.fontFamily,
         font_size: typography.fontSize,
-        typography_token: command.tokenId
+        typography_token: command.tokenId,
+        typography_style: null
+      };
+      return node.id;
+    }
+    case "set_text_typography_style": {
+      const node = requireNode(document, command.nodeId);
+      if (node.content.type !== "text") {
+        throw new Error(`node is not text: ${command.nodeId}`);
+      }
+      const style = requireTypographyStyle(document, command.styleId);
+      const typography = parseTypographyValue(style);
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize,
+        typography_token: null,
+        typography_style: command.styleId
       };
       return node.id;
     }
@@ -958,6 +1106,17 @@ function requireColorToken(document: DesignFile, tokenId: string): DesignToken {
   return token;
 }
 
+function requireColorStyle(document: DesignFile, styleId: string): DesignStyle {
+  const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
+  if (!style) {
+    throw new Error(`style not found: ${styleId}`);
+  }
+  if (style.type !== "color") {
+    throw new Error(`style is not a color style: ${styleId}`);
+  }
+  return style;
+}
+
 function requireSpacingToken(document: DesignFile, tokenId: string): DesignToken {
   const token = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []).get(tokenId);
   if (!token) {
@@ -978,6 +1137,52 @@ function requireTypographyToken(document: DesignFile, tokenId: string): DesignTo
     throw new Error(`token is not a typography token: ${tokenId}`);
   }
   return token;
+}
+
+function requireTypographyStyle(document: DesignFile, styleId: string): DesignStyle {
+  const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
+  if (!style) {
+    throw new Error(`style not found: ${styleId}`);
+  }
+  if (style.type !== "typography") {
+    throw new Error(`style is not a typography style: ${styleId}`);
+  }
+  return style;
+}
+
+function materializeStyleBindings(document: DesignFile): void {
+  const styleMap = new Map((document.styles ?? []).map((style) => [style.id, style]));
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      materializeNodeStyleBindings(node, styleMap);
+    }
+  }
+  relayoutDesignFile(document);
+}
+
+function materializeNodeStyleBindings(node: DesignNode, styleMap: Map<string, DesignStyle>): void {
+  if (node.style.fill_style) {
+    const style = styleMap.get(node.style.fill_style);
+    if (style?.type === "color") {
+      node.style = { ...node.style, fill: style.value };
+    }
+  }
+
+  if (node.content.type === "text" && node.content.typography_style) {
+    const style = styleMap.get(node.content.typography_style);
+    if (style?.type === "typography") {
+      const typography = parseTypographyValue(style);
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize
+      };
+    }
+  }
+
+  for (const child of node.children) {
+    materializeNodeStyleBindings(child, styleMap);
+  }
 }
 
 function materializeTokenBindings(document: DesignFile): void {

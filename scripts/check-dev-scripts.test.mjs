@@ -20,3 +20,17 @@ test("server dev script resolves workspace packages from source exports", async 
     "server mcp must not require prebuilt package dist files"
   );
 });
+
+test("e2e script starts required local services before Playwright", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const e2eScript = packageJson.scripts?.["test:e2e"];
+  const runner = await readFile("scripts/run-e2e.mjs", "utf8");
+
+  assert.equal(typeof e2eScript, "string");
+  assert.match(e2eScript, /^node scripts\/run-e2e\.mjs -- /);
+  assert.match(runner, /name: "server"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/server", "dev"\]/);
+  assert.match(runner, /name: "web"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/web", "dev"\]/);
+  assert.match(runner, /http:\/\/127\.0\.0\.1:4317\/health/);
+  assert.match(runner, /http:\/\/127\.0\.0\.1:5173\//);
+  assert.match(runner, /"pnpm",\s*\["exec",\s*"playwright",\s*"test"/);
+});

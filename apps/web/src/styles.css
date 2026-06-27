@@ -1238,6 +1238,26 @@ button:disabled {
   line-height: var(--editor-text-small-line);
 }
 
+.style-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--editor-space-xs);
+  align-items: center;
+  min-width: 0;
+  margin-top: var(--editor-space-xs);
+}
+
+.style-create-row input {
+  min-width: 0;
+  min-height: var(--editor-space-xl);
+  padding: 0 var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  font: inherit;
+}
+
 .inspector-token-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

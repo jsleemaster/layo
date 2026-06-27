@@ -2,6 +2,7 @@ import type {
   CodeComponentMapping,
   ComponentDefinition,
   DesignFile,
+  DesignStyle,
   DesignToken,
   DesignTokenSet,
   DesignNode,
@@ -50,6 +51,7 @@ export interface CodeStructureNode {
   style: {
     fill: string;
     fillToken?: string;
+    fillStyle?: string;
     stroke: string | null;
     strokeWidth: number;
     opacity: number;
@@ -64,6 +66,7 @@ export interface CodeStructureNode {
         fontFamily: string;
         writingMode?: TextWritingMode;
         typographyToken?: string;
+        typographyStyle?: string;
       }
     | { type: "image"; assetId: string; fitMode: "fill" | "fit" };
   componentRef?: {
@@ -163,6 +166,7 @@ export interface TokenExportSummary {
 export interface CodeImplementationSpec {
   elements: ElementCodeArtifact[];
   components: ComponentImplementationArtifact[];
+  styles: DesignStyle[];
   tokens: TokenExportSummary;
   tokenCandidates: TokenCandidateSummary;
 }
@@ -210,6 +214,7 @@ export function exportDesignToCode(
     implementationSpec: {
       elements,
       components,
+      styles: document.styles ?? [],
       tokens: {
         ...(document.token_sets?.length ? { tokenSets: document.token_sets } : {}),
         colors: colorTokens,
@@ -388,6 +393,7 @@ function structureFor(
     style: {
       fill: resolvedFill(node, tokenMap),
       ...(node.style.fill_token ? { fillToken: node.style.fill_token } : {}),
+      ...(node.style.fill_style ? { fillStyle: node.style.fill_style } : {}),
       stroke: node.style.stroke,
       strokeWidth: node.style.stroke_width,
       opacity: node.style.opacity
@@ -490,6 +496,7 @@ function handoffAnnotationsFor(node: DesignNode, tokenMap: Map<string, DesignTok
 function styleAnnotationFor(node: DesignNode, tokenMap: Map<string, DesignToken>): CodeHandoffAnnotation {
   const token = node.style.fill_token ? tokenMap.get(node.style.fill_token) : undefined;
   const fill = resolvedFill(node, tokenMap);
+  const fillStyle = node.style.fill_style;
 
   return {
     id: `${node.id}-style`,
@@ -498,6 +505,8 @@ function styleAnnotationFor(node: DesignNode, tokenMap: Map<string, DesignToken>
     detail:
       token && token.type === "color"
         ? `fill token ${token.id} maps to var(--${cssTokenName(token.id)})`
+        : fillStyle
+          ? `fill style ${fillStyle} materialized to ${fill}`
         : node.style.stroke
           ? `stroke ${node.style.stroke} ${formatPx(node.style.stroke_width)}`
           : undefined,
@@ -509,11 +518,17 @@ function styleAnnotationFor(node: DesignNode, tokenMap: Map<string, DesignToken>
 function contentAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
   if (node.content.type === "text") {
     const writingMode = node.content.writing_mode ?? "horizontal_tb";
+    const typographyStyle = node.content.typography_style;
     return {
       id: `${node.id}-content`,
       label: "콘텐츠",
       value: `"${node.content.value}" · ${formatPx(node.content.font_size)} ${node.content.font_family}`,
-      detail: writingMode !== "horizontal_tb" ? `writing mode ${writingMode}` : undefined,
+      detail:
+        typographyStyle
+          ? `typography style ${typographyStyle}`
+          : writingMode !== "horizontal_tb"
+            ? `writing mode ${writingMode}`
+            : undefined,
       kind: "content",
       sourceNodeIds: [node.id]
     };
@@ -641,6 +656,9 @@ function contentFor(node: DesignNode): CodeStructureNode["content"] {
     }
     if (node.content.typography_token) {
       content.typographyToken = node.content.typography_token;
+    }
+    if (node.content.typography_style) {
+      content.typographyStyle = node.content.typography_style;
     }
     return content;
   }

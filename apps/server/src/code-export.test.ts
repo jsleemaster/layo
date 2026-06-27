@@ -204,6 +204,35 @@ describe("code export", () => {
     expect((button?.structure.children[0].content as any).typographyToken).toBe("typography-heading-lg");
   });
 
+  test("exports reusable style bindings as implementation metadata", () => {
+    const fixture = tossFixture() as any;
+    fixture.styles = [
+      { id: "style-color-brand-primary", name: "Brand / Primary", type: "color", value: "#3182f6" },
+      {
+        id: "style-typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ];
+    fixture.pages[0].children[0].style.fill_style = "style-color-brand-primary";
+    const label = fixture.pages[0].children[0].children[0];
+    label.content = {
+      ...label.content,
+      font_family: "Inter",
+      font_size: 32,
+      typography_style: "style-typography-heading-lg"
+    };
+
+    const result = exportDesignToCode(fixture);
+
+    expect((result.implementationSpec as any).styles).toEqual(fixture.styles);
+    expect((result.elements[0].structure.style as any).fillStyle).toBe("style-color-brand-primary");
+    expect((result.elements[0].structure.children[0].content as any).typographyStyle).toBe(
+      "style-typography-heading-lg"
+    );
+  });
+
   test("resolves active token set overrides and excludes disabled set variables", () => {
     const fixture = tossFixture() as any;
     fixture.token_sets = [

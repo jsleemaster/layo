@@ -1,5 +1,6 @@
 import type {
   ComponentVariant,
+  DesignStyle,
   DesignToken,
   DesignTokenSet,
   GridArea,
@@ -107,9 +108,22 @@ export type EditorCommand =
       fill: string;
     }
   | {
+      type: "create_style";
+      style: DesignStyle;
+    }
+  | {
+      type: "set_document_styles";
+      styles: DesignStyle[];
+    }
+  | {
       type: "set_fill_token";
       nodeId: string;
       tokenId: string;
+    }
+  | {
+      type: "set_fill_style";
+      nodeId: string;
+      styleId: string;
     }
   | {
       type: "set_token_set_enabled";
@@ -135,6 +149,11 @@ export type EditorCommand =
       type: "set_text_typography_token";
       nodeId: string;
       tokenId: string;
+    }
+  | {
+      type: "set_text_typography_style";
+      nodeId: string;
+      styleId: string;
     }
   | {
       type: "set_text_content";
@@ -344,14 +363,24 @@ function findColorToken(document: RendererDocument, tokenId: string): DesignToke
   return token?.type === "color" ? token : null;
 }
 
+function findColorStyle(document: RendererDocument, styleId: string): DesignStyle | null {
+  const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
+  return style?.type === "color" ? style : null;
+}
+
 function findTypographyToken(document: RendererDocument, tokenId: string): DesignToken | null {
   const token = activeDesignTokenReferenceMap(document).get(tokenId);
   return token?.type === "typography" ? token : null;
 }
 
-function parseTypographyToken(token: DesignToken): { fontFamily: string; fontSize: number; lineHeight?: number } | null {
+function findTypographyStyle(document: RendererDocument, styleId: string): DesignStyle | null {
+  const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
+  return style?.type === "typography" ? style : null;
+}
+
+function parseTypographyValue(source: Pick<DesignToken | DesignStyle, "value">): { fontFamily: string; fontSize: number; lineHeight?: number } | null {
   try {
-    const parsed = JSON.parse(token.value) as Partial<{ fontFamily: string; fontSize: number; lineHeight: number }>;
+    const parsed = JSON.parse(source.value) as Partial<{ fontFamily: string; fontSize: number; lineHeight: number }>;
     const fontFamily = typeof parsed.fontFamily === "string" ? parsed.fontFamily.trim() : "";
     const fontSize = Number(parsed.fontSize);
     const lineHeight = parsed.lineHeight === undefined ? undefined : Number(parsed.lineHeight);
@@ -365,6 +394,10 @@ function parseTypographyToken(token: DesignToken): { fontFamily: string; fontSiz
   } catch {
     return null;
   }
+}
+
+function parseTypographyToken(token: DesignToken): { fontFamily: string; fontSize: number; lineHeight?: number } | null {
+  return parseTypographyValue(token);
 }
 
 function activeDesignTokenReferenceMap(document: RendererDocument): Map<string, DesignToken> {
@@ -432,6 +465,39 @@ function materializeTokenBindings(document: RendererDocument): void {
     }
   }
   relayoutDocument(document);
+}
+
+function materializeStyleBindings(document: RendererDocument): void {
+  const styleMap = new Map((document.styles ?? []).map((style) => [style.id, style]));
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      materializeNodeStyleBindings(node, styleMap);
+    }
+  }
+  relayoutDocument(document);
+}
+
+function materializeNodeStyleBindings(node: RendererNode, styleMap: Map<string, DesignStyle>): void {
+  if (node.style.fill_style) {
+    const style = styleMap.get(node.style.fill_style);
+    if (style?.type === "color") {
+      node.style = { ...node.style, fill: style.value };
+    }
+  }
+  if (node.content.type === "text" && node.content.typography_style) {
+    const style = styleMap.get(node.content.typography_style);
+    const typography = style?.type === "typography" ? parseTypographyValue(style) : null;
+    if (typography) {
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize
+      };
+    }
+  }
+  for (const child of node.children) {
+    materializeNodeStyleBindings(child, styleMap);
+  }
 }
 
 function materializeNodeTokenBindings(node: RendererNode, tokenMap: Map<string, DesignToken>): void {
@@ -1397,10 +1463,42 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         nodeId: command.nodeId,
         style: previousStyle
       };
-      node.style = { ...node.style, fill: command.fill, fill_token: null };
+      node.style = { ...node.style, fill: command.fill, fill_token: null, fill_style: null };
       relayoutDocument(next);
 
       return { document: next, inverse };
+    }
+    case "create_style": {
+      const previousStyles = [...(next.styles ?? [])];
+      const nextStyle = {
+        id: command.style.id,
+        name: command.style.name,
+        type: command.style.type,
+        value: command.style.value
+      };
+      const existingIndex = previousStyles.findIndex((style) => style.id === nextStyle.id);
+      next.styles = [...previousStyles];
+      if (existingIndex >= 0) {
+        next.styles[existingIndex] = nextStyle;
+      } else {
+        next.styles.push(nextStyle);
+      }
+      materializeStyleBindings(next);
+
+      return {
+        document: next,
+        inverse: { type: "set_document_styles", styles: previousStyles }
+      };
+    }
+    case "set_document_styles": {
+      const previousStyles = [...(next.styles ?? [])];
+      next.styles = command.styles.map((style) => ({ ...style }));
+      materializeStyleBindings(next);
+
+      return {
+        document: next,
+        inverse: { type: "set_document_styles", styles: previousStyles }
+      };
     }
     case "set_fill_token": {
       const node = findNodeById(next, command.nodeId);
@@ -1410,11 +1508,35 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       }
 
       const previousStyle = { ...node.style };
-      if (previousStyle.fill === token.value && previousStyle.fill_token === command.tokenId) {
+      if (previousStyle.fill === token.value && previousStyle.fill_token === command.tokenId && !previousStyle.fill_style) {
         return { document, inverse: null };
       }
 
-      node.style = { ...node.style, fill: token.value, fill_token: command.tokenId };
+      node.style = { ...node.style, fill: token.value, fill_token: command.tokenId, fill_style: null };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_node_style",
+          nodeId: command.nodeId,
+          style: previousStyle
+        }
+      };
+    }
+    case "set_fill_style": {
+      const node = findNodeById(next, command.nodeId);
+      const style = findColorStyle(next, command.styleId);
+      if (!node || !style || isNodeLocked(node)) {
+        return { document, inverse: null };
+      }
+
+      const previousStyle = { ...node.style };
+      if (previousStyle.fill === style.value && previousStyle.fill_style === command.styleId && !previousStyle.fill_token) {
+        return { document, inverse: null };
+      }
+
+      node.style = { ...node.style, fill: style.value, fill_token: null, fill_style: command.styleId };
       relayoutDocument(next);
 
       return {
@@ -1458,6 +1580,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
       if (
         previousStyle.fill === command.style.fill &&
         previousStyle.fill_token === command.style.fill_token &&
+        previousStyle.fill_style === command.style.fill_style &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
         previousStyle.opacity === command.style.opacity
@@ -1530,7 +1653,36 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         ...node.content,
         font_family: typography.fontFamily,
         font_size: typography.fontSize,
-        typography_token: command.tokenId
+        typography_token: command.tokenId,
+        typography_style: null
+      };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_text_content",
+          nodeId: command.nodeId,
+          content: previousContent
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_text_typography_style": {
+      const node = findNodeById(next, command.nodeId);
+      const style = findTypographyStyle(next, command.styleId);
+      const typography = style ? parseTypographyValue(style) : null;
+      if (!node || isNodeLocked(node) || node.content.type !== "text" || !style || !typography) {
+        return { document, inverse: null };
+      }
+
+      const previousContent = { ...node.content };
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize,
+        typography_token: null,
+        typography_style: command.styleId
       };
       relayoutDocument(next);
 

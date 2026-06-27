@@ -12,6 +12,8 @@ pub struct DesignFile {
     pub token_sets: Vec<DesignTokenSet>,
     #[serde(default)]
     pub tokens: Vec<DesignToken>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<DesignStyle>,
     #[serde(default)]
     pub components: Vec<ComponentDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -45,6 +47,24 @@ pub struct DesignTokenSet {
 pub enum DesignTokenType {
     Color,
     Spacing,
+    Typography,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct DesignStyle {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub style_type: DesignStyleType,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DesignStyleType {
+    Color,
     Typography,
 }
 
@@ -536,6 +556,8 @@ pub struct Style {
     pub fill: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_style: Option<String>,
     pub stroke: Option<String>,
     pub stroke_width: f64,
     pub opacity: f64,
@@ -554,6 +576,8 @@ pub enum NodeContent {
         writing_mode: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         typography_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        typography_style: Option<String>,
     },
     Image {
         asset_id: String,
@@ -574,6 +598,7 @@ impl DesignFile {
             version: 1,
             token_sets: vec![],
             tokens: vec![],
+            styles: vec![],
             components: vec![],
             code_mappings: vec![],
             pages: vec![Page {
@@ -614,6 +639,7 @@ impl DesignFile {
                         style: Style {
                             fill: "#111827".to_string(),
                             fill_token: None,
+                            fill_style: None,
                             stroke: None,
                             stroke_width: 0.0,
                             opacity: 1.0,
@@ -624,6 +650,7 @@ impl DesignFile {
                             font_family: "Inter".to_string(),
                             writing_mode: None,
                             typography_token: None,
+                            typography_style: None,
                         },
                     }],
                     transform: Transform {
@@ -638,6 +665,7 @@ impl DesignFile {
                     style: Style {
                         fill: "#ffffff".to_string(),
                         fill_token: None,
+                        fill_style: None,
                         stroke: Some("#d1d5db".to_string()),
                         stroke_width: 1.0,
                         opacity: 1.0,

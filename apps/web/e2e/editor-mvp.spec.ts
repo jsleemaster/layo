@@ -2818,6 +2818,23 @@ test("inspector shows fill token binding from agent-applied color tokens", async
   await expect(page.getByTestId("inspector-fill-token")).toContainText("Brand / Primary");
 });
 
+test("right inspector creates and applies reusable styles", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-fill").fill("#2563eb");
+  await page.getByRole("button", { name: "색상 스타일 저장" }).click();
+  await page.getByTestId("style-name-input").fill("Brand / Primary");
+  await page.getByRole("button", { name: "스타일 생성" }).click();
+
+  await expect(page.getByTestId("inspector-fill-style")).toContainText("Brand / Primary");
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  expect((await fileResponse.json()).file.styles).toContainEqual(
+    expect.objectContaining({ id: "style-color-brand-primary" })
+  );
+});
+
 test("right inspector imports and exports DTCG token JSON", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const importedTokenJson = JSON.stringify(

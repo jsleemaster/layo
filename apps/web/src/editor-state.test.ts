@@ -319,6 +319,51 @@ describe("editor state commands", () => {
     });
   });
 
+  test("applies reusable color and typography styles with undo and redo", () => {
+    const document = sampleDocument() as any;
+    document.styles = [
+      { id: "style-color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" },
+      {
+        id: "style-typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ];
+    const initial = createEditorState(document);
+
+    const styled = executeEditorCommand(initial, {
+      type: "set_fill_style",
+      nodeId: "text-1",
+      styleId: "style-color-brand-primary"
+    } as any);
+    expect(findNodeById(styled.document, "text-1")?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_style: "style-color-brand-primary"
+    });
+    expect(findNodeById(undo(styled).document, "text-1")?.style).toEqual({
+      fill: "#111827",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1
+    });
+
+    const typed = executeEditorCommand(styled, {
+      type: "set_text_typography_style",
+      nodeId: "text-1",
+      styleId: "style-typography-heading-lg"
+    } as any);
+    expect(findNodeById(typed.document, "text-1")?.content).toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 32,
+      typography_style: "style-typography-heading-lg"
+    });
+    expect(findNodeById(redo(undo(typed)).document, "text-1")?.content).toMatchObject({
+      typography_style: "style-typography-heading-lg"
+    });
+  });
+
   test("toggles token sets with undo and rematerializes active fill bindings", () => {
     const document = sampleDocument() as any;
     document.token_sets = [

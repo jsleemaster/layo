@@ -14,6 +14,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type DesignStyle,
   type DesignToken,
   type DesignTokenSet,
   type GridArea,
@@ -1256,6 +1257,72 @@ async function persistTextTypographyToken(fileId: string, nodeId: string, tokenI
 
   if (!response.ok) {
     throw new Error(`텍스트 타이포그래피 토큰 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistCreateFillStyle(fileId: string, nodeId: string, style: DesignStyle) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [
+        { type: "create_style", style },
+        { type: "set_fill_style", nodeId, styleId: style.id }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`색상 스타일 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistFillStyle(fileId: string, nodeId: string, styleId: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_fill_style", nodeId, styleId }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`색상 스타일 적용 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistCreateTypographyStyle(fileId: string, nodeId: string, style: DesignStyle) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [
+        { type: "create_style", style },
+        { type: "set_text_typography_style", nodeId, styleId: style.id }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`타이포그래피 스타일 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistTextTypographyStyle(fileId: string, nodeId: string, styleId: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_text_typography_style", nodeId, styleId }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`타이포그래피 스타일 적용 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -4185,13 +4252,18 @@ function Inspector({
   codeExportStatus,
   documentTokens,
   documentTokenSets,
+  documentStyles,
   canAlign,
   canDistribute,
   onGeometryChange,
   onFillChange,
+  onFillStyleChange,
+  onCreateFillStyle,
   onTextChange,
   onTextWritingModeChange,
   onTextTypographyTokenChange,
+  onTextTypographyStyleChange,
+  onCreateTypographyStyle,
   onLayoutChange,
   onLayoutItemChange,
   onConstraintsChange,
@@ -4242,13 +4314,18 @@ function Inspector({
   codeExportStatus: string;
   documentTokens: DesignToken[];
   documentTokenSets: DesignTokenSet[];
+  documentStyles: DesignStyle[];
   canAlign: boolean;
   canDistribute: boolean;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onFillChange: (nodeId: string, fill: string) => void;
+  onFillStyleChange: (nodeId: string, styleId: string) => void;
+  onCreateFillStyle: (nodeId: string, style: DesignStyle) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onTextWritingModeChange: (nodeId: string, writingMode: TextWritingMode) => void;
   onTextTypographyTokenChange: (nodeId: string, tokenId: string) => void;
+  onTextTypographyStyleChange: (nodeId: string, styleId: string) => void;
+  onCreateTypographyStyle: (nodeId: string, style: DesignStyle) => void;
   onLayoutChange: (nodeId: string, layout: NodeLayout) => void;
   onLayoutItemChange: (nodeId: string, layoutItem: NodeLayoutItem) => void;
   onConstraintsChange: (nodeId: string, constraints: NodeConstraints) => void;
@@ -4295,6 +4372,14 @@ function Inspector({
   onExportPresetsChange: (nodeId: string, presets: NodeExportPreset[]) => void;
   onTabChange: (tab: InspectorTab) => void;
 }) {
+  const [pendingStyleKind, setPendingStyleKind] = useState<"color" | "typography" | null>(null);
+  const [styleNameDraft, setStyleNameDraft] = useState("");
+
+  useEffect(() => {
+    setPendingStyleKind(null);
+    setStyleNameDraft("");
+  }, [selectedNode?.id]);
+
   const tokenControls = (
     <InspectorTokenControls
       draft={tokenDtcgDraft}
@@ -4423,13 +4508,50 @@ function Inspector({
   const selectedParentUsesGrid = selectedParentNode?.layout?.mode === "grid";
   const constraints = selectedNode.constraints ?? DEFAULT_NODE_CONSTRAINTS;
   const activeDocumentTokens = resolveActiveDesignTokens(documentTokens, documentTokenSets);
+  const colorStyles = documentStyles.filter((style) => style.type === "color");
+  const typographyStyles = documentStyles.filter((style) => style.type === "typography");
   const fillToken = selectedNode.style.fill_token
     ? activeDocumentTokens.find((token) => token.id === selectedNode.style.fill_token && token.type === "color") ??
       documentTokens.find((token) => token.id === selectedNode.style.fill_token && token.type === "color") ??
       null
     : null;
+  const fillStyle = selectedNode.style.fill_style
+    ? colorStyles.find((style) => style.id === selectedNode.style.fill_style) ?? null
+    : null;
   const spacingTokens = activeDocumentTokens.filter((token) => token.type === "spacing");
   const typographyTokens = activeDocumentTokens.filter((token) => token.type === "typography");
+  const selectedTextContent = selectedNode.content.type === "text" ? selectedNode.content : null;
+  const typographyStyle =
+    selectedTextContent?.typography_style
+      ? typographyStyles.find((style) => style.id === selectedTextContent.typography_style) ?? null
+      : null;
+  const createStyleFromDraft = () => {
+    const name = styleNameDraft.trim();
+    if (!name || !pendingStyleKind) {
+      return;
+    }
+    const id = `style-${pendingStyleKind === "color" ? "color" : "typography"}-${safeTestId(name)}`;
+    if (pendingStyleKind === "color") {
+      onCreateFillStyle(selectedNode.id, {
+        id,
+        name,
+        type: "color",
+        value: selectedNode.style.fill
+      });
+    } else if (selectedTextContent) {
+      onCreateTypographyStyle(selectedNode.id, {
+        id,
+        name,
+        type: "typography",
+        value: JSON.stringify({
+          fontFamily: selectedTextContent.font_family,
+          fontSize: selectedTextContent.font_size
+        })
+      });
+    }
+    setPendingStyleKind(null);
+    setStyleNameDraft("");
+  };
   const variantControls =
     selectedNode.component_instance && componentDefinition
       ? componentVariantControls(componentDefinition, selectedNode.component_instance.variant_id ?? null)
@@ -4898,6 +5020,46 @@ function Inspector({
           토큰 {fillToken?.name ?? selectedNode.style.fill_token}
         </div>
       ) : null}
+      <label className="stacked-field">
+        색상 스타일
+        <select
+          data-testid="inspector-fill-style"
+          value={selectedNode.style.fill_style ?? ""}
+          onChange={(event) => {
+            if (event.currentTarget.value) {
+              onFillStyleChange(selectedNode.id, event.currentTarget.value);
+            }
+          }}
+        >
+          <option value="">스타일 없음</option>
+          {colorStyles.map((style) => (
+            <option key={style.id} value={style.id}>
+              {style.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {fillStyle ? (
+        <div className="inspector-token-readout" data-testid="inspector-fill-style-readout">
+          스타일 {fillStyle.name}
+        </div>
+      ) : null}
+      <button type="button" className="inspector-compact-button" onClick={() => setPendingStyleKind("color")}>
+        색상 스타일 저장
+      </button>
+      {pendingStyleKind === "color" ? (
+        <div className="style-create-row">
+          <input
+            data-testid="style-name-input"
+            value={styleNameDraft}
+            placeholder="Brand / Primary"
+            onChange={(event) => setStyleNameDraft(event.currentTarget.value)}
+          />
+          <button type="button" className="inspector-compact-button" onClick={createStyleFromDraft}>
+            스타일 생성
+          </button>
+        </div>
+      ) : null}
       {tokenControls}
       {selectedNode.content.type === "text" ? (
         <>
@@ -4945,6 +5107,46 @@ function Inspector({
                 ))}
               </select>
             </label>
+          ) : null}
+          <label className="stacked-field">
+            타이포그래피 스타일
+            <select
+              data-testid="inspector-text-typography-style"
+              value={selectedNode.content.typography_style ?? ""}
+              onChange={(event) => {
+                if (event.currentTarget.value) {
+                  onTextTypographyStyleChange(selectedNode.id, event.currentTarget.value);
+                }
+              }}
+            >
+              <option value="">스타일 없음</option>
+              {typographyStyles.map((style) => (
+                <option key={style.id} value={style.id}>
+                  {style.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {typographyStyle ? (
+            <div className="inspector-token-readout" data-testid="inspector-text-typography-style-readout">
+              스타일 {typographyStyle.name}
+            </div>
+          ) : null}
+          <button type="button" className="inspector-compact-button" onClick={() => setPendingStyleKind("typography")}>
+            타이포그래피 스타일 저장
+          </button>
+          {pendingStyleKind === "typography" ? (
+            <div className="style-create-row">
+              <input
+                data-testid="style-name-input"
+                value={styleNameDraft}
+                placeholder="Typography / Heading LG"
+                onChange={(event) => setStyleNameDraft(event.currentTarget.value)}
+              />
+              <button type="button" className="inspector-compact-button" onClick={createStyleFromDraft}>
+                스타일 생성
+              </button>
+            </div>
           ) : null}
         </>
       ) : null}
@@ -7576,6 +7778,74 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "텍스트 타이포그래피 토큰을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const createFillStyle = (nodeId: string, style: DesignStyle) => {
+    dispatch({ type: "create_style", style });
+    dispatch({ type: "set_fill_style", nodeId, styleId: style.id });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistCreateFillStyle(currentProject.currentDocumentId, nodeId, style)
+      .then(() => {
+        setProjectStatus("색상 스타일 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "색상 스타일을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const updateFillStyle = (nodeId: string, styleId: string) => {
+    dispatch({ type: "set_fill_style", nodeId, styleId });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistFillStyle(currentProject.currentDocumentId, nodeId, styleId)
+      .then(() => {
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "색상 스타일을 적용하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const createTypographyStyle = (nodeId: string, style: DesignStyle) => {
+    dispatch({ type: "create_style", style });
+    dispatch({ type: "set_text_typography_style", nodeId, styleId: style.id });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistCreateTypographyStyle(currentProject.currentDocumentId, nodeId, style)
+      .then(() => {
+        setProjectStatus("타이포그래피 스타일 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "타이포그래피 스타일을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const updateTextTypographyStyle = (nodeId: string, styleId: string) => {
+    dispatch({ type: "set_text_typography_style", nodeId, styleId });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistTextTypographyStyle(currentProject.currentDocumentId, nodeId, styleId)
+      .then(() => {
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "타이포그래피 스타일을 적용하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -11428,6 +11698,7 @@ export function App() {
         codeExportStatus={codeExportStatus}
         documentTokens={editor?.document.tokens ?? []}
         documentTokenSets={editor?.document.token_sets ?? []}
+        documentStyles={editor?.document.styles ?? []}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}
         zoomLabel={`${Math.round((editor?.viewport.scale ?? 1) * 100)}%`}
@@ -11462,9 +11733,13 @@ export function App() {
         onTabChange={setInspectorTab}
         onGeometryChange={updateGeometry}
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
+        onFillStyleChange={updateFillStyle}
+        onCreateFillStyle={createFillStyle}
         onTextChange={updateTextNode}
         onTextWritingModeChange={updateTextWritingMode}
         onTextTypographyTokenChange={updateTextTypographyToken}
+        onTextTypographyStyleChange={updateTextTypographyStyle}
+        onCreateTypographyStyle={createTypographyStyle}
         onLayoutChange={updateLayout}
         onLayoutItemChange={updateLayoutItem}
         onConstraintsChange={updateConstraints}

@@ -111,6 +111,32 @@ fn code_component_mappings_round_trip_through_json() {
 }
 
 #[test]
+fn reusable_styles_round_trip_through_json() {
+    let raw = r##"
+    {
+      "id": "style-file",
+      "name": "Style File",
+      "version": 1,
+      "styles": [
+        {
+          "id": "style-color-brand-primary",
+          "name": "Brand / Primary",
+          "type": "color",
+          "value": "#2563eb"
+        }
+      ],
+      "pages": []
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+
+    assert_eq!(parsed.styles.len(), 1);
+    assert_eq!(parsed.styles[0].id, "style-color-brand-primary");
+    assert!(serde_json::to_string(&parsed).unwrap().contains("\"styles\""));
+}
+
+#[test]
 fn layout_metadata_round_trips_through_json() {
     let raw = r##"
     {
