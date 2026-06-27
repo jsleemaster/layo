@@ -602,6 +602,50 @@ test("right inspector authors multi-property component variant combinations", as
   await expect(page.getByTestId("inspector-component-variant-surface")).toHaveValue("elevated");
 });
 
+test("component instances render boolean variant properties as toggles", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-component-definition-variants")).toBeVisible();
+
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("enabled");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-0").fill("true");
+  await page.getByTestId("inspector-component-variant-add").click();
+  await page.getByTestId("inspector-component-definition-variant-name-variant-2").fill("Disabled");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+
+  const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
+    data: {
+      parentId: "page-1",
+      definitionId: "component-card",
+      instanceId: "instance-card",
+      x: 520,
+      y: 140
+    }
+  });
+  expect(instance.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "Card 인스턴스" }).click();
+  await expect(page.getByTestId("inspector-component-variant-enabled")).toHaveCount(0);
+
+  const toggle = page.getByTestId("inspector-component-variant-enabled-toggle");
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toBeChecked();
+
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+});
+
 test("inspector dev panel copies generated handoff snippets to the clipboard", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: "http://127.0.0.1:5173"

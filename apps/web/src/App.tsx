@@ -3864,6 +3864,7 @@ type ComponentVariantControl = {
   name: string;
   selectedValue: string;
   values: string[];
+  booleanPair: { onValue: string; offValue: string } | null;
 };
 
 function safeTestId(value: string) {
@@ -3876,6 +3877,26 @@ function safeTestId(value: string) {
 
 function selectedComponentVariant(component: ComponentDefinition, variantId?: string | null) {
   return component.variants.find((variant) => variant.id === variantId) ?? component.variants[0] ?? null;
+}
+
+function booleanVariantPair(values: string[]) {
+  if (values.length !== 2) {
+    return null;
+  }
+  const onValues = new Set(["true", "yes", "on"]);
+  const offValues = new Set(["false", "no", "off"]);
+  const normalized = values.map((value) => value.trim().toLowerCase());
+  const onIndex = normalized.findIndex((value) => onValues.has(value));
+  const offIndex = normalized.findIndex((value) => offValues.has(value));
+
+  if (onIndex === -1 || offIndex === -1 || onIndex === offIndex) {
+    return null;
+  }
+
+  return {
+    onValue: values[onIndex],
+    offValue: values[offIndex]
+  };
 }
 
 function componentVariantControls(component: ComponentDefinition, variantId?: string | null): ComponentVariantControl[] {
@@ -3901,7 +3922,8 @@ function componentVariantControls(component: ComponentDefinition, variantId?: st
         name,
         selectedValue:
           selectedVariant?.properties.find((property) => property.name === name)?.value ?? values[0] ?? "",
-        values
+        values,
+        booleanPair: booleanVariantPair(values)
       }
     ];
   });
@@ -4577,32 +4599,50 @@ function Inspector({
       {variantControls.length > 0 && componentDefinition ? (
         <section className="inspector-section" data-testid="inspector-component-variants" aria-label="컴포넌트 변형">
           <h3>변형</h3>
-          {variantControls.map((control) => (
-            <label className="stacked-field" key={control.name}>
-              {control.name}
-              <select
-                data-testid={`inspector-component-variant-${safeTestId(control.name)}`}
-                value={control.selectedValue}
-                onChange={(event) => {
-                  const variantId = variantIdForControlValue(
-                    componentDefinition,
-                    selectedNode.component_instance?.variant_id ?? null,
-                    control.name,
-                    event.currentTarget.value
-                  );
-                  if (variantId) {
-                    onComponentVariantChange(selectedNode.id, variantId);
+          {variantControls.map((control) => {
+            const selectVariantValue = (value: string) => {
+              const variantId = variantIdForControlValue(
+                componentDefinition,
+                selectedNode.component_instance?.variant_id ?? null,
+                control.name,
+                value
+              );
+              if (variantId) {
+                onComponentVariantChange(selectedNode.id, variantId);
+              }
+            };
+
+            return control.booleanPair ? (
+              <label className="component-variant-toggle-field" key={control.name}>
+                <span>{control.name}</span>
+                <input
+                  type="checkbox"
+                  data-testid={`inspector-component-variant-${safeTestId(control.name)}-toggle`}
+                  checked={control.selectedValue === control.booleanPair.onValue}
+                  onChange={(event) =>
+                    selectVariantValue(
+                      event.currentTarget.checked ? control.booleanPair!.onValue : control.booleanPair!.offValue
+                    )
                   }
-                }}
-              >
-                {control.values.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
+                />
+              </label>
+            ) : (
+              <label className="stacked-field" key={control.name}>
+                {control.name}
+                <select
+                  data-testid={`inspector-component-variant-${safeTestId(control.name)}`}
+                  value={control.selectedValue}
+                  onChange={(event) => selectVariantValue(event.currentTarget.value)}
+                >
+                  {control.values.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
         </section>
       ) : null}
       <InspectorAlignmentControls
