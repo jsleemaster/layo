@@ -185,6 +185,44 @@ export interface ExportedFileArchiveDownload {
   mimeType: string;
 }
 
+export interface LibraryArchiveReview {
+  originalFileId: string;
+  originalName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  components: Array<{ originalComponentId: string; name: string; nodeCount: number; conflict: boolean }>;
+  tokens: Array<{
+    originalTokenId: string;
+    name: string;
+    type: "color" | "spacing";
+    value: string;
+    conflict: boolean;
+  }>;
+}
+
+export interface ImportedLibraryArchive {
+  fileId: string;
+  originalFileId: string;
+  originalName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  componentIdMap: Record<string, string>;
+  tokenIdMap: Record<string, string>;
+}
+
+export interface ImportLibraryArchiveInput {
+  archiveBase64: string;
+  idPrefix?: string;
+}
+
+export interface ExportedLibraryArchiveDownload {
+  blob: Blob;
+  fileName: string;
+  mimeType: string;
+}
+
 export function parseDocumentPayload(payload: unknown): RendererDocument {
   if (!payload || typeof payload !== "object" || !("file" in payload)) {
     throw new Error("문서 응답에 파일이 없습니다");
@@ -230,6 +268,53 @@ export async function exportFileArchive(
   const mimeType = response.headers.get("Content-Type") ?? "application/vnd.layo.file-archive+zip";
   const fileName =
     parseContentDispositionFilename(response.headers.get("Content-Disposition")) ?? `${fileId}.layo.zip`;
+  return {
+    blob: await response.blob(),
+    fileName,
+    mimeType
+  };
+}
+
+export async function reviewLibraryArchive(
+  fileId: string,
+  archiveBase64: string,
+  fetcher: typeof fetch = fetch
+): Promise<LibraryArchiveReview> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/review`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archiveBase64 })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { review: LibraryArchiveReview }).review;
+}
+
+export async function importLibraryArchive(
+  fileId: string,
+  input: ImportLibraryArchiveInput,
+  fetcher: typeof fetch = fetch
+): Promise<ImportedLibraryArchive> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { imported: ImportedLibraryArchive }).imported;
+}
+
+export async function exportLibraryArchive(
+  fileId: string,
+  fetcher: typeof fetch = fetch
+): Promise<ExportedLibraryArchiveDownload> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/export/library`));
+  if (!response.ok) {
+    throw new Error(`문서 요청 실패: ${response.status} ${response.statusText}`.trim());
+  }
+  const mimeType = response.headers.get("Content-Type") ?? "application/vnd.layo.library-archive+zip";
+  const fileName =
+    parseContentDispositionFilename(response.headers.get("Content-Disposition")) ??
+    `${fileId}.layo-library.zip`;
   return {
     blob: await response.blob(),
     fileName,

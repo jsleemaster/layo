@@ -40,6 +40,7 @@ const COMMENT_ACTIVITY_RETENTION_LIMIT = 50;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 export const FILE_ARCHIVE_MIME_TYPE = "application/vnd.layo.file-archive+zip";
 export const PROJECT_ARCHIVE_MIME_TYPE = "application/vnd.layo.project-archive+zip";
+export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+zip";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface LayoutSpacing {
@@ -528,6 +529,60 @@ export interface ImportProjectArchiveOptions {
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
+}
+
+export interface LibraryArchiveManifest {
+  schemaVersion: 1;
+  format: "layo.library.archive";
+  exportedAt: string;
+  fileId: string;
+  name: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+}
+
+export interface ExportedLibraryArchive {
+  fileId: string;
+  name: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  mimeType: typeof LIBRARY_ARCHIVE_MIME_TYPE;
+  fileName: string;
+  archive: Buffer;
+  manifest: LibraryArchiveManifest;
+}
+
+export interface ReviewedLibraryArchive {
+  originalFileId: string;
+  originalName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  components: Array<{ originalComponentId: string; name: string; nodeCount: number; conflict: boolean }>;
+  tokens: Array<{
+    originalTokenId: string;
+    name: string;
+    type: DesignToken["type"];
+    value: string;
+    conflict: boolean;
+  }>;
+}
+
+export interface ImportedLibraryArchive {
+  fileId: string;
+  originalFileId: string;
+  originalName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  componentIdMap: Record<string, string>;
+  tokenIdMap: Record<string, string>;
+}
+
+export interface ImportLibraryArchiveOptions {
+  idPrefix?: string;
 }
 
 export class FileStorage {
@@ -1200,6 +1255,136 @@ export class FileStorage {
       documentCount: archiveProject.documents.length,
       assetCount: archiveProject.assetIds.length,
       documentIdMap
+    };
+  }
+
+  async exportLibraryArchive(fileId: string): Promise<ExportedLibraryArchive> {
+    const document = await this.readFile(fileId);
+    const tokens = document.tokens ?? [];
+    const components = document.components ?? [];
+    const assetIds = collectComponentImageAssetIds(components);
+    const assets = await Promise.all(assetIds.map((assetId) => this.readAsset(assetId)));
+    const manifest: LibraryArchiveManifest = {
+      schemaVersion: 1,
+      format: "layo.library.archive",
+      exportedAt: new Date().toISOString(),
+      fileId: document.id,
+      name: document.name,
+      componentCount: components.length,
+      tokenCount: tokens.length,
+      assetCount: assets.length
+    };
+    const library: LibraryArchivePayloadFile = {
+      fileId: document.id,
+      name: document.name,
+      tokens,
+      components
+    };
+    const entries: ZipArchiveEntry[] = [
+      jsonArchiveEntry("manifest.json", manifest),
+      jsonArchiveEntry("library.json", library),
+      ...assets.flatMap((asset) => [
+        jsonArchiveEntry(`assets/${asset.assetId}.json`, {
+          assetId: asset.assetId,
+          name: asset.name,
+          mimeType: asset.mimeType,
+          byteLength: asset.byteLength,
+          url: `/assets/${asset.assetId}`
+        } satisfies StoredAsset),
+        {
+          path: `assets/${asset.assetId}.bin`,
+          data: asset.data
+        }
+      ])
+    ];
+
+    return {
+      fileId: document.id,
+      name: document.name,
+      componentCount: components.length,
+      tokenCount: tokens.length,
+      assetCount: assets.length,
+      mimeType: LIBRARY_ARCHIVE_MIME_TYPE,
+      fileName: `${document.id}.layo-library.zip`,
+      archive: createZipArchive(entries),
+      manifest
+    };
+  }
+
+  async reviewLibraryArchive(fileId: string, archive: Buffer): Promise<ReviewedLibraryArchive> {
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const tokenConflicts = library.library.tokens.map((token) => ({
+      originalTokenId: token.id,
+      name: token.name,
+      type: token.type,
+      value: token.value,
+      conflict: hasConflictingToken(target, token)
+    }));
+    const componentConflicts = library.library.components.map((component) => ({
+      originalComponentId: component.id,
+      name: component.name,
+      nodeCount: countNodeTree(component.source_node),
+      conflict: Boolean((target.components ?? []).some((candidate) => candidate.id === component.id))
+    }));
+
+    return {
+      originalFileId: library.manifest.fileId,
+      originalName: library.manifest.name,
+      componentCount: library.library.components.length,
+      tokenCount: library.library.tokens.length,
+      assetCount: library.assetIds.length,
+      components: componentConflicts,
+      tokens: tokenConflicts
+    };
+  }
+
+  async importLibraryArchive(
+    fileId: string,
+    archive: Buffer,
+    options: ImportLibraryArchiveOptions = {}
+  ): Promise<ImportedLibraryArchive> {
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const idPrefix = options.idPrefix?.trim() ? normalizeLibraryIdPrefix(options.idPrefix) : undefined;
+    const tokenIdMap = createLibraryTokenIdMap(target, library.library.tokens, idPrefix);
+    const componentIdMap = createLibraryComponentIdMap(target, library.library.components, idPrefix);
+
+    await Promise.all(library.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
+
+    const targetTokens = [...(target.tokens ?? [])];
+    for (const token of library.library.tokens) {
+      const nextTokenId = tokenIdMap[token.id];
+      if (!nextTokenId) {
+        throw new Error(`library token missing from id map: ${token.id}`);
+      }
+      const existing = targetTokens.find((candidate) => candidate.id === nextTokenId);
+      if (!existing) {
+        targetTokens.push({ ...structuredClone(token), id: nextTokenId });
+      }
+    }
+
+    const importedComponents = library.library.components.map((component) => {
+      const nextComponentId = componentIdMap[component.id];
+      if (!nextComponentId) {
+        throw new Error(`library component missing from id map: ${component.id}`);
+      }
+      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+    });
+
+    target.tokens = targetTokens;
+    target.components = [...(target.components ?? []), ...importedComponents];
+    await this.writeFile(fileId, target);
+
+    return {
+      fileId,
+      originalFileId: library.manifest.fileId,
+      originalName: library.manifest.name,
+      componentCount: importedComponents.length,
+      tokenCount: library.library.tokens.length,
+      assetCount: library.assetIds.length,
+      componentIdMap,
+      tokenIdMap
     };
   }
 
@@ -2216,6 +2401,30 @@ function parseProjectArchiveManifest(input: unknown): ProjectArchiveManifest {
   };
 }
 
+function parseLibraryArchiveManifest(input: unknown): LibraryArchiveManifest {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive manifest");
+  }
+  const candidate = input as LibraryArchiveManifest;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported library archive schema: ${String(candidate.schemaVersion)}`);
+  }
+  if (candidate.format !== "layo.library.archive") {
+    throw new Error(`unsupported library archive format: ${String(candidate.format)}`);
+  }
+  assertSafeStorageId(candidate.fileId);
+  return {
+    schemaVersion: 1,
+    format: "layo.library.archive",
+    exportedAt: normalizeName(candidate.exportedAt, new Date(0).toISOString()),
+    fileId: candidate.fileId,
+    name: normalizeName(candidate.name, candidate.fileId),
+    componentCount: Math.max(0, Math.round(Number(candidate.componentCount) || 0)),
+    tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
+    assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0))
+  };
+}
+
 function parseDesignFileArchiveDocument(input: unknown): DesignFile {
   if (!input || typeof input !== "object") {
     throw new Error("invalid file archive document");
@@ -2232,11 +2441,79 @@ function parseDesignFileArchiveDocument(input: unknown): DesignFile {
   };
 }
 
+function parseLibraryArchivePayloadFile(input: unknown): LibraryArchivePayloadFile {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive payload");
+  }
+  const candidate = input as LibraryArchivePayloadFile;
+  assertSafeStorageId(candidate.fileId);
+  if (!Array.isArray(candidate.tokens)) {
+    throw new Error("library archive tokens are required");
+  }
+  if (!Array.isArray(candidate.components)) {
+    throw new Error("library archive components are required");
+  }
+  return {
+    fileId: candidate.fileId,
+    name: normalizeName(candidate.name, candidate.fileId),
+    tokens: candidate.tokens.map(parseLibraryArchiveToken),
+    components: candidate.components.map(parseLibraryArchiveComponent)
+  };
+}
+
+function parseLibraryArchiveToken(input: unknown): DesignToken {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive token");
+  }
+  const candidate = input as DesignToken;
+  assertSafeStorageId(candidate.id);
+  if (candidate.type !== "color" && candidate.type !== "spacing") {
+    throw new Error(`unsupported library archive token type: ${String(candidate.type)}`);
+  }
+  return {
+    id: candidate.id,
+    name: normalizeName(candidate.name, candidate.id),
+    type: candidate.type,
+    value: normalizeName(candidate.value, "")
+  };
+}
+
+function parseLibraryArchiveComponent(input: unknown): ComponentDefinition {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive component");
+  }
+  const candidate = input as ComponentDefinition;
+  assertSafeStorageId(candidate.id);
+  if (!candidate.source_node || typeof candidate.source_node !== "object") {
+    throw new Error("library archive component source node is required");
+  }
+  return {
+    id: candidate.id,
+    name: normalizeName(candidate.name, candidate.id),
+    source_node: candidate.source_node,
+    variants: Array.isArray(candidate.variants) ? candidate.variants : []
+  };
+}
+
 interface ProjectArchivePayload {
   manifest: ProjectArchiveManifest;
   project: ProjectManifest;
   documents: DesignFile[];
   documentsById: Map<string, DesignFile>;
+  assetIds: string[];
+  assets: Array<{ metadata: StoredAsset; data: Buffer }>;
+}
+
+interface LibraryArchivePayloadFile {
+  fileId: string;
+  name: string;
+  tokens: DesignToken[];
+  components: ComponentDefinition[];
+}
+
+interface LibraryArchivePayload {
+  manifest: LibraryArchiveManifest;
+  library: LibraryArchivePayloadFile;
   assetIds: string[];
   assets: Array<{ metadata: StoredAsset; data: Buffer }>;
 }
@@ -2279,6 +2556,32 @@ function readProjectArchivePayload(entries: Map<string, Buffer>): ProjectArchive
     documentsById: new Map(documents.map((document) => [document.id, document])),
     assetIds,
     assets
+  };
+}
+
+function readLibraryArchivePayload(entries: Map<string, Buffer>): LibraryArchivePayload {
+  const manifest = parseLibraryArchiveManifest(readJsonArchiveEntry(entries, "manifest.json"));
+  const library = parseLibraryArchivePayloadFile(readJsonArchiveEntry(entries, "library.json"));
+  if (library.fileId !== manifest.fileId) {
+    throw new Error(`library archive manifest mismatch: ${library.fileId}`);
+  }
+  if (library.components.length !== manifest.componentCount) {
+    throw new Error("library archive component count mismatch");
+  }
+  if (library.tokens.length !== manifest.tokenCount) {
+    throw new Error("library archive token count mismatch");
+  }
+
+  const assetIds = collectComponentImageAssetIds(library.components);
+  if (assetIds.length !== manifest.assetCount) {
+    throw new Error("library archive asset count mismatch");
+  }
+
+  return {
+    manifest,
+    library,
+    assetIds,
+    assets: readFileArchiveAssets(entries, assetIds)
   };
 }
 
@@ -2339,6 +2642,156 @@ function collectImageAssetIds(document: DesignFile): string[] {
     stack.push(...node.children);
   }
   return [...assetIds].sort();
+}
+
+function collectComponentImageAssetIds(components: ComponentDefinition[]): string[] {
+  const assetIds = new Set<string>();
+  for (const component of components) {
+    collectImageAssetIdsFromNode(component.source_node, assetIds);
+  }
+  return [...assetIds].sort();
+}
+
+function collectImageAssetIdsFromNode(node: DesignNode, assetIds: Set<string>) {
+  if (node.content.type === "image") {
+    assertSafeStorageId(node.content.asset_id);
+    assetIds.add(node.content.asset_id);
+  }
+  for (const child of node.children) {
+    collectImageAssetIdsFromNode(child, assetIds);
+  }
+}
+
+function hasConflictingToken(target: DesignFile, token: DesignToken) {
+  const existing = (target.tokens ?? []).find((candidate) => candidate.id === token.id);
+  return Boolean(existing && (existing.type !== token.type || existing.value !== token.value));
+}
+
+function normalizeLibraryIdPrefix(value: string | undefined) {
+  const prefix = value?.trim() || "library";
+  assertSafeStorageId(prefix);
+  return prefix;
+}
+
+function createLibraryTokenIdMap(
+  target: DesignFile,
+  tokens: DesignToken[],
+  idPrefix: string | undefined
+): Record<string, string> {
+  const targetTokens = target.tokens ?? [];
+  const usedIds = new Set(targetTokens.map((token) => token.id));
+  const tokenIdMap: Record<string, string> = {};
+  const conflictPrefix = idPrefix ?? "library";
+
+  for (const token of tokens) {
+    assertSafeStorageId(token.id);
+    const existing = targetTokens.find((candidate) => candidate.id === token.id);
+    if (existing && existing.type === token.type && existing.value === token.value) {
+      tokenIdMap[token.id] = token.id;
+      continue;
+    }
+    if (existing || usedIds.has(token.id)) {
+      tokenIdMap[token.id] = createAvailableLibraryId(conflictPrefix, token.id, usedIds);
+      continue;
+    }
+    usedIds.add(token.id);
+    tokenIdMap[token.id] = token.id;
+  }
+
+  return tokenIdMap;
+}
+
+function createLibraryComponentIdMap(
+  target: DesignFile,
+  components: ComponentDefinition[],
+  idPrefix: string | undefined
+): Record<string, string> {
+  const usedIds = new Set((target.components ?? []).map((component) => component.id));
+  const componentIdMap: Record<string, string> = {};
+  const conflictPrefix = idPrefix ?? "library";
+
+  for (const component of components) {
+    assertSafeStorageId(component.id);
+    const shouldPrefix = Boolean(idPrefix) || usedIds.has(component.id);
+    const nextId = shouldPrefix
+      ? createAvailableLibraryId(conflictPrefix, component.id, usedIds)
+      : component.id;
+    if (!shouldPrefix) {
+      usedIds.add(nextId);
+    }
+    componentIdMap[component.id] = nextId;
+  }
+
+  return componentIdMap;
+}
+
+function createAvailableLibraryId(prefix: string, originalId: string, usedIds: Set<string>) {
+  let candidate = `${prefix}-${originalId}`;
+  assertSafeStorageId(candidate);
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${prefix}-${originalId}-${suffix}`;
+    assertSafeStorageId(candidate);
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function remapLibraryComponent(
+  component: ComponentDefinition,
+  nextComponentId: string,
+  componentIdMap: Record<string, string>,
+  tokenIdMap: Record<string, string>
+): ComponentDefinition {
+  return {
+    ...structuredClone(component),
+    id: nextComponentId,
+    source_node: remapLibraryNode(component.source_node, componentIdMap, tokenIdMap)
+  };
+}
+
+function remapLibraryNode(
+  node: DesignNode,
+  componentIdMap: Record<string, string>,
+  tokenIdMap: Record<string, string>
+): DesignNode {
+  const nextNode = structuredClone(node);
+  if (nextNode.style.fill_token && tokenIdMap[nextNode.style.fill_token]) {
+    nextNode.style.fill_token = tokenIdMap[nextNode.style.fill_token];
+  }
+  if (nextNode.layout?.spacing_tokens) {
+    nextNode.layout = {
+      ...nextNode.layout,
+      spacing_tokens: remapLayoutSpacingTokens(nextNode.layout.spacing_tokens, tokenIdMap)
+    };
+  }
+  if (nextNode.component_instance?.definition_id && componentIdMap[nextNode.component_instance.definition_id]) {
+    nextNode.component_instance = {
+      ...nextNode.component_instance,
+      definition_id: componentIdMap[nextNode.component_instance.definition_id]
+    };
+  }
+  nextNode.children = nextNode.children.map((child) => remapLibraryNode(child, componentIdMap, tokenIdMap));
+  return nextNode;
+}
+
+function remapLayoutSpacingTokens(
+  spacingTokens: LayoutSpacingTokens,
+  tokenIdMap: Record<string, string>
+): LayoutSpacingTokens {
+  const nextSpacingTokens: LayoutSpacingTokens = { ...spacingTokens };
+  for (const key of Object.keys(nextSpacingTokens) as Array<keyof LayoutSpacingTokens>) {
+    const tokenId = nextSpacingTokens[key];
+    if (tokenId && tokenIdMap[tokenId]) {
+      nextSpacingTokens[key] = tokenIdMap[tokenId];
+    }
+  }
+  return nextSpacingTokens;
+}
+
+function countNodeTree(node: DesignNode) {
+  return countNodes([node]);
 }
 
 function parseStoredFileVersion(input: unknown, expectedFileId: string): StoredFileVersion {

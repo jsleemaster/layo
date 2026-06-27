@@ -36,8 +36,10 @@ import {
   createCommentThread,
   deleteFileVersion,
   exportFileArchive,
+  exportLibraryArchive,
   exportDesignTokensDtcg,
   importFileArchive,
+  importLibraryArchive,
   importDesignTokensDtcg,
   listCommentActivity,
   listCommentNotifications,
@@ -51,6 +53,7 @@ import {
   resolveCommentThread,
   pruneFileVersions,
   reviewFileArchive,
+  reviewLibraryArchive,
   saveFileVersion,
   setFileVersionPinned,
   subscribeToCommentEvents,
@@ -61,7 +64,8 @@ import {
   type CommentThread,
   type FileArchiveReview,
   type FileVersionChangeSummary,
-  type FileVersionSummary
+  type FileVersionSummary,
+  type LibraryArchiveReview
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
 import { uploadImageAsset, type UploadedAsset } from "./asset-api";
@@ -535,6 +539,12 @@ interface FileVersionPreviewState {
 
 interface FileArchiveReviewState {
   review: FileArchiveReview;
+  archiveBase64: string;
+  sourceFileName: string;
+}
+
+interface LibraryArchiveReviewState {
+  review: LibraryArchiveReview;
   archiveBase64: string;
   sourceFileName: string;
 }
@@ -4147,6 +4157,9 @@ export function App() {
   const [fileArchiveReview, setFileArchiveReview] = useState<FileArchiveReviewState | null>(null);
   const [fileArchiveImportName, setFileArchiveImportName] = useState("");
   const [fileArchiveStatus, setFileArchiveStatus] = useState("아카이브 대기 중");
+  const [libraryArchiveReview, setLibraryArchiveReview] = useState<LibraryArchiveReviewState | null>(null);
+  const [libraryArchivePrefix, setLibraryArchivePrefix] = useState("shared");
+  const [libraryArchiveStatus, setLibraryArchiveStatus] = useState("라이브러리 아카이브 대기 중");
   const [projectArchiveReview, setProjectArchiveReview] = useState<ProjectArchiveReviewState | null>(null);
   const [projectArchiveImportName, setProjectArchiveImportName] = useState("");
   const [projectArchiveStatus, setProjectArchiveStatus] = useState("프로젝트 아카이브 대기 중");
@@ -4199,6 +4212,7 @@ export function App() {
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
   const manifestFileInputRef = useRef<HTMLInputElement | null>(null);
   const fileArchiveInputRef = useRef<HTMLInputElement | null>(null);
+  const libraryArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const projectArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementNodeIdRef = useRef<string | null>(null);
@@ -6929,6 +6943,90 @@ export function App() {
     }
   };
 
+  const exportCurrentLibraryArchive = async () => {
+    if (!currentProject) {
+      setLibraryArchiveStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      const archive = await exportLibraryArchive(currentProject.currentDocumentId);
+      downloadBlob(archive.blob, archive.fileName);
+      setLibraryArchiveStatus(`${archive.fileName} 내보냄`);
+      setProjectStatus("라이브러리 아카이브 내보냄");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "라이브러리 아카이브를 내보내지 못했습니다";
+      setLibraryArchiveStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
+  const reviewSelectedLibraryArchive = async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (!currentProject) {
+      setLibraryArchiveStatus("프로젝트 없음");
+      input.value = "";
+      return;
+    }
+
+    try {
+      setLibraryArchiveStatus("라이브러리 아카이브 검토 중");
+      const archiveBase64 = await readFileAsBase64(file);
+      const review = await reviewLibraryArchive(currentProject.currentDocumentId, archiveBase64);
+      setLibraryArchiveReview({
+        review,
+        archiveBase64,
+        sourceFileName: file.name
+      });
+      setLibraryArchivePrefix("shared");
+      setLibraryArchiveStatus(`${review.originalName} 라이브러리 검토됨`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "라이브러리 아카이브를 검토하지 못했습니다";
+      setLibraryArchiveReview(null);
+      setLibraryArchiveStatus(message);
+    } finally {
+      input.value = "";
+    }
+  };
+
+  const cancelLibraryArchiveImport = () => {
+    setLibraryArchiveReview(null);
+    setLibraryArchiveStatus("라이브러리 가져오기 취소됨");
+  };
+
+  const importReviewedLibraryArchive = async () => {
+    if (!currentProject) {
+      setLibraryArchiveStatus("프로젝트 없음");
+      return;
+    }
+    if (!libraryArchiveReview) {
+      setLibraryArchiveStatus("검토된 라이브러리 아카이브 없음");
+      return;
+    }
+
+    try {
+      setLibraryArchiveStatus("라이브러리 가져오는 중");
+      const imported = await importLibraryArchive(currentProject.currentDocumentId, {
+        archiveBase64: libraryArchiveReview.archiveBase64,
+        idPrefix: libraryArchivePrefix.trim() || undefined
+      });
+      await loadProjectDocument(currentProject, projects);
+      setLibraryArchiveReview(null);
+      setLibraryArchiveStatus(
+        `라이브러리 가져옴 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
+      );
+      setProjectStatus("라이브러리 가져옴");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "라이브러리 아카이브를 가져오지 못했습니다";
+      setLibraryArchiveStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
   const exportCurrentProjectArchive = async () => {
     if (!currentProject) {
       setProjectArchiveStatus("프로젝트 없음");
@@ -8265,6 +8363,84 @@ export function App() {
                         onClick={() => void importReviewedFileArchive()}
                       >
                         검토한 아카이브 가져오기
+                      </button>
+                    </div>
+                  ) : null}
+                </section>
+                <section
+                  className="file-archive-panel"
+                  data-testid="library-archive-panel"
+                  aria-label="라이브러리 아카이브"
+                >
+                  <div className="file-archive-heading">
+                    <strong>라이브러리 아카이브</strong>
+                  </div>
+                  <div className="project-actions file-archive-actions">
+                    <button type="button" onClick={() => void exportCurrentLibraryArchive()} disabled={!currentProject}>
+                      현재 파일 라이브러리 내보내기
+                    </button>
+                    <button type="button" onClick={() => libraryArchiveInputRef.current?.click()}>
+                      라이브러리 가져오기
+                    </button>
+                  </div>
+                  <input
+                    ref={libraryArchiveInputRef}
+                    className="visually-hidden"
+                    data-testid="library-archive-upload"
+                    type="file"
+                    accept=".layo-library.zip,.zip,application/zip,application/vnd.layo.library-archive+zip"
+                    onChange={(event) => void reviewSelectedLibraryArchive(event)}
+                  />
+                  <div className="project-status" data-testid="library-archive-status">
+                    {libraryArchiveStatus}
+                  </div>
+                  {libraryArchiveReview ? (
+                    <div className="file-archive-review" data-testid="library-archive-review">
+                      <div className="file-archive-review-header">
+                        <span>
+                          <strong>가져오기 전 라이브러리 검토</strong>
+                          <span>
+                            {libraryArchiveReview.review.originalName} · {libraryArchiveReview.sourceFileName}
+                          </span>
+                        </span>
+                        <button type="button" onClick={cancelLibraryArchiveImport}>
+                          검토 취소
+                        </button>
+                      </div>
+                      <div className="file-archive-review-body">
+                        <strong>{libraryArchiveReview.review.originalName}</strong>
+                        <span>
+                          컴포넌트 {libraryArchiveReview.review.componentCount}개 · 토큰{" "}
+                          {libraryArchiveReview.review.tokenCount}개 · 에셋 {libraryArchiveReview.review.assetCount}개
+                        </span>
+                        <span>원본 파일 {libraryArchiveReview.review.originalFileId}</span>
+                        {libraryArchiveReview.review.components.map((component) => (
+                          <span key={component.originalComponentId}>
+                            {component.name} · 객체 {component.nodeCount}개
+                            {component.conflict ? " · 충돌" : ""}
+                          </span>
+                        ))}
+                        {libraryArchiveReview.review.tokens.map((token) => (
+                          <span key={token.originalTokenId}>
+                            {token.name} · {token.type}
+                            {token.conflict ? " · 충돌" : ""}
+                          </span>
+                        ))}
+                      </div>
+                      <label>
+                        가져올 ID 접두어
+                        <input
+                          data-testid="library-archive-prefix"
+                          value={libraryArchivePrefix}
+                          onChange={(event) => setLibraryArchivePrefix(event.currentTarget.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="file-archive-import"
+                        onClick={() => void importReviewedLibraryArchive()}
+                      >
+                        검토한 라이브러리 가져오기
                       </button>
                     </div>
                   ) : null}

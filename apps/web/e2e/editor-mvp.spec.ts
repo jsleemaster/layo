@@ -300,6 +300,66 @@ test("file panel exports a Layo archive and reviews it before import", async ({ 
   await expect(page.getByTestId("project-name")).toHaveValue("아카이브 복원본");
 });
 
+test("file panel exports a shared library archive and imports reusable components and tokens", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const commands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ]
+    }
+  });
+  expect(commands.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "현재 파일 라이브러리 내보내기" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(`${documentId}.layo-library.zip`);
+  const archivePath = await download.path();
+  if (!archivePath) {
+    throw new Error("library archive download path missing");
+  }
+
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  await page.getByTestId("library-archive-upload").setInputFiles(archivePath);
+  const review = page.getByTestId("library-archive-review");
+  await expect(review).toContainText("가져오기 전 라이브러리 검토");
+  await expect(review).toContainText("Card");
+  await expect(review).toContainText("Brand / Primary");
+  await page.getByTestId("library-archive-prefix").fill("shared");
+  await page.getByRole("button", { name: "검토한 라이브러리 가져오기" }).click();
+  await expect(page.getByTestId("library-archive-status")).toContainText("라이브러리 가져옴");
+  const targetProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${targetProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const targetDocumentId = (await projectResponse.json()).project.currentDocumentId as string;
+  const response = await page.request.get(`http://127.0.0.1:4317/files/${targetDocumentId}`);
+  expect(response.ok()).toBeTruthy();
+  const payload = await response.json();
+  expect(payload.file.components).toEqual([expect.objectContaining({ id: "shared-component-card", name: "Card" })]);
+  expect(payload.file.tokens).toEqual([
+    expect.objectContaining({ id: "color-brand-primary", value: "#2563eb" })
+  ]);
+});
+
 test("file panel exports a project archive and reviews every document before import", async ({ page }) => {
   const { projectId } = await createProjectFromEmptyState(page);
   const secondDocument = await page.request.post(`http://127.0.0.1:4317/projects/${projectId}/documents`, {

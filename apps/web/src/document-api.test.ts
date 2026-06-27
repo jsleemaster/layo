@@ -4,7 +4,9 @@ import {
   createCommentThread,
   deleteFileVersion,
   exportFileArchive,
+  exportLibraryArchive,
   importFileArchive,
+  importLibraryArchive,
   listCommentActivity,
   listCommentNotifications,
   listCommentThreads,
@@ -17,6 +19,7 @@ import {
   restoreFileVersion,
   pruneFileVersions,
   reviewFileArchive,
+  reviewLibraryArchive,
   saveFileVersion,
   setFileVersionPinned,
   subscribeToCommentEvents,
@@ -349,6 +352,87 @@ describe("file version API helpers", () => {
       [expect.stringContaining("/files/import/archive/review"), "POST"],
       [expect.stringContaining("/files/import/archive"), "POST"],
       [expect.stringContaining("/files/document-1/export/archive"), "GET"]
+    ]);
+  });
+
+  test("reviews imports and exports library archives", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/files/document-1/import/library/review" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ archiveBase64: "UEs=" });
+        return jsonResponse({
+          review: {
+            originalFileId: "source-file",
+            originalName: "Source",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            components: [{ originalComponentId: "component-card", name: "Card", nodeCount: 1, conflict: false }],
+            tokens: [
+              {
+                originalTokenId: "color-brand-primary",
+                name: "Brand / Primary",
+                type: "color",
+                value: "#2563eb",
+                conflict: false
+              }
+            ]
+          }
+        });
+      }
+
+      if (pathname === "/files/document-1/import/library" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ archiveBase64: "UEs=", idPrefix: "shared" });
+        return jsonResponse({
+          imported: {
+            fileId: "document-1",
+            originalFileId: "source-file",
+            originalName: "Source",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            componentIdMap: { "component-card": "shared-component-card" },
+            tokenIdMap: { "color-brand-primary": "color-brand-primary" }
+          }
+        });
+      }
+
+      if (pathname === "/files/document-1/export/library") {
+        return new Response(new Blob([new Uint8Array([0x50, 0x4b])]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.layo.library-archive+zip",
+            "Content-Disposition": 'attachment; filename="document-1.layo-library.zip"'
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(reviewLibraryArchive("document-1", "UEs=", fetcher as typeof fetch)).resolves.toMatchObject({
+      componentCount: 1,
+      tokens: [expect.objectContaining({ originalTokenId: "color-brand-primary" })]
+    });
+    await expect(
+      importLibraryArchive("document-1", { archiveBase64: "UEs=", idPrefix: "shared" }, fetcher as typeof fetch)
+    ).resolves.toMatchObject({
+      fileId: "document-1",
+      componentIdMap: { "component-card": "shared-component-card" }
+    });
+    await expect(exportLibraryArchive("document-1", fetcher as typeof fetch)).resolves.toMatchObject({
+      fileName: "document-1.layo-library.zip",
+      mimeType: "application/vnd.layo.library-archive+zip"
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/files/document-1/import/library/review"), "POST"],
+      [expect.stringContaining("/files/document-1/import/library"), "POST"],
+      [expect.stringContaining("/files/document-1/export/library"), "GET"]
     ]);
   });
 

@@ -403,6 +403,182 @@ describe("FileStorage", () => {
     expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
   });
 
+  test("library archive exports reviews and imports components tokens and assets without overwriting ids", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const target = await storageWithDocument(path.join(tempRoot, "target"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "library.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+
+    await source.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: {
+            id: "color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        {
+          type: "create_token",
+          token: {
+            id: "spacing-card-gap",
+            name: "Spacing / Card Gap",
+            type: "spacing",
+            value: "24px"
+          }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+        {
+          type: "create_component",
+          nodeId: "library-card",
+          componentId: "component-card",
+          name: "Card"
+        }
+      ] as any
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "library-image",
+      kind: "image",
+      name: "Library Image",
+      transform: { x: 60, y: 80, rotation: 0 },
+      size: { width: 20, height: 20 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    await source.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_component",
+          nodeId: "library-image",
+          componentId: "component-image",
+          name: "Image Tile"
+        }
+      ] as any
+    });
+    await target.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: {
+            id: "color-brand-primary",
+            name: "Existing Brand",
+            type: "color",
+            value: "#111827"
+          }
+        }
+      ] as any
+    });
+
+    const exported = await source.exportLibraryArchive("sample-file");
+    expect(exported).toMatchObject({
+      fileId: "sample-file",
+      name: "테스트 문서",
+      componentCount: 2,
+      tokenCount: 2,
+      assetCount: 1,
+      mimeType: "application/vnd.layo.library-archive+zip",
+      fileName: "sample-file.layo-library.zip"
+    });
+    expect(exported.archive.subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const review = await target.reviewLibraryArchive("sample-file", exported.archive);
+    expect(review).toMatchObject({
+      originalFileId: "sample-file",
+      originalName: "테스트 문서",
+      componentCount: 2,
+      tokenCount: 2,
+      assetCount: 1,
+      components: [
+        expect.objectContaining({
+          originalComponentId: "component-card",
+          name: "Card",
+          conflict: false
+        }),
+        expect.objectContaining({
+          originalComponentId: "component-image",
+          name: "Image Tile",
+          conflict: false
+        })
+      ],
+      tokens: [
+        expect.objectContaining({
+          originalTokenId: "color-brand-primary",
+          name: "Brand / Primary",
+          conflict: true
+        }),
+        expect.objectContaining({
+          originalTokenId: "spacing-card-gap",
+          name: "Spacing / Card Gap",
+          conflict: false
+        })
+      ]
+    });
+    expect((await target.readFile("sample-file")).components ?? []).toEqual([]);
+
+    const imported = await target.importLibraryArchive("sample-file", exported.archive, {
+      idPrefix: "shared"
+    });
+    expect(imported).toMatchObject({
+      fileId: "sample-file",
+      originalFileId: "sample-file",
+      componentCount: 2,
+      tokenCount: 2,
+      assetCount: 1,
+      componentIdMap: {
+        "component-card": "shared-component-card",
+        "component-image": "shared-component-image"
+      },
+      tokenIdMap: {
+        "color-brand-primary": "shared-color-brand-primary",
+        "spacing-card-gap": "spacing-card-gap"
+      }
+    });
+
+    const targetDocument = await target.readFile("sample-file");
+    expect(targetDocument.tokens?.map((token) => [token.id, token.value])).toEqual([
+      ["color-brand-primary", "#111827"],
+      ["shared-color-brand-primary", "#2563eb"],
+      ["spacing-card-gap", "24px"]
+    ]);
+    expect(targetDocument.components?.map((component) => component.id)).toEqual([
+      "shared-component-card",
+      "shared-component-image"
+    ]);
+    expect(targetDocument.components?.[0].source_node.style.fill_token).toBe("shared-color-brand-primary");
+    expect(targetDocument.components?.[1].source_node.content).toMatchObject({
+      type: "image",
+      asset_id: asset.assetId
+    });
+    expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
