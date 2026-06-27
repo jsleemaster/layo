@@ -13,6 +13,7 @@ import {
   resolveCommentThread,
   restoreFileVersion,
   saveFileVersion,
+  subscribeToCommentEvents,
   summarizeDocumentChanges
 } from "./document-api";
 
@@ -202,6 +203,68 @@ describe("parseDocumentPayload", () => {
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/comments/activity?viewerId="), "GET"]
     ]);
+  });
+
+  test("subscribes to live comment events with EventSource", () => {
+    const originalEventSource = globalThis.EventSource;
+    const createdSources: FakeEventSource[] = [];
+    class FakeEventSource extends EventTarget {
+      closed = false;
+
+      constructor(readonly url: string) {
+        super();
+        createdSources.push(this);
+      }
+
+      close() {
+        this.closed = true;
+      }
+    }
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    try {
+      const events: unknown[] = [];
+      const unsubscribe = subscribeToCommentEvents({
+        fileId: "sample-file",
+        viewerId: "사용자",
+        onCommentEvent: (event) => events.push(event)
+      });
+
+      expect(createdSources).toHaveLength(1);
+      const source = createdSources[0];
+      const url = new URL(source.url, "http://127.0.0.1:4317");
+      expect(url.pathname).toBe("/comments/events");
+      expect(url.searchParams.get("fileId")).toBe("sample-file");
+      expect(url.searchParams.get("viewerId")).toBe("사용자");
+
+      source.dispatchEvent(
+        new MessageEvent("comment", {
+          data: JSON.stringify({
+            schemaVersion: 1,
+            type: "created",
+            fileId: "sample-file",
+            threadId: "comment-1",
+            viewerId: "사용자",
+            createdAt: "2026-06-27T00:00:00.000Z"
+          })
+        })
+      );
+      expect(events).toEqual([
+        {
+          schemaVersion: 1,
+          type: "created",
+          fileId: "sample-file",
+          threadId: "comment-1",
+          viewerId: "사용자",
+          createdAt: "2026-06-27T00:00:00.000Z"
+        }
+      ]);
+
+      unsubscribe();
+      expect(source.closed).toBe(true);
+    } finally {
+      globalThis.EventSource = originalEventSource;
+    }
   });
 });
 

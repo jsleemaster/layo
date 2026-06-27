@@ -105,6 +105,24 @@ export interface CommentActivityFeed {
   events: CommentActivityEvent[];
 }
 
+export type CommentLiveEventType = "created" | "replied" | "resolved" | "read";
+
+export interface CommentLiveEvent {
+  schemaVersion: 1;
+  type: CommentLiveEventType;
+  fileId: string;
+  threadId?: string;
+  viewerId?: string;
+  createdAt: string;
+}
+
+export interface SubscribeToCommentEventsOptions {
+  fileId?: string;
+  viewerId?: string;
+  onCommentEvent: (event: CommentLiveEvent) => void;
+  onError?: () => void;
+}
+
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
@@ -313,6 +331,46 @@ export async function markFileCommentsRead(
   });
   const payload = await readDocumentJson(response);
   return (payload as { threads: CommentThread[] }).threads;
+}
+
+export function subscribeToCommentEvents(options: SubscribeToCommentEventsOptions): () => void {
+  if (typeof EventSource === "undefined") {
+    return () => {};
+  }
+
+  const params = new URLSearchParams();
+  if (options.viewerId?.trim()) {
+    params.set("viewerId", options.viewerId);
+  }
+  if (options.fileId?.trim()) {
+    params.set("fileId", options.fileId);
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const source = new EventSource(apiUrl(`/comments/events${query}`));
+  const handleComment = (message: MessageEvent<string>) => {
+    try {
+      const event = JSON.parse(message.data) as Partial<CommentLiveEvent>;
+      if (event.schemaVersion !== 1 || typeof event.fileId !== "string") {
+        return;
+      }
+      options.onCommentEvent(event as CommentLiveEvent);
+    } catch {
+      // Ignore malformed stream messages. EventSource will keep the connection alive.
+    }
+  };
+
+  source.addEventListener("comment", handleComment as EventListener);
+  if (options.onError) {
+    source.addEventListener("error", options.onError);
+  }
+
+  return () => {
+    source.removeEventListener("comment", handleComment as EventListener);
+    if (options.onError) {
+      source.removeEventListener("error", options.onError);
+    }
+    source.close();
+  };
 }
 
 export async function summarizeDocumentChanges(

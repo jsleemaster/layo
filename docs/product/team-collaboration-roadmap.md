@@ -50,6 +50,9 @@ deployment details in `docs/deployment/collaboration.md`.
 - Open editor sessions periodically refresh comment threads, local notification
   summaries, and retained activity so comments created through another browser,
   HTTP client, MCP client, or agent appear in the file panel without a reload.
+- Open editor sessions also subscribe to a process-local SSE comment event
+  stream so comment create, reply, resolve, and read mutations refresh the
+  current file without waiting for the polling fallback.
 - A retained local comment activity feed records create, reply, and resolve
   events in comment sidecars and exposes recent project/file activity through
   storage, HTTP, MCP, web API helpers, and the file panel.
@@ -140,13 +143,14 @@ Exit criteria:
 ## Later Team Features
 
 - Invite links and one-time join flows.
-- Full live comment sync, websocket/SSE notification delivery, external
-  notification channels, and team activity feeds beyond
+- Full CRDT-backed live comment editing, cross-process/pubsub comment event
+  fanout for deployed multi-instance servers, external notification channels,
+  and team activity feeds beyond
   the landed selected-node comment thread, reply, viewport bubble, persisted
   mention, structured local team-member mention target, local unread/read
   state, local project/file unread summary, local viewer-targeted mention
-  notification counts, browser-delivered local notification/activity refresh,
-  and retained local activity feed foundation.
+  notification counts, browser polling fallback, process-local SSE event
+  delivery, and retained local activity feed foundation.
 - Named checkpoints and activity history.
 - Branch, review, and merge flows for design changes.
 - Document-level permission policies beyond relay connection roles.

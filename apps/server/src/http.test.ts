@@ -513,6 +513,47 @@ describe("HTTP server", () => {
     });
   });
 
+  test("streams comment mutation events to subscribed clients", async () => {
+    const server = await createServerWithDocument();
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const stream = await fetch(
+        `${address}/comments/events?viewerId=${encodeURIComponent("사용자")}&fileId=sample-file`,
+        { signal: controller.signal }
+      );
+      expect(stream.status).toBe(200);
+      expect(stream.headers.get("content-type")).toContain("text/event-stream");
+      expect(stream.headers.get("access-control-allow-origin")).toBe("*");
+
+      const eventPromise = readCommentStreamEvent(stream);
+      const created = await fetch(`${address}/files/sample-file/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nodeId: "text-1",
+          body: "@사용자 SSE 확인",
+          authorName: "디자인 팀",
+          mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+        })
+      });
+      expect(created.status).toBe(200);
+
+      const event = await eventPromise;
+      expect(event).toMatchObject({
+        schemaVersion: 1,
+        type: "created",
+        fileId: "sample-file",
+        viewerId: "사용자"
+      });
+      expect(event.threadId).toMatch(/^comment-/);
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  });
+
   test("updates image node assets and persists replacement metadata", async () => {
     const server = await createServerWithDocument();
 
@@ -910,3 +951,42 @@ describe("HTTP server", () => {
     expect(file.json().file.tokens).toEqual(imported.json().tokens);
   });
 });
+
+async function readCommentStreamEvent(response: Response): Promise<Record<string, unknown>> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("comment event stream has no readable body");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const deadline = Date.now() + 3_000;
+
+  while (Date.now() < deadline) {
+    const result = await Promise.race([
+      reader.read(),
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
+        setTimeout(() => reject(new Error("timed out waiting for comment event")), 3_000)
+      )
+    ]);
+    if (result.done) {
+      break;
+    }
+    buffer += decoder.decode(result.value, { stream: true });
+    const blocks = buffer.split("\n\n");
+    buffer = blocks.pop() ?? "";
+    for (const block of blocks) {
+      if (!block.includes("event: comment")) {
+        continue;
+      }
+      const data = block
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trim())
+        .join("\n");
+      return JSON.parse(data) as Record<string, unknown>;
+    }
+  }
+
+  throw new Error("comment event was not emitted");
+}

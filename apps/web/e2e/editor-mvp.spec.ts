@@ -1513,6 +1513,89 @@ test("file panel receives externally created comment notifications without reloa
   await expect(feed).toContainText("@사용자 외부 알림 확인");
 });
 
+test("file panel receives externally created comment notifications through the event stream", async ({
+  page
+}) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoCommentEventCount?: number;
+      __layoEventSourceUrls?: string[];
+      __layoSuppressedCommentPolling?: boolean;
+    };
+    const NativeEventSource = window.EventSource;
+    const nativeSetInterval = window.setInterval.bind(window);
+
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === 2_000) {
+        instrumentedWindow.__layoSuppressedCommentPolling = true;
+        return 0;
+      }
+      return nativeSetInterval(handler, timeout, ...args);
+    }) as typeof window.setInterval;
+
+    class InstrumentedEventSource extends NativeEventSource {
+      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
+        super(url, eventSourceInitDict);
+        instrumentedWindow.__layoEventSourceUrls = [
+          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
+          String(url)
+        ];
+        this.addEventListener("comment", () => {
+          instrumentedWindow.__layoCommentEventCount =
+            (instrumentedWindow.__layoCommentEventCount ?? 0) + 1;
+        });
+      }
+    }
+
+    window.EventSource = InstrumentedEventSource;
+  });
+
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await openFilePanel(page);
+  const summary = page.getByTestId("comment-notification-summary");
+  const feed = page.getByTestId("comment-activity-feed");
+  await expect(summary).toContainText("읽지 않은 코멘트 없음");
+  await expect(feed).toContainText("최근 코멘트 활동 없음");
+  await page.waitForFunction(
+    ({ documentId: expectedDocumentId }) => {
+      const instrumentedWindow = window as Window & {
+        __layoEventSourceUrls?: string[];
+        __layoSuppressedCommentPolling?: boolean;
+      };
+      return (
+        instrumentedWindow.__layoSuppressedCommentPolling === true &&
+        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+          const parsedUrl = new URL(url, window.location.href);
+          return (
+            parsedUrl.pathname === "/comments/events" &&
+            parsedUrl.searchParams.get("fileId") === expectedDocumentId
+          );
+        })
+      );
+    },
+    { documentId }
+  );
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "@사용자 이벤트 스트림 확인",
+      authorName: "디자인 팀",
+      mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await page.waitForFunction(() => {
+    const instrumentedWindow = window as Window & { __layoCommentEventCount?: number };
+    return (instrumentedWindow.__layoCommentEventCount ?? 0) > 0;
+  });
+  await expect(summary).toContainText("읽지 않은 코멘트 1개", { timeout: 1_200 });
+  await expect(summary).toContainText("나를 멘션 1개");
+  await expect(feed).toContainText("@사용자 이벤트 스트림 확인", { timeout: 1_200 });
+});
+
 test("file panel shows retained recent comment activity", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

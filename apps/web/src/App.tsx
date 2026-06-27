@@ -46,6 +46,7 @@ import {
   restoreFileVersion,
   resolveCommentThread,
   saveFileVersion,
+  subscribeToCommentEvents,
   summarizeDocumentChanges,
   type CommentActivityFeed,
   type CommentMentionTarget,
@@ -4247,6 +4248,28 @@ export function App() {
     }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
 
     return () => window.clearInterval(intervalId);
+  }, [currentProject?.currentDocumentId]);
+
+  useEffect(() => {
+    const fileId = currentProject?.currentDocumentId;
+    if (!fileId) {
+      return;
+    }
+
+    return subscribeToCommentEvents({
+      fileId,
+      viewerId: LOCAL_COMMENT_VIEWER_ID,
+      onCommentEvent: (event) => {
+        if (event.fileId !== fileId) {
+          return;
+        }
+        void Promise.all([
+          refreshCommentThreads(fileId),
+          refreshCommentNotifications(),
+          refreshCommentActivity()
+        ]);
+      }
+    });
   }, [currentProject?.currentDocumentId]);
 
   useEffect(() => {
