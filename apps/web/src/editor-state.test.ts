@@ -3736,6 +3736,95 @@ describe("editor state commands", () => {
     });
   });
 
+  test("variant source tree switches preserve compatible style and geometry overrides", () => {
+    const document = sampleDocument();
+    const primarySource = structuredClone(document.pages[0].children[0]);
+    primarySource.children[0].transform = { x: 32, y: 40, rotation: 0 };
+    primarySource.children[0].size = { width: 260, height: 48 };
+    primarySource.children[0].style = {
+      ...primarySource.children[0].style,
+      stroke: "#111827",
+      stroke_width: 1,
+      opacity: 1
+    };
+    const secondarySource = structuredClone(document.pages[0].children[0]);
+    secondarySource.children[0].transform = { x: 20, y: 28, rotation: 0 };
+    secondarySource.children[0].size = { width: 180, height: 36 };
+    secondarySource.children[0].style = {
+      ...secondarySource.children[0].style,
+      stroke: "#475569",
+      stroke_width: 2,
+      opacity: 0.8
+    };
+    document.components = [
+      {
+        id: "component-1",
+        name: "Card",
+        source_node: structuredClone(document.pages[0].children[0]),
+        variants: [
+          {
+            id: "variant-primary",
+            name: "Primary",
+            properties: [{ name: "variant", value: "primary" }],
+            source_node: primarySource
+          },
+          {
+            id: "variant-secondary",
+            name: "Secondary",
+            properties: [{ name: "variant", value: "secondary" }],
+            source_node: secondarySource
+          }
+        ]
+      } as any
+    ];
+
+    const instance = executeEditorCommand(createEditorState(document), {
+      type: "create_component_instance",
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+    const restyled = executeEditorCommand(instance, {
+      type: "set_node_style",
+      nodeId: "instance-1__text-1",
+      style: {
+        fill: "#111827",
+        stroke: "#7c3aed",
+        stroke_width: 3,
+        opacity: 0.62
+      }
+    });
+    const resized = executeEditorCommand(restyled, {
+      type: "update_node_geometry",
+      nodeId: "instance-1__text-1",
+      patch: { x: 44, y: 68, width: 310, height: 72 }
+    });
+    const switched = executeEditorCommand(resized, {
+      type: "set_component_instance_variant",
+      nodeId: "instance-1",
+      variantId: "variant-secondary"
+    });
+
+    expect(findNodeById(switched.document, "instance-1__text-1")).toMatchObject({
+      transform: { x: 44, y: 68 },
+      size: { width: 310, height: 72 },
+      style: { stroke: "#7c3aed", stroke_width: 3, opacity: 0.62 }
+    });
+    expect(findNodeById(switched.document, "instance-1")?.component_instance?.overrides).toEqual(
+      expect.arrayContaining([
+        { node_id: "text-1", field: "stroke", value: "#7c3aed" },
+        { node_id: "text-1", field: "stroke_width", value: "3" },
+        { node_id: "text-1", field: "opacity", value: "0.62" },
+        { node_id: "text-1", field: "x", value: "44" },
+        { node_id: "text-1", field: "y", value: "68" },
+        { node_id: "text-1", field: "width", value: "310" },
+        { node_id: "text-1", field: "height", value: "72" }
+      ])
+    );
+  });
+
   test("sets component definition variants and resets invalid instance selections with undo and redo", () => {
     const document = sampleDocument();
     document.components = [

@@ -197,6 +197,23 @@ export interface ComponentInstance {
   detached: boolean;
 }
 
+type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "opacity";
+type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
+
+const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
+  "fill",
+  "stroke",
+  "stroke_width",
+  "opacity"
+];
+const componentInstanceGeometryOverrideFields: ComponentInstanceGeometryOverrideField[] = [
+  "x",
+  "y",
+  "width",
+  "height"
+];
+const nullComponentOverrideValue = "__layo_component_override_null__";
+
 export type CodeComponentMappingImportMode = "named" | "default";
 export type CodeComponentMappingPropType = "string";
 export type CodeComponentMappingSourceField = "text";
@@ -1807,6 +1824,7 @@ export class FileStorage {
     };
     applyConstraintsAfterParentResize(node, previousSize);
     relayoutDesignFile(document);
+    syncComponentInstanceGeometryOverrides(document, nodeId, patch);
 
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
@@ -3542,31 +3560,111 @@ function syncComponentInstanceTextOverride(document: DesignFile, nodeId: string,
 function syncComponentInstanceStyleOverride(
   document: DesignFile,
   nodeId: string,
-  field: "fill",
-  value: string
+  field: ComponentInstanceStyleOverrideField,
+  value: string | number | null
+): void {
+  syncComponentInstanceStyleOverrides(document, nodeId, { [field]: value } as Partial<DesignNode["style"]>, [field]);
+}
+
+function syncComponentInstanceStyleOverrides(
+  document: DesignFile,
+  nodeId: string,
+  style: Partial<DesignNode["style"]>,
+  fields: ComponentInstanceStyleOverrideField[] = componentInstanceStyleOverrideFields
 ): void {
   const owner = findComponentInstanceOwner(document, nodeId);
   if (!owner?.instance.component_instance) {
     return;
   }
 
-  const sourceValue = findComponentSourceStyleValue(document, owner.instance, owner.sourceNodeId, field);
-  if (sourceValue === null) {
+  const existingOverrides = owner.instance.component_instance.overrides ?? [];
+  const fieldsToSync = fields.filter((field) => Object.prototype.hasOwnProperty.call(style, field));
+  if (fieldsToSync.length === 0) {
     return;
   }
 
-  const existingOverrides = owner.instance.component_instance.overrides ?? [];
   const nextOverrides = existingOverrides.filter(
-    (override) => !(override.node_id === owner.sourceNodeId && override.field === field)
+    (override) =>
+      !(
+        override.node_id === owner.sourceNodeId &&
+        fieldsToSync.includes(override.field as ComponentInstanceStyleOverrideField)
+      )
   );
-  if (value !== sourceValue) {
-    nextOverrides.push({ node_id: owner.sourceNodeId, field, value });
+  for (const field of fieldsToSync) {
+    const sourceValue = findComponentSourceStyleValue(document, owner.instance, owner.sourceNodeId, field);
+    if (sourceValue === undefined) {
+      continue;
+    }
+    const value = style[field] as string | number | null;
+    if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
+      nextOverrides.push({
+        node_id: owner.sourceNodeId,
+        field,
+        value: serializeComponentOverrideValue(value)
+      });
+    }
   }
 
   owner.instance.component_instance = {
     ...owner.instance.component_instance,
     overrides: nextOverrides
   };
+}
+
+function syncComponentInstanceGeometryOverrides(document: DesignFile, nodeId: string, patch: GeometryPatch): void {
+  const owner = findComponentInstanceOwner(document, nodeId);
+  if (!owner?.instance.component_instance) {
+    return;
+  }
+
+  const node = findNodeById(document, nodeId);
+  if (!node) {
+    return;
+  }
+
+  const fieldsToSync = componentInstanceGeometryOverrideFields.filter((field) =>
+    Object.prototype.hasOwnProperty.call(patch, field)
+  );
+  if (owner.instance.id === nodeId) {
+    const placementFields = new Set<ComponentInstanceGeometryOverrideField>(["x", "y"]);
+    const sizeFieldsOnly = fieldsToSync.filter((field) => !placementFields.has(field));
+    fieldsToSync.splice(0, fieldsToSync.length, ...sizeFieldsOnly);
+  }
+  if (fieldsToSync.length === 0) {
+    return;
+  }
+
+  const existingOverrides = owner.instance.component_instance.overrides ?? [];
+  const nextOverrides = existingOverrides.filter(
+    (override) =>
+      !(
+        override.node_id === owner.sourceNodeId &&
+        fieldsToSync.includes(override.field as ComponentInstanceGeometryOverrideField)
+      )
+  );
+  for (const field of fieldsToSync) {
+    const sourceValue = findComponentSourceGeometryValue(document, owner.instance, owner.sourceNodeId, field);
+    if (sourceValue === undefined) {
+      continue;
+    }
+    const value = geometryOverrideValue(node, field);
+    if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
+      nextOverrides.push({
+        node_id: owner.sourceNodeId,
+        field,
+        value: serializeComponentOverrideValue(value)
+      });
+    }
+  }
+
+  owner.instance.component_instance = {
+    ...owner.instance.component_instance,
+    overrides: nextOverrides
+  };
+}
+
+function serializeComponentOverrideValue(value: string | number | null): string {
+  return value === null ? nullComponentOverrideValue : String(value);
 }
 
 function findComponentInstanceOwner(
@@ -3644,13 +3742,35 @@ function findComponentSourceStyleValue(
   document: DesignFile,
   instance: DesignNode,
   sourceNodeId: string,
-  field: "fill"
-): string | null {
+  field: ComponentInstanceStyleOverrideField
+): string | number | null | undefined {
   const sourceNode = componentSourceNodeForInstance(document, instance);
   if (!sourceNode) {
-    return null;
+    return undefined;
   }
-  return findInNode(sourceNode, sourceNodeId)?.style[field] ?? null;
+  const node = findInNode(sourceNode, sourceNodeId);
+  return node ? node.style[field] : undefined;
+}
+
+function findComponentSourceGeometryValue(
+  document: DesignFile,
+  instance: DesignNode,
+  sourceNodeId: string,
+  field: ComponentInstanceGeometryOverrideField
+): number | undefined {
+  const sourceNode = componentSourceNodeForInstance(document, instance);
+  if (!sourceNode) {
+    return undefined;
+  }
+  const node = findInNode(sourceNode, sourceNodeId);
+  return node ? geometryOverrideValue(node, field) : undefined;
+}
+
+function geometryOverrideValue(node: DesignNode, field: ComponentInstanceGeometryOverrideField): number {
+  if (field === "x" || field === "y") {
+    return node.transform[field];
+  }
+  return node.size[field];
 }
 
 function componentSourceNodeForVariant(
@@ -3727,6 +3847,26 @@ function applyComponentInstanceOverrides(instance: DesignNode, sourceRootNodeId:
       target.content = { ...target.content, value: override.value };
     } else if (override.field === "fill") {
       target.style = { ...target.style, fill: override.value, fill_token: null, fill_style: null };
+    } else if (override.field === "stroke") {
+      target.style = {
+        ...target.style,
+        stroke: override.value === nullComponentOverrideValue ? null : override.value
+      };
+    } else if (override.field === "stroke_width" || override.field === "opacity") {
+      const value = Number(override.value);
+      if (Number.isFinite(value)) {
+        target.style = { ...target.style, [override.field]: value };
+      }
+    } else if (override.field === "x" || override.field === "y") {
+      const value = Number(override.value);
+      if (Number.isFinite(value)) {
+        target.transform = { ...target.transform, [override.field]: value };
+      }
+    } else if (override.field === "width" || override.field === "height") {
+      const value = Number(override.value);
+      if (Number.isFinite(value)) {
+        target.size = { ...target.size, [override.field]: Math.max(1, value) };
+      }
     }
   }
 }

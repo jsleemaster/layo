@@ -1850,6 +1850,166 @@ describe("FileStorage", () => {
     });
   });
 
+  test("component instance geometry overrides persist after switching variants", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const component = await storage.createComponent("sample-file", "frame-1", {
+      componentId: "component-1",
+      name: "Card"
+    });
+    const primarySource = structuredClone(component.source_node);
+    primarySource.children[0].transform = { x: 32, y: 40, rotation: 0 };
+    primarySource.children[0].size = { width: 260, height: 48 };
+    const secondarySource = structuredClone(component.source_node);
+    secondarySource.children[0].transform = { x: 20, y: 28, rotation: 0 };
+    secondarySource.children[0].size = { width: 180, height: 36 };
+    await storage.setComponentVariants(
+      "sample-file",
+      "component-1",
+      [
+        {
+          id: "variant-primary",
+          name: "Primary",
+          properties: [{ name: "variant", value: "primary" }],
+          source_node: primarySource
+        },
+        {
+          id: "variant-secondary",
+          name: "Secondary",
+          properties: [{ name: "variant", value: "secondary" }],
+          source_node: secondarySource
+        }
+      ] as any
+    );
+
+    await storage.createComponentInstance("sample-file", {
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+    await storage.updateNodeGeometry("sample-file", "instance-1__text-1", {
+      x: 44,
+      y: 68,
+      width: 310,
+      height: 72
+    });
+    const switched = await storage.setComponentInstanceVariant("sample-file", "instance-1", "variant-secondary");
+    const persisted = await storage.readFile("sample-file");
+
+    expect(findNode(persisted, "instance-1__text-1")).toMatchObject({
+      transform: { x: 44, y: 68 },
+      size: { width: 310, height: 72 }
+    });
+    expect(switched.component_instance?.overrides).toEqual(
+      expect.arrayContaining([
+        { node_id: "text-1", field: "x", value: "44" },
+        { node_id: "text-1", field: "y", value: "68" },
+        { node_id: "text-1", field: "width", value: "310" },
+        { node_id: "text-1", field: "height", value: "72" }
+      ])
+    );
+  });
+
+  test("agent commands preserve component instance style and geometry overrides after switching variants", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const component = await storage.createComponent("sample-file", "frame-1", {
+      componentId: "component-1",
+      name: "Card"
+    });
+    const primarySource = structuredClone(component.source_node);
+    primarySource.children[0].transform = { x: 32, y: 40, rotation: 0 };
+    primarySource.children[0].size = { width: 260, height: 48 };
+    primarySource.children[0].style = {
+      ...primarySource.children[0].style,
+      stroke: "#111827",
+      stroke_width: 1,
+      opacity: 1
+    };
+    const secondarySource = structuredClone(component.source_node);
+    secondarySource.children[0].transform = { x: 20, y: 28, rotation: 0 };
+    secondarySource.children[0].size = { width: 180, height: 36 };
+    secondarySource.children[0].style = {
+      ...secondarySource.children[0].style,
+      stroke: "#475569",
+      stroke_width: 2,
+      opacity: 0.8
+    };
+    await storage.setComponentVariants(
+      "sample-file",
+      "component-1",
+      [
+        {
+          id: "variant-primary",
+          name: "Primary",
+          properties: [{ name: "variant", value: "primary" }],
+          source_node: primarySource
+        },
+        {
+          id: "variant-secondary",
+          name: "Secondary",
+          properties: [{ name: "variant", value: "secondary" }],
+          source_node: secondarySource
+        }
+      ] as any
+    );
+
+    await storage.createComponentInstance("sample-file", {
+      parentId: "page-1",
+      definitionId: "component-1",
+      instanceId: "instance-1",
+      x: 520,
+      y: 140
+    });
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "set_node_style",
+          nodeId: "instance-1__text-1",
+          style: {
+            fill: "#111827",
+            stroke: "#7c3aed",
+            stroke_width: 3,
+            opacity: 0.62
+          }
+        },
+        {
+          type: "update_geometry",
+          nodeId: "instance-1__text-1",
+          x: 44,
+          y: 68,
+          width: 310,
+          height: 72
+        }
+      ] as any
+    });
+    const switched = await storage.setComponentInstanceVariant("sample-file", "instance-1", "variant-secondary");
+    const persisted = await storage.readFile("sample-file");
+
+    expect(result.audit.commandTypes).toEqual(["set_node_style", "update_geometry"]);
+    expect(findNode(persisted, "instance-1__text-1")).toMatchObject({
+      transform: { x: 44, y: 68 },
+      size: { width: 310, height: 72 },
+      style: { stroke: "#7c3aed", stroke_width: 3, opacity: 0.62 }
+    });
+    expect(switched.component_instance?.overrides).toEqual(
+      expect.arrayContaining([
+        { node_id: "text-1", field: "stroke", value: "#7c3aed" },
+        { node_id: "text-1", field: "stroke_width", value: "3" },
+        { node_id: "text-1", field: "opacity", value: "0.62" },
+        { node_id: "text-1", field: "x", value: "44" },
+        { node_id: "text-1", field: "y", value: "68" },
+        { node_id: "text-1", field: "width", value: "310" },
+        { node_id: "text-1", field: "height", value: "72" }
+      ])
+    );
+  });
+
   test("inspects and searches canvas nodes for agent workflows", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

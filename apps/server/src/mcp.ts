@@ -164,6 +164,15 @@ const codeComponentMappingSchema = z.object({
   docs_url: z.string().optional().describe("Optional component documentation URL")
 });
 
+const nodeStyleSchema = z.object({
+  fill: z.string().describe("CSS fill color"),
+  fill_token: z.string().nullable().optional().describe("Optional fill token binding"),
+  fill_style: z.string().nullable().optional().describe("Optional reusable fill style binding"),
+  stroke: z.string().nullable().describe("CSS stroke color or null for no stroke"),
+  stroke_width: z.number().min(0).describe("Stroke width in pixels"),
+  opacity: z.number().min(0).max(1).describe("Layer opacity from 0 to 1")
+});
+
 const agentCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("update_geometry"),
@@ -177,6 +186,11 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("set_fill"),
     nodeId: z.string(),
     fill: z.string()
+  }),
+  z.object({
+    type: z.literal("set_node_style"),
+    nodeId: z.string(),
+    style: nodeStyleSchema
   }),
   z.object({
     type: z.literal("create_token"),
