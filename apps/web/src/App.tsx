@@ -3107,6 +3107,9 @@ function InspectorTokenControls({
   );
 }
 
+const PNG_EXPORT_SCALES = [1, 2, 3] as const;
+type PngExportScale = (typeof PNG_EXPORT_SCALES)[number];
+
 function DevPanel({
   selectedNode,
   codeExport,
@@ -3116,10 +3119,11 @@ function DevPanel({
   selectedNode: RendererNode | null;
   codeExport: CodeExportPayload | null;
   codeExportStatus: string;
-  onDownloadPng: () => string | null;
+  onDownloadPng: (scale: PngExportScale) => string | null;
 }) {
   const [copyStatus, setCopyStatus] = useState("복사 대기 중");
   const [assetStatus, setAssetStatus] = useState("에셋 다운로드 대기 중");
+  const [pngScale, setPngScale] = useState<PngExportScale>(2);
   const codeStructure = selectedNode ? findCodeStructureForNode(codeExport, selectedNode.id) : null;
   const cssSnippet = codeExport && codeStructure ? cssSnippetForCodeNode(codeExport.css, codeStructure.className) : "";
   const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
@@ -3159,7 +3163,7 @@ function DevPanel({
   };
 
   const downloadSelectedPng = () => {
-    const nextStatus = onDownloadPng();
+    const nextStatus = onDownloadPng(pngScale);
     setAssetStatus(nextStatus ?? "PNG 다운로드 실패");
   };
 
@@ -3208,6 +3212,29 @@ function DevPanel({
               >
                 PNG 다운로드
               </button>
+            </div>
+            <div
+              className="dev-panel-scale-control"
+              data-testid="dev-panel-png-scale-control"
+              role="radiogroup"
+              aria-label="PNG 배율"
+            >
+              <span>PNG 배율</span>
+              <div className="dev-panel-scale-options">
+                {PNG_EXPORT_SCALES.map((scale) => (
+                  <button
+                    key={scale}
+                    type="button"
+                    role="radio"
+                    aria-checked={pngScale === scale}
+                    className={`dev-panel-scale-button${pngScale === scale ? " is-active" : ""}`}
+                    data-testid={`dev-panel-png-scale-${scale}x`}
+                    onClick={() => setPngScale(scale)}
+                  >
+                    {scale}x
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="dev-panel-asset-status" data-testid="dev-panel-asset-status" aria-live="polite">
               {assetStatus}
@@ -3351,7 +3378,7 @@ function Inspector({
   onCreateCommentReply: (threadId: string) => void;
   onResolveComment: (threadId: string) => void;
   onMarkCommentRead: (threadId: string) => void;
-  onDownloadSelectedPng: () => string | null;
+  onDownloadSelectedPng: (scale: PngExportScale) => string | null;
   onTabChange: (tab: InspectorTab) => void;
 }) {
   const tokenControls = (
@@ -5518,7 +5545,11 @@ export function App() {
     }
   };
 
-  const downloadSelectionPngFromState = (scopedState: EditorState): RendererNode | null => {
+  const downloadSelectionPngFromState = (
+    scopedState: EditorState,
+    scale: PngExportScale = 2,
+    filename?: string
+  ): RendererNode | null => {
     const stage = konvaStageRef.current;
     if (!stage) {
       setProjectStatus("PNG 내보내기에 실패했습니다");
@@ -5550,10 +5581,10 @@ export function App() {
           y,
           width,
           height,
-          pixelRatio: 2,
+          pixelRatio: scale,
           mimeType: "image/png"
         }),
-        `${node.id}.png`
+        filename ?? `${node.id}.png`
       );
       return node;
     } catch (error) {
@@ -5580,14 +5611,16 @@ export function App() {
     setObjectContextMenu(null);
   };
 
-  const downloadSelectedNodePngFromDevPanel = () => {
+  const downloadSelectedNodePngFromDevPanel = (scale: PngExportScale) => {
     const currentEditor = editorRef.current;
     if (!currentEditor) {
       return null;
     }
 
-    const node = downloadSelectionPngFromState(currentEditor);
-    return node ? `${node.name} PNG 다운로드됨` : null;
+    const nodeId = currentEditor.selection.nodeId;
+    const filename = nodeId ? `${nodeId}${scale === 2 ? "" : `@${scale}x`}.png` : undefined;
+    const node = downloadSelectionPngFromState(currentEditor, scale, filename);
+    return node ? `${node.name} PNG${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
   };
 
   const createContextComponent = () => {

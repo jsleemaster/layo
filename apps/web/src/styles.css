@@ -1312,6 +1312,7 @@ button:disabled {
 
 .dev-panel-code-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--editor-space-xs);
@@ -1332,6 +1333,42 @@ button:disabled {
   font-size: var(--editor-text-small-size);
   font-weight: var(--editor-text-control-weight);
   line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-scale-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-xs);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-scale-options {
+  display: flex;
+  gap: var(--editor-space-xxs);
+}
+
+.dev-panel-scale-button {
+  flex: 0 0 auto;
+  min-width: 34px;
+  min-height: var(--editor-space-lg);
+  padding: 0 var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-scale-button.is-active {
+  border-color: var(--editor-color-selection);
+  background: var(--editor-color-selection-soft);
+  color: var(--editor-color-selection);
 }
 
 .dev-panel-code-block pre {

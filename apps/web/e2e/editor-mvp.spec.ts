@@ -458,6 +458,46 @@ test("inspector dev panel downloads the selected layer as png", async ({ page })
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("헤드라인 PNG 다운로드됨");
 });
 
+function pngDimensions(png: Buffer) {
+  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return {
+    width: png.readUInt32BE(16),
+    height: png.readUInt32BE(20)
+  };
+}
+
+test("inspector dev panel downloads png assets at the selected scale", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const defaultDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const defaultDownload = await defaultDownloadPromise;
+  expect(defaultDownload.suggestedFilename()).toBe("text-1.png");
+  const defaultPath = await defaultDownload.path();
+  if (!defaultPath) {
+    throw new Error("default png download path missing");
+  }
+  const defaultSize = pngDimensions(await readFile(defaultPath));
+
+  await page.getByTestId("dev-panel-png-scale-3x").click();
+  const scaledDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const scaledDownload = await scaledDownloadPromise;
+  expect(scaledDownload.suggestedFilename()).toBe("text-1@3x.png");
+  const scaledPath = await scaledDownload.path();
+  if (!scaledPath) {
+    throw new Error("scaled png download path missing");
+  }
+  const scaledSize = pngDimensions(await readFile(scaledPath));
+
+  expect(scaledSize.width).toBeGreaterThan(defaultSize.width);
+  expect(scaledSize.height).toBeGreaterThan(defaultSize.height);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("헤드라인 PNG 3x 다운로드됨");
+});
+
 test("file panel exports a project archive and reviews every document before import", async ({ page }) => {
   const { projectId } = await createProjectFromEmptyState(page);
   const secondDocument = await page.request.post(`http://127.0.0.1:4317/projects/${projectId}/documents`, {
