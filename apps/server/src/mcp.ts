@@ -256,6 +256,12 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     name: z.string()
   }),
   z.object({
+    type: z.literal("combine_components_as_variants"),
+    componentId: z.string(),
+    nodeIds: z.array(z.string()).min(2),
+    propertyName: z.string().optional()
+  }),
+  z.object({
     type: z.literal("set_export_presets"),
     nodeId: z.string(),
     presets: z.array(nodeExportPresetSchema)

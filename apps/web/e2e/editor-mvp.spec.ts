@@ -689,6 +689,96 @@ test("component variant matrix edits cells and deletes properties and variants",
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
 });
 
+test("combines selected components as variants from the context menu", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const commands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "page-1",
+          id: "button-primary",
+          name: "Button / Primary",
+          x: 160,
+          y: 120,
+          width: 140,
+          height: 64,
+          fill: "#2563eb"
+        },
+        {
+          type: "create_rectangle",
+          parentId: "page-1",
+          id: "button-secondary",
+          name: "Button / Secondary",
+          x: 340,
+          y: 120,
+          width: 140,
+          height: 64,
+          fill: "#0f766e"
+        },
+        {
+          type: "create_component",
+          nodeId: "button-primary",
+          componentId: "component-button-primary",
+          name: "Button / Primary"
+        },
+        {
+          type: "create_component",
+          nodeId: "button-secondary",
+          componentId: "component-button-secondary",
+          name: "Button / Secondary"
+        }
+      ]
+    }
+  });
+  expect(commands.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "Button / Primary" }).click();
+  await page.getByRole("button", { name: "Button / Secondary" }).click({ modifiers: ["Shift"] });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  await page.mouse.click(stageBox.x + 172, stageBox.y + 132, { button: "right" });
+  const menu = page.getByTestId("object-context-menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "변형으로 결합" })).toBeEnabled();
+  await menu.getByRole("menuitem", { name: "변형으로 결합" }).click();
+
+  const matrix = page.getByTestId("inspector-component-variant-matrix");
+  await expect(matrix).toBeVisible();
+  await expect(page.getByTestId("inspector-component-definition-variant-name-variant-button-primary")).toHaveValue(
+    "Primary"
+  );
+  await expect(page.getByTestId("inspector-component-definition-variant-name-variant-button-secondary")).toHaveValue(
+    "Secondary"
+  );
+  await expect(page.getByTestId("inspector-component-variant-matrix-cell-variant-button-primary-variant")).toHaveValue(
+    "Primary"
+  );
+  await expect(
+    page.getByTestId("inspector-component-variant-matrix-cell-variant-button-secondary-variant")
+  ).toHaveValue("Secondary");
+
+  await page.mouse.click(stageBox.x + 172, stageBox.y + 132, { button: "right" });
+  await expect(menu).toBeVisible();
+  await menu.getByRole("menuitem", { name: "인스턴스 만들기" }).click();
+  await expect(page.getByRole("button", { name: "Button 인스턴스" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Button 인스턴스" }).click();
+  const selector = page.getByTestId("inspector-component-variant-variant");
+  await expect(selector.locator("option")).toHaveText(["Primary", "Secondary"]);
+  await selector.selectOption("Secondary");
+  await expect(selector).toHaveValue("Secondary");
+});
+
 test("component instances render boolean variant properties as toggles", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

@@ -1,4 +1,5 @@
 import type {
+  ComponentDefinition,
   ComponentVariant,
   DesignStyle,
   DesignToken,
@@ -298,6 +299,18 @@ export type EditorCommand =
       instanceVariantIds?: Record<string, string | null>;
     }
   | {
+      type: "combine_components_as_variants";
+      componentId: string;
+      nodeIds: string[];
+      propertyName?: string;
+    }
+  | {
+      type: "restore_component_snapshot";
+      components: ComponentDefinition[];
+      nextCommand: EditorCommand;
+      selectedNodeId: string | null;
+    }
+  | {
       type: "detach_instance";
       nodeId: string;
       previousNode?: RendererNode;
@@ -353,6 +366,53 @@ const DEFAULT_CONSTRAINTS: NodeConstraints = { horizontal: "left", vertical: "to
 const DEFAULT_LAYOUT_ITEM: NodeLayoutItem = { position: "static", margin: { top: 0, right: 0, bottom: 0, left: 0 } };
 const PASTE_OFFSET = 24;
 const VERTICAL_TEXT_WRITING_MODES = new Set<TextWritingMode>(["vertical_rl", "vertical_lr"]);
+
+function safeComponentSlug(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "variant"
+  );
+}
+
+function normalizeVariantPropertyName(value: string | undefined): string {
+  const normalized = value?.trim();
+  return normalized || "variant";
+}
+
+function componentVariantValueFromName(name: string, fallbackId: string): string {
+  const segments = name
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments.at(-1) || name.trim() || fallbackId;
+}
+
+function combinedComponentName(names: string[], fallback: string): string {
+  const prefixes = names
+    .map((name) =>
+      name
+        .split("/")
+        .slice(0, -1)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(" / ")
+    )
+    .filter(Boolean);
+  return prefixes.length === names.length && prefixes.every((prefix) => prefix === prefixes[0])
+    ? prefixes[0]
+    : fallback.trim() || "Component";
+}
+
+function isDefaultOnlyComponent(component: ComponentDefinition): boolean {
+  return (
+    component.variants.length === 1 &&
+    component.variants[0]?.id === "default" &&
+    component.variants[0]?.properties.length === 0
+  );
+}
 
 function isVerticalTextWritingMode(mode: TextWritingMode | undefined): boolean {
   return mode ? VERTICAL_TEXT_WRITING_MODES.has(mode) : false;
@@ -2483,6 +2543,69 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           instanceVariantIds: previousInstanceVariantIds
         },
         selectedNodeId: component.source_node.id
+      };
+    }
+    case "combine_components_as_variants": {
+      const components = next.components ?? [];
+      const baseComponent = components.find((component) => component.id === command.componentId);
+      const selection = findSiblingSelection(next, command.nodeIds);
+      if (!baseComponent || !selection || selection.nodes.length < 2) {
+        return { document, inverse: null };
+      }
+
+      const selectedComponents = selection.nodes.flatMap((node) => {
+        if (node.kind !== "component" || isNodeLocked(node)) {
+          return [];
+        }
+        const component = components.find((candidate) => candidate.source_node.id === node.id);
+        return component ? [{ node, component }] : [];
+      });
+      if (
+        selectedComponents.length !== selection.nodes.length ||
+        !selectedComponents.some(({ component }) => component.id === command.componentId) ||
+        selectedComponents.some(({ component }) => !isDefaultOnlyComponent(component))
+      ) {
+        return { document, inverse: null };
+      }
+
+      const previousComponents = structuredClone(components);
+      const propertyName = normalizeVariantPropertyName(command.propertyName);
+      const baseName = combinedComponentName(selectedComponents.map(({ node }) => node.name), baseComponent.name);
+      const combinedVariants = selectedComponents.map(({ node }) => {
+        const value = componentVariantValueFromName(node.name, node.id);
+        return {
+          id: `variant-${safeComponentSlug(node.id)}`,
+          name: value,
+          properties: [{ name: propertyName, value, type: "select" as const }]
+        };
+      });
+
+      next.components = components
+        .filter((component) => !selectedComponents.some((selected) => selected.component.id === component.id))
+        .concat({
+          ...baseComponent,
+          name: baseName,
+          source_node: structuredClone(selectedComponents.find(({ component }) => component.id === command.componentId)?.node ?? baseComponent.source_node),
+          variants: combinedVariants
+        });
+
+      return {
+        document: next,
+        inverse: {
+          type: "restore_component_snapshot",
+          components: previousComponents,
+          nextCommand: command,
+          selectedNodeId: baseComponent.source_node.id
+        },
+        selectedNodeId: baseComponent.source_node.id
+      };
+    }
+    case "restore_component_snapshot": {
+      next.components = structuredClone(command.components);
+      return {
+        document: next,
+        inverse: command.nextCommand,
+        selectedNodeId: command.selectedNodeId
       };
     }
     case "detach_instance": {

@@ -142,6 +142,12 @@ export type AgentCommand =
       writingMode?: TextWritingMode;
     }
   | { type: "create_component"; nodeId: string; componentId: string; name: string }
+  | {
+      type: "combine_components_as_variants";
+      componentId: string;
+      nodeIds: string[];
+      propertyName?: string;
+    }
   | { type: "set_export_presets"; nodeId: string; presets: NodeExportPreset[] }
   | { type: "set_layout"; nodeId: string; layout: NodeLayout }
   | { type: "set_layout_item"; nodeId: string; layoutItem: NodeLayoutItem }
@@ -866,6 +872,53 @@ function collectNode(node: DesignNode, nodes: Map<string, ComparableDesignNode>)
   }
 }
 
+function safeComponentSlug(value: string): string {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "variant"
+  );
+}
+
+function normalizeVariantPropertyName(value: string | undefined): string {
+  const normalized = value?.trim();
+  return normalized || "variant";
+}
+
+function componentVariantValueFromName(name: string, fallbackId: string): string {
+  const segments = name
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  return segments.at(-1) || name.trim() || fallbackId;
+}
+
+function combinedComponentName(names: string[], fallback: string): string {
+  const prefixes = names
+    .map((name) =>
+      name
+        .split("/")
+        .slice(0, -1)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(" / ")
+    )
+    .filter(Boolean);
+  return prefixes.length === names.length && prefixes.every((prefix) => prefix === prefixes[0])
+    ? prefixes[0]
+    : fallback.trim() || "Component";
+}
+
+function isDefaultOnlyComponent(component: ComponentDefinition): boolean {
+  return (
+    component.variants.length === 1 &&
+    component.variants[0]?.id === "default" &&
+    component.variants[0]?.properties.length === 0
+  );
+}
+
 function applyAgentCommand(document: DesignFile, command: AgentCommand): string {
   switch (command.type) {
     case "update_geometry": {
@@ -1118,6 +1171,56 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       document.components = document.components ?? [];
       document.components.push(component);
       return node.id;
+    }
+    case "combine_components_as_variants": {
+      const components = document.components ?? [];
+      const baseComponent = components.find((component) => component.id === command.componentId);
+      const selection = findSiblingSelection(document, command.nodeIds);
+      if (!baseComponent || !selection || selection.nodes.length < 2) {
+        throw new Error("combine requires at least two sibling main components");
+      }
+
+      const selectedComponents = selection.nodes.map((node) => {
+        if (node.kind !== "component") {
+          throw new Error(`node is not a main component source: ${node.id}`);
+        }
+        const component = components.find((candidate) => candidate.source_node.id === node.id);
+        if (!component) {
+          throw new Error(`component definition not found for node: ${node.id}`);
+        }
+        if (!isDefaultOnlyComponent(component)) {
+          throw new Error(`component already has authored variants: ${component.id}`);
+        }
+        return { node, component };
+      });
+
+      if (!selectedComponents.some(({ component }) => component.id === command.componentId)) {
+        throw new Error(`base component is not selected: ${command.componentId}`);
+      }
+
+      const propertyName = normalizeVariantPropertyName(command.propertyName);
+      const baseName = combinedComponentName(selectedComponents.map(({ node }) => node.name), baseComponent.name);
+      const combinedComponentIds = new Set(selectedComponents.map(({ component }) => component.id));
+      const sourceNode =
+        selectedComponents.find(({ component }) => component.id === command.componentId)?.node ?? baseComponent.source_node;
+      const combinedComponent: ComponentDefinition = {
+        ...baseComponent,
+        name: baseName,
+        source_node: structuredClone(sourceNode),
+        variants: selectedComponents.map(({ node }) => {
+          const value = componentVariantValueFromName(node.name, node.id);
+          return {
+            id: `variant-${safeComponentSlug(node.id)}`,
+            name: value,
+            properties: [{ name: propertyName, value, type: "select" }]
+          };
+        })
+      };
+
+      document.components = components.map((component) =>
+        component.id === command.componentId ? combinedComponent : component
+      ).filter((component) => component.id === command.componentId || !combinedComponentIds.has(component.id));
+      return sourceNode.id;
     }
     case "set_export_presets": {
       const node = requireNode(document, command.nodeId);
@@ -1450,6 +1553,54 @@ function findParentChildren(document: DesignFile, parentId: string): { children:
 
   const node = findNodeById(document, parentId);
   return node ? { children: node.children } : null;
+}
+
+function findSiblingSelection(document: DesignFile, nodeIds: string[]): { parentId: string; nodes: DesignNode[] } | null {
+  const uniqueNodeIds = Array.from(new Set(nodeIds));
+  if (uniqueNodeIds.length < 2) {
+    return null;
+  }
+
+  for (const page of document.pages) {
+    const nodes = siblingsFromChildren(page.children, uniqueNodeIds);
+    if (nodes) {
+      return { parentId: page.id, nodes };
+    }
+
+    for (const node of page.children) {
+      const found = siblingSelectionInTree(node, uniqueNodeIds);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function siblingSelectionInTree(
+  parent: DesignNode,
+  nodeIds: string[]
+): { parentId: string; nodes: DesignNode[] } | null {
+  const nodes = siblingsFromChildren(parent.children, nodeIds);
+  if (nodes) {
+    return { parentId: parent.id, nodes };
+  }
+
+  for (const child of parent.children) {
+    const found = siblingSelectionInTree(child, nodeIds);
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function siblingsFromChildren(children: DesignNode[], nodeIds: string[]): DesignNode[] | null {
+  const nodeIdSet = new Set(nodeIds);
+  const nodes = children.filter((node) => nodeIdSet.has(node.id));
+  return nodes.length === nodeIds.length ? nodes : null;
 }
 
 function renameInstanceTree(node: DesignNode, instanceId: string) {
