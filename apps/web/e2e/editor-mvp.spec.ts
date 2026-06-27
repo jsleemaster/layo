@@ -607,6 +607,11 @@ test("inspector dev panel downloads image artifacts with embedded image asset by
   expect(pdfText).toContain("/EmbeddedFiles");
   expect(pdfText).toContain("/Type /EmbeddedFile");
   expect(pdfText).toContain("/Subtype /image#2Fpng");
+  expect(pdfText).toContain("/Subtype /Image");
+  expect(pdfText).toContain("/Filter /FlateDecode");
+  expect(pdfText).toContain("/ColorSpace /DeviceRGB");
+  expect(pdfText).toContain("/SMask");
+  expect(pdfText).toContain("/Im1 Do");
   expect(pdf.includes(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
   expect(pdfText.trimEnd().endsWith("%%EOF")).toBe(true);
 });

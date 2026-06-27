@@ -108,4 +108,17 @@ describe("node artifact exports", () => {
     expect(pdfText).toContain("/Subtype /image#2Fpng");
     expect(Buffer.from(pdf).includes(pngSignature)).toBe(true);
   });
+
+  test("renders PNG image nodes visibly in selected-layer PDFs", () => {
+    const pdf = pdfForNode(imageNode, { assets: { "asset-pixel": imageAsset } });
+    const pdfText = new TextDecoder().decode(pdf);
+
+    expect(pdfText).toContain("/Subtype /Image");
+    expect(pdfText).toContain("/Filter /FlateDecode");
+    expect(pdfText).toContain("/ColorSpace /DeviceRGB");
+    expect(pdfText).toContain("/SMask");
+    expect(pdfText).toContain("/Im1 Do");
+    expect(pdfText).not.toContain("0.953 0.957 0.965 rg");
+    expect(pdfText).not.toContain("0 0 80 48 re");
+  });
 });

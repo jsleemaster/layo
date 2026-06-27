@@ -1,3 +1,4 @@
+import { unzlibSync, zlibSync } from "fflate";
 import type { RendererNode } from "@layo/renderer";
 
 export interface NodeArtifactAsset {
@@ -31,6 +32,7 @@ interface PdfImageEntry {
   pageHeight: number;
   xObjectName?: string;
   xObjectId?: number;
+  sMaskId?: number;
   fileSpecId?: number;
 }
 
@@ -245,6 +247,191 @@ function bytesFromBase64(value: string) {
   return bytes;
 }
 
+interface DecodedPng {
+  width: number;
+  height: number;
+  rgb: Uint8Array;
+  alpha?: Uint8Array;
+}
+
+const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function readUint32(bytes: Uint8Array, offset: number) {
+  return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+}
+
+function asciiChunkType(bytes: Uint8Array, offset: number) {
+  return String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+}
+
+function concatBytes(parts: Uint8Array[]) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+function paethPredictor(left: number, up: number, upLeft: number) {
+  const prediction = left + up - upLeft;
+  const leftDistance = Math.abs(prediction - left);
+  const upDistance = Math.abs(prediction - up);
+  const upLeftDistance = Math.abs(prediction - upLeft);
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) {
+    return left;
+  }
+  if (upDistance <= upLeftDistance) {
+    return up;
+  }
+  return upLeft;
+}
+
+function pngComponentCount(colorType: number) {
+  if (colorType === 0) {
+    return 1;
+  }
+  if (colorType === 2) {
+    return 3;
+  }
+  if (colorType === 4) {
+    return 2;
+  }
+  if (colorType === 6) {
+    return 4;
+  }
+  return 0;
+}
+
+function unfilterPngScanlines(inflated: Uint8Array, width: number, height: number, components: number) {
+  const rowSize = width * components;
+  const output = new Uint8Array(rowSize * height);
+  const bytesPerPixel = components;
+  let sourceOffset = 0;
+
+  for (let row = 0; row < height; row += 1) {
+    const filterType = inflated[sourceOffset];
+    sourceOffset += 1;
+    const rowOffset = row * rowSize;
+    const previousRowOffset = rowOffset - rowSize;
+
+    for (let column = 0; column < rowSize; column += 1) {
+      const raw = inflated[sourceOffset];
+      sourceOffset += 1;
+      const left = column >= bytesPerPixel ? output[rowOffset + column - bytesPerPixel] : 0;
+      const up = row > 0 ? output[previousRowOffset + column] : 0;
+      const upLeft = row > 0 && column >= bytesPerPixel ? output[previousRowOffset + column - bytesPerPixel] : 0;
+      let value = raw;
+
+      if (filterType === 1) {
+        value += left;
+      } else if (filterType === 2) {
+        value += up;
+      } else if (filterType === 3) {
+        value += Math.floor((left + up) / 2);
+      } else if (filterType === 4) {
+        value += paethPredictor(left, up, upLeft);
+      } else if (filterType !== 0) {
+        return null;
+      }
+
+      output[rowOffset + column] = value & 0xff;
+    }
+  }
+
+  return output;
+}
+
+function decodePng(bytes: Uint8Array): DecodedPng | null {
+  if (bytes.length < pngSignature.length || !pngSignature.every((value, index) => bytes[index] === value)) {
+    return null;
+  }
+
+  let offset = pngSignature.length;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let interlaceMethod = 0;
+  const idatParts: Uint8Array[] = [];
+
+  while (offset + 12 <= bytes.length) {
+    const chunkLength = readUint32(bytes, offset);
+    const chunkType = asciiChunkType(bytes, offset + 4);
+    const dataOffset = offset + 8;
+    const nextOffset = dataOffset + chunkLength + 4;
+    if (nextOffset > bytes.length) {
+      return null;
+    }
+
+    if (chunkType === "IHDR") {
+      width = readUint32(bytes, dataOffset);
+      height = readUint32(bytes, dataOffset + 4);
+      bitDepth = bytes[dataOffset + 8];
+      colorType = bytes[dataOffset + 9];
+      interlaceMethod = bytes[dataOffset + 12];
+    } else if (chunkType === "IDAT") {
+      idatParts.push(bytes.slice(dataOffset, dataOffset + chunkLength));
+    } else if (chunkType === "IEND") {
+      break;
+    }
+
+    offset = nextOffset;
+  }
+
+  const components = pngComponentCount(colorType);
+  if (width <= 0 || height <= 0 || bitDepth !== 8 || interlaceMethod !== 0 || components === 0 || idatParts.length === 0) {
+    return null;
+  }
+
+  let scanlines: Uint8Array | null = null;
+  try {
+    scanlines = unfilterPngScanlines(unzlibSync(concatBytes(idatParts)), width, height, components);
+  } catch {
+    return null;
+  }
+  if (!scanlines) {
+    return null;
+  }
+
+  const pixelCount = width * height;
+  const rgb = new Uint8Array(pixelCount * 3);
+  const alpha = colorType === 4 || colorType === 6 ? new Uint8Array(pixelCount) : undefined;
+
+  for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+    const source = pixel * components;
+    const target = pixel * 3;
+
+    if (colorType === 0) {
+      rgb[target] = scanlines[source];
+      rgb[target + 1] = scanlines[source];
+      rgb[target + 2] = scanlines[source];
+    } else if (colorType === 2) {
+      rgb[target] = scanlines[source];
+      rgb[target + 1] = scanlines[source + 1];
+      rgb[target + 2] = scanlines[source + 2];
+    } else if (colorType === 4) {
+      rgb[target] = scanlines[source];
+      rgb[target + 1] = scanlines[source];
+      rgb[target + 2] = scanlines[source];
+      if (alpha) {
+        alpha[pixel] = scanlines[source + 1];
+      }
+    } else if (colorType === 6) {
+      rgb[target] = scanlines[source];
+      rgb[target + 1] = scanlines[source + 1];
+      rgb[target + 2] = scanlines[source + 2];
+      if (alpha) {
+        alpha[pixel] = scanlines[source + 3];
+      }
+    }
+  }
+
+  return { width, height, rgb, alpha };
+}
+
 function pdfAssetFileName(node: RendererNode, asset: NodeArtifactAsset) {
   const extension = asset.mimeType.split("/")[1]?.replace("jpeg", "jpg") || "bin";
   return asset.name?.trim() || `${node.id}-${asset.assetId}.${extension}`;
@@ -383,7 +570,25 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
       )}) >>`
     );
 
-    if (entry.asset.mimeType === "image/jpeg") {
+    const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : null;
+    if (png) {
+      entry.xObjectName = `Im${index + 1}`;
+      const rgbBytes = zlibSync(png.rgb);
+      if (png.alpha) {
+        const alphaBytes = zlibSync(png.alpha);
+        entry.sMaskId = addPdfObject(objects, [
+          `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${alphaBytes.length} >>\nstream\n`,
+          alphaBytes,
+          "\nendstream"
+        ]);
+      }
+      const sMaskClause = entry.sMaskId ? ` /SMask ${entry.sMaskId} 0 R` : "";
+      entry.xObjectId = addPdfObject(objects, [
+        `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode${sMaskClause} /Length ${rgbBytes.length} >>\nstream\n`,
+        rgbBytes,
+        "\nendstream"
+      ]);
+    } else if (entry.asset.mimeType === "image/jpeg") {
       entry.xObjectName = `Im${index + 1}`;
       entry.xObjectId = addPdfObject(objects, [
         `<< /Type /XObject /Subtype /Image /Width ${Math.max(1, Math.round(
