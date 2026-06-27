@@ -389,6 +389,10 @@ test("inspector dev panel shows selected layer handoff specs and code", async ({
   await expect(page.getByTestId("dev-panel-specs")).toContainText("W 260");
   await expect(page.getByTestId("dev-panel-specs")).toContainText("H 48");
   await expect(page.getByTestId("dev-panel-specs")).toContainText("#111827");
+  await expect(page.getByTestId("dev-panel-ready-annotations")).toContainText("크기/위치");
+  await expect(page.getByTestId("dev-panel-ready-annotations")).toContainText("260 x 48");
+  await expect(page.getByTestId("dev-panel-ready-annotations")).toContainText("콘텐츠");
+  await expect(page.getByTestId("dev-panel-ready-annotations")).toContainText("\"Layo\"");
   await expect(page.getByTestId("dev-panel-css")).toContainText(".node-text-1");
   await expect(page.getByTestId("dev-panel-css")).toContainText("font-size");
   await expect(page.getByTestId("dev-panel-html")).toContainText('data-node-id="text-1"');
@@ -429,6 +433,12 @@ test("inspector dev panel copies generated handoff snippets to the clipboard", a
   await expect(page.getByTestId("dev-panel-copy-status")).toContainText("구조 복사됨");
   const structureClipboard = await page.evaluate(() => navigator.clipboard.readText());
   expect(structureClipboard).toContain('"id": "text-1"');
+
+  await page.getByTestId("dev-panel-copy-annotations").click();
+  await expect(page.getByTestId("dev-panel-copy-status")).toContainText("핸드오프 복사됨");
+  const annotationsClipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(annotationsClipboard).toContain("크기/위치");
+  expect(annotationsClipboard).toContain("text-1");
 });
 
 test("inspector dev panel downloads the selected layer as svg", async ({ page }) => {

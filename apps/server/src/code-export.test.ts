@@ -271,6 +271,76 @@ describe("code export", () => {
     });
   });
 
+  test("exports ready-for-dev annotations for code structures", () => {
+    const fixture = tossFixture() as any;
+    fixture.tokens = [
+      {
+        id: "color-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#3182f6"
+      },
+      {
+        id: "spacing-layout-lg",
+        name: "Layout / Lg",
+        type: "spacing",
+        value: "32px"
+      }
+    ];
+    fixture.pages[0].children[0].style.fill_token = "color-brand-primary";
+    fixture.pages[0].children[0].layout = {
+      mode: "auto",
+      direction: "vertical",
+      align_items: "center",
+      justify_content: "center",
+      gap: 32,
+      row_gap: 32,
+      column_gap: 32,
+      padding: { top: 32, right: 32, bottom: 32, left: 32 },
+      spacing_tokens: {
+        gap: "spacing-layout-lg",
+        row_gap: "spacing-layout-lg",
+        column_gap: "spacing-layout-lg",
+        padding_top: "spacing-layout-lg",
+        padding_right: "spacing-layout-lg",
+        padding_bottom: "spacing-layout-lg",
+        padding_left: "spacing-layout-lg"
+      }
+    };
+
+    const result = exportDesignToCode(fixture);
+    const button = result.elements.find((element) => element.id === "tds-button-primary");
+
+    expect(button?.structure.annotations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tds-button-primary-geometry",
+          label: "크기/위치",
+          value: "240 x 56 · X 64, Y 120"
+        }),
+        expect.objectContaining({
+          id: "tds-button-primary-style",
+          label: "스타일",
+          detail: "fill token color-brand-primary maps to var(--layo-token-color-brand-primary)"
+        }),
+        expect.objectContaining({
+          id: "tds-button-primary-layout",
+          label: "레이아웃",
+          detail: "spacing token spacing-layout-lg is used for gap and padding"
+        })
+      ])
+    );
+    expect(button?.structure.children[0].annotations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "tds-button-label-content",
+          label: "콘텐츠",
+          value: "\"송금하기\" · 18px Arial"
+        })
+      ])
+    );
+  });
+
   test("exports image fit mode for agent handoff", () => {
     const result = exportDesignToCode({
       id: "image-file",

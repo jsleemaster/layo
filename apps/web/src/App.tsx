@@ -267,6 +267,20 @@ function htmlSnippetForCodeNode(html: string, nodeId: string) {
   return lines.slice(startIndex, endIndex).join("\n");
 }
 
+function annotationSnippetForCodeNode(annotations: CodeStructureNode["annotations"]) {
+  return annotations
+    .map((annotation) =>
+      [
+        `${annotation.label}: ${annotation.value}`,
+        annotation.detail ? `Detail: ${annotation.detail}` : null,
+        `Nodes: ${annotation.sourceNodeIds.join(", ")}`
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n");
+}
+
 function gridTrackInputValue(tracks: GridTrack[] | undefined, count: number) {
   return Array.from({ length: count }, (_, index) => gridTrackToken(tracks?.[index])).join(" ");
 }
@@ -3234,6 +3248,8 @@ function DevPanel({
   const cssSnippet = codeExport && codeStructure ? cssSnippetForCodeNode(codeExport.css, codeStructure.className) : "";
   const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
   const structureSnippet = codeStructure ? JSON.stringify(codeStructure, null, 2) : "";
+  const annotations = codeStructure?.annotations ?? [];
+  const annotationSnippet = annotationSnippetForCodeNode(annotations);
   const exportPresets = selectedNode?.export_presets ?? [];
   const selectedExportReviewItems = selectedNodes.length > 1 ? buildExportPresetReviewItems(selectedNodes) : [];
   const isPageExportReview = !selectedNode && selectedExportReviewItems.length === 0;
@@ -3522,6 +3538,34 @@ function DevPanel({
           </div>
           <div className="dev-panel-copy-status" data-testid="dev-panel-copy-status" aria-live="polite">
             {copyStatus}
+          </div>
+          <div className="dev-panel-annotations" data-testid="dev-panel-ready-annotations">
+            <div className="dev-panel-code-header">
+              <span>Ready for dev</span>
+              <button
+                type="button"
+                className="dev-panel-copy-button"
+                data-testid="dev-panel-copy-annotations"
+                disabled={!annotationSnippet}
+                onClick={() => void copySnippet("핸드오프", annotationSnippet)}
+              >
+                핸드오프 복사
+              </button>
+            </div>
+            {annotations.length === 0 ? (
+              <span className="dev-panel-annotation-empty">핸드오프 annotation 대기 중</span>
+            ) : (
+              <div className="dev-panel-annotation-list">
+                {annotations.map((annotation) => (
+                  <div key={annotation.id} className="dev-panel-annotation-row">
+                    <span className="dev-panel-annotation-label">{annotation.label}</span>
+                    <span className="dev-panel-annotation-value">{annotation.value}</span>
+                    {annotation.detail ? <span className="dev-panel-annotation-detail">{annotation.detail}</span> : null}
+                    <span className="dev-panel-annotation-source">{annotation.sourceNodeIds.join(", ")}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="dev-panel-asset-card" data-testid="dev-panel-assets">
             <div className="dev-panel-code-header">

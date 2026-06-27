@@ -50,6 +50,7 @@ export interface CodeStructureNode {
     strokeWidth: number;
     opacity: number;
   };
+  annotations: CodeHandoffAnnotation[];
   content:
     | { type: "empty" }
     | { type: "text"; value: string; fontSize: number; fontFamily: string }
@@ -72,6 +73,15 @@ export interface CodeStructureNode {
   layout_item?: NodeLayoutItem;
   constraints?: NodeConstraints;
   children: CodeStructureNode[];
+}
+
+export interface CodeHandoffAnnotation {
+  id: string;
+  label: string;
+  value: string;
+  detail?: string;
+  kind: "identity" | "geometry" | "style" | "content" | "layout" | "component" | "asset";
+  sourceNodeIds: string[];
 }
 
 export interface ElementImplementationSpec {
@@ -232,6 +242,7 @@ function structureFor(node: DesignNode, tokenMap: Map<string, DesignToken>): Cod
       strokeWidth: node.style.stroke_width,
       opacity: node.style.opacity
     },
+    annotations: handoffAnnotationsFor(node, tokenMap),
     content: contentFor(node),
     children: node.children.filter(isNodeExportVisible).map((child) => structureFor(child, tokenMap))
   };
@@ -269,6 +280,189 @@ function structureFor(node: DesignNode, tokenMap: Map<string, DesignToken>): Cod
   }
 
   return base;
+}
+
+function handoffAnnotationsFor(node: DesignNode, tokenMap: Map<string, DesignToken>): CodeHandoffAnnotation[] {
+  const annotations: CodeHandoffAnnotation[] = [
+    {
+      id: `${node.id}-identity`,
+      label: "레이어",
+      value: `${node.name} · ${node.kind}`,
+      kind: "identity",
+      sourceNodeIds: [node.id]
+    },
+    {
+      id: `${node.id}-geometry`,
+      label: "크기/위치",
+      value: `${formatNumber(node.size.width)} x ${formatNumber(node.size.height)} · X ${formatNumber(
+        node.transform.x
+      )}, Y ${formatNumber(node.transform.y)}`,
+      detail:
+        node.transform.rotation === 0
+          ? undefined
+          : `rotation ${formatNumber(node.transform.rotation)}deg`,
+      kind: "geometry",
+      sourceNodeIds: [node.id]
+    },
+    styleAnnotationFor(node, tokenMap)
+  ];
+
+  const contentAnnotation = contentAnnotationFor(node);
+  if (contentAnnotation) {
+    annotations.push(contentAnnotation);
+  }
+
+  const layoutAnnotation = layoutAnnotationFor(node);
+  if (layoutAnnotation) {
+    annotations.push(layoutAnnotation);
+  }
+
+  const componentAnnotation = componentAnnotationFor(node);
+  if (componentAnnotation) {
+    annotations.push(componentAnnotation);
+  }
+
+  const assetAnnotation = assetAnnotationFor(node);
+  if (assetAnnotation) {
+    annotations.push(assetAnnotation);
+  }
+
+  return annotations;
+}
+
+function styleAnnotationFor(node: DesignNode, tokenMap: Map<string, DesignToken>): CodeHandoffAnnotation {
+  const token = node.style.fill_token ? tokenMap.get(node.style.fill_token) : undefined;
+  const fill = resolvedFill(node, tokenMap);
+
+  return {
+    id: `${node.id}-style`,
+    label: "스타일",
+    value: `Fill ${fill} · opacity ${formatNumber(node.style.opacity)}`,
+    detail:
+      token && token.type === "color"
+        ? `fill token ${token.id} maps to var(--${cssTokenName(token.id)})`
+        : node.style.stroke
+          ? `stroke ${node.style.stroke} ${formatPx(node.style.stroke_width)}`
+          : undefined,
+    kind: "style",
+    sourceNodeIds: [node.id]
+  };
+}
+
+function contentAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
+  if (node.content.type === "text") {
+    return {
+      id: `${node.id}-content`,
+      label: "콘텐츠",
+      value: `"${node.content.value}" · ${formatPx(node.content.font_size)} ${node.content.font_family}`,
+      kind: "content",
+      sourceNodeIds: [node.id]
+    };
+  }
+
+  if (node.content.type === "image") {
+    return {
+      id: `${node.id}-content`,
+      label: "콘텐츠",
+      value: `Image asset ${node.content.asset_id} · ${node.content.fit_mode ?? "fill"}`,
+      kind: "content",
+      sourceNodeIds: [node.id]
+    };
+  }
+
+  return null;
+}
+
+function layoutAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
+  if (!node.layout && !node.layout_item && !node.constraints) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  if (node.layout) {
+    parts.push(node.layout.mode);
+    parts.push(node.layout.direction);
+    parts.push(`gap ${formatNumber(node.layout.gap)}`);
+    parts.push(
+      `padding ${formatNumber(node.layout.padding.top)}/${formatNumber(node.layout.padding.right)}/${formatNumber(
+        node.layout.padding.bottom
+      )}/${formatNumber(node.layout.padding.left)}`
+    );
+  }
+  if (node.layout_item) {
+    parts.push(`item ${node.layout_item.position ?? "normal"}`);
+  }
+  if (node.constraints) {
+    parts.push(`constraints ${node.constraints.horizontal}/${node.constraints.vertical}`);
+  }
+
+  return {
+    id: `${node.id}-layout`,
+    label: "레이아웃",
+    value: parts.join(" · "),
+    detail: layoutSpacingTokenDetail(node.layout),
+    kind: "layout",
+    sourceNodeIds: [node.id]
+  };
+}
+
+function layoutSpacingTokenDetail(layout: NodeLayout | null | undefined): string | undefined {
+  if (!layout?.spacing_tokens) {
+    return undefined;
+  }
+
+  const gapToken = layout.spacing_tokens.gap;
+  const paddingTokens = [
+    layout.spacing_tokens.padding_top,
+    layout.spacing_tokens.padding_right,
+    layout.spacing_tokens.padding_bottom,
+    layout.spacing_tokens.padding_left
+  ].filter(Boolean);
+  if (gapToken && paddingTokens.length > 0 && paddingTokens.every((token) => token === gapToken)) {
+    return `spacing token ${gapToken} is used for gap and padding`;
+  }
+
+  const tokenIds = [
+    layout.spacing_tokens.gap,
+    layout.spacing_tokens.row_gap,
+    layout.spacing_tokens.column_gap,
+    ...paddingTokens
+  ].filter((tokenId, index, values): tokenId is string => Boolean(tokenId) && values.indexOf(tokenId) === index);
+
+  return tokenIds.length > 0 ? `spacing tokens ${tokenIds.join(", ")}` : undefined;
+}
+
+function componentAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
+  if (!node.component_instance) {
+    return null;
+  }
+
+  return {
+    id: `${node.id}-component`,
+    label: "컴포넌트",
+    value: `${node.component_instance.definition_id} · ${node.component_instance.detached ? "detached" : "instance"}`,
+    detail:
+      node.component_instance.overrides.length > 0
+        ? `${node.component_instance.overrides.length} override(s) mapped for implementation`
+        : undefined,
+    kind: "component",
+    sourceNodeIds: [node.id]
+  };
+}
+
+function assetAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
+  if (node.content.type !== "image") {
+    return null;
+  }
+
+  return {
+    id: `${node.id}-asset`,
+    label: "에셋",
+    value: `${node.content.asset_id} · ${formatNumber(node.size.width)} x ${formatNumber(node.size.height)}`,
+    detail: `fit mode ${node.content.fit_mode ?? "fill"}`,
+    kind: "asset",
+    sourceNodeIds: [node.id]
+  };
 }
 
 function isNodeExportVisible(node: DesignNode): boolean {

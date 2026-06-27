@@ -246,6 +246,7 @@ export interface CodeStructureNode {
     strokeWidth: number;
     opacity: number;
   };
+  annotations: CodeHandoffAnnotation[];
   content:
     | { type: "empty" }
     | { type: "text"; value: string; fontSize: number; fontFamily: string }
@@ -259,6 +260,15 @@ export interface CodeStructureNode {
   layout_item?: unknown;
   constraints?: unknown;
   children: CodeStructureNode[];
+}
+
+export interface CodeHandoffAnnotation {
+  id: string;
+  label: string;
+  value: string;
+  detail?: string;
+  kind: "identity" | "geometry" | "style" | "content" | "layout" | "component" | "asset";
+  sourceNodeIds: string[];
 }
 
 export interface CodeElementImplementation {
