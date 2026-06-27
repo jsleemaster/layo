@@ -559,6 +559,58 @@ test("inspector dev panel downloads selected frame artifacts with nested child l
   expect(pdfText.trimEnd().endsWith("%%EOF")).toBe(true);
 });
 
+test("inspector dev panel downloads image artifacts with embedded image asset bytes", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+
+  const imageTransfer = await createImageDataTransfer(page, "export-image.png", { width: 18, height: 14 }, "#2563eb");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 340,
+    clientY: stageBox.y + 280
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+
+  await page.getByRole("button", { name: "이미지 3" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const svgDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-svg").click();
+  const svgDownload = await svgDownloadPromise;
+  expect(svgDownload.suggestedFilename()).toBe("image-3.svg");
+  const svgPath = await svgDownload.path();
+  if (!svgPath) {
+    throw new Error("image svg download path missing");
+  }
+  const svg = await readFile(svgPath, "utf8");
+  expect(svg).toContain("<image");
+  expect(svg).toContain('data-node-id="image-3"');
+  expect(svg).toContain('data-image-asset-id="asset-');
+  expect(svg).toContain('href="data:image/png;base64,');
+
+  const pdfDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-pdf").click();
+  const pdfDownload = await pdfDownloadPromise;
+  expect(pdfDownload.suggestedFilename()).toBe("image-3.pdf");
+  const pdfPath = await pdfDownload.path();
+  if (!pdfPath) {
+    throw new Error("image pdf download path missing");
+  }
+  const pdf = await readFile(pdfPath);
+  const pdfText = pdf.toString("utf8");
+  expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+  expect(pdfText).toContain("/Title (이미지 3)");
+  expect(pdfText).toContain("/EmbeddedFiles");
+  expect(pdfText).toContain("/Type /EmbeddedFile");
+  expect(pdfText).toContain("/Subtype /image#2Fpng");
+  expect(pdf.includes(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
+  expect(pdfText.trimEnd().endsWith("%%EOF")).toBe(true);
+});
+
 test("inspector dev panel saves and batch-downloads selected layer export presets", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

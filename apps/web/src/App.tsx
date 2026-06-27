@@ -72,7 +72,7 @@ import {
   type LibraryArchiveReview
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
-import { pdfForNode, svgForNode } from "./node-artifacts";
+import { imageAssetIdsForNode, pdfForNode, svgForNode, type NodeArtifactAsset } from "./node-artifacts";
 import { uploadImageAsset, type UploadedAsset } from "./asset-api";
 import {
   createCollabDocumentSession,
@@ -428,7 +428,7 @@ function exportReviewZipName(scopeLabel: string) {
   return `${normalized || "layo"}-export-review.zip`;
 }
 
-function readFileAsBase64(file: File): Promise<string> {
+function readFileAsBase64(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener("load", () => {
@@ -965,6 +965,40 @@ function nodeLayerLabel(node: RendererNode): string {
 
 function assetUrlForId(assetId: string) {
   return apiUrl(`/assets/${encodeURIComponent(assetId)}`);
+}
+
+function artifactFileNameForAsset(assetId: string, mimeType: string) {
+  const extension = mimeType.split("/")[1]?.replace("jpeg", "jpg") || "bin";
+  return `${assetId}.${extension}`;
+}
+
+async function loadArtifactAssetsForNode(node: RendererNode): Promise<Record<string, NodeArtifactAsset>> {
+  const assetIds = imageAssetIdsForNode(node);
+  if (assetIds.length === 0) {
+    return {};
+  }
+
+  const entries = await Promise.all(
+    assetIds.map(async (assetId): Promise<[string, NodeArtifactAsset]> => {
+      const response = await fetch(assetUrlForId(assetId));
+      if (!response.ok) {
+        throw new Error(`asset export fetch failed: ${assetId}`);
+      }
+      const blob = await response.blob();
+      const mimeType = blob.type || response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+      return [
+        assetId,
+        {
+          assetId,
+          mimeType,
+          dataBase64: await readFileAsBase64(blob),
+          name: artifactFileNameForAsset(assetId, mimeType)
+        }
+      ];
+    })
+  );
+
+  return Object.fromEntries(entries);
 }
 
 function imageFilesFromList(files: FileList | File[]): File[] {
@@ -3201,12 +3235,13 @@ function DevPanel({
     }
   };
 
-  const downloadSelectedSvg = () => {
+  const downloadSelectedSvg = async () => {
     if (!selectedNode) {
       return;
     }
     try {
-      downloadBlob(new Blob([svgForNode(selectedNode)], { type: "image/svg+xml" }), `${selectedNode.id}.svg`);
+      const assets = await loadArtifactAssetsForNode(selectedNode);
+      downloadBlob(new Blob([svgForNode(selectedNode, { assets })], { type: "image/svg+xml" }), `${selectedNode.id}.svg`);
       setAssetStatus(`${selectedNode.name} SVG 다운로드됨`);
     } catch {
       setAssetStatus("SVG 다운로드 실패");
@@ -3228,12 +3263,13 @@ function DevPanel({
     setAssetStatus(nextStatus ?? "WEBP 다운로드 실패");
   };
 
-  const downloadSelectedPdf = () => {
+  const downloadSelectedPdf = async () => {
     if (!selectedNode) {
       return;
     }
     try {
-      downloadBlob(new Blob([pdfForNode(selectedNode)], { type: "application/pdf" }), `${selectedNode.id}.pdf`);
+      const assets = await loadArtifactAssetsForNode(selectedNode);
+      downloadBlob(new Blob([pdfForNode(selectedNode, { assets })], { type: "application/pdf" }), `${selectedNode.id}.pdf`);
       setAssetStatus(`${selectedNode.name} PDF 다운로드됨`);
     } catch {
       setAssetStatus("PDF 다운로드 실패");
@@ -3273,7 +3309,7 @@ function DevPanel({
   const normalizeExportPresetFormat = (format: NodeExportPreset["format"]): ExportPresetFormat =>
     EXPORT_PRESET_FORMATS.includes(format as ExportPresetFormat) ? (format as ExportPresetFormat) : "png";
 
-  const downloadExportPreset = (preset: NodeExportPreset): boolean => {
+  const downloadExportPreset = async (preset: NodeExportPreset): Promise<boolean> => {
     if (!selectedNode) {
       return false;
     }
@@ -3281,9 +3317,11 @@ function DevPanel({
     const filename = `${selectedNode.id}${preset.suffix}.${exportPresetExtension(format)}`;
     try {
       if (format === "svg") {
-        downloadBlob(new Blob([svgForNode(selectedNode)], { type: "image/svg+xml" }), filename);
+        const assets = await loadArtifactAssetsForNode(selectedNode);
+        downloadBlob(new Blob([svgForNode(selectedNode, { assets })], { type: "image/svg+xml" }), filename);
       } else if (format === "pdf") {
-        downloadBlob(new Blob([pdfForNode(selectedNode)], { type: "application/pdf" }), filename);
+        const assets = await loadArtifactAssetsForNode(selectedNode);
+        downloadBlob(new Blob([pdfForNode(selectedNode, { assets })], { type: "application/pdf" }), filename);
       } else {
         return Boolean(onDownloadRaster(format, presetRasterScale(preset.scale), filename));
       }
@@ -3293,15 +3331,17 @@ function DevPanel({
     }
   };
 
-  const downloadAllExportPresets = () => {
+  const downloadAllExportPresets = async () => {
     if (!selectedNode || exportPresets.length === 0) {
       setAssetStatus("export preset 없음");
       return;
     }
-    const downloadCount = exportPresets.reduce(
-      (count, preset) => count + (downloadExportPreset(preset) ? 1 : 0),
-      0
-    );
+    let downloadCount = 0;
+    for (const preset of exportPresets) {
+      if (await downloadExportPreset(preset)) {
+        downloadCount += 1;
+      }
+    }
     setAssetStatus(
       downloadCount === exportPresets.length
         ? `${downloadCount}개 export preset 다운로드됨`
@@ -3323,10 +3363,12 @@ function DevPanel({
     const format = normalizeExportPresetFormat(item.format);
     try {
       if (format === "svg") {
-        return { path: item.filename, data: new Blob([svgForNode(node)], { type: "image/svg+xml" }) };
+        const assets = await loadArtifactAssetsForNode(node);
+        return { path: item.filename, data: new Blob([svgForNode(node, { assets })], { type: "image/svg+xml" }) };
       }
       if (format === "pdf") {
-        return { path: item.filename, data: new Blob([pdfForNode(node)], { type: "application/pdf" }) };
+        const assets = await loadArtifactAssetsForNode(node);
+        return { path: item.filename, data: new Blob([pdfForNode(node, { assets })], { type: "application/pdf" }) };
       }
       const dataUrl = onDownloadNodeRaster(format, presetRasterScale(item.scale), item.nodeId, item.filename, {
         download: false
