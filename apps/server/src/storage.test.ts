@@ -1346,6 +1346,42 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("persists node export presets through agent commands", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const result = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "set_export_presets",
+          nodeId: "text-1",
+          presets: [
+            { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+            { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+          ]
+        }
+      ] as any
+    });
+    const previewText = result.preview.pages[0].children[0].children[0] as any;
+    const persisted = await storage.readFile("sample-file");
+    const persistedText = persisted.pages[0].children[0].children[0] as any;
+
+    expect(result).toMatchObject({
+      persisted: true,
+      validation: { ok: true, issueCount: 0 },
+      audit: {
+        commandTypes: ["set_export_presets"],
+        changedNodeIds: ["text-1"]
+      }
+    });
+    expect(previewText.export_presets).toEqual([
+      { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+      { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+    ]);
+    expect(persistedText.export_presets).toEqual(previewText.export_presets);
+  });
+
   test("validates missing and wrong-type layout spacing token references", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

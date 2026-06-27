@@ -11,6 +11,7 @@ import type {
   DesignToken,
   DesignNode,
   NodeConstraints,
+  NodeExportPreset,
   NodeLayout,
   NodeLayoutItem
 } from "./storage";
@@ -25,6 +26,7 @@ export interface AgentNodeSummary {
   layout?: NodeLayout;
   layout_item?: NodeLayoutItem;
   constraints?: NodeConstraints;
+  exportPresets?: NodeExportPreset[];
   bounds: { x: number; y: number; width: number; height: number };
 }
 
@@ -113,6 +115,7 @@ export type AgentCommand =
       fontFamily?: string;
     }
   | { type: "create_component"; nodeId: string; componentId: string; name: string }
+  | { type: "set_export_presets"; nodeId: string; presets: NodeExportPreset[] }
   | { type: "set_layout"; nodeId: string; layout: NodeLayout }
   | { type: "set_layout_item"; nodeId: string; layoutItem: NodeLayoutItem }
   | { type: "set_constraints"; nodeId: string; constraints: NodeConstraints }
@@ -392,6 +395,7 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     layout: node.layout ?? undefined,
     layout_item: node.layout_item ?? undefined,
     constraints: node.constraints ?? undefined,
+    exportPresets: node.export_presets ? node.export_presets.map((preset) => ({ ...preset })) : undefined,
     bounds: {
       x: node.transform.x,
       y: node.transform.y,
@@ -451,6 +455,7 @@ function validateNode(
   }
 
   validateLayoutSpacingTokenReferences(node, path, tokenTypes, issues);
+  validateExportPresets(node, path, issues);
 
   if (node.kind === "text" && node.content.type !== "text") {
     issues.push({
@@ -511,6 +516,53 @@ function validateLayoutSpacingTokenReferences(
       issues.push({
         code: "invalid_layout_spacing_token_type",
         message: `node layout spacing token is not spacing: ${tokenId}`,
+        nodeId: node.id,
+        path
+      });
+    }
+  }
+}
+
+function validateExportPresets(
+  node: DesignNode,
+  path: string[],
+  issues: DocumentValidationIssue[]
+) {
+  if (!node.export_presets?.length) {
+    return;
+  }
+
+  const ids = new Set<string>();
+  for (const preset of node.export_presets) {
+    if (!preset.id?.trim()) {
+      issues.push({
+        code: "invalid_export_preset_id",
+        message: `node export preset id is required: ${node.id}`,
+        nodeId: node.id,
+        path
+      });
+    } else if (ids.has(preset.id)) {
+      issues.push({
+        code: "duplicate_export_preset_id",
+        message: `duplicate export preset id: ${preset.id}`,
+        nodeId: node.id,
+        path
+      });
+    }
+    ids.add(preset.id);
+
+    if (!["png", "jpeg", "webp", "svg", "pdf"].includes(preset.format)) {
+      issues.push({
+        code: "invalid_export_preset_format",
+        message: `unsupported export preset format: ${String(preset.format)}`,
+        nodeId: node.id,
+        path
+      });
+    }
+    if (!Number.isFinite(preset.scale) || preset.scale <= 0) {
+      issues.push({
+        code: "invalid_export_preset_scale",
+        message: `export preset scale must be positive: ${preset.id}`,
         nodeId: node.id,
         path
       });
@@ -680,6 +732,16 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       document.components.push(component);
       return node.id;
     }
+    case "set_export_presets": {
+      const node = requireNode(document, command.nodeId);
+      const presets = normalizeNodeExportPresets(command.presets);
+      if (presets.length > 0) {
+        node.export_presets = presets;
+      } else {
+        delete node.export_presets;
+      }
+      return node.id;
+    }
     case "set_layout": {
       const node = requireNode(document, command.nodeId);
       node.layout = normalizeNodeLayout(command.layout);
@@ -727,6 +789,21 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       return node.id;
     }
   }
+}
+
+function normalizeNodeExportPresets(presets: NodeExportPreset[]): NodeExportPreset[] {
+  return presets.map((preset, index) => {
+    const format = ["png", "jpeg", "webp", "svg", "pdf"].includes(preset.format)
+      ? preset.format
+      : "png";
+    const scale = Number.isFinite(preset.scale) && preset.scale > 0 ? Math.max(1, Math.round(preset.scale)) : 1;
+    return {
+      id: preset.id.trim() || `export-preset-${index + 1}`,
+      format,
+      scale,
+      suffix: preset.suffix.trim()
+    };
+  });
 }
 
 function requireColorToken(document: DesignFile, tokenId: string): DesignToken {

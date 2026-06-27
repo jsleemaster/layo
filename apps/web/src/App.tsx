@@ -19,6 +19,7 @@ import {
   type GridTrack,
   type ImageFitMode,
   type NodeConstraints,
+  type NodeExportPreset,
   type NodeLayout,
   type NodeLayoutItem,
   type RendererDocument,
@@ -1149,6 +1150,21 @@ async function persistNodeLayout(fileId: string, nodeId: string, layout: NodeLay
 
   if (!response.ok) {
     throw new Error(`레이아웃 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistNodeExportPresets(fileId: string, nodeId: string, presets: NodeExportPreset[]) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_export_presets", nodeId, presets }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`export preset 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -3176,6 +3192,16 @@ function InspectorTokenControls({
 
 const PNG_EXPORT_SCALES = [1, 2, 3] as const;
 type PngExportScale = (typeof PNG_EXPORT_SCALES)[number];
+const EXPORT_PRESET_FORMATS = ["png", "jpeg", "webp", "svg", "pdf"] as const;
+type ExportPresetFormat = (typeof EXPORT_PRESET_FORMATS)[number];
+
+function exportPresetFormatLabel(format: ExportPresetFormat) {
+  return format.toUpperCase();
+}
+
+function exportPresetExtension(format: ExportPresetFormat) {
+  return format === "jpeg" ? "jpg" : format;
+}
 
 function DevPanel({
   selectedNode,
@@ -3183,7 +3209,9 @@ function DevPanel({
   codeExportStatus,
   onDownloadPng,
   onDownloadJpeg,
-  onDownloadWebp
+  onDownloadWebp,
+  onDownloadRaster,
+  onExportPresetsChange
 }: {
   selectedNode: RendererNode | null;
   codeExport: CodeExportPayload | null;
@@ -3191,14 +3219,20 @@ function DevPanel({
   onDownloadPng: (scale: PngExportScale) => string | null;
   onDownloadJpeg: (scale: PngExportScale) => string | null;
   onDownloadWebp: (scale: PngExportScale) => string | null;
+  onDownloadRaster: (format: "png" | "jpeg" | "webp", scale: PngExportScale, filename: string) => string | null;
+  onExportPresetsChange: (nodeId: string, presets: NodeExportPreset[]) => void;
 }) {
   const [copyStatus, setCopyStatus] = useState("복사 대기 중");
   const [assetStatus, setAssetStatus] = useState("에셋 다운로드 대기 중");
   const [pngScale, setPngScale] = useState<PngExportScale>(2);
+  const [presetFormat, setPresetFormat] = useState<ExportPresetFormat>("png");
+  const [presetScale, setPresetScale] = useState<PngExportScale>(1);
+  const [presetSuffix, setPresetSuffix] = useState("");
   const codeStructure = selectedNode ? findCodeStructureForNode(codeExport, selectedNode.id) : null;
   const cssSnippet = codeExport && codeStructure ? cssSnippetForCodeNode(codeExport.css, codeStructure.className) : "";
   const htmlSnippet = codeExport && selectedNode ? htmlSnippetForCodeNode(codeExport.html, selectedNode.id) : "";
   const structureSnippet = codeStructure ? JSON.stringify(codeStructure, null, 2) : "";
+  const exportPresets = selectedNode?.export_presets ?? [];
 
   useEffect(() => {
     setCopyStatus(selectedNode ? "복사 대기 중" : "레이어 선택 대기 중");
@@ -3258,6 +3292,74 @@ function DevPanel({
     } catch {
       setAssetStatus("PDF 다운로드 실패");
     }
+  };
+
+  const nextPresetId = () => `${selectedNode?.id ?? "node"}-export-preset-${exportPresets.length + 1}`;
+  const addExportPreset = () => {
+    if (!selectedNode) {
+      return;
+    }
+    onExportPresetsChange(selectedNode.id, [
+      ...exportPresets,
+      {
+        id: nextPresetId(),
+        format: presetFormat,
+        scale: presetScale,
+        suffix: presetSuffix.trim()
+      }
+    ]);
+    setAssetStatus(`${selectedNode.name} export preset 추가됨`);
+  };
+
+  const removeExportPreset = (presetId: string) => {
+    if (!selectedNode) {
+      return;
+    }
+    onExportPresetsChange(
+      selectedNode.id,
+      exportPresets.filter((preset) => preset.id !== presetId)
+    );
+    setAssetStatus(`${selectedNode.name} export preset 삭제됨`);
+  };
+
+  const presetRasterScale = (scale: number): PngExportScale => (scale === 3 ? 3 : scale === 1 ? 1 : 2);
+
+  const downloadExportPreset = (preset: NodeExportPreset): boolean => {
+    if (!selectedNode) {
+      return false;
+    }
+    const format = EXPORT_PRESET_FORMATS.includes(preset.format as ExportPresetFormat)
+      ? (preset.format as ExportPresetFormat)
+      : "png";
+    const filename = `${selectedNode.id}${preset.suffix}.${exportPresetExtension(format)}`;
+    try {
+      if (format === "svg") {
+        downloadBlob(new Blob([svgForNode(selectedNode)], { type: "image/svg+xml" }), filename);
+      } else if (format === "pdf") {
+        downloadBlob(new Blob([pdfForNode(selectedNode)], { type: "application/pdf" }), filename);
+      } else {
+        return Boolean(onDownloadRaster(format, presetRasterScale(preset.scale), filename));
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const downloadAllExportPresets = () => {
+    if (!selectedNode || exportPresets.length === 0) {
+      setAssetStatus("export preset 없음");
+      return;
+    }
+    const downloadCount = exportPresets.reduce(
+      (count, preset) => count + (downloadExportPreset(preset) ? 1 : 0),
+      0
+    );
+    setAssetStatus(
+      downloadCount === exportPresets.length
+        ? `${downloadCount}개 export preset 다운로드됨`
+        : `${downloadCount}/${exportPresets.length}개 export preset 다운로드됨`
+    );
   };
 
   return (
@@ -3355,6 +3457,98 @@ function DevPanel({
             </div>
             <div className="dev-panel-asset-status" data-testid="dev-panel-asset-status" aria-live="polite">
               {assetStatus}
+            </div>
+            <div className="dev-panel-export-presets-card">
+              <div className="dev-panel-code-header">
+                <span>Export presets</span>
+                <button
+                  type="button"
+                  className="dev-panel-copy-button"
+                  data-testid="dev-panel-export-presets-download-all"
+                  onClick={downloadAllExportPresets}
+                  disabled={exportPresets.length === 0}
+                >
+                  모두 다운로드
+                </button>
+              </div>
+              <div className="dev-panel-export-preset-builder">
+                <label>
+                  형식
+                  <select
+                    data-testid="dev-panel-export-preset-format"
+                    value={presetFormat}
+                    onChange={(event) => setPresetFormat(event.currentTarget.value as ExportPresetFormat)}
+                  >
+                    {EXPORT_PRESET_FORMATS.map((format) => (
+                      <option key={format} value={format}>
+                        {exportPresetFormatLabel(format)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div
+                  className="dev-panel-scale-control"
+                  data-testid="dev-panel-export-preset-scale-control"
+                  role="radiogroup"
+                  aria-label="export preset 배율"
+                >
+                  <span>배율</span>
+                  <div className="dev-panel-scale-options">
+                    {PNG_EXPORT_SCALES.map((scale) => (
+                      <button
+                        key={scale}
+                        type="button"
+                        role="radio"
+                        aria-checked={presetScale === scale}
+                        className={`dev-panel-scale-button${presetScale === scale ? " is-active" : ""}`}
+                        data-testid={`dev-panel-export-preset-scale-${scale}x`}
+                        onClick={() => setPresetScale(scale)}
+                      >
+                        {scale}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label>
+                  suffix
+                  <input
+                    data-testid="dev-panel-export-preset-suffix"
+                    value={presetSuffix}
+                    onChange={(event) => setPresetSuffix(event.currentTarget.value)}
+                    placeholder="@2x"
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="dev-panel-copy-button"
+                  data-testid="dev-panel-export-preset-add"
+                  onClick={addExportPreset}
+                >
+                  프리셋 추가
+                </button>
+              </div>
+              <div className="dev-panel-export-presets" data-testid="dev-panel-export-presets">
+                {exportPresets.length === 0 ? (
+                  <span>저장된 export preset 없음</span>
+                ) : (
+                  exportPresets.map((preset) => (
+                    <div key={preset.id} className="dev-panel-export-preset-row">
+                      <span>
+                        {exportPresetFormatLabel(preset.format as ExportPresetFormat)} {preset.scale}x
+                        {preset.suffix ? ` ${preset.suffix}` : ""}
+                      </span>
+                      <button
+                        type="button"
+                        className="dev-panel-copy-button"
+                        data-testid={`dev-panel-export-preset-remove-${preset.id}`}
+                        onClick={() => removeExportPreset(preset.id)}
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
           <div className="stacked-field dev-panel-code-block">
@@ -3458,6 +3652,8 @@ function Inspector({
   onDownloadSelectedPng,
   onDownloadSelectedJpeg,
   onDownloadSelectedWebp,
+  onDownloadSelectedRaster,
+  onExportPresetsChange,
   onTabChange
 }: {
   activeTab: InspectorTab;
@@ -3500,6 +3696,12 @@ function Inspector({
   onDownloadSelectedPng: (scale: PngExportScale) => string | null;
   onDownloadSelectedJpeg: (scale: PngExportScale) => string | null;
   onDownloadSelectedWebp: (scale: PngExportScale) => string | null;
+  onDownloadSelectedRaster: (
+    format: "png" | "jpeg" | "webp",
+    scale: PngExportScale,
+    filename: string
+  ) => string | null;
+  onExportPresetsChange: (nodeId: string, presets: NodeExportPreset[]) => void;
   onTabChange: (tab: InspectorTab) => void;
 }) {
   const tokenControls = (
@@ -3535,6 +3737,8 @@ function Inspector({
             onDownloadPng={onDownloadSelectedPng}
             onDownloadJpeg={onDownloadSelectedJpeg}
             onDownloadWebp={onDownloadSelectedWebp}
+            onDownloadRaster={onDownloadSelectedRaster}
+            onExportPresetsChange={onExportPresetsChange}
           />
         ) : activeTab === "prototype" ? (
           <PrototypePanel />
@@ -3571,6 +3775,8 @@ function Inspector({
             onDownloadPng={onDownloadSelectedPng}
             onDownloadJpeg={onDownloadSelectedJpeg}
             onDownloadWebp={onDownloadSelectedWebp}
+            onDownloadRaster={onDownloadSelectedRaster}
+            onExportPresetsChange={onExportPresetsChange}
           />
         ) : activeTab === "prototype" ? (
           <PrototypePanel />
@@ -3802,6 +4008,8 @@ function Inspector({
           onDownloadPng={onDownloadSelectedPng}
           onDownloadJpeg={onDownloadSelectedJpeg}
           onDownloadWebp={onDownloadSelectedWebp}
+          onDownloadRaster={onDownloadSelectedRaster}
+          onExportPresetsChange={onExportPresetsChange}
         />
       ) : activeTab === "prototype" ? (
         <PrototypePanel />
@@ -5751,56 +5959,36 @@ export function App() {
     setObjectContextMenu(null);
   };
 
-  const downloadSelectedNodePngFromDevPanel = (scale: PngExportScale) => {
+  const downloadSelectedNodeRasterFromDevPanel = (
+    format: "png" | "jpeg" | "webp",
+    scale: PngExportScale,
+    filenameOverride?: string
+  ) => {
     const currentEditor = editorRef.current;
     if (!currentEditor) {
       return null;
     }
 
     const nodeId = currentEditor.selection.nodeId;
-    const filename = nodeId ? `${nodeId}${scale === 2 ? "" : `@${scale}x`}.png` : undefined;
+    const extension = format === "jpeg" ? "jpg" : format;
+    const filename = filenameOverride ?? (nodeId ? `${nodeId}${scale === 2 ? "" : `@${scale}x`}.${extension}` : undefined);
     const node = downloadSelectionRasterFromState(currentEditor, {
       scale,
       filename,
-      mimeType: "image/png",
-      failureMessage: "PNG 다운로드 실패"
+      mimeType: format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp",
+      failureMessage: `${format.toUpperCase()} 다운로드 실패`
     });
-    return node ? `${node.name} PNG${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
+    return node ? `${node.name} ${format.toUpperCase()}${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
   };
 
-  const downloadSelectedNodeJpegFromDevPanel = (scale: PngExportScale) => {
-    const currentEditor = editorRef.current;
-    if (!currentEditor) {
-      return null;
-    }
+  const downloadSelectedNodePngFromDevPanel = (scale: PngExportScale) =>
+    downloadSelectedNodeRasterFromDevPanel("png", scale);
 
-    const nodeId = currentEditor.selection.nodeId;
-    const filename = nodeId ? `${nodeId}${scale === 2 ? "" : `@${scale}x`}.jpg` : undefined;
-    const node = downloadSelectionRasterFromState(currentEditor, {
-      scale,
-      filename,
-      mimeType: "image/jpeg",
-      failureMessage: "JPEG 다운로드 실패"
-    });
-    return node ? `${node.name} JPEG${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
-  };
+  const downloadSelectedNodeJpegFromDevPanel = (scale: PngExportScale) =>
+    downloadSelectedNodeRasterFromDevPanel("jpeg", scale);
 
-  const downloadSelectedNodeWebpFromDevPanel = (scale: PngExportScale) => {
-    const currentEditor = editorRef.current;
-    if (!currentEditor) {
-      return null;
-    }
-
-    const nodeId = currentEditor.selection.nodeId;
-    const filename = nodeId ? `${nodeId}${scale === 2 ? "" : `@${scale}x`}.webp` : undefined;
-    const node = downloadSelectionRasterFromState(currentEditor, {
-      scale,
-      filename,
-      mimeType: "image/webp",
-      failureMessage: "WEBP 다운로드 실패"
-    });
-    return node ? `${node.name} WEBP${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
-  };
+  const downloadSelectedNodeWebpFromDevPanel = (scale: PngExportScale) =>
+    downloadSelectedNodeRasterFromDevPanel("webp", scale);
 
   const createContextComponent = () => {
     runContextMenuStateAction((state) => {
@@ -7429,6 +7617,16 @@ export function App() {
 
   const updateConstraints = (nodeId: string, constraints: NodeConstraints) => {
     dispatch({ type: "set_node_constraints", nodeId, constraints });
+  };
+
+  const updateExportPresets = (nodeId: string, presets: NodeExportPreset[]) => {
+    dispatch({ type: "set_node_export_presets", nodeId, presets });
+    if (currentProject) {
+      void persistNodeExportPresets(currentProject.currentDocumentId, nodeId, presets).catch((error) => {
+        const message = error instanceof Error ? error.message : "export preset을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+    }
   };
 
   const openProject = async (projectId: string) => {
@@ -10216,6 +10414,8 @@ export function App() {
         onDownloadSelectedPng={downloadSelectedNodePngFromDevPanel}
         onDownloadSelectedJpeg={downloadSelectedNodeJpegFromDevPanel}
         onDownloadSelectedWebp={downloadSelectedNodeWebpFromDevPanel}
+        onDownloadSelectedRaster={downloadSelectedNodeRasterFromDevPanel}
+        onExportPresetsChange={updateExportPresets}
         onTabChange={setInspectorTab}
         onGeometryChange={updateGeometry}
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}

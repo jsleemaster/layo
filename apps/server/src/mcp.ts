@@ -115,6 +115,13 @@ const designTokenSchema = z.object({
   value: z.string()
 });
 
+const nodeExportPresetSchema = z.object({
+  id: z.string(),
+  format: z.enum(["png", "jpeg", "webp", "svg", "pdf"]),
+  scale: z.number().positive(),
+  suffix: z.string().default("")
+});
+
 const agentCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("update_geometry"),
@@ -179,6 +186,11 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     nodeId: z.string(),
     componentId: z.string(),
     name: z.string()
+  }),
+  z.object({
+    type: z.literal("set_export_presets"),
+    nodeId: z.string(),
+    presets: z.array(nodeExportPresetSchema)
   }),
   z.object({
     type: z.literal("set_layout"),

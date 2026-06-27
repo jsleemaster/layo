@@ -8,8 +8,24 @@ test.beforeEach(async () => {
   await rm("apps/server/.layo", { recursive: true, force: true });
 });
 
+async function openFilePanel(page: Page) {
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일", exact: true }).click();
+  await expect(page.getByTestId("project-status")).toBeVisible();
+}
+
+async function openTeamPanel(page: Page) {
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀", exact: true }).click();
+  await expect(page.getByTestId("team-name")).toBeVisible();
+}
+
+async function openLayersPanel(page: Page) {
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어", exact: true }).click();
+  await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
+}
+
 async function createProjectFromEmptyState(page: Page) {
   await page.goto("http://127.0.0.1:5173/");
+  await openFilePanel(page);
   await expect(page.getByTestId("project-status")).toContainText("저장된 프로젝트 없음");
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
@@ -22,6 +38,7 @@ async function createProjectFromEmptyState(page: Page) {
 
 test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
+  await openTeamPanel(page);
 
   await expect(page.getByTestId("team-name")).toBeVisible();
   await expect(page.getByTestId("relay-url")).toHaveCount(0);
@@ -65,8 +82,9 @@ test("relay team syncs document edits between two browser contexts", async ({ br
   try {
     const documentId = await createProjectFromEmptyState(pageA);
     await pageB.goto("http://127.0.0.1:5173/");
-    await expect(pageB.getByRole("button", { name: "헤드라인" })).toBeVisible();
+    await openLayersPanel(pageB);
 
+    await openTeamPanel(pageA);
     await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
     await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
@@ -79,6 +97,7 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     expect(manifest).toContain("websocket");
     expect(manifest).toContain('"schemaVersion": 1');
 
+    await openTeamPanel(pageB);
     await pageB.getByRole("tab", { name: "팀 설정" }).click();
     await pageB.getByTestId("team-manifest").fill("{ broken");
     await pageB.getByRole("button", { name: "설정 가져오기" }).click();
@@ -107,10 +126,13 @@ test("relay team syncs document edits between two browser contexts", async ({ br
     await expect(pageB.getByTestId("team-manifest-status")).toContainText("불러옴");
 
     await pageA.getByRole("button", { name: "텍스트 만들기" }).click();
+    await openLayersPanel(pageA);
+    await openLayersPanel(pageB);
     await expect(pageA.getByRole("button", { name: "텍스트 3" })).toBeVisible();
     await expect(pageB.getByRole("button", { name: "텍스트 3" })).toBeVisible({ timeout: 8000 });
 
     await pageB.getByRole("button", { name: "텍스트 3" }).click();
+    await openTeamPanel(pageA);
     await expect(pageA.getByTestId("presence-list")).toContainText("text-3", { timeout: 8000 });
     await expect(pageA.getByTestId("remote-selection")).toHaveAttribute("data-selected-node-id", "text-3", {
       timeout: 8000
@@ -191,6 +213,7 @@ test("two editors keep independent node move and text edits", async ({ browser }
     await createProjectFromEmptyState(firstPage);
     await secondPage.goto("http://127.0.0.1:5173/");
 
+    await openTeamPanel(firstPage);
     await firstPage.getByRole("tab", { name: "실시간 협업" }).click();
     await firstPage.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
     await firstPage.getByRole("button", { name: "협업 팀 만들기" }).click();
@@ -203,10 +226,13 @@ test("two editors keep independent node move and text edits", async ({ browser }
     const downloadedManifestPath = join(downloadDir, download.suggestedFilename());
     await download.saveAs(downloadedManifestPath);
 
+    await openTeamPanel(secondPage);
     await secondPage.getByRole("tab", { name: "팀 설정" }).click();
     await secondPage.getByTestId("team-manifest-file").setInputFiles(downloadedManifestPath);
     await expect(secondPage.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 
+    await openLayersPanel(firstPage);
+    await openLayersPanel(secondPage);
     await firstPage.getByRole("button", { name: "헤드라인" }).click();
     await secondPage.getByRole("button", { name: "헤드라인" }).click();
 
@@ -244,10 +270,11 @@ test("five team members join a relay room and observe concurrent edits", async (
     await Promise.all(
       pages.slice(1).map(async (page) => {
         await page.goto("http://127.0.0.1:5173/");
-        await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
+        await openLayersPanel(page);
       })
     );
 
+    await openTeamPanel(pages[0]);
     await pages[0].getByRole("tab", { name: "실시간 협업" }).click();
     await pages[0].getByTestId("relay-url").fill("ws://127.0.0.1:4327");
     await pages[0].getByRole("button", { name: "협업 팀 만들기" }).click();
@@ -273,6 +300,7 @@ test("five team members join a relay room and observe concurrent edits", async (
 
     await Promise.all(
       pages.map(async (page, index) => {
+        await openTeamPanel(page);
         await page.getByRole("tab", { name: "팀 설정" }).click();
         await page.getByTestId("team-manifest").fill(memberManifests[index]);
         await page.getByRole("button", { name: "설정 가져오기" }).click();
@@ -289,6 +317,7 @@ test("five team members join a relay room and observe concurrent edits", async (
       });
     }
 
+    await Promise.all([openLayersPanel(pages[0]), openLayersPanel(pages[1]), openLayersPanel(pages[4])]);
     await Promise.all([
       pages[0].getByRole("button", { name: "헤드라인" }).click(),
       pages[1].getByRole("button", { name: "헤드라인" }).click(),
@@ -304,6 +333,7 @@ test("five team members join a relay room and observe concurrent edits", async (
     ]);
 
     for (const page of pages) {
+      await openLayersPanel(page);
       await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toHaveCount(1, { timeout: 8000 });
       await expect(page.getByRole("button", { name: /^텍스트 \d+$/ })).toHaveCount(1, { timeout: 8000 });
       await page.getByRole("button", { name: "헤드라인" }).click();
@@ -327,8 +357,9 @@ test("encrypted relay team syncs document edits without exporting the passphrase
   try {
     await createProjectFromEmptyState(pageA);
     await pageB.goto("http://127.0.0.1:5173/");
-    await expect(pageB.getByRole("button", { name: "헤드라인" })).toBeVisible();
+    await openLayersPanel(pageB);
 
+    await openTeamPanel(pageA);
     await pageA.getByRole("tab", { name: "실시간 협업" }).click();
     await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
     await pageA.getByTestId("team-e2ee-toggle").check();
@@ -343,6 +374,7 @@ test("encrypted relay team syncs document edits without exporting the passphrase
     expect(manifest).toContain('"algorithm": "AES-GCM"');
     expect(manifest).not.toContain("correct horse battery staple");
 
+    await openTeamPanel(pageB);
     await pageB.getByRole("tab", { name: "실시간 협업" }).click();
     await pageB.getByTestId("team-e2ee-passphrase").fill("correct horse battery staple");
     await pageB.getByRole("tab", { name: "팀 설정" }).click();
@@ -351,6 +383,7 @@ test("encrypted relay team syncs document edits without exporting the passphrase
     await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 
     await pageA.getByRole("button", { name: "텍스트 만들기" }).click();
+    await openLayersPanel(pageB);
     await expect(pageB.getByRole("button", { name: "텍스트 3" })).toBeVisible({ timeout: 8000 });
   } finally {
     await contextA.close();

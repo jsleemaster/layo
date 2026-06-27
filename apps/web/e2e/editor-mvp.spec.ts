@@ -520,6 +520,47 @@ test("inspector dev panel downloads the selected layer as pdf", async ({ page })
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("헤드라인 PDF 다운로드됨");
 });
 
+test("inspector dev panel saves and batch-downloads selected layer export presets", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  await page.getByTestId("dev-panel-export-preset-format").selectOption("png");
+  await page.getByTestId("dev-panel-export-preset-scale-3x").click();
+  await page.getByTestId("dev-panel-export-preset-suffix").fill("@hero");
+  await page.getByTestId("dev-panel-export-preset-add").click();
+  await expect(page.getByTestId("dev-panel-export-presets")).toContainText("PNG 3x @hero");
+
+  await page.getByTestId("dev-panel-export-preset-format").selectOption("svg");
+  await page.getByTestId("dev-panel-export-preset-scale-1x").click();
+  await page.getByTestId("dev-panel-export-preset-suffix").fill("");
+  await page.getByTestId("dev-panel-export-preset-add").click();
+  await expect(page.getByTestId("dev-panel-export-presets")).toContainText("SVG 1x");
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const savedText = filePayload.file.pages[0].children[0].children[0];
+  expect(savedText.export_presets).toEqual([
+    { id: "text-1-export-preset-1", format: "png", scale: 3, suffix: "@hero" },
+    { id: "text-1-export-preset-2", format: "svg", scale: 1, suffix: "" }
+  ]);
+
+  const downloadedNames: string[] = [];
+  page.on("download", (download) => downloadedNames.push(download.suggestedFilename()));
+  await page.getByTestId("dev-panel-export-presets-download-all").click();
+  await expect.poll(() => downloadedNames.sort()).toEqual(["text-1.svg", "text-1@hero.png"]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("2개 export preset 다운로드됨");
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-export-presets")).toContainText("PNG 3x @hero");
+  await expect(page.getByTestId("dev-panel-export-presets")).toContainText("SVG 1x");
+});
+
 function pngDimensions(png: Buffer) {
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   return {

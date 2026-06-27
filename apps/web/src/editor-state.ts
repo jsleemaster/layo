@@ -4,6 +4,7 @@ import type {
   GridTrack,
   ImageFitMode,
   NodeConstraints,
+  NodeExportPreset,
   NodeLayout,
   NodeLayoutItem,
   RendererDocument,
@@ -128,6 +129,11 @@ export type EditorCommand =
       type: "set_image_fit_mode";
       nodeId: string;
       fitMode: ImageFitMode;
+    }
+  | {
+      type: "set_node_export_presets";
+      nodeId: string;
+      presets: NodeExportPreset[];
     }
   | {
       type: "create_node";
@@ -1373,6 +1379,35 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           type: "set_image_fit_mode",
           nodeId: command.nodeId,
           fitMode: previousFitMode
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_node_export_presets": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node)) {
+        return { document, inverse: null };
+      }
+
+      const previousPresets = node.export_presets ? structuredClone(node.export_presets) : [];
+      const nextPresets = normalizeNodeExportPresets(command.presets);
+      if (JSON.stringify(previousPresets) === JSON.stringify(nextPresets)) {
+        return { document, inverse: null };
+      }
+
+      if (nextPresets.length > 0) {
+        node.export_presets = nextPresets;
+      } else {
+        delete node.export_presets;
+      }
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_node_export_presets",
+          nodeId: command.nodeId,
+          presets: previousPresets
         },
         selectedNodeId: command.nodeId
       };
@@ -3099,6 +3134,21 @@ function normalizeNodeConstraints(constraints: NodeConstraints): NodeConstraints
     horizontal: isHorizontalConstraint(constraints.horizontal) ? constraints.horizontal : "left",
     vertical: isVerticalConstraint(constraints.vertical) ? constraints.vertical : "top"
   };
+}
+
+function normalizeNodeExportPresets(presets: NodeExportPreset[]): NodeExportPreset[] {
+  return presets.map((preset, index) => {
+    const format = ["png", "jpeg", "webp", "svg", "pdf"].includes(preset.format)
+      ? preset.format
+      : "png";
+    const scale = Number.isFinite(preset.scale) && preset.scale > 0 ? Math.max(1, Math.round(preset.scale)) : 1;
+    return {
+      id: preset.id.trim() || `export-preset-${index + 1}`,
+      format,
+      scale,
+      suffix: preset.suffix.trim()
+    };
+  });
 }
 
 function restoreChildTransforms(

@@ -129,6 +129,37 @@ function sampleDocumentWithTopLevelRectangle(): RendererDocument {
 }
 
 describe("editor state commands", () => {
+  test("sets selected node export presets with undo and redo", () => {
+    const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+
+    const withPresets = executeEditorCommand(initial, {
+      type: "set_node_export_presets",
+      nodeId: "text-1",
+      presets: [
+        { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+        { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+      ]
+    } as any);
+
+    expect(findNodeById(withPresets.document, "text-1")).toMatchObject({
+      export_presets: [
+        { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+        { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+      ]
+    });
+
+    const undone = undo(withPresets);
+    expect(findNodeById(undone.document, "text-1") as any).not.toHaveProperty("export_presets");
+
+    const redone = redo(undone);
+    expect(findNodeById(redone.document, "text-1")).toMatchObject({
+      export_presets: [
+        { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+        { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+      ]
+    });
+  });
+
   test("updates node geometry and reverses it with undo and redo", () => {
     const initial = createEditorState(sampleDocument());
 

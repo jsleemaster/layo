@@ -55,6 +55,8 @@ pub struct Node {
     pub layout_item: Option<NodeLayoutItem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<NodeConstraints>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub export_presets: Vec<NodeExportPreset>,
     #[serde(default)]
     pub locked: bool,
     #[serde(default = "default_visible")]
@@ -68,6 +70,26 @@ pub struct Node {
 
 fn default_visible() -> bool {
     true
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct NodeExportPreset {
+    pub id: String,
+    pub format: ExportPresetFormat,
+    pub scale: f64,
+    pub suffix: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ExportPresetFormat {
+    Png,
+    Jpeg,
+    Webp,
+    Svg,
+    Pdf,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -482,6 +504,7 @@ impl DesignFile {
                     layout: None,
                     layout_item: None,
                     constraints: None,
+                    export_presets: vec![],
                     locked: false,
                     visible: true,
                     children: vec![Node {
@@ -492,6 +515,7 @@ impl DesignFile {
                         layout: None,
                         layout_item: None,
                         constraints: None,
+                        export_presets: vec![],
                         locked: false,
                         visible: true,
                         children: vec![],

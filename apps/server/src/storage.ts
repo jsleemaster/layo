@@ -123,6 +123,14 @@ export interface NodeConstraints {
 }
 
 export type ImageFitMode = "fill" | "fit";
+export type ExportPresetFormat = "png" | "jpeg" | "webp" | "svg" | "pdf";
+
+export interface NodeExportPreset {
+  id: string;
+  format: ExportPresetFormat;
+  scale: number;
+  suffix: string;
+}
 
 export interface DesignNode {
   id: string;
@@ -132,6 +140,7 @@ export interface DesignNode {
   layout?: NodeLayout | null;
   layout_item?: NodeLayoutItem | null;
   constraints?: NodeConstraints | null;
+  export_presets?: NodeExportPreset[];
   locked?: boolean;
   visible?: boolean;
   transform: { x: number; y: number; rotation: number };

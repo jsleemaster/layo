@@ -254,6 +254,66 @@ fn layout_metadata_round_trips_through_json() {
 }
 
 #[test]
+fn export_preset_metadata_round_trips_through_json() {
+    let raw = r##"
+    {
+      "id": "export-preset-file",
+      "name": "Export Preset File",
+      "version": 1,
+      "components": [],
+      "pages": [
+        {
+          "id": "page-1",
+          "name": "페이지 1",
+          "children": [
+            {
+              "id": "frame-1",
+              "kind": "frame",
+              "name": "Frame",
+              "transform": { "x": 0, "y": 0, "rotation": 0 },
+              "size": { "width": 320, "height": 240 },
+              "style": { "fill": "#ffffff", "stroke": null, "stroke_width": 0, "opacity": 1 },
+              "content": { "type": "empty" },
+              "children": [
+                {
+                  "id": "text-1",
+                  "kind": "text",
+                  "name": "Headline",
+                  "export_presets": [
+                    { "id": "preset-png-3x", "format": "png", "scale": 3, "suffix": "@3x" },
+                    { "id": "preset-svg", "format": "svg", "scale": 1, "suffix": "" }
+                  ],
+                  "transform": { "x": 32, "y": 40, "rotation": 0 },
+                  "size": { "width": 260, "height": 48 },
+                  "style": { "fill": "#111827", "stroke": null, "stroke_width": 0, "opacity": 1 },
+                  "content": { "type": "text", "value": "Layo", "font_size": 28, "font_family": "Inter" },
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let text = &parsed.pages[0].children[0].children[0];
+
+    assert_eq!(text.export_presets.len(), 2);
+    assert_eq!(text.export_presets[0].id, "preset-png-3x");
+    assert_eq!(text.export_presets[0].format, editor_core::ExportPresetFormat::Png);
+    assert_eq!(text.export_presets[0].scale, 3.0);
+    assert_eq!(text.export_presets[0].suffix, "@3x");
+    assert_eq!(text.export_presets[1].format, editor_core::ExportPresetFormat::Svg);
+
+    let json = serde_json::to_string(&parsed).unwrap();
+    assert!(json.contains("\"export_presets\""));
+    assert!(json.contains("\"format\":\"png\""));
+    assert!(json.contains("\"suffix\":\"@3x\""));
+}
+
+#[test]
 fn spacing_tokens_round_trip_through_json() {
     let raw = r##"
     {

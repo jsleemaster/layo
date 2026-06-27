@@ -953,6 +953,60 @@ describe("MCP AI editing workflow", () => {
     );
     expect(validation.validation).toMatchObject({ ok: true, issueCount: 0 });
   });
+
+  test("lets an MCP client set node export presets", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "export-preset-project",
+        name: "Export preset project",
+        documentId: "export-preset-file",
+        documentName: "Export preset file"
+      }
+    });
+
+    const persisted = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "export-preset-file",
+          dryRun: false,
+          commands: [
+            {
+              type: "set_export_presets",
+              nodeId: "text-1",
+              presets: [
+                { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+                { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+              ]
+            }
+          ]
+        }
+      })
+    );
+    expect(persisted.result).toMatchObject({
+      persisted: true,
+      audit: {
+        commandTypes: ["set_export_presets"],
+        changedNodeIds: ["text-1"]
+      },
+      validation: { ok: true, issueCount: 0 }
+    });
+
+    const inspection = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "export-preset-file" }
+      })
+    );
+    const text = inspection.inspection.nodes.find((node: { id: string }) => node.id === "text-1");
+    expect(text.exportPresets).toEqual([
+      { id: "preset-png-3x", format: "png", scale: 3, suffix: "@hero" },
+      { id: "preset-svg", format: "svg", scale: 1, suffix: "" }
+    ]);
+  });
 });
 
 async function connectMcpClient() {

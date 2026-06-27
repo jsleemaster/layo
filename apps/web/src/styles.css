@@ -1371,6 +1371,67 @@ button:disabled {
   color: var(--editor-color-selection);
 }
 
+.dev-panel-export-presets-card {
+  display: grid;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  padding-top: var(--editor-space-xs);
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.dev-panel-export-preset-builder {
+  display: grid;
+  grid-template-columns: minmax(78px, 1fr) minmax(0, 1.4fr);
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  align-items: end;
+}
+
+.dev-panel-export-preset-builder label {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-export-preset-builder select,
+.dev-panel-export-preset-builder input {
+  min-width: 0;
+  min-height: var(--editor-space-xl);
+  padding: 0 var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  font: inherit;
+}
+
+.dev-panel-export-presets {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.dev-panel-export-preset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+}
+
+.dev-panel-export-preset-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dev-panel-code-block pre {
   max-width: 100%;
   max-height: 180px;
