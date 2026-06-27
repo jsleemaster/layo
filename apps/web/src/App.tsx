@@ -3867,6 +3867,17 @@ type ComponentVariantControl = {
   booleanPair: { onValue: string; offValue: string } | null;
 };
 
+type ComponentVariantMatrix = {
+  propertyNames: string[];
+  rows: {
+    variant: ComponentVariant;
+    values: Record<string, string>;
+    combinationKey: string;
+    duplicate: boolean;
+  }[];
+  duplicateGroups: ComponentVariant[][];
+};
+
 function safeTestId(value: string) {
   return value
     .trim()
@@ -3931,6 +3942,59 @@ function componentVariantControls(component: ComponentDefinition, variantId?: st
 
 function visibleVariantProperties(variant: ComponentVariant) {
   return variant.properties.length > 0 ? variant.properties : [{ name: "", value: "" }];
+}
+
+function componentVariantMatrix(variants: ComponentVariant[]): ComponentVariantMatrix {
+  const propertyNames = Array.from(
+    new Set(
+      variants
+        .flatMap((variant) => variant.properties.map((property) => property.name.trim()))
+        .filter((name) => name.length > 0)
+    )
+  );
+  const rows = variants.map((variant) => {
+    const values = Object.fromEntries(
+      propertyNames.map((name) => [
+        name,
+        variant.properties.find((property) => property.name.trim() === name)?.value ?? ""
+      ])
+    );
+    const complete = propertyNames.length > 0 && propertyNames.every((name) => values[name].trim().length > 0);
+    const combinationKey = complete ? propertyNames.map((name) => `${name}=${values[name].trim()}`).join("|") : "";
+
+    return {
+      variant,
+      values,
+      combinationKey,
+      duplicate: false
+    };
+  });
+  const rowsByCombination = new Map<string, typeof rows>();
+
+  for (const row of rows) {
+    if (!row.combinationKey) {
+      continue;
+    }
+    rowsByCombination.set(row.combinationKey, [...(rowsByCombination.get(row.combinationKey) ?? []), row]);
+  }
+
+  const duplicateGroups = Array.from(rowsByCombination.values())
+    .filter((group) => group.length > 1)
+    .map((group) => group.map((row) => row.variant));
+  const duplicateKeys = new Set(
+    Array.from(rowsByCombination.entries())
+      .filter(([, group]) => group.length > 1)
+      .map(([key]) => key)
+  );
+
+  return {
+    propertyNames,
+    rows: rows.map((row) => ({
+      ...row,
+      duplicate: duplicateKeys.has(row.combinationKey)
+    })),
+    duplicateGroups
+  };
 }
 
 function updateComponentVariantAt(
@@ -4285,6 +4349,7 @@ function Inspector({
       ? componentVariantControls(componentDefinition, selectedNode.component_instance.variant_id ?? null)
       : [];
   const componentDefinitionVariants = selectedComponentDefinition?.variants ?? [];
+  const componentDefinitionVariantMatrix = componentVariantMatrix(componentDefinitionVariants);
   const updateComponentDefinitionVariants = (variants: ComponentVariant[]) => {
     if (selectedComponentDefinition) {
       onComponentDefinitionVariantsChange(selectedComponentDefinition.id, variants);
@@ -4594,6 +4659,50 @@ function Inspector({
               );
             })}
           </div>
+          {componentDefinitionVariantMatrix.propertyNames.length > 0 ? (
+            <div className="component-variant-matrix" data-testid="inspector-component-variant-matrix">
+              <div className="component-variant-matrix-heading">
+                <strong>조합 매트릭스</strong>
+                <span>{componentDefinitionVariantMatrix.rows.length}개 변형</span>
+              </div>
+              {componentDefinitionVariantMatrix.duplicateGroups.length > 0 ? (
+                <p className="component-variant-matrix-warning" data-testid="inspector-component-variant-matrix-warning">
+                  중복 조합:{" "}
+                  {componentDefinitionVariantMatrix.duplicateGroups
+                    .map((group) => group.map((variant) => variant.name).join(", "))
+                    .join(" / ")}
+                </p>
+              ) : null}
+              <div className="component-variant-matrix-scroll">
+                <table className="component-variant-matrix-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">변형</th>
+                      {componentDefinitionVariantMatrix.propertyNames.map((name) => (
+                        <th key={name} scope="col">
+                          {name}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {componentDefinitionVariantMatrix.rows.map((row) => (
+                      <tr
+                        key={row.variant.id}
+                        className={row.duplicate ? "is-duplicate" : undefined}
+                        data-testid={`inspector-component-variant-matrix-row-${safeTestId(row.variant.id)}`}
+                      >
+                        <th scope="row">{row.variant.name}</th>
+                        {componentDefinitionVariantMatrix.propertyNames.map((name) => (
+                          <td key={name}>{row.values[name] || "값 없음"}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
       {variantControls.length > 0 && componentDefinition ? (

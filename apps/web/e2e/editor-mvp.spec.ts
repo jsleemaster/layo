@@ -602,6 +602,51 @@ test("right inspector authors multi-property component variant combinations", as
   await expect(page.getByTestId("inspector-component-variant-surface")).toHaveValue("elevated");
 });
 
+test("main component variant authoring shows a combination matrix and duplicate warning", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("inspector-component-definition-variants")).toBeVisible();
+
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-0").fill("flat");
+  await page.getByTestId("inspector-component-variant-property-add").click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-1").fill("size");
+  await page.getByTestId("inspector-component-definition-variant-property-value-default-1").fill("regular");
+
+  await page.getByTestId("inspector-component-variant-add").click();
+  await page.getByTestId("inspector-component-definition-variant-name-variant-2").fill("Elevated Large");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("elevated");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("large");
+
+  const matrix = page.getByTestId("inspector-component-variant-matrix");
+  await expect(matrix).toBeVisible();
+  await expect(matrix).toContainText("surface");
+  await expect(matrix).toContainText("size");
+  await expect(page.getByTestId("inspector-component-variant-matrix-row-default")).toContainText("flat");
+  await expect(page.getByTestId("inspector-component-variant-matrix-row-default")).toContainText("regular");
+  await expect(page.getByTestId("inspector-component-variant-matrix-row-variant-2")).toContainText("elevated");
+  await expect(page.getByTestId("inspector-component-variant-matrix-row-variant-2")).toContainText("large");
+
+  await expect(page.getByTestId("inspector-component-variant-matrix-warning")).toHaveCount(0);
+
+  await page.getByTestId("inspector-component-variant-add").click();
+  await page.getByTestId("inspector-component-definition-variant-name-variant-3").fill("Flat Regular Copy");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-3-0").fill("flat");
+  await page.getByTestId("inspector-component-definition-variant-property-value-variant-3-1").fill("regular");
+
+  await expect(page.getByTestId("inspector-component-variant-matrix-warning")).toContainText("중복 조합");
+  await expect(page.getByTestId("inspector-component-variant-matrix-warning")).toContainText("Default");
+  await expect(page.getByTestId("inspector-component-variant-matrix-warning")).toContainText("Flat Regular Copy");
+});
+
 test("component instances render boolean variant properties as toggles", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

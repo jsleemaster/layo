@@ -1614,6 +1614,75 @@ button:disabled {
   line-height: var(--editor-text-small-line);
 }
 
+.component-variant-matrix {
+  display: grid;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  padding-top: var(--editor-space-xs);
+  border-top: 1px solid var(--editor-color-border);
+}
+
+.component-variant-matrix-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--editor-space-sm);
+  min-width: 0;
+}
+
+.component-variant-matrix-heading strong {
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-heading-weight);
+  line-height: var(--editor-text-small-line);
+}
+
+.component-variant-matrix-heading span,
+.component-variant-matrix-warning {
+  color: var(--editor-color-text-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.component-variant-matrix-warning {
+  margin: 0;
+  color: var(--editor-color-warning);
+  overflow-wrap: anywhere;
+}
+
+.component-variant-matrix-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.component-variant-matrix-table {
+  width: 100%;
+  min-width: 100%;
+  border-collapse: collapse;
+  color: var(--editor-color-text-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.component-variant-matrix-table th,
+.component-variant-matrix-table td {
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+  border: 1px solid var(--editor-color-border);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.component-variant-matrix-table th {
+  color: var(--editor-color-ink);
+  font-weight: var(--editor-text-control-weight);
+}
+
+.component-variant-matrix-table tr.is-duplicate td,
+.component-variant-matrix-table tr.is-duplicate th {
+  background: color-mix(in srgb, var(--editor-color-warning) 16%, transparent);
+}
+
 .comment-target,
 .comment-summary {
   display: grid;
