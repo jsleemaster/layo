@@ -364,6 +364,52 @@ describe("editor state commands", () => {
     });
   });
 
+  test("manages reusable styles with rename delete undo and redo", () => {
+    const document = sampleDocument() as any;
+    document.styles = [{ id: "style-color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }];
+    const initial = createEditorState(document);
+
+    const styled = executeEditorCommand(initial, {
+      type: "set_fill_style",
+      nodeId: "text-1",
+      styleId: "style-color-brand-primary"
+    } as any);
+    const renamed = executeEditorCommand(styled, {
+      type: "rename_style",
+      styleId: "style-color-brand-primary",
+      name: "Brand / Accent"
+    } as any);
+
+    expect(renamed.document.styles).toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary", name: "Brand / Accent" })
+    );
+
+    const deleted = executeEditorCommand(renamed, {
+      type: "delete_style",
+      styleId: "style-color-brand-primary"
+    } as any);
+    expect(deleted.document.styles ?? []).toEqual([]);
+    expect(findNodeById(deleted.document, "text-1")?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_style: null
+    });
+
+    const restoredStyle = undo(deleted);
+    expect(restoredStyle.document.styles).toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary", name: "Brand / Accent" })
+    );
+    expect(findNodeById(restoredStyle.document, "text-1")?.style.fill_style).toBe("style-color-brand-primary");
+
+    const restoredName = undo(restoredStyle);
+    expect(restoredName.document.styles).toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary", name: "Brand / Primary" })
+    );
+
+    const redoneDelete = redo(redo(restoredName));
+    expect(redoneDelete.document.styles ?? []).toEqual([]);
+    expect(findNodeById(redoneDelete.document, "text-1")?.style.fill_style).toBeNull();
+  });
+
   test("toggles token sets with undo and rematerializes active fill bindings", () => {
     const document = sampleDocument() as any;
     document.token_sets = [

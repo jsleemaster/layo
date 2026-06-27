@@ -1293,6 +1293,36 @@ async function persistFillStyle(fileId: string, nodeId: string, styleId: string)
   }
 }
 
+async function persistRenameStyle(fileId: string, styleId: string, name: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "rename_style", styleId, name }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`스타일 이름 변경 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistDeleteStyle(fileId: string, styleId: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "delete_style", styleId }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`스타일 삭제 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 async function persistCreateTypographyStyle(fileId: string, nodeId: string, style: DesignStyle) {
   const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
     method: "POST",
@@ -4025,6 +4055,32 @@ function safeTestId(value: string) {
     .replace(/^-+|-+$/g, "") || "property";
 }
 
+function countStyleUsage(document: RendererDocument | null): Record<string, number> {
+  const counts: Record<string, number> = {};
+  if (!document) {
+    return counts;
+  }
+
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      countNodeStyleUsage(node, counts);
+    }
+  }
+  return counts;
+}
+
+function countNodeStyleUsage(node: RendererNode, counts: Record<string, number>) {
+  if (node.style.fill_style) {
+    counts[node.style.fill_style] = (counts[node.style.fill_style] ?? 0) + 1;
+  }
+  if (node.content.type === "text" && node.content.typography_style) {
+    counts[node.content.typography_style] = (counts[node.content.typography_style] ?? 0) + 1;
+  }
+  for (const child of node.children) {
+    countNodeStyleUsage(child, counts);
+  }
+}
+
 function selectedComponentVariant(component: ComponentDefinition, variantId?: string | null) {
   return component.variants.find((variant) => variant.id === variantId) ?? component.variants[0] ?? null;
 }
@@ -4253,12 +4309,15 @@ function Inspector({
   documentTokens,
   documentTokenSets,
   documentStyles,
+  documentStyleUsageCounts,
   canAlign,
   canDistribute,
   onGeometryChange,
   onFillChange,
   onFillStyleChange,
   onCreateFillStyle,
+  onRenameStyle,
+  onDeleteStyle,
   onTextChange,
   onTextWritingModeChange,
   onTextTypographyTokenChange,
@@ -4315,12 +4374,15 @@ function Inspector({
   documentTokens: DesignToken[];
   documentTokenSets: DesignTokenSet[];
   documentStyles: DesignStyle[];
+  documentStyleUsageCounts: Record<string, number>;
   canAlign: boolean;
   canDistribute: boolean;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onFillChange: (nodeId: string, fill: string) => void;
   onFillStyleChange: (nodeId: string, styleId: string) => void;
   onCreateFillStyle: (nodeId: string, style: DesignStyle) => void;
+  onRenameStyle: (styleId: string, name: string) => void;
+  onDeleteStyle: (styleId: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onTextWritingModeChange: (nodeId: string, writingMode: TextWritingMode) => void;
   onTextTypographyTokenChange: (nodeId: string, tokenId: string) => void;
@@ -4374,6 +4436,7 @@ function Inspector({
 }) {
   const [pendingStyleKind, setPendingStyleKind] = useState<"color" | "typography" | null>(null);
   const [styleNameDraft, setStyleNameDraft] = useState("");
+  const [styleRenameDrafts, setStyleRenameDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setPendingStyleKind(null);
@@ -4552,6 +4615,60 @@ function Inspector({
     setPendingStyleKind(null);
     setStyleNameDraft("");
   };
+  const updateStyleRenameDraft = (styleId: string, value: string) => {
+    setStyleRenameDrafts((current) => ({ ...current, [styleId]: value }));
+  };
+  const renameStyleFromDraft = (style: DesignStyle) => {
+    const name = (styleRenameDrafts[style.id] ?? style.name).trim();
+    if (!name || name === style.name) {
+      return;
+    }
+    onRenameStyle(style.id, name);
+    setStyleRenameDrafts((current) => ({ ...current, [style.id]: name }));
+  };
+  const styleManagement = documentStyles.length ? (
+    <section className="inspector-section style-management-section" data-testid="style-management-section">
+      <h3>스타일</h3>
+      <div className="style-management-list">
+        {documentStyles.map((style) => {
+          const styleTestId = safeTestId(style.id);
+          const usageCount = documentStyleUsageCounts[style.id] ?? 0;
+          const draft = styleRenameDrafts[style.id] ?? style.name;
+          return (
+            <div className="style-management-row" data-testid={`style-management-row-${styleTestId}`} key={style.id}>
+              <div className="style-management-meta">
+                <strong>{style.type === "color" ? "색상" : "타이포"}</strong>
+                <span data-testid={`style-usage-count-${styleTestId}`}>{usageCount}곳</span>
+              </div>
+              <input
+                data-testid={`style-rename-input-${styleTestId}`}
+                value={draft}
+                onChange={(event) => updateStyleRenameDraft(style.id, event.currentTarget.value)}
+              />
+              <div className="style-management-actions">
+                <button
+                  type="button"
+                  className="inspector-compact-button"
+                  data-testid={`style-rename-button-${styleTestId}`}
+                  onClick={() => renameStyleFromDraft(style)}
+                >
+                  이름 변경
+                </button>
+                <button
+                  type="button"
+                  className="inspector-compact-button"
+                  data-testid={`style-delete-button-${styleTestId}`}
+                  onClick={() => onDeleteStyle(style.id)}
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  ) : null;
   const variantControls =
     selectedNode.component_instance && componentDefinition
       ? componentVariantControls(componentDefinition, selectedNode.component_instance.variant_id ?? null)
@@ -5060,6 +5177,7 @@ function Inspector({
           </button>
         </div>
       ) : null}
+      {styleManagement}
       {tokenControls}
       {selectedNode.content.type === "text" ? (
         <>
@@ -7812,6 +7930,40 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "색상 스타일을 적용하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const renameStyle = (styleId: string, name: string) => {
+    dispatch({ type: "rename_style", styleId, name });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistRenameStyle(currentProject.currentDocumentId, styleId, name)
+      .then(() => {
+        setProjectStatus("스타일 이름 변경됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "스타일 이름을 변경하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const deleteStyle = (styleId: string) => {
+    dispatch({ type: "delete_style", styleId });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistDeleteStyle(currentProject.currentDocumentId, styleId)
+      .then(() => {
+        setProjectStatus("스타일 삭제됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "스타일을 삭제하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -11699,6 +11851,7 @@ export function App() {
         documentTokens={editor?.document.tokens ?? []}
         documentTokenSets={editor?.document.token_sets ?? []}
         documentStyles={editor?.document.styles ?? []}
+        documentStyleUsageCounts={countStyleUsage(editor?.document ?? null)}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}
         zoomLabel={`${Math.round((editor?.viewport.scale ?? 1) * 100)}%`}
@@ -11735,6 +11888,8 @@ export function App() {
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onFillStyleChange={updateFillStyle}
         onCreateFillStyle={createFillStyle}
+        onRenameStyle={renameStyle}
+        onDeleteStyle={deleteStyle}
         onTextChange={updateTextNode}
         onTextWritingModeChange={updateTextWritingMode}
         onTextTypographyTokenChange={updateTextTypographyToken}

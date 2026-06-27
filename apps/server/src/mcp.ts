@@ -179,6 +179,15 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     style: designStyleSchema
   }),
   z.object({
+    type: z.literal("rename_style"),
+    styleId: z.string(),
+    name: z.string()
+  }),
+  z.object({
+    type: z.literal("delete_style"),
+    styleId: z.string()
+  }),
+  z.object({
     type: z.literal("set_fill_token"),
     nodeId: z.string(),
     tokenId: z.string()

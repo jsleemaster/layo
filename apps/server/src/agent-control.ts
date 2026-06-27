@@ -62,11 +62,22 @@ export interface CanvasInspection {
   componentCount: number;
   tokens: DesignToken[];
   tokenSets: DesignTokenSet[];
-  styles: DesignStyle[];
+  styles: StyleInspection[];
   components: Array<{ id: string; name: string; variantCount: number }>;
   nodes: AgentNodeSummary[];
   validation: DocumentValidation;
 }
+
+export interface StyleUsage {
+  nodeId: string;
+  nodeName: string;
+  property: "fill_style" | "typography_style";
+}
+
+export type StyleInspection = DesignStyle & {
+  usageCount: number;
+  usedBy: StyleUsage[];
+};
 
 export interface ChangeSummary {
   createdNodeIds: string[];
@@ -88,6 +99,8 @@ export type AgentCommand =
   | { type: "set_fill"; nodeId: string; fill: string }
   | { type: "create_token"; token: DesignToken }
   | { type: "create_style"; style: DesignStyle }
+  | { type: "rename_style"; styleId: string; name: string }
+  | { type: "delete_style"; styleId: string }
   | { type: "set_token_set_enabled"; tokenSetId: string; enabled: boolean }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
   | { type: "set_fill_style"; nodeId: string; styleId: string }
@@ -174,6 +187,7 @@ export interface AgentBatchResult {
   preview: DesignFile;
   validation: DocumentValidation;
   changeSummary: ChangeSummary;
+  inspection: CanvasInspection;
   audit: AgentBatchAudit;
 }
 
@@ -202,7 +216,7 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
     componentCount: components.length,
     tokens: document.tokens ?? [],
     tokenSets: document.token_sets ?? [],
-    styles: document.styles ?? [],
+    styles: summarizeStyles(document),
     components: components.map((component) => ({
       id: component.id,
       name: component.name,
@@ -446,6 +460,7 @@ export function createAgentBatchResult(
     preview,
     validation,
     changeSummary,
+    inspection: inspectCanvas(preview),
     audit: {
       fileId,
       dryRun: input.dryRun ?? false,
@@ -494,6 +509,51 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
   for (const child of node.children) {
     collectSummary(child, [...path, child.id], nodes);
   }
+}
+
+function summarizeStyles(document: DesignFile): StyleInspection[] {
+  const usageByStyle = new Map<string, StyleUsage[]>();
+
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectStyleUsage(node, usageByStyle);
+    }
+  }
+
+  return (document.styles ?? []).map((style) => {
+    const usedBy = usageByStyle.get(style.id) ?? [];
+    return {
+      ...style,
+      usageCount: usedBy.length,
+      usedBy
+    };
+  });
+}
+
+function collectStyleUsage(node: DesignNode, usageByStyle: Map<string, StyleUsage[]>) {
+  if (node.style.fill_style) {
+    appendStyleUsage(usageByStyle, node.style.fill_style, {
+      nodeId: node.id,
+      nodeName: node.name,
+      property: "fill_style"
+    });
+  }
+
+  if (node.content.type === "text" && node.content.typography_style) {
+    appendStyleUsage(usageByStyle, node.content.typography_style, {
+      nodeId: node.id,
+      nodeName: node.name,
+      property: "typography_style"
+    });
+  }
+
+  for (const child of node.children) {
+    collectStyleUsage(child, usageByStyle);
+  }
+}
+
+function appendStyleUsage(usageByStyle: Map<string, StyleUsage[]>, styleId: string, usage: StyleUsage) {
+  usageByStyle.set(styleId, [...(usageByStyle.get(styleId) ?? []), usage]);
 }
 
 function countNodes(nodes: DesignNode[]): number {
@@ -861,6 +921,21 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       materializeStyleBindings(document);
       return style.id;
     }
+    case "rename_style": {
+      const style = requireStyle(document, command.styleId);
+      const name = command.name.trim();
+      if (!name) {
+        throw new Error("style name is required");
+      }
+      style.name = name;
+      return style.id;
+    }
+    case "delete_style": {
+      requireStyle(document, command.styleId);
+      document.styles = (document.styles ?? []).filter((style) => style.id !== command.styleId);
+      clearStyleBindings(document, command.styleId);
+      return command.styleId;
+    }
     case "set_token_set_enabled": {
       const tokenSet = (document.token_sets ?? []).find((candidate) => candidate.id === command.tokenSetId);
       if (!tokenSet) {
@@ -1107,10 +1182,7 @@ function requireColorToken(document: DesignFile, tokenId: string): DesignToken {
 }
 
 function requireColorStyle(document: DesignFile, styleId: string): DesignStyle {
-  const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
-  if (!style) {
-    throw new Error(`style not found: ${styleId}`);
-  }
+  const style = requireStyle(document, styleId);
   if (style.type !== "color") {
     throw new Error(`style is not a color style: ${styleId}`);
   }
@@ -1140,12 +1212,17 @@ function requireTypographyToken(document: DesignFile, tokenId: string): DesignTo
 }
 
 function requireTypographyStyle(document: DesignFile, styleId: string): DesignStyle {
+  const style = requireStyle(document, styleId);
+  if (style.type !== "typography") {
+    throw new Error(`style is not a typography style: ${styleId}`);
+  }
+  return style;
+}
+
+function requireStyle(document: DesignFile, styleId: string): DesignStyle {
   const style = (document.styles ?? []).find((candidate) => candidate.id === styleId);
   if (!style) {
     throw new Error(`style not found: ${styleId}`);
-  }
-  if (style.type !== "typography") {
-    throw new Error(`style is not a typography style: ${styleId}`);
   }
   return style;
 }
@@ -1182,6 +1259,28 @@ function materializeNodeStyleBindings(node: DesignNode, styleMap: Map<string, De
 
   for (const child of node.children) {
     materializeNodeStyleBindings(child, styleMap);
+  }
+}
+
+function clearStyleBindings(document: DesignFile, styleId: string): void {
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      clearNodeStyleBindings(node, styleId);
+    }
+  }
+}
+
+function clearNodeStyleBindings(node: DesignNode, styleId: string): void {
+  if (node.style.fill_style === styleId) {
+    node.style = { ...node.style, fill_style: null };
+  }
+
+  if (node.content.type === "text" && node.content.typography_style === styleId) {
+    node.content = { ...node.content, typography_style: null };
+  }
+
+  for (const child of node.children) {
+    clearNodeStyleBindings(child, styleId);
   }
 }
 

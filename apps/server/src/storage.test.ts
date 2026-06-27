@@ -1352,6 +1352,58 @@ describe("FileStorage", () => {
     expect(findNode(await storage.readFile("sample-file"), "text-1")?.style.fill_style).toBeNull();
   });
 
+  test("agent commands rename and delete reusable styles with usage summaries", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    const created = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_style",
+          style: {
+            id: "style-color-brand-primary",
+            name: "Brand / Primary",
+            type: "color",
+            value: "#2563eb"
+          }
+        },
+        { type: "set_fill_style", nodeId: "text-1", styleId: "style-color-brand-primary" }
+      ] as any
+    });
+    expect((created.inspection.styles[0] as any).usageCount).toBe(1);
+    expect((created.inspection.styles[0] as any).usedBy).toContainEqual(
+      expect.objectContaining({ nodeId: "text-1", property: "fill_style" })
+    );
+
+    const renamed = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        { type: "rename_style", styleId: "style-color-brand-primary", name: "Brand / Accent" }
+      ] as any
+    });
+    expect(renamed.preview.styles).toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary", name: "Brand / Accent" })
+    );
+    expect((renamed.inspection.styles[0] as any).usageCount).toBe(1);
+
+    const deleted = await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [{ type: "delete_style", styleId: "style-color-brand-primary" }] as any
+    });
+    const persistedText = findNode(await storage.readFile("sample-file"), "text-1");
+
+    expect(deleted.preview.styles ?? []).not.toContainEqual(
+      expect.objectContaining({ id: "style-color-brand-primary" })
+    );
+    expect(persistedText?.style).toMatchObject({
+      fill: "#2563eb",
+      fill_style: null
+    });
+    expect(deleted.validation.issueCount).toBe(0);
+    expect(deleted.audit.commandTypes).toEqual(["delete_style"]);
+  });
+
   test("agent commands toggle token sets and rematerialize active color bindings", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

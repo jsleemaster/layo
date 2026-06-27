@@ -91,6 +91,12 @@ export type GeometryPatch = Partial<{
   height: number;
 }>;
 
+interface StyleBindingSnapshot {
+  nodeId: string;
+  fillStyle?: string | null;
+  typographyStyle?: string | null;
+}
+
 export type EditorCommand =
   | {
       type: "update_node_geometry";
@@ -112,8 +118,18 @@ export type EditorCommand =
       style: DesignStyle;
     }
   | {
+      type: "rename_style";
+      styleId: string;
+      name: string;
+    }
+  | {
+      type: "delete_style";
+      styleId: string;
+    }
+  | {
       type: "set_document_styles";
       styles: DesignStyle[];
+      bindings?: StyleBindingSnapshot[];
     }
   | {
       type: "set_fill_token";
@@ -498,6 +514,44 @@ function materializeNodeStyleBindings(node: RendererNode, styleMap: Map<string, 
   for (const child of node.children) {
     materializeNodeStyleBindings(child, styleMap);
   }
+}
+
+function collectStyleBindingSnapshots(document: RendererDocument): StyleBindingSnapshot[] {
+  const snapshots: StyleBindingSnapshot[] = [];
+  forEachNode(document, (node) => {
+    snapshots.push({
+      nodeId: node.id,
+      fillStyle: node.style.fill_style ?? null,
+      typographyStyle: node.content.type === "text" ? node.content.typography_style ?? null : null
+    });
+  });
+  return snapshots;
+}
+
+function applyStyleBindingSnapshots(document: RendererDocument, snapshots: StyleBindingSnapshot[]): void {
+  for (const snapshot of snapshots) {
+    const node = findNodeById(document, snapshot.nodeId);
+    if (!node) {
+      continue;
+    }
+    if (snapshot.fillStyle !== undefined) {
+      node.style = { ...node.style, fill_style: snapshot.fillStyle };
+    }
+    if (snapshot.typographyStyle !== undefined && node.content.type === "text") {
+      node.content = { ...node.content, typography_style: snapshot.typographyStyle };
+    }
+  }
+}
+
+function clearStyleBindings(document: RendererDocument, styleId: string): void {
+  forEachNode(document, (node) => {
+    if (node.style.fill_style === styleId) {
+      node.style = { ...node.style, fill_style: null };
+    }
+    if (node.content.type === "text" && node.content.typography_style === styleId) {
+      node.content = { ...node.content, typography_style: null };
+    }
+  });
 }
 
 function materializeNodeTokenBindings(node: RendererNode, tokenMap: Map<string, DesignToken>): void {
@@ -1490,14 +1544,49 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         inverse: { type: "set_document_styles", styles: previousStyles }
       };
     }
+    case "rename_style": {
+      const style = (next.styles ?? []).find((candidate) => candidate.id === command.styleId);
+      const name = command.name.trim();
+      if (!style || !name || style.name === name) {
+        return { document, inverse: null };
+      }
+
+      const previousName = style.name;
+      style.name = name;
+
+      return {
+        document: next,
+        inverse: { type: "rename_style", styleId: command.styleId, name: previousName }
+      };
+    }
+    case "delete_style": {
+      const previousStyles = [...(next.styles ?? [])];
+      const previousBindings = collectStyleBindingSnapshots(next);
+      if (!previousStyles.some((style) => style.id === command.styleId)) {
+        return { document, inverse: null };
+      }
+
+      next.styles = previousStyles.filter((style) => style.id !== command.styleId);
+      clearStyleBindings(next, command.styleId);
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: { type: "set_document_styles", styles: previousStyles, bindings: previousBindings }
+      };
+    }
     case "set_document_styles": {
       const previousStyles = [...(next.styles ?? [])];
+      const previousBindings = collectStyleBindingSnapshots(next);
       next.styles = command.styles.map((style) => ({ ...style }));
+      if (command.bindings) {
+        applyStyleBindingSnapshots(next, command.bindings);
+      }
       materializeStyleBindings(next);
 
       return {
         document: next,
-        inverse: { type: "set_document_styles", styles: previousStyles }
+        inverse: { type: "set_document_styles", styles: previousStyles, bindings: previousBindings }
       };
     }
     case "set_fill_token": {

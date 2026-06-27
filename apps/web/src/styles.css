@@ -1258,6 +1258,38 @@ button:disabled {
   font: inherit;
 }
 
+.style-management-list {
+  display: grid;
+  gap: var(--editor-space-sm);
+}
+
+.style-management-row {
+  display: grid;
+  gap: var(--editor-space-xs);
+  padding-bottom: var(--editor-space-sm);
+  border-bottom: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.style-management-meta,
+.style-management-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--editor-space-xs);
+  align-items: center;
+}
+
+.style-management-meta strong {
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.style-management-meta span {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
 .inspector-token-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

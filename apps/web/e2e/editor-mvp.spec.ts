@@ -2828,11 +2828,30 @@ test("right inspector creates and applies reusable styles", async ({ page }) => 
   await page.getByRole("button", { name: "스타일 생성" }).click();
 
   await expect(page.getByTestId("inspector-fill-style")).toContainText("Brand / Primary");
-  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(fileResponse.ok()).toBeTruthy();
-  expect((await fileResponse.json()).file.styles).toContainEqual(
-    expect.objectContaining({ id: "style-color-brand-primary" })
-  );
+  await expect(page.getByTestId("style-usage-count-style-color-brand-primary")).toContainText("1곳");
+
+  await page.getByTestId("style-rename-input-style-color-brand-primary").fill("Brand / Accent");
+  await page.getByTestId("style-rename-button-style-color-brand-primary").click();
+  await expect(page.getByTestId("inspector-fill-style")).toContainText("Brand / Accent");
+
+  await page.getByTestId("style-delete-button-style-color-brand-primary").click();
+  await expect(page.getByTestId("inspector-fill-style")).toHaveValue("");
+
+  await expect
+    .poll(async () => {
+      const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(fileResponse.ok()).toBeTruthy();
+      const filePayload = await fileResponse.json();
+      const findNode = (nodes: any[], nodeId: string): any =>
+        nodes.reduce<any | null>((found, node) => found ?? (node.id === nodeId ? node : findNode(node.children ?? [], nodeId)), null);
+      const textNode = findNode(filePayload.file.pages[0].children, "text-1");
+      return {
+        styles: filePayload.file.styles ?? [],
+        fill: textNode?.style?.fill,
+        fillStyle: textNode?.style?.fill_style
+      };
+    })
+    .toEqual({ styles: [], fill: "#2563eb", fillStyle: null });
 });
 
 test("right inspector imports and exports DTCG token JSON", async ({ page }) => {
