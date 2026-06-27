@@ -7,6 +7,7 @@
     "build": "pnpm -r build",
     "build:fullstack": "pnpm --filter @layo/renderer build && pnpm --filter @layo/collaboration build && pnpm --filter @layo/web typecheck && pnpm --dir apps/web exec vite build --base=/app/ && pnpm --filter @layo/server build",
     "check:design-rules": "node scripts/check-design-rules.mjs",
+    "check:live-deployment": "node scripts/live-deployment-smoke.mjs",
     "check:penpot-maturity": "node --test scripts/check-penpot-maturity.test.mjs",
     "dev": "pnpm --parallel --filter @layo/server --filter @layo/web dev",
     "dev:collab": "pnpm --filter @layo/collab-relay dev",

@@ -47,7 +47,7 @@ implementation slice reveals a new gap.
 | Developer handoff | Inspect, HTML/CSS/SVG access, API, webhooks, plugin integrations. | MCP/HTTP inspect, validate, change summary, and structured code export. | Visible Dev panel plus MCP/API surfaces, repo component mappings, and ready-for-dev annotations. |
 | Extensibility | Plugin system and API integrations. | No plugin runtime; deterministic agent commands exist. | Plugin/API lane that complements MCP instead of replacing it. |
 | AI workflow | Penpot MCP reads/writes the focused file through plugin/API context. | Layo MCP/HTTP applies typed command batches directly to saved design files. | Keep typed deterministic commands as a differentiator while matching Penpot-level breadth. |
-| Operations | Self-hosting, configuration, Docker/Kubernetes guidance. | Vercel/static plus Node server and relay deployment notes. | Production-grade self-host, Vercel-compatible app deployment, backups, migrations, monitoring, and upgrade docs. |
+| Operations | Self-hosting, configuration, Docker/Kubernetes guidance. | Vercel/static plus Node server and relay deployment notes, Vercel full-stack routing artifacts, and a live production smoke verifier that rejects non-Layo Vercel pages. Actual production deployment still needs valid Vercel project credentials/ownership. | Production-grade self-host, Vercel-compatible app deployment, backups, migrations, monitoring, and upgrade docs. |
 
 ## Maturity Gates
 
@@ -105,4 +105,4 @@ These are the first Penpot-comparable gaps to close:
 5. Open file import/export and backup/restore, including Penpot/Figma migration
    paths where feasible.
 6. Plugin/API extensibility lane that does not weaken deterministic MCP commands.
-7. Production-grade self-host and Vercel app deployment with operations checks.
+7. Production-grade self-host and actual Vercel app deployment after the live production smoke verifier passes against the public URL.

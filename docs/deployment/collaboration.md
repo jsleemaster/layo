@@ -50,6 +50,18 @@ vercel build --yes
 vercel deploy --prebuilt --prod
 ```
 
+After a production deployment, run the live smoke check before reporting that
+the Vercel site is actually serving Layo:
+
+```bash
+pnpm run check:live-deployment -- --url https://layo.vercel.app
+```
+
+The smoke check fetches the public URL, rejects unrelated Next.js or portfolio
+pages, verifies the Layo Vite shell marker, and checks the same-origin `/health`
+route. If this command fails, the GitHub About link may point at Vercel, but the
+production site is not verified as the Layo editor.
+
 By default, Vercel runtime writes use `/tmp/layo` because the deployment
 filesystem is otherwise read-only. This is useful for validating the deployed
 editor shell and API routing, but it is not durable team storage. Set

@@ -61,3 +61,9 @@ test("vercel deployment routes same-origin API requests to the Layo server funct
   assert.match(apiFunction, /\/tmp\/layo/);
   assert.match(apiFunction, /originalUrl\.slice\(4\)/);
 });
+
+test("web shell includes a stable Layo deployment marker", async () => {
+  const indexHtml = await readText("apps/web/index.html");
+
+  assert.match(indexHtml, /<meta name="layo-app" content="vite-editor" \/>/);
+});
