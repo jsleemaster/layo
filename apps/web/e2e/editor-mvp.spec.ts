@@ -300,6 +300,42 @@ test("file panel exports a Layo archive and reviews it before import", async ({ 
   await expect(page.getByTestId("project-name")).toHaveValue("아카이브 복원본");
 });
 
+test("file panel exports a project archive and reviews every document before import", async ({ page }) => {
+  const { projectId } = await createProjectFromEmptyState(page);
+  const secondDocument = await page.request.post(`http://127.0.0.1:4317/projects/${projectId}/documents`, {
+    data: { documentId: "project-archive-second", name: "검토 문서" }
+  });
+  expect(secondDocument.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(projectId);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "현재 프로젝트 아카이브 내보내기" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(`${projectId}.layo-project.zip`);
+  const archivePath = await download.path();
+  if (!archivePath) {
+    throw new Error("project archive download path missing");
+  }
+
+  await page.getByTestId("project-archive-upload").setInputFiles(archivePath);
+  const review = page.getByTestId("project-archive-review");
+  await expect(review).toContainText("가져오기 전 프로젝트 검토");
+  await expect(review).toContainText("문서 2개");
+  await expect(review).toContainText("새 문서");
+  await expect(review).toContainText("검토 문서");
+
+  await page.getByTestId("project-archive-import-name").fill("프로젝트 복원본");
+  await page.getByRole("button", { name: "검토한 프로젝트 아카이브 가져오기" }).click();
+  await expect(page.getByTestId("project-archive-status")).toContainText("프로젝트 복원본 가져옴");
+  await expect(page.getByTestId("project-name")).toHaveValue("프로젝트 복원본");
+  const restoredProjectId = await page.getByTestId("project-switcher").inputValue();
+  const restoredResponse = await page.request.get(`http://127.0.0.1:4317/projects/${restoredProjectId}`);
+  expect(restoredResponse.ok()).toBeTruthy();
+  expect((await restoredResponse.json()).project.documents).toHaveLength(2);
+});
+
 test("filters projects and keeps recently opened projects first", async ({ page }) => {
   await openEmptyEditor(page);
   const alphaProjectId = await createNamedProject(page, "검색 알파");

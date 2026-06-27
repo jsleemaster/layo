@@ -3,7 +3,10 @@ import {
   createProject,
   deleteProject,
   duplicateProject,
+  exportProjectArchive,
   fetchProjects,
+  importProjectArchive,
+  reviewProjectArchive,
   setProjectSharing,
   updateProject,
   type ProjectManifest
@@ -87,6 +90,74 @@ describe("project api", () => {
         headers: undefined,
         body: null
       }
+    ]);
+  });
+
+  test("reviews imports and exports project archives", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/projects/import/archive/review") {
+        return new Response(
+          JSON.stringify({
+            review: {
+              originalProjectId: "project-web",
+              originalName: "웹 프로젝트",
+              suggestedName: "웹 프로젝트",
+              documentCount: 2,
+              assetCount: 1,
+              documents: [{ originalFileId: "document-web", originalName: "웹 문서", pageCount: 1, nodeCount: 4 }]
+            }
+          }),
+          { status: 200 }
+        );
+      }
+
+      if (pathname === "/projects/import/archive") {
+        return new Response(
+          JSON.stringify({
+            imported: {
+              project,
+              originalProjectId: "project-web",
+              originalName: "웹 프로젝트",
+              documentCount: 2,
+              assetCount: 1,
+              documentIdMap: { "document-web": "restored-document-web" }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+
+      if (pathname === "/projects/project-web/export/archive") {
+        return new Response(new Blob([new Uint8Array([0x50, 0x4b])]), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/vnd.layo.project-archive+zip",
+            "Content-Disposition": 'attachment; filename="project-web.layo-project.zip"'
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(reviewProjectArchive("UEs=", fetcher as typeof fetch)).resolves.toMatchObject({
+      originalProjectId: "project-web",
+      documentCount: 2
+    });
+    await expect(importProjectArchive({ archiveBase64: "UEs=", name: "복원 프로젝트" }, fetcher as typeof fetch)).resolves
+      .toMatchObject({ originalProjectId: "project-web", project });
+    await expect(exportProjectArchive("project-web", fetcher as typeof fetch)).resolves.toMatchObject({
+      fileName: "project-web.layo-project.zip",
+      mimeType: "application/vnd.layo.project-archive+zip"
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/projects/import/archive/review"), "POST"],
+      [expect.stringContaining("/projects/import/archive"), "POST"],
+      [expect.stringContaining("/projects/project-web/export/archive"), "GET"]
     ]);
   });
 });

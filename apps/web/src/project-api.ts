@@ -22,6 +22,44 @@ export interface ProjectManifest {
   sharing: ProjectSharing;
 }
 
+export interface ProjectArchiveReviewDocument {
+  originalFileId: string;
+  originalName: string;
+  pageCount: number;
+  nodeCount: number;
+}
+
+export interface ProjectArchiveReview {
+  originalProjectId: string;
+  originalName: string;
+  suggestedName: string;
+  documentCount: number;
+  assetCount: number;
+  documents: ProjectArchiveReviewDocument[];
+}
+
+export interface ImportedProjectArchive {
+  project: ProjectManifest;
+  originalProjectId: string;
+  originalName: string;
+  documentCount: number;
+  assetCount: number;
+  documentIdMap: Record<string, string>;
+}
+
+export interface ImportProjectArchiveInput {
+  archiveBase64: string;
+  projectId?: string;
+  name?: string;
+  documentIdPrefix?: string;
+}
+
+export interface ExportedProjectArchiveDownload {
+  blob: Blob;
+  fileName: string;
+  mimeType: string;
+}
+
 export async function fetchProjects(fetcher: typeof fetch = fetch): Promise<ProjectManifest[]> {
   const response = await fetcher(apiUrl("/projects"));
   const payload = await readJson(response);
@@ -66,6 +104,51 @@ export async function deleteProject(
   return writeProject(apiUrl(`/projects/${projectId}`), "DELETE", undefined, fetcher);
 }
 
+export async function reviewProjectArchive(
+  archiveBase64: string,
+  fetcher: typeof fetch = fetch
+): Promise<ProjectArchiveReview> {
+  const response = await fetcher(apiUrl("/projects/import/archive/review"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ archiveBase64 })
+  });
+  const payload = await readJson(response);
+  return (payload as { review: ProjectArchiveReview }).review;
+}
+
+export async function importProjectArchive(
+  input: ImportProjectArchiveInput,
+  fetcher: typeof fetch = fetch
+): Promise<ImportedProjectArchive> {
+  const response = await fetcher(apiUrl("/projects/import/archive"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const payload = await readJson(response);
+  return (payload as { imported: ImportedProjectArchive }).imported;
+}
+
+export async function exportProjectArchive(
+  projectId: string,
+  fetcher: typeof fetch = fetch
+): Promise<ExportedProjectArchiveDownload> {
+  const response = await fetcher(apiUrl(`/projects/${projectId}/export/archive`));
+  if (!response.ok) {
+    throw new Error(`프로젝트 요청 실패: ${response.status} ${response.statusText}`.trim());
+  }
+  const mimeType = response.headers.get("Content-Type") ?? "application/vnd.layo.project-archive+zip";
+  const fileName =
+    parseContentDispositionFilename(response.headers.get("Content-Disposition")) ??
+    `${projectId}.layo-project.zip`;
+  return {
+    blob: await response.blob(),
+    fileName,
+    mimeType
+  };
+}
+
 async function writeProject(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
@@ -87,4 +170,9 @@ async function readJson(response: Response): Promise<unknown> {
     throw new Error(`프로젝트 요청 실패: ${response.status} ${response.statusText}`.trim());
   }
   return response.json();
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  const match = header?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+  return match?.[1] ? decodeURIComponent(match[1]) : null;
 }

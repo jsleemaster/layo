@@ -312,6 +312,97 @@ describe("FileStorage", () => {
     await expect(target.readFile("sample-file")).rejects.toThrow();
   });
 
+  test("project archive export reviews and imports all documents with referenced assets", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "pixel.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "project-archive-image",
+      kind: "image",
+      name: "프로젝트 이미지",
+      transform: { x: 80, y: 120, rotation: 0 },
+      size: { width: 120, height: 90 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    await source.createProjectDocument("test-project", {
+      documentId: "second-file",
+      name: "두 번째 문서"
+    });
+
+    const exported = await source.exportProjectArchive("test-project");
+    expect(exported).toMatchObject({
+      projectId: "test-project",
+      name: "테스트 프로젝트",
+      documentCount: 2,
+      assetCount: 1,
+      mimeType: "application/vnd.layo.project-archive+zip"
+    });
+    expect(exported.archive.subarray(0, 2).toString("utf8")).toBe("PK");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    const review = await target.reviewProjectArchive(exported.archive);
+    expect(review).toMatchObject({
+      originalProjectId: "test-project",
+      originalName: "테스트 프로젝트",
+      suggestedName: "테스트 프로젝트",
+      documentCount: 2,
+      assetCount: 1,
+      documents: [
+        expect.objectContaining({ originalFileId: "sample-file", originalName: "테스트 문서" }),
+        expect.objectContaining({ originalFileId: "second-file", originalName: "두 번째 문서" })
+      ]
+    });
+    await expect(target.readProject("test-project")).rejects.toThrow();
+
+    const imported = await target.importProjectArchive(exported.archive, {
+      projectId: "imported-project",
+      name: "복원 프로젝트",
+      documentIdPrefix: "restored"
+    });
+    expect(imported).toMatchObject({
+      originalProjectId: "test-project",
+      originalName: "테스트 프로젝트",
+      documentCount: 2,
+      assetCount: 1
+    });
+    expect(imported.project).toMatchObject({
+      projectId: "imported-project",
+      name: "복원 프로젝트",
+      currentDocumentId: "restored-second-file",
+      sharing: { mode: "private" }
+    });
+    expect(imported.documentIdMap).toEqual({
+      "sample-file": "restored-sample-file",
+      "second-file": "restored-second-file"
+    });
+    expect((await target.readProject("imported-project")).documents.map((item) => item.documentId)).toEqual([
+      "restored-sample-file",
+      "restored-second-file"
+    ]);
+    expect((await target.readFile("restored-sample-file")).id).toBe("restored-sample-file");
+    expect(findImageNode(await target.readFile("restored-sample-file"), "project-archive-image")?.content).toMatchObject(
+      {
+        type: "image",
+        asset_id: asset.assetId
+      }
+    );
+    expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
