@@ -4,6 +4,7 @@ import type { ComponentDefinition } from "./ComponentDefinition";
 import type { DesignStyle } from "./DesignStyle";
 import type { DesignToken } from "./DesignToken";
 import type { DesignTokenSet } from "./DesignTokenSet";
+import type { DesignTokenTheme } from "./DesignTokenTheme";
 import type { Page } from "./Page";
 
-export type DesignFile = { id: string, name: string, version: number, token_sets?: Array<DesignTokenSet>, tokens: Array<DesignToken>, styles?: Array<DesignStyle>, components: Array<ComponentDefinition>, code_mappings?: Array<CodeComponentMapping>, pages: Array<Page>, };
+export type DesignFile = { id: string, name: string, version: number, token_sets?: Array<DesignTokenSet>, token_themes?: Array<DesignTokenTheme>, tokens: Array<DesignToken>, styles?: Array<DesignStyle>, components: Array<ComponentDefinition>, code_mappings?: Array<CodeComponentMapping>, pages: Array<Page>, };

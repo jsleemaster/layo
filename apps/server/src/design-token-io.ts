@@ -1,4 +1,4 @@
-import type { DesignToken, DesignTokenSet } from "./storage.js";
+import type { DesignToken, DesignTokenSet, DesignTokenTheme } from "./storage.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,12 +8,18 @@ const SUPPORTED_TOKEN_TYPES = new Set(["color", "spacing", "dimension", "typogra
 export interface ImportedDesignTokenDocument {
   tokens: DesignToken[];
   tokenSets: DesignTokenSet[];
+  tokenThemes: DesignTokenTheme[];
 }
 
-export function exportDesignTokensToDtcg(tokens: DesignToken[], tokenSets: DesignTokenSet[] = []): JsonRecord {
+export function exportDesignTokensToDtcg(
+  tokens: DesignToken[],
+  tokenSets: DesignTokenSet[] = [],
+  tokenThemes: DesignTokenTheme[] = []
+): JsonRecord {
   const normalizedTokenSets = normalizeTokenSetsForExport(tokens, tokenSets);
+  const normalizedTokenThemes = normalizeTokenThemesForExport(tokenThemes, normalizedTokenSets);
   if (normalizedTokenSets.length > 0) {
-    return exportTokenSetDocumentToDtcg(tokens, normalizedTokenSets);
+    return exportTokenSetDocumentToDtcg(tokens, normalizedTokenSets, normalizedTokenThemes);
   }
 
   const root: JsonRecord = {
@@ -61,17 +67,19 @@ export function importDesignTokenDocumentFromDtcg(input: unknown): ImportedDesig
   const seenIds = new Map<string, number>();
   const explicitTokenSetNames = tokenSetOrder(input).filter((tokenSetName) => isRecord(input[tokenSetName]));
   const activeTokenSets = activeTokenSetIds(input);
+  const importedTokenThemes = tokenThemes(input);
   const shouldPersistTokenSets =
     explicitTokenSetNames.length > 1 ||
     explicitTokenSetNames.some((tokenSetName) => tokenSetName !== DTCG_TOKEN_SET) ||
-    activeTokenSets.length > 0;
+    activeTokenSets.length > 0 ||
+    importedTokenThemes.length > 0;
 
   if (shouldPersistTokenSets) {
     const orderedTokenSetNames = explicitTokenSetNames.length ? explicitTokenSetNames : [DTCG_TOKEN_SET];
     const tokenSets = orderedTokenSetNames.map((tokenSetName) => ({
       id: normalizeTokenSetId(tokenSetName),
       name: tokenSetName,
-      enabled: activeTokenSets.length ? activeTokenSets.includes(tokenSetName) : true
+      enabled: activeTokenSets.length ? activeTokenSets.includes(tokenSetName) : importedTokenThemes.length ? false : true
     }));
     for (const tokenSet of tokenSets) {
       const root = input[tokenSet.name];
@@ -80,7 +88,7 @@ export function importDesignTokenDocumentFromDtcg(input: unknown): ImportedDesig
       }
       collectDesignTokens(root, [], inheritedTokenType(root), tokens, seenIds, tokenSet.id);
     }
-    return { tokens, tokenSets };
+    return { tokens, tokenSets, tokenThemes: importedTokenThemes };
   }
 
   const roots = tokenSetRootsForDocument(input);
@@ -89,19 +97,23 @@ export function importDesignTokenDocumentFromDtcg(input: unknown): ImportedDesig
     collectDesignTokens(root, [], inheritedTokenType(root), tokens, seenIds);
   }
 
-  return { tokens, tokenSets: [] };
+  return { tokens, tokenSets: [], tokenThemes: importedTokenThemes };
 }
 
 export const exportColorTokensToDtcg = exportDesignTokensToDtcg;
 export const importColorTokensFromDtcg = importDesignTokensFromDtcg;
 
-export function resolveActiveDesignTokens(tokens: DesignToken[], tokenSets: DesignTokenSet[] = []): DesignToken[] {
+export function resolveActiveDesignTokens(
+  tokens: DesignToken[],
+  tokenSets: DesignTokenSet[] = [],
+  tokenThemes: DesignTokenTheme[] = []
+): DesignToken[] {
   if (!tokenSets.length) {
     return [...tokens];
   }
 
   const tokenSetOrder = tokenSets.map((tokenSet) => tokenSet.id);
-  const enabledTokenSetIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+  const enabledTokenSetIds = activeTokenSetIdsForResolution(tokenSets, tokenThemes);
   const winners = new Map<string, DesignToken>();
   const keyOrder: string[] = [];
   const remember = (token: DesignToken) => {
@@ -129,13 +141,14 @@ export function resolveActiveDesignTokens(tokens: DesignToken[], tokenSets: Desi
 
 export function createActiveDesignTokenReferenceMap(
   tokens: DesignToken[],
-  tokenSets: DesignTokenSet[] = []
+  tokenSets: DesignTokenSet[] = [],
+  tokenThemes: DesignTokenTheme[] = []
 ): Map<string, DesignToken> {
   if (!tokenSets.length) {
     return new Map(tokens.map((token) => [token.id, token]));
   }
 
-  const activeTokens = resolveActiveDesignTokens(tokens, tokenSets);
+  const activeTokens = resolveActiveDesignTokens(tokens, tokenSets, tokenThemes);
   const activeTokenByKey = new Map(activeTokens.map((token) => [tokenResolutionKey(token), token]));
   const tokenMap = new Map<string, DesignToken>();
   for (const token of tokens) {
@@ -150,11 +163,15 @@ export function createActiveDesignTokenReferenceMap(
   return tokenMap;
 }
 
-function exportTokenSetDocumentToDtcg(tokens: DesignToken[], tokenSets: DesignTokenSet[]): JsonRecord {
+function exportTokenSetDocumentToDtcg(
+  tokens: DesignToken[],
+  tokenSets: DesignTokenSet[],
+  tokenThemes: DesignTokenTheme[] = []
+): JsonRecord {
   const root: JsonRecord = {
     $metadata: {
       tokenSetOrder: tokenSets.map((tokenSet) => tokenSet.id),
-      activeThemes: [],
+      activeThemes: tokenThemes.filter((theme) => theme.enabled).map((theme) => theme.id),
       activeTokenSets: tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id)
     }
   };
@@ -163,6 +180,14 @@ function exportTokenSetDocumentToDtcg(tokens: DesignToken[], tokenSets: DesignTo
 
   for (const tokenSet of tokenSets) {
     root[tokenSet.id] = {};
+  }
+  if (tokenThemes.length) {
+    root.$themes = tokenThemes.map((theme) => ({
+      id: theme.id,
+      name: theme.name,
+      ...(theme.group ? { group: theme.group } : {}),
+      selectedTokenSets: theme.token_set_ids
+    }));
   }
 
   for (const token of tokens) {
@@ -224,6 +249,42 @@ function activeTokenSetIds(input: JsonRecord): string[] {
     return [];
   }
   return metadata.activeTokenSets.filter((value): value is string => typeof value === "string");
+}
+
+function activeThemeIds(input: JsonRecord): string[] {
+  const metadata = input.$metadata;
+  if (!isRecord(metadata) || !Array.isArray(metadata.activeThemes)) {
+    return [];
+  }
+  return metadata.activeThemes.filter((value): value is string => typeof value === "string");
+}
+
+function tokenThemes(input: JsonRecord): DesignTokenTheme[] {
+  if (!Array.isArray(input.$themes)) {
+    return [];
+  }
+  const activeThemes = new Set(activeThemeIds(input));
+  return input.$themes
+    .filter(isRecord)
+    .map((theme, index) => {
+      const id = normalizeTokenThemeId(typeof theme.id === "string" ? theme.id : `theme-${index + 1}`);
+      const name = typeof theme.name === "string" && theme.name.trim() ? theme.name.trim() : id;
+      const group = typeof theme.group === "string" && theme.group.trim() ? theme.group.trim() : undefined;
+      const rawTokenSetIds = Array.isArray(theme.selectedTokenSets)
+        ? theme.selectedTokenSets
+        : Array.isArray(theme.tokenSetIds)
+          ? theme.tokenSetIds
+          : [];
+      return {
+        id,
+        name,
+        ...(group ? { group } : {}),
+        enabled: activeThemes.has(id),
+        token_set_ids: rawTokenSetIds
+          .filter((value): value is string => typeof value === "string")
+          .map(normalizeTokenSetId)
+      };
+    });
 }
 
 function collectDesignTokens(
@@ -374,6 +435,17 @@ function normalizeTokenSetId(input: string): string {
   );
 }
 
+function normalizeTokenThemeId(input: string): string {
+  return (
+    input
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-") || "theme"
+  );
+}
+
 function normalizeTokenSetsForExport(tokens: DesignToken[], tokenSets: DesignTokenSet[]): DesignTokenSet[] {
   const normalized = new Map<string, DesignTokenSet>();
   for (const tokenSet of tokenSets) {
@@ -394,6 +466,47 @@ function normalizeTokenSetsForExport(tokens: DesignToken[], tokenSets: DesignTok
     }
   }
   return [...normalized.values()];
+}
+
+function normalizeTokenThemesForExport(
+  tokenThemes: DesignTokenTheme[],
+  tokenSets: DesignTokenSet[]
+): DesignTokenTheme[] {
+  const tokenSetIds = new Set(tokenSets.map((tokenSet) => tokenSet.id));
+  return tokenThemes
+    .map((theme) => {
+      const id = normalizeTokenThemeId(theme.id);
+      const tokenSetIdsForTheme = Array.from(
+        new Set(theme.token_set_ids.map(normalizeTokenSetId).filter((tokenSetId) => tokenSetIds.has(tokenSetId)))
+      );
+      return {
+        id,
+        name: theme.name?.trim() || id,
+        ...(theme.group?.trim() ? { group: theme.group.trim() } : {}),
+        enabled: Boolean(theme.enabled),
+        token_set_ids: tokenSetIdsForTheme
+      };
+    })
+    .filter((theme) => theme.token_set_ids.length > 0);
+}
+
+function activeTokenSetIdsForResolution(
+  tokenSets: DesignTokenSet[],
+  tokenThemes: DesignTokenTheme[] = []
+): Set<string> {
+  const activeIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+  const knownTokenSetIds = new Set(tokenSets.map((tokenSet) => tokenSet.id));
+  for (const theme of tokenThemes) {
+    if (!theme.enabled) {
+      continue;
+    }
+    for (const tokenSetId of theme.token_set_ids) {
+      if (knownTokenSetIds.has(tokenSetId)) {
+        activeIds.add(tokenSetId);
+      }
+    }
+  }
+  return activeIds;
 }
 
 function tokenResolutionKey(token: DesignToken): string {

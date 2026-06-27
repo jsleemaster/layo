@@ -199,6 +199,14 @@ export interface DesignTokenSet {
   enabled: boolean;
 }
 
+export interface DesignTokenTheme {
+  id: string;
+  name: string;
+  group?: string | null;
+  enabled: boolean;
+  token_set_ids: string[];
+}
+
 export interface DesignStyle {
   id: string;
   name: string;
@@ -211,6 +219,7 @@ export interface RendererDocument {
   name: string;
   tokens?: DesignToken[];
   token_sets?: DesignTokenSet[];
+  token_themes?: DesignTokenTheme[];
   styles?: DesignStyle[];
   components?: ComponentDefinition[];
   code_mappings?: CodeComponentMapping[];

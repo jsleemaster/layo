@@ -10,6 +10,8 @@ pub struct DesignFile {
     pub version: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub token_sets: Vec<DesignTokenSet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_themes: Vec<DesignTokenTheme>,
     #[serde(default)]
     pub tokens: Vec<DesignToken>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -39,6 +41,18 @@ pub struct DesignTokenSet {
     pub id: String,
     pub name: String,
     pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct DesignTokenTheme {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub token_set_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -613,6 +627,7 @@ impl DesignFile {
             name: "샘플 파일".to_string(),
             version: 1,
             token_sets: vec![],
+            token_themes: vec![],
             tokens: vec![],
             styles: vec![],
             components: vec![],

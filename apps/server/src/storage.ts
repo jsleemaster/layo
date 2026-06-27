@@ -242,6 +242,14 @@ export interface DesignTokenSet {
   enabled: boolean;
 }
 
+export interface DesignTokenTheme {
+  id: string;
+  name: string;
+  group?: string | null;
+  enabled: boolean;
+  token_set_ids: string[];
+}
+
 export interface DesignStyle {
   id: string;
   name: string;
@@ -255,6 +263,7 @@ export interface DesignFile {
   version?: number;
   tokens?: DesignToken[];
   token_sets?: DesignTokenSet[];
+  token_themes?: DesignTokenTheme[];
   styles?: DesignStyle[];
   components?: ComponentDefinition[];
   code_mappings?: CodeComponentMapping[];
@@ -1753,13 +1762,13 @@ export class FileStorage {
 
   async exportTokensDtcg(fileId: string): Promise<Record<string, unknown>> {
     const document = await this.readFile(fileId);
-    return exportDesignTokensToDtcg(document.tokens ?? [], document.token_sets ?? []);
+    return exportDesignTokensToDtcg(document.tokens ?? [], document.token_sets ?? [], document.token_themes ?? []);
   }
 
   async importTokensDtcg(
     fileId: string,
     tokensDocument: unknown
-  ): Promise<{ file: DesignFile; tokens: DesignToken[]; tokenSets: DesignTokenSet[] }> {
+  ): Promise<{ file: DesignFile; tokens: DesignToken[]; tokenSets: DesignTokenSet[]; tokenThemes: DesignTokenTheme[] }> {
     const document = await this.readFile(fileId);
     const imported = importDesignTokenDocumentFromDtcg(tokensDocument);
     document.tokens = imported.tokens;
@@ -1768,9 +1777,14 @@ export class FileStorage {
     } else {
       delete document.token_sets;
     }
+    if (imported.tokenThemes.length) {
+      document.token_themes = imported.tokenThemes;
+    } else {
+      delete document.token_themes;
+    }
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
-    return { file: document, tokens: imported.tokens, tokenSets: imported.tokenSets };
+    return { file: document, tokens: imported.tokens, tokenSets: imported.tokenSets, tokenThemes: imported.tokenThemes };
   }
 
   async updateNodeGeometry(fileId: string, nodeId: string, patch: GeometryPatch): Promise<DesignNode> {

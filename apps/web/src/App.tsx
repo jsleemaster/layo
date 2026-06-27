@@ -17,6 +17,7 @@ import {
   type DesignStyle,
   type DesignToken,
   type DesignTokenSet,
+  type DesignTokenTheme,
   type GridArea,
   type GridTrack,
   type ImageFitMode,
@@ -1385,6 +1386,21 @@ async function persistTokenSetEnabled(fileId: string, tokenSetId: string, enable
 
   if (!response.ok) {
     throw new Error(`토큰 세트 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistTokenThemeEnabled(fileId: string, tokenThemeId: string, enabled: boolean) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_token_theme_enabled", tokenThemeId, enabled }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`토큰 테마 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -3356,21 +3372,26 @@ function InspectorTokenControls({
   draft,
   status,
   tokenSets,
+  tokenThemes,
   canEdit,
   onDraftChange,
   onExport,
   onImport,
-  onTokenSetEnabledChange
+  onTokenSetEnabledChange,
+  onTokenThemeEnabledChange
 }: {
   draft: string;
   status: string;
   tokenSets: DesignTokenSet[];
+  tokenThemes: DesignTokenTheme[];
   canEdit: boolean;
   onDraftChange: (value: string) => void;
   onExport: () => void;
   onImport: () => void;
   onTokenSetEnabledChange: (tokenSetId: string, enabled: boolean) => void;
+  onTokenThemeEnabledChange: (tokenThemeId: string, enabled: boolean) => void;
 }) {
+  const themesByGroup = groupTokenThemes(tokenThemes);
   return (
     <section className="inspector-section" data-testid="inspector-section-tokens" aria-label="토큰">
       <h3>토큰</h3>
@@ -3402,6 +3423,31 @@ function InspectorTokenControls({
           ))}
         </div>
       ) : null}
+      {themesByGroup.length ? (
+        <div className="token-theme-list" data-testid="token-theme-list">
+          {themesByGroup.map((group) => (
+            <div key={group.name} className="token-theme-group" data-testid={`token-theme-group-${group.name}`}>
+              <div className="token-theme-group-label">{group.name}</div>
+              {group.themes.map((theme) => (
+                <label
+                  key={theme.id}
+                  className="token-set-row"
+                  data-testid={`token-theme-row-${theme.id}`}
+                >
+                  <input
+                    data-testid={`token-theme-enabled-${theme.id}`}
+                    type="checkbox"
+                    checked={theme.enabled}
+                    disabled={!canEdit}
+                    onChange={(event) => onTokenThemeEnabledChange(theme.id, event.currentTarget.checked)}
+                  />
+                  <span>{theme.name}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <label className="stacked-field">
         DTCG JSON
         <textarea
@@ -3417,6 +3463,15 @@ function InspectorTokenControls({
       </div>
     </section>
   );
+}
+
+function groupTokenThemes(tokenThemes: DesignTokenTheme[]): Array<{ name: string; themes: DesignTokenTheme[] }> {
+  const groups = new Map<string, DesignTokenTheme[]>();
+  for (const theme of tokenThemes) {
+    const groupName = theme.group?.trim() || "테마";
+    groups.set(groupName, [...(groups.get(groupName) ?? []), theme]);
+  }
+  return [...groups.entries()].map(([name, themes]) => ({ name, themes }));
 }
 
 const PNG_EXPORT_SCALES = [1, 2, 3] as const;
@@ -4517,6 +4572,7 @@ function Inspector({
   codeExportStatus,
   documentTokens,
   documentTokenSets,
+  documentTokenThemes,
   documentStyles,
   documentStyleUsageCounts,
   canAlign,
@@ -4555,6 +4611,7 @@ function Inspector({
   onExportTokensDtcg,
   onImportTokensDtcg,
   onTokenSetEnabledChange,
+  onTokenThemeEnabledChange,
   onCommentBodyChange,
   onCommentReplyBodyChange,
   onCreateComment,
@@ -4583,6 +4640,7 @@ function Inspector({
   codeExportStatus: string;
   documentTokens: DesignToken[];
   documentTokenSets: DesignTokenSet[];
+  documentTokenThemes: DesignTokenTheme[];
   documentStyles: DesignStyle[];
   documentStyleUsageCounts: Record<string, number>;
   canAlign: boolean;
@@ -4621,6 +4679,7 @@ function Inspector({
   onExportTokensDtcg: () => void;
   onImportTokensDtcg: () => void;
   onTokenSetEnabledChange: (tokenSetId: string, enabled: boolean) => void;
+  onTokenThemeEnabledChange: (tokenThemeId: string, enabled: boolean) => void;
   onCommentBodyChange: (value: string) => void;
   onCommentReplyBodyChange: (threadId: string, value: string) => void;
   onCreateComment: (nodeId: string) => void;
@@ -4662,11 +4721,13 @@ function Inspector({
       draft={tokenDtcgDraft}
       status={tokenDtcgStatus}
       tokenSets={documentTokenSets}
+      tokenThemes={documentTokenThemes}
       canEdit={canEditTokens}
       onDraftChange={onTokenDtcgDraftChange}
       onExport={onExportTokensDtcg}
       onImport={onImportTokensDtcg}
       onTokenSetEnabledChange={onTokenSetEnabledChange}
+      onTokenThemeEnabledChange={onTokenThemeEnabledChange}
     />
   );
 
@@ -4784,7 +4845,7 @@ function Inspector({
     : DEFAULT_NODE_LAYOUT_ITEM;
   const selectedParentUsesGrid = selectedParentNode?.layout?.mode === "grid";
   const constraints = selectedNode.constraints ?? DEFAULT_NODE_CONSTRAINTS;
-  const activeDocumentTokens = resolveActiveDesignTokens(documentTokens, documentTokenSets);
+  const activeDocumentTokens = resolveActiveDesignTokens(documentTokens, documentTokenSets, documentTokenThemes);
   const colorStyles = documentStyles.filter((style) => style.type === "color");
   const typographyStyles = documentStyles.filter((style) => style.type === "typography");
   const fillToken = selectedNode.style.fill_token
@@ -10231,6 +10292,24 @@ export function App() {
       });
   };
 
+  const updateTokenThemeEnabled = (tokenThemeId: string, enabled: boolean) => {
+    dispatch({ type: "set_token_theme_enabled", tokenThemeId, enabled });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistTokenThemeEnabled(currentProject.currentDocumentId, tokenThemeId, enabled)
+      .then(() => {
+        setTokenDtcgStatus(enabled ? "토큰 테마 활성화됨" : "토큰 테마 비활성화됨");
+        setProjectStatus("토큰 테마 저장됨");
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "토큰 테마를 저장하지 못했습니다";
+        setTokenDtcgStatus(message);
+      });
+  };
+
   const createNode = (kind: "rectangle" | "text") => {
     if (!editor) {
       return;
@@ -12292,6 +12371,7 @@ export function App() {
         codeExportStatus={codeExportStatus}
         documentTokens={editor?.document.tokens ?? []}
         documentTokenSets={editor?.document.token_sets ?? []}
+        documentTokenThemes={editor?.document.token_themes ?? []}
         documentStyles={editor?.document.styles ?? []}
         documentStyleUsageCounts={countStyleUsage(editor?.document ?? null)}
         canAlign={canAlignInspectorSelection}
@@ -12311,6 +12391,7 @@ export function App() {
         onExportTokensDtcg={() => void exportCurrentDocumentTokensDtcg()}
         onImportTokensDtcg={() => void importCurrentDocumentTokensDtcg()}
         onTokenSetEnabledChange={updateTokenSetEnabled}
+        onTokenThemeEnabledChange={updateTokenThemeEnabled}
         onCommentBodyChange={setCommentBody}
         onCommentReplyBodyChange={(threadId, value) =>
           setCommentReplyBodies((current) => ({ ...current, [threadId]: value }))

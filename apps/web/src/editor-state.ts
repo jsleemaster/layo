@@ -4,6 +4,7 @@ import type {
   DesignStyle,
   DesignToken,
   DesignTokenSet,
+  DesignTokenTheme,
   GridArea,
   GridTrack,
   ImageFitMode,
@@ -152,6 +153,15 @@ export type EditorCommand =
       type: "set_token_set_enabled";
       tokenSetId: string;
       enabled: boolean;
+    }
+  | {
+      type: "set_token_theme_enabled";
+      tokenThemeId: string;
+      enabled: boolean;
+    }
+  | {
+      type: "restore_token_theme_enabled_states";
+      states: Array<{ id: string; enabled: boolean }>;
     }
   | {
       type: "set_node_style";
@@ -485,11 +495,12 @@ function parseTypographyToken(token: DesignToken): { fontFamily: string; fontSiz
 function activeDesignTokenReferenceMap(document: RendererDocument): Map<string, DesignToken> {
   const tokens = document.tokens ?? [];
   const tokenSets = document.token_sets ?? [];
+  const tokenThemes = document.token_themes ?? [];
   if (!tokenSets.length) {
     return new Map(tokens.map((token) => [token.id, token]));
   }
 
-  const activeTokens = resolveActiveDesignTokens(tokens, tokenSets);
+  const activeTokens = resolveActiveDesignTokens(tokens, tokenSets, tokenThemes);
   const activeTokenByKey = new Map(activeTokens.map((token) => [tokenResolutionKey(token), token]));
   const tokenMap = new Map<string, DesignToken>();
   for (const token of tokens) {
@@ -504,12 +515,16 @@ function activeDesignTokenReferenceMap(document: RendererDocument): Map<string, 
   return tokenMap;
 }
 
-export function resolveActiveDesignTokens(tokens: DesignToken[], tokenSets: DesignTokenSet[] = []): DesignToken[] {
+export function resolveActiveDesignTokens(
+  tokens: DesignToken[],
+  tokenSets: DesignTokenSet[] = [],
+  tokenThemes: DesignTokenTheme[] = []
+): DesignToken[] {
   if (!tokenSets.length) {
     return [...tokens];
   }
 
-  const enabledSetIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+  const enabledSetIds = activeTokenSetIds(tokenSets, tokenThemes);
   const winners = new Map<string, DesignToken>();
   const keyOrder: string[] = [];
   const remember = (token: DesignToken) => {
@@ -533,6 +548,19 @@ export function resolveActiveDesignTokens(tokens: DesignToken[], tokenSets: Desi
   }
 
   return keyOrder.map((key) => winners.get(key)).filter((token): token is DesignToken => Boolean(token));
+}
+
+function activeTokenSetIds(tokenSets: DesignTokenSet[], tokenThemes: DesignTokenTheme[]): Set<string> {
+  const enabledSetIds = new Set(tokenSets.filter((tokenSet) => tokenSet.enabled).map((tokenSet) => tokenSet.id));
+  for (const theme of tokenThemes) {
+    if (!theme.enabled) {
+      continue;
+    }
+    for (const tokenSetId of theme.token_set_ids) {
+      enabledSetIds.add(tokenSetId);
+    }
+  }
+  return enabledSetIds;
 }
 
 function tokenResolutionKey(token: DesignToken): string {
@@ -638,9 +666,57 @@ function materializeNodeTokenBindings(node: RendererNode, tokenMap: Map<string, 
       };
     }
   }
+  if (node.layout?.spacing_tokens) {
+    const layout = normalizeNodeLayout(node.layout);
+    const spacingTokens = layout.spacing_tokens;
+    if (spacingTokens?.gap) {
+      const token = tokenMap.get(spacingTokens.gap);
+      if (token?.type === "spacing") {
+        layout.gap = spacingTokenNumber(token) ?? layout.gap;
+      }
+    }
+    if (spacingTokens?.row_gap) {
+      const token = tokenMap.get(spacingTokens.row_gap);
+      if (token?.type === "spacing") {
+        layout.row_gap = spacingTokenNumber(token) ?? layout.row_gap;
+      }
+    }
+    if (spacingTokens?.column_gap) {
+      const token = tokenMap.get(spacingTokens.column_gap);
+      if (token?.type === "spacing") {
+        layout.column_gap = spacingTokenNumber(token) ?? layout.column_gap;
+      }
+    }
+    const paddingTokenKeys = [
+      ["padding_top", "top"],
+      ["padding_right", "right"],
+      ["padding_bottom", "bottom"],
+      ["padding_left", "left"]
+    ] as const;
+    for (const [tokenKey, side] of paddingTokenKeys) {
+      const tokenId = spacingTokens?.[tokenKey];
+      const token = tokenId ? tokenMap.get(tokenId) : undefined;
+      if (token?.type === "spacing") {
+        layout.padding[side] = spacingTokenNumber(token) ?? layout.padding[side];
+      }
+    }
+    node.layout = normalizeNodeLayout(layout);
+  }
   for (const child of node.children) {
     materializeNodeTokenBindings(child, tokenMap);
   }
+}
+
+function spacingTokenNumber(token: DesignToken): number | null {
+  const match = token.value.trim().match(/^(\d+(?:\.\d+)?)(px)?$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function sameTokenThemeStates(
+  before: Array<{ id: string; enabled: boolean }>,
+  after: Array<{ id: string; enabled: boolean }>
+): boolean {
+  return before.length === after.length && before.every((state, index) => state.id === after[index]?.id && state.enabled === after[index]?.enabled);
 }
 
 export function getNodeAbsolutePosition(
@@ -1746,6 +1822,58 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           type: "set_token_set_enabled",
           tokenSetId: command.tokenSetId,
           enabled: previousEnabled
+        }
+      };
+    }
+    case "set_token_theme_enabled": {
+      const tokenTheme = (next.token_themes ?? []).find((candidate) => candidate.id === command.tokenThemeId);
+      if (!tokenTheme) {
+        return { document, inverse: null };
+      }
+      const previousStates = (next.token_themes ?? []).map((theme) => ({ id: theme.id, enabled: theme.enabled }));
+      const group = tokenTheme.group?.trim();
+      if (command.enabled && group) {
+        for (const candidate of next.token_themes ?? []) {
+          if (candidate.id !== tokenTheme.id && candidate.group?.trim() === group) {
+            candidate.enabled = false;
+          }
+        }
+      }
+      tokenTheme.enabled = command.enabled;
+      const nextStates = (next.token_themes ?? []).map((theme) => ({ id: theme.id, enabled: theme.enabled }));
+      if (sameTokenThemeStates(previousStates, nextStates)) {
+        return { document, inverse: null };
+      }
+      materializeTokenBindings(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "restore_token_theme_enabled_states",
+          states: previousStates
+        }
+      };
+    }
+    case "restore_token_theme_enabled_states": {
+      const previousStates = (next.token_themes ?? []).map((theme) => ({ id: theme.id, enabled: theme.enabled }));
+      const stateById = new Map(command.states.map((state) => [state.id, state.enabled]));
+      for (const theme of next.token_themes ?? []) {
+        const enabled = stateById.get(theme.id);
+        if (enabled !== undefined) {
+          theme.enabled = enabled;
+        }
+      }
+      const nextStates = (next.token_themes ?? []).map((theme) => ({ id: theme.id, enabled: theme.enabled }));
+      if (sameTokenThemeStates(previousStates, nextStates)) {
+        return { document, inverse: null };
+      }
+      materializeTokenBindings(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "restore_token_theme_enabled_states",
+          states: previousStates
         }
       };
     }

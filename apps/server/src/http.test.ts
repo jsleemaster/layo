@@ -1120,6 +1120,162 @@ describe("HTTP server", () => {
     });
   });
 
+  test("serves token theme agent commands and rematerializes bound token values", async () => {
+    const server = await createServerWithDocument();
+
+    const imported = await server.inject({
+      method: "PUT",
+      url: "/files/sample-file/tokens/dtcg",
+      payload: {
+        $metadata: {
+          tokenSetOrder: ["base", "light", "dark"],
+          activeThemes: ["theme-light"]
+        },
+        $themes: [
+          {
+            id: "theme-light",
+            name: "Light",
+            group: "mode",
+            selectedTokenSets: ["base", "light"]
+          },
+          {
+            id: "theme-dark",
+            name: "Dark",
+            group: "mode",
+            selectedTokenSets: ["base", "dark"]
+          }
+        ],
+        base: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#f8fafc"
+            }
+          }
+        },
+        light: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#ffffff"
+            }
+          }
+        },
+        dark: {
+          Surface: {
+            Canvas: {
+              $type: "color",
+              $value: "#0f172a"
+            }
+          }
+        }
+      }
+    });
+    expect(imported.statusCode).toBe(200);
+
+    const prepared = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_rectangle",
+            parentId: "page-1",
+            id: "surface-card",
+            name: "Surface Card",
+            x: 160,
+            y: 120,
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          {
+            type: "set_fill_token",
+            nodeId: "surface-card",
+            tokenId: "color-base-surface-canvas"
+          }
+        ]
+      }
+    });
+    expect(prepared.statusCode).toBe(200);
+    expect(prepared.json().result.preview.pages[0].children.find((node: { id: string }) => node.id === "surface-card").style.fill).toBe("#ffffff");
+
+    const themed = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [{ type: "set_token_theme_enabled", tokenThemeId: "theme-dark", enabled: true }]
+      }
+    });
+    expect(themed.statusCode).toBe(200);
+    expect(themed.json().result.audit.commandTypes).toContain("set_token_theme_enabled");
+
+    const file = await server.inject({ method: "GET", url: "/files/sample-file" });
+    const card = file.json().file.pages[0].children.find((node: { id: string }) => node.id === "surface-card");
+    expect(card.style).toMatchObject({
+      fill: "#0f172a",
+      fill_token: "color-base-surface-canvas"
+    });
+    expect(file.json().file.token_themes).toEqual([
+      {
+        id: "theme-light",
+        name: "Light",
+        group: "mode",
+        enabled: false,
+        token_set_ids: ["base", "light"]
+      },
+      {
+        id: "theme-dark",
+        name: "Dark",
+        group: "mode",
+        enabled: true,
+        token_set_ids: ["base", "dark"]
+      }
+    ]);
+
+    const inspect = await server.inject({ method: "GET", url: "/files/sample-file/agent/inspect" });
+    expect(inspect.json().inspection.tokenThemes).toEqual(file.json().file.token_themes);
+  });
+
+  test("validates token themes that reference missing token sets", async () => {
+    const server = await createServerWithDocument();
+
+    await server.inject({
+      method: "PUT",
+      url: "/files/sample-file/tokens/dtcg",
+      payload: {
+        $metadata: {
+          tokenSetOrder: ["base"],
+          activeThemes: ["theme-broken"]
+        },
+        $themes: [
+          {
+            id: "theme-broken",
+            name: "Broken",
+            group: "mode",
+            selectedTokenSets: ["base", "missing"]
+          }
+        ],
+        base: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#2563eb"
+            }
+          }
+        }
+      }
+    });
+
+    const validate = await server.inject({ method: "GET", url: "/files/sample-file/agent/validate" });
+    expect(validate.json().validation.issues).toContainEqual({
+      code: "missing_token_theme_set",
+      message: "token theme references missing token set: theme-broken -> missing"
+    });
+  });
+
   test("serves repo component mappings and includes them in code export", async () => {
     const server = await createServerWithDocument();
 

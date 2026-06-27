@@ -3245,6 +3245,96 @@ test("right inspector manages imported DTCG token sets", async ({ page }) => {
   await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"activeTokenSets": \[\s+"base"\s+\]/);
 });
 
+test("right inspector activates imported DTCG token themes", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const importedTokenJson = JSON.stringify(
+    {
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeThemes: ["theme-light"]
+      },
+      $themes: [
+        { id: "theme-light", name: "Light", group: "mode", selectedTokenSets: ["base", "light"] },
+        { id: "theme-dark", name: "Dark", group: "mode", selectedTokenSets: ["base", "dark"] }
+      ],
+      base: {
+        Surface: {
+          Canvas: {
+            $type: "color",
+            $value: "#f8fafc"
+          }
+        }
+      },
+      light: {
+        Surface: {
+          Canvas: {
+            $type: "color",
+            $value: "#ffffff"
+          }
+        }
+      },
+      dark: {
+        Surface: {
+          Canvas: {
+            $type: "color",
+            $value: "#0f172a"
+          }
+        }
+      }
+    },
+    null,
+    2
+  );
+
+  await page.getByTestId("dtcg-token-json").fill(importedTokenJson);
+  await page.getByRole("button", { name: "토큰 가져오기" }).click();
+  await expect(page.getByTestId("dtcg-token-status")).toContainText("3개 토큰 가져옴");
+  await expect(page.getByTestId("token-theme-group-mode")).toContainText("mode");
+  await expect(page.getByTestId("token-theme-enabled-theme-light")).toBeChecked();
+  await expect(page.getByTestId("token-theme-enabled-theme-dark")).not.toBeChecked();
+
+  const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [{ type: "set_fill_token", nodeId: "text-1", tokenId: "color-base-surface-canvas" }]
+    }
+  });
+  expect(agentResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#ffffff");
+  await expect(page.getByTestId("inspector-fill-token")).toContainText("Surface / Canvas");
+
+  await page.getByTestId("token-theme-enabled-theme-dark").check();
+  await expect(page.getByTestId("token-theme-enabled-theme-light")).not.toBeChecked();
+  await expect(page.getByTestId("token-theme-enabled-theme-dark")).toBeChecked();
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#0f172a");
+
+  await expect
+    .poll(async () => {
+      const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(fileResponse.ok()).toBeTruthy();
+      const file = (await fileResponse.json()).file;
+      const textNode = file.pages[0].children[0].children[0];
+      return {
+        fill: textNode.style.fill,
+        themes: file.token_themes.map((theme: { id: string; enabled: boolean }) => ({
+          id: theme.id,
+          enabled: theme.enabled
+        }))
+      };
+    })
+    .toEqual({
+      fill: "#0f172a",
+      themes: [
+        { id: "theme-light", enabled: false },
+        { id: "theme-dark", enabled: true }
+      ]
+    });
+});
+
 test("right inspector binds imported spacing tokens to layout gap and padding", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const importedTokenJson = JSON.stringify(

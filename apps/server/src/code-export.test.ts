@@ -289,6 +289,62 @@ describe("code export", () => {
     });
   });
 
+  test("resolves token theme overrides and exports theme metadata", () => {
+    const fixture = tossFixture() as any;
+    fixture.token_sets = [
+      { id: "base", name: "base", enabled: false },
+      { id: "light", name: "light", enabled: false },
+      { id: "dark", name: "dark", enabled: false }
+    ];
+    fixture.token_themes = [
+      { id: "theme-light", name: "Light", group: "mode", enabled: false, token_set_ids: ["base", "light"] },
+      { id: "theme-dark", name: "Dark", group: "mode", enabled: true, token_set_ids: ["base", "dark"] }
+    ];
+    fixture.tokens = [
+      {
+        id: "color-base-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#2563eb",
+        set_id: "base"
+      },
+      {
+        id: "color-light-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#60a5fa",
+        set_id: "light"
+      },
+      {
+        id: "color-dark-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#93c5fd",
+        set_id: "dark"
+      }
+    ];
+    fixture.pages[0].children[0].style.fill_token = "color-base-brand-primary";
+
+    const result = exportDesignToCode(fixture);
+    const button = result.elements.find((element) => element.id === "tds-button-primary");
+
+    expect((result.implementationSpec.tokens as any).tokenThemes).toEqual(fixture.token_themes);
+    expect(result.implementationSpec.tokens.colors).toEqual([
+      {
+        id: "color-dark-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#93c5fd",
+        set_id: "dark"
+      }
+    ]);
+    expect(result.css).toContain("--layo-token-color-dark-brand-primary: #93c5fd;");
+    expect(button?.structure.style).toMatchObject({
+      fill: "#93c5fd",
+      fillToken: "color-base-brand-primary"
+    });
+  });
+
   test("exports component definitions and instance references for agents", () => {
     const result = exportDesignToCode(componentFixture());
 

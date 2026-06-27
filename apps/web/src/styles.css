@@ -1358,6 +1358,24 @@ button:disabled {
   flex: 0 0 auto;
 }
 
+.token-theme-list {
+  display: grid;
+  gap: var(--editor-space-sm);
+  margin-top: var(--editor-space-sm);
+}
+
+.token-theme-group {
+  display: grid;
+  gap: var(--editor-space-xs);
+}
+
+.token-theme-group-label {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  font-weight: 600;
+  line-height: var(--editor-text-small-line);
+}
+
 .inspector-token-textarea {
   width: 100%;
   min-height: 144px;

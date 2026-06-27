@@ -502,6 +502,87 @@ describe("editor state commands", () => {
     });
   });
 
+  test("toggles token themes with group exclusivity, undo, redo, and rematerialized fill bindings", () => {
+    const document = sampleDocument() as any;
+    document.token_sets = [
+      { id: "base", name: "base", enabled: false },
+      { id: "light", name: "light", enabled: false },
+      { id: "dark", name: "dark", enabled: false }
+    ];
+    document.token_themes = [
+      { id: "theme-light", name: "Light", group: "mode", enabled: true, token_set_ids: ["base", "light"] },
+      { id: "theme-dark", name: "Dark", group: "mode", enabled: false, token_set_ids: ["base", "dark"] }
+    ];
+    document.tokens = [
+      {
+        id: "color-base-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#2563eb",
+        set_id: "base"
+      },
+      {
+        id: "color-light-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#60a5fa",
+        set_id: "light"
+      },
+      {
+        id: "color-dark-brand-primary",
+        name: "Brand / Primary",
+        type: "color",
+        value: "#93c5fd",
+        set_id: "dark"
+      }
+    ];
+
+    const bound = executeEditorCommand(createEditorState(document), {
+      type: "set_fill_token",
+      nodeId: "text-1",
+      tokenId: "color-base-brand-primary"
+    } as any);
+    expect(findNodeById(bound.document, "text-1")?.style).toMatchObject({
+      fill: "#60a5fa",
+      fill_token: "color-base-brand-primary"
+    });
+
+    const dark = executeEditorCommand(bound, {
+      type: "set_token_theme_enabled",
+      tokenThemeId: "theme-dark",
+      enabled: true
+    } as any);
+
+    expect(dark.document.token_themes).toEqual([
+      { id: "theme-light", name: "Light", group: "mode", enabled: false, token_set_ids: ["base", "light"] },
+      { id: "theme-dark", name: "Dark", group: "mode", enabled: true, token_set_ids: ["base", "dark"] }
+    ]);
+    expect(findNodeById(dark.document, "text-1")?.style).toMatchObject({
+      fill: "#93c5fd",
+      fill_token: "color-base-brand-primary"
+    });
+
+    const undone = undo(dark);
+    expect(undone.document.token_themes?.map((theme) => ({ id: theme.id, enabled: theme.enabled }))).toEqual([
+      { id: "theme-light", enabled: true },
+      { id: "theme-dark", enabled: false }
+    ]);
+    expect(findNodeById(undone.document, "text-1")?.style).toMatchObject({
+      fill: "#60a5fa",
+      fill_token: "color-base-brand-primary"
+    });
+
+    const redone = redo(undone);
+    expect(redone.document.token_themes?.map((theme) => ({ id: theme.id, enabled: theme.enabled }))).toEqual([
+      { id: "theme-light", enabled: false },
+      { id: "theme-dark", enabled: true }
+    ]);
+    expect(findNodeById(redone.document, "text-1")?.style).toMatchObject({
+      fill: "#93c5fd",
+      fill_token: "color-base-brand-primary"
+    });
+  });
+
   test("preserves layout spacing token bindings and clears them on manual override", () => {
     const document = sampleDocument() as any;
     document.tokens = [

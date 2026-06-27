@@ -5,6 +5,7 @@ import type {
   DesignStyle,
   DesignToken,
   DesignTokenSet,
+  DesignTokenTheme,
   DesignNode,
   NodeConstraints,
   NodeLayout,
@@ -162,6 +163,7 @@ export interface TokenCandidateSummary {
 
 export interface TokenExportSummary {
   tokenSets?: DesignTokenSet[];
+  tokenThemes?: DesignTokenTheme[];
   colors: DesignToken[];
   spacing: DesignToken[];
   typography: DesignToken[];
@@ -180,11 +182,19 @@ export function exportDesignToCode(
   options: CodeExportOptions = {}
 ): CodeExportResult {
   const roots = document.pages.flatMap((page) => page.children).filter(isNodeExportVisible);
-  const activeTokens = resolveActiveDesignTokens(document.tokens ?? [], document.token_sets ?? []);
+  const activeTokens = resolveActiveDesignTokens(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  );
   const colorTokens = documentColorTokens(activeTokens);
   const spacingTokens = documentSpacingTokens(activeTokens);
   const typographyTokens = documentTypographyTokens(activeTokens);
-  const tokenMap = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []);
+  const tokenMap = createActiveDesignTokenReferenceMap(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  );
   const componentById = new Map((document.components ?? []).map((component) => [component.id, component]));
   const mappingByComponentId = new Map(
     (document.code_mappings ?? []).map((mapping) => [mapping.component_id, mapping])
@@ -221,6 +231,7 @@ export function exportDesignToCode(
       styles: document.styles ?? [],
       tokens: {
         ...(document.token_sets?.length ? { tokenSets: document.token_sets } : {}),
+        ...(document.token_themes?.length ? { tokenThemes: document.token_themes } : {}),
         colors: colorTokens,
         spacing: spacingTokens,
         typography: typographyTokens

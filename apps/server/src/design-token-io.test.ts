@@ -314,4 +314,90 @@ describe("DTCG color token import/export", () => {
       }
     });
   });
+
+  test("imports and exports token themes with active theme metadata", () => {
+    const imported = importDesignTokenDocumentFromDtcg({
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeThemes: ["theme-dark"]
+      },
+      $themes: [
+        {
+          id: "theme-light",
+          name: "Light",
+          group: "mode",
+          selectedTokenSets: ["base", "light"]
+        },
+        {
+          id: "theme-dark",
+          name: "Dark",
+          group: "mode",
+          selectedTokenSets: ["base", "dark"]
+        }
+      ],
+      base: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#2563eb"
+          }
+        }
+      },
+      light: {
+        Surface: {
+          Canvas: {
+            $type: "color",
+            $value: "#ffffff"
+          }
+        }
+      },
+      dark: {
+        Surface: {
+          Canvas: {
+            $type: "color",
+            $value: "#0f172a"
+          }
+        }
+      }
+    });
+
+    expect(imported.tokenThemes).toEqual([
+      {
+        id: "theme-light",
+        name: "Light",
+        group: "mode",
+        enabled: false,
+        token_set_ids: ["base", "light"]
+      },
+      {
+        id: "theme-dark",
+        name: "Dark",
+        group: "mode",
+        enabled: true,
+        token_set_ids: ["base", "dark"]
+      }
+    ]);
+
+    expect(exportDesignTokensToDtcg(imported.tokens, imported.tokenSets, imported.tokenThemes)).toMatchObject({
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeThemes: ["theme-dark"],
+        activeTokenSets: []
+      },
+      $themes: [
+        {
+          id: "theme-light",
+          name: "Light",
+          group: "mode",
+          selectedTokenSets: ["base", "light"]
+        },
+        {
+          id: "theme-dark",
+          name: "Dark",
+          group: "mode",
+          selectedTokenSets: ["base", "dark"]
+        }
+      ]
+    });
+  });
 });

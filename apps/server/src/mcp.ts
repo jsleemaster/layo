@@ -194,6 +194,16 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     styleId: z.string()
   }),
   z.object({
+    type: z.literal("set_token_set_enabled"),
+    tokenSetId: z.string(),
+    enabled: z.boolean()
+  }),
+  z.object({
+    type: z.literal("set_token_theme_enabled"),
+    tokenThemeId: z.string(),
+    enabled: z.boolean()
+  }),
+  z.object({
     type: z.literal("set_fill_token"),
     nodeId: z.string(),
     tokenId: z.string()
@@ -1151,7 +1161,8 @@ export function createMcpServer(storage = new FileStorage()) {
                 fileId,
                 file: result.file,
                 tokens: result.tokens,
-                tokenSets: result.tokenSets
+                tokenSets: result.tokenSets,
+                tokenThemes: result.tokenThemes
               },
               null,
               2

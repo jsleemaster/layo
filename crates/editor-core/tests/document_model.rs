@@ -706,6 +706,49 @@ fn token_sets_round_trip_through_json() {
 }
 
 #[test]
+fn token_themes_round_trip_through_json() {
+    let raw = r##"
+    {
+      "id": "token-theme-file",
+      "name": "Token Theme File",
+      "version": 1,
+      "components": [],
+      "token_sets": [
+        { "id": "base", "name": "base", "enabled": false },
+        { "id": "dark", "name": "dark", "enabled": false }
+      ],
+      "token_themes": [
+        {
+          "id": "theme-dark",
+          "name": "Dark",
+          "group": "mode",
+          "enabled": true,
+          "token_set_ids": ["base", "dark"]
+        }
+      ],
+      "tokens": [
+        {
+          "id": "color-dark-brand-primary",
+          "name": "Brand / Primary",
+          "type": "color",
+          "value": "#93c5fd",
+          "set_id": "dark"
+        }
+      ],
+      "pages": []
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let json = serde_json::to_string(&parsed).unwrap();
+
+    assert!(json.contains("\"token_themes\""));
+    assert!(json.contains("\"id\":\"theme-dark\""));
+    assert!(json.contains("\"group\":\"mode\""));
+    assert!(json.contains("\"token_set_ids\":[\"base\",\"dark\"]"));
+}
+
+#[test]
 fn typography_token_round_trips_through_json() {
     let raw = r##"
     {

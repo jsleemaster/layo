@@ -12,6 +12,7 @@ import type {
   DesignStyle,
   DesignToken,
   DesignTokenSet,
+  DesignTokenTheme,
   DesignNode,
   NodeConstraints,
   NodeExportPreset,
@@ -62,6 +63,7 @@ export interface CanvasInspection {
   componentCount: number;
   tokens: DesignToken[];
   tokenSets: DesignTokenSet[];
+  tokenThemes: DesignTokenTheme[];
   styles: StyleInspection[];
   components: Array<{ id: string; name: string; variantCount: number }>;
   nodes: AgentNodeSummary[];
@@ -103,6 +105,7 @@ export type AgentCommand =
   | { type: "duplicate_style"; styleId: string; newStyleId: string; name: string }
   | { type: "delete_style"; styleId: string }
   | { type: "set_token_set_enabled"; tokenSetId: string; enabled: boolean }
+  | { type: "set_token_theme_enabled"; tokenThemeId: string; enabled: boolean }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
   | { type: "set_fill_style"; nodeId: string; styleId: string }
   | { type: "set_text_typography_token"; nodeId: string; tokenId: string }
@@ -223,6 +226,7 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
     componentCount: components.length,
     tokens: document.tokens ?? [],
     tokenSets: document.token_sets ?? [],
+    tokenThemes: document.token_themes ?? [],
     styles: summarizeStyles(document),
     components: components.map((component) => ({
       id: component.id,
@@ -269,6 +273,7 @@ export function validateDocument(document: DesignFile): DocumentValidation {
   const componentIds = new Set<string>();
   const tokenTypes = new Map<string, DesignToken["type"]>();
   const tokenSetIds = new Set<string>();
+  const tokenThemeIds = new Set<string>();
   const styleTypes = new Map<string, DesignStyle["type"]>();
 
   for (const tokenSet of document.token_sets ?? []) {
@@ -316,6 +321,30 @@ export function validateDocument(document: DesignFile): DocumentValidation {
         code: "missing_token_set",
         message: `token references missing token set: ${token.id} -> ${token.set_id}`
       });
+    }
+  }
+
+  for (const theme of document.token_themes ?? []) {
+    if (tokenThemeIds.has(theme.id)) {
+      issues.push({
+        code: "duplicate_token_theme_id",
+        message: `duplicate token theme id: ${theme.id}`
+      });
+    }
+    tokenThemeIds.add(theme.id);
+    if (!theme.name.trim()) {
+      issues.push({
+        code: "invalid_token_theme_name",
+        message: `token theme must have a non-empty name: ${theme.id}`
+      });
+    }
+    for (const tokenSetId of theme.token_set_ids) {
+      if (!tokenSetIds.has(tokenSetId)) {
+        issues.push({
+          code: "missing_token_theme_set",
+          message: `token theme references missing token set: ${theme.id} -> ${tokenSetId}`
+        });
+      }
     }
   }
 
@@ -1021,6 +1050,11 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       materializeTokenBindings(document);
       return tokenSet.id;
     }
+    case "set_token_theme_enabled": {
+      const theme = setTokenThemeEnabled(document, command.tokenThemeId, command.enabled);
+      materializeTokenBindings(document);
+      return theme.id;
+    }
     case "set_fill_token": {
       const node = requireNode(document, command.nodeId);
       const token = requireColorToken(document, command.tokenId);
@@ -1297,7 +1331,11 @@ function normalizeNodeExportPresets(presets: NodeExportPreset[]): NodeExportPres
 }
 
 function requireColorToken(document: DesignFile, tokenId: string): DesignToken {
-  const token = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []).get(tokenId);
+  const token = createActiveDesignTokenReferenceMap(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  ).get(tokenId);
   if (!token) {
     throw new Error(`token not found: ${tokenId}`);
   }
@@ -1316,7 +1354,11 @@ function requireColorStyle(document: DesignFile, styleId: string): DesignStyle {
 }
 
 function requireSpacingToken(document: DesignFile, tokenId: string): DesignToken {
-  const token = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []).get(tokenId);
+  const token = createActiveDesignTokenReferenceMap(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  ).get(tokenId);
   if (!token) {
     throw new Error(`token not found: ${tokenId}`);
   }
@@ -1327,7 +1369,11 @@ function requireSpacingToken(document: DesignFile, tokenId: string): DesignToken
 }
 
 function requireTypographyToken(document: DesignFile, tokenId: string): DesignToken {
-  const token = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []).get(tokenId);
+  const token = createActiveDesignTokenReferenceMap(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  ).get(tokenId);
   if (!token) {
     throw new Error(`token not found: ${tokenId}`);
   }
@@ -1411,7 +1457,11 @@ function clearNodeStyleBindings(node: DesignNode, styleId: string): void {
 }
 
 function materializeTokenBindings(document: DesignFile): void {
-  const tokenMap = createActiveDesignTokenReferenceMap(document.tokens ?? [], document.token_sets ?? []);
+  const tokenMap = createActiveDesignTokenReferenceMap(
+    document.tokens ?? [],
+    document.token_sets ?? [],
+    document.token_themes ?? []
+  );
   for (const page of document.pages) {
     for (const node of page.children) {
       materializeNodeTokenBindings(node, tokenMap);
@@ -1480,6 +1530,25 @@ function materializeNodeTokenBindings(node: DesignNode, tokenMap: Map<string, De
   for (const child of node.children) {
     materializeNodeTokenBindings(child, tokenMap);
   }
+}
+
+function setTokenThemeEnabled(document: DesignFile, tokenThemeId: string, enabled: boolean): DesignTokenTheme {
+  const theme = (document.token_themes ?? []).find((candidate) => candidate.id === tokenThemeId);
+  if (!theme) {
+    throw new Error(`token theme not found: ${tokenThemeId}`);
+  }
+
+  const group = theme.group?.trim();
+  if (enabled && group) {
+    for (const candidate of document.token_themes ?? []) {
+      if (candidate.id !== theme.id && candidate.group?.trim() === group) {
+        candidate.enabled = false;
+      }
+    }
+  }
+
+  theme.enabled = enabled;
+  return theme;
 }
 
 function spacingTokenValueToNumber(token: DesignToken): number {
