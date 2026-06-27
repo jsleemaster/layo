@@ -1,4 +1,4 @@
-import type { RendererDocument } from "@layo/renderer";
+import type { DesignToken, RendererDocument } from "@layo/renderer";
 import { apiUrl } from "./api-base";
 
 export interface FileVersionSummary {
@@ -223,6 +223,84 @@ export interface ExportedLibraryArchiveDownload {
   mimeType: string;
 }
 
+export interface ExportCodeOptions {
+  moduleBasePath?: string;
+}
+
+export interface CodeStructureNode {
+  id: string;
+  name: string;
+  kind: string;
+  className: string;
+  bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+  };
+  style: {
+    fill: string;
+    fillToken?: string;
+    stroke: string | null;
+    strokeWidth: number;
+    opacity: number;
+  };
+  content:
+    | { type: "empty" }
+    | { type: "text"; value: string; fontSize: number; fontFamily: string }
+    | { type: "image"; assetId: string; fitMode: "fill" | "fit" };
+  componentRef?: {
+    definitionId: string;
+    detached: boolean;
+    overrides: Array<{ nodeId: string; field: string; value: string }>;
+  };
+  layout?: unknown;
+  layout_item?: unknown;
+  constraints?: unknown;
+  children: CodeStructureNode[];
+}
+
+export interface CodeElementImplementation {
+  componentName: string;
+  suggestedProps: Array<{ name: string; type: "string"; sourceNodeId: string; defaultValue: string }>;
+  slots: Array<{ name: string; sourceNodeIds: string[] }>;
+  cssClassNames: string[];
+  sourceNodeIds: string[];
+}
+
+export interface CodeElementArtifact {
+  id: string;
+  name: string;
+  className: string;
+  html: string;
+  css: string;
+  jsModule: string;
+  structure: CodeStructureNode;
+  implementation: CodeElementImplementation;
+}
+
+export interface CodeExportPayload {
+  css: string;
+  html: string;
+  elements: CodeElementArtifact[];
+  implementationSpec: {
+    elements: CodeElementArtifact[];
+    components: unknown[];
+    tokens: {
+      colors: DesignToken[];
+      spacing: DesignToken[];
+    };
+    tokenCandidates: {
+      colors: string[];
+      fontFamilies: string[];
+      fontSizes: number[];
+      spacings: number[];
+    };
+  };
+  indexModule: string;
+}
+
 export function parseDocumentPayload(payload: unknown): RendererDocument {
   if (!payload || typeof payload !== "object" || !("file" in payload)) {
     throw new Error("문서 응답에 파일이 없습니다");
@@ -320,6 +398,21 @@ export async function exportLibraryArchive(
     fileName,
     mimeType
   };
+}
+
+export async function exportCode(
+  fileId: string,
+  options: ExportCodeOptions = {},
+  fetcher: typeof fetch = fetch
+): Promise<CodeExportPayload> {
+  const searchParams = new URLSearchParams();
+  if (options.moduleBasePath?.trim()) {
+    searchParams.set("moduleBasePath", options.moduleBasePath);
+  }
+  const suffix = searchParams.toString() ? `?${searchParams.toString()}` : "";
+  const response = await fetcher(apiUrl(`/files/${fileId}/export/code${suffix}`));
+  const payload = await readDocumentJson(response);
+  return (payload as { export: CodeExportPayload }).export;
 }
 
 export async function exportDesignTokensDtcg(fileId: string, fetcher: typeof fetch = fetch): Promise<unknown> {

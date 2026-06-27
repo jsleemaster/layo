@@ -360,6 +360,32 @@ test("file panel exports a shared library archive and imports reusable component
   ]);
 });
 
+test("inspector dev panel shows selected layer handoff specs and code", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  await expect(page.getByTestId("dev-panel")).toBeVisible();
+  await expect(page.getByTestId("dev-panel-status")).toContainText("코드 내보내기");
+  await expect(page.getByTestId("dev-panel-selected-node")).toContainText("헤드라인");
+  await expect(page.getByTestId("dev-panel-selected-node")).toContainText("text-1");
+  await expect(page.getByTestId("dev-panel-specs")).toContainText("W 260");
+  await expect(page.getByTestId("dev-panel-specs")).toContainText("H 48");
+  await expect(page.getByTestId("dev-panel-specs")).toContainText("#111827");
+  await expect(page.getByTestId("dev-panel-css")).toContainText(".node-text-1");
+  await expect(page.getByTestId("dev-panel-css")).toContainText("font-size");
+  await expect(page.getByTestId("dev-panel-html")).toContainText('data-node-id="text-1"');
+  await expect(page.getByTestId("dev-panel-structure")).toContainText('"id": "text-1"');
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await expect(page.getByTestId("dev-panel-selected-node")).toContainText("랜딩 프레임");
+  await expect(page.getByTestId("dev-panel-selected-node")).toContainText("frame-1");
+  await expect(page.getByTestId("dev-panel-css")).toContainText(".node-frame-1");
+  await expect(page.getByTestId("dev-panel-html")).toContainText('data-node-id="frame-1"');
+  await expect(page.getByTestId("dev-panel-structure")).toContainText('"id": "frame-1"');
+});
+
 test("file panel exports a project archive and reviews every document before import", async ({ page }) => {
   const { projectId } = await createProjectFromEmptyState(page);
   const secondDocument = await page.request.post(`http://127.0.0.1:4317/projects/${projectId}/documents`, {
