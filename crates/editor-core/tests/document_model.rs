@@ -590,6 +590,62 @@ fn color_token_metadata_round_trips_through_json() {
 }
 
 #[test]
+fn typography_token_round_trips_through_json() {
+    let raw = r##"
+    {
+      "id": "typography-token-file",
+      "name": "Typography Token File",
+      "version": 1,
+      "components": [],
+      "tokens": [
+        {
+          "id": "typography-heading-lg",
+          "name": "Typography / Heading LG",
+          "type": "typography",
+          "value": "{\"fontFamily\":\"Inter\",\"fontSize\":32,\"lineHeight\":40}"
+        }
+      ],
+      "pages": [
+        {
+          "id": "page-1",
+          "name": "페이지 1",
+          "children": [
+            {
+              "id": "text-1",
+              "kind": "text",
+              "name": "Headline",
+              "transform": { "x": 0, "y": 0, "rotation": 0 },
+              "size": { "width": 120, "height": 48 },
+              "style": {
+                "fill": "#111827",
+                "stroke": null,
+                "stroke_width": 0,
+                "opacity": 1
+              },
+              "content": {
+                "type": "text",
+                "value": "Token",
+                "font_size": 32,
+                "font_family": "Inter",
+                "typography_token": "typography-heading-lg"
+              },
+              "children": []
+            }
+          ]
+        }
+      ]
+    }
+    "##;
+
+    let parsed: DesignFile = serde_json::from_str(raw).unwrap();
+    let json = serde_json::to_string(&parsed).unwrap();
+
+    assert!(json.contains("\"type\":\"typography\""));
+    assert!(json.contains("\"id\":\"typography-heading-lg\""));
+    assert!(json.contains("\"typography_token\":\"typography-heading-lg\""));
+}
+
+#[test]
 fn node_interaction_metadata_round_trips_through_json() {
     let raw = r##"
     {

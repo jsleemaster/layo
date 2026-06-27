@@ -55,7 +55,14 @@ export interface CodeStructureNode {
   annotations: CodeHandoffAnnotation[];
   content:
     | { type: "empty" }
-    | { type: "text"; value: string; fontSize: number; fontFamily: string; writingMode?: TextWritingMode }
+    | {
+        type: "text";
+        value: string;
+        fontSize: number;
+        fontFamily: string;
+        writingMode?: TextWritingMode;
+        typographyToken?: string;
+      }
     | { type: "image"; assetId: string; fitMode: "fill" | "fit" };
   componentRef?: {
     definitionId: string;
@@ -147,6 +154,7 @@ export interface TokenCandidateSummary {
 export interface TokenExportSummary {
   colors: DesignToken[];
   spacing: DesignToken[];
+  typography: DesignToken[];
 }
 
 export interface CodeImplementationSpec {
@@ -163,7 +171,8 @@ export function exportDesignToCode(
   const roots = document.pages.flatMap((page) => page.children).filter(isNodeExportVisible);
   const colorTokens = documentColorTokens(document);
   const spacingTokens = documentSpacingTokens(document);
-  const tokenMap = new Map([...colorTokens, ...spacingTokens].map((token) => [token.id, token]));
+  const typographyTokens = documentTypographyTokens(document);
+  const tokenMap = new Map([...colorTokens, ...spacingTokens, ...typographyTokens].map((token) => [token.id, token]));
   const componentById = new Map((document.components ?? []).map((component) => [component.id, component]));
   const mappingByComponentId = new Map(
     (document.code_mappings ?? []).map((mapping) => [mapping.component_id, mapping])
@@ -184,6 +193,7 @@ export function exportDesignToCode(
       ".canvas-export-root {",
       ...colorTokens.map((token) => `  --${cssTokenName(token.id)}: ${token.value};`),
       ...spacingTokens.map((token) => `  --${cssTokenName(token.id)}: ${cssSpacingTokenValue(token)};`),
+      ...typographyTokens.flatMap(cssTypographyTokenVariables),
       "  position: relative;",
       "  width: 100%;",
       "  min-height: 100vh;",
@@ -198,7 +208,8 @@ export function exportDesignToCode(
       components,
       tokens: {
         colors: colorTokens,
-        spacing: spacingTokens
+        spacing: spacingTokens,
+        typography: typographyTokens
       },
       tokenCandidates: collectTokenCandidates([
         ...roots,
@@ -623,6 +634,9 @@ function contentFor(node: DesignNode): CodeStructureNode["content"] {
     if (node.content.writing_mode && node.content.writing_mode !== "horizontal_tb") {
       content.writingMode = node.content.writing_mode;
     }
+    if (node.content.typography_token) {
+      content.typographyToken = node.content.typography_token;
+    }
     return content;
   }
 
@@ -750,12 +764,12 @@ function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[]
 
   if (node.kind === "text" && node.content.type === "text") {
     lines.push(`  color: ${cssFillValue(node, tokenMap)};`);
-    lines.push(`  font-family: ${fontFamily(node.content.font_family)};`);
-    lines.push(`  font-size: ${formatPx(node.content.font_size)};`);
+    lines.push(`  font-family: ${cssTextFontFamilyValue(node, tokenMap)};`);
+    lines.push(`  font-size: ${cssTextFontSizeValue(node, tokenMap)};`);
     if (node.content.writing_mode && node.content.writing_mode !== "horizontal_tb") {
       lines.push(`  writing-mode: ${cssTextWritingMode(node.content.writing_mode)};`);
     }
-    lines.push("  line-height: 1.25;");
+    lines.push(`  line-height: ${cssTextLineHeightValue(node, tokenMap)};`);
     lines.push("  white-space: pre-wrap;");
   } else {
     lines.push(`  background-color: ${cssFillValue(node, tokenMap)};`);
@@ -793,6 +807,10 @@ function documentSpacingTokens(document: DesignFile): DesignToken[] {
   return (document.tokens ?? []).filter((token) => token.type === "spacing");
 }
 
+function documentTypographyTokens(document: DesignFile): DesignToken[] {
+  return (document.tokens ?? []).filter((token) => token.type === "typography");
+}
+
 function resolvedFill(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
   const token = node.style.fill_token ? tokenMap.get(node.style.fill_token) : undefined;
   return token?.type === "color" ? token.value : node.style.fill;
@@ -826,6 +844,80 @@ function cssSpacingTokenValue(token: DesignToken): string {
     return formatPx(numeric);
   }
   return token.value;
+}
+
+interface TypographyTokenValue {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight?: number;
+}
+
+function parseTypographyTokenValue(token: DesignToken): TypographyTokenValue | null {
+  try {
+    const parsed = JSON.parse(token.value) as Partial<TypographyTokenValue>;
+    const fontFamily = typeof parsed.fontFamily === "string" ? parsed.fontFamily.trim() : "";
+    const fontSize = Number(parsed.fontSize);
+    const lineHeight = parsed.lineHeight === undefined ? undefined : Number(parsed.lineHeight);
+    if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
+      return null;
+    }
+    if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
+      return null;
+    }
+    return {
+      fontFamily,
+      fontSize,
+      ...(lineHeight !== undefined ? { lineHeight } : {})
+    };
+  } catch {
+    return null;
+  }
+}
+
+function typographyTokenFor(node: DesignNode, tokenMap: Map<string, DesignToken>): DesignToken | undefined {
+  const tokenId = node.content.type === "text" ? node.content.typography_token : undefined;
+  const token = tokenId ? tokenMap.get(tokenId) : undefined;
+  return token?.type === "typography" ? token : undefined;
+}
+
+function cssTypographyTokenVariables(token: DesignToken): string[] {
+  const value = parseTypographyTokenValue(token);
+  if (!value) {
+    return [];
+  }
+  const tokenName = cssTokenName(token.id);
+  return [
+    `  --${tokenName}-font-family: ${fontFamily(value.fontFamily)};`,
+    `  --${tokenName}-font-size: ${formatPx(value.fontSize)};`,
+    ...(value.lineHeight !== undefined ? [`  --${tokenName}-line-height: ${formatPx(value.lineHeight)};`] : [])
+  ];
+}
+
+function cssTextFontFamilyValue(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
+  const token = typographyTokenFor(node, tokenMap);
+  const value = token ? parseTypographyTokenValue(token) : null;
+  if (!token || !value) {
+    return fontFamily(node.content.type === "text" ? node.content.font_family : "Arial");
+  }
+  return `var(--${cssTokenName(token.id)}-font-family, ${fontFamily(value.fontFamily)})`;
+}
+
+function cssTextFontSizeValue(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
+  const token = typographyTokenFor(node, tokenMap);
+  const value = token ? parseTypographyTokenValue(token) : null;
+  if (!token || !value) {
+    return formatPx(node.content.type === "text" ? node.content.font_size : 16);
+  }
+  return `var(--${cssTokenName(token.id)}-font-size, ${formatPx(value.fontSize)})`;
+}
+
+function cssTextLineHeightValue(node: DesignNode, tokenMap: Map<string, DesignToken>): string {
+  const token = typographyTokenFor(node, tokenMap);
+  const value = token ? parseTypographyTokenValue(token) : null;
+  if (!token || !value?.lineHeight) {
+    return "1.25";
+  }
+  return `var(--${cssTokenName(token.id)}-line-height, ${formatPx(value.lineHeight)})`;
 }
 
 function cssTokenName(tokenId: string): string {

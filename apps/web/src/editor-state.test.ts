@@ -217,6 +217,50 @@ describe("editor state commands", () => {
     });
   });
 
+  test("applies typography tokens to selected text with undo and redo", () => {
+    const document = sampleDocument() as any;
+    document.tokens = [
+      {
+        id: "typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ];
+    const initial = createEditorState(document);
+
+    const tokenized = executeEditorCommand(initial, {
+      type: "set_text_typography_token",
+      nodeId: "text-1",
+      tokenId: "typography-heading-lg"
+    } as any);
+
+    expect(findNodeById(tokenized.document, "text-1")?.content).toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 32,
+      typography_token: "typography-heading-lg"
+    });
+
+    const undone = undo(tokenized);
+    expect(findNodeById(undone.document, "text-1")?.content).toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 28
+    });
+    expect(findNodeById(undone.document, "text-1")?.content).not.toMatchObject({
+      typography_token: "typography-heading-lg"
+    });
+
+    const redone = redo(undone);
+    expect(findNodeById(redone.document, "text-1")?.content).toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 32,
+      typography_token: "typography-heading-lg"
+    });
+  });
+
   test("applies copied object style with undo support", () => {
     const initial = setSelection(createEditorState(sampleDocument()), "text-1");
 

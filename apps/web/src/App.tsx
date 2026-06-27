@@ -1242,6 +1242,21 @@ async function persistTextWritingMode(fileId: string, nodeId: string, writingMod
   }
 }
 
+async function persistTextTypographyToken(fileId: string, nodeId: string, tokenId: string) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_text_typography_token", nodeId, tokenId }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`텍스트 타이포그래피 토큰 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 function CanvasImageBody({
   assetId,
   width,
@@ -4134,6 +4149,7 @@ function Inspector({
   onFillChange,
   onTextChange,
   onTextWritingModeChange,
+  onTextTypographyTokenChange,
   onLayoutChange,
   onLayoutItemChange,
   onConstraintsChange,
@@ -4188,6 +4204,7 @@ function Inspector({
   onFillChange: (nodeId: string, fill: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onTextWritingModeChange: (nodeId: string, writingMode: TextWritingMode) => void;
+  onTextTypographyTokenChange: (nodeId: string, tokenId: string) => void;
   onLayoutChange: (nodeId: string, layout: NodeLayout) => void;
   onLayoutItemChange: (nodeId: string, layoutItem: NodeLayoutItem) => void;
   onConstraintsChange: (nodeId: string, constraints: NodeConstraints) => void;
@@ -4362,6 +4379,7 @@ function Inspector({
     ? documentTokens.find((token) => token.id === selectedNode.style.fill_token && token.type === "color") ?? null
     : null;
   const spacingTokens = documentTokens.filter((token) => token.type === "spacing");
+  const typographyTokens = documentTokens.filter((token) => token.type === "typography");
   const variantControls =
     selectedNode.component_instance && componentDefinition
       ? componentVariantControls(componentDefinition, selectedNode.component_instance.variant_id ?? null)
@@ -4857,6 +4875,27 @@ function Inspector({
               <option value="vertical_lr">세로 왼쪽-오른쪽</option>
             </select>
           </label>
+          {typographyTokens.length ? (
+            <label className="stacked-field">
+              타이포그래피 토큰
+              <select
+                data-testid="inspector-text-typography-token"
+                value={selectedNode.content.typography_token ?? ""}
+                onChange={(event) => {
+                  if (event.currentTarget.value) {
+                    onTextTypographyTokenChange(selectedNode.id, event.currentTarget.value);
+                  }
+                }}
+              >
+                <option value="">토큰 없음</option>
+                {typographyTokens.map((token) => (
+                  <option key={token.id} value={token.id}>
+                    {token.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </>
       ) : null}
       <section className="inspector-section comment-panel" data-testid="comment-panel" aria-label="코멘트">
@@ -7471,6 +7510,22 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "텍스트 쓰기 방향을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const updateTextTypographyToken = (nodeId: string, tokenId: string) => {
+    dispatch({ type: "set_text_typography_token", nodeId, tokenId });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistTextTypographyToken(currentProject.currentDocumentId, nodeId, tokenId)
+      .then(() => {
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "텍스트 타이포그래피 토큰을 저장하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -11339,6 +11394,7 @@ export function App() {
         onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
         onTextChange={updateTextNode}
         onTextWritingModeChange={updateTextWritingMode}
+        onTextTypographyTokenChange={updateTextTypographyToken}
         onLayoutChange={updateLayout}
         onLayoutItemChange={updateLayoutItem}
         onConstraintsChange={updateConstraints}

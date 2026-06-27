@@ -33,6 +33,7 @@ pub struct DesignToken {
 pub enum DesignTokenType {
     Color,
     Spacing,
+    Typography,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -539,6 +540,8 @@ pub enum NodeContent {
         font_family: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        typography_token: Option<String>,
     },
     Image {
         asset_id: String,
@@ -607,6 +610,7 @@ impl DesignFile {
                             font_size: 28.0,
                             font_family: "Inter".to_string(),
                             writing_mode: None,
+                            typography_token: None,
                         },
                     }],
                     transform: Transform {

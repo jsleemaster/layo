@@ -126,6 +126,16 @@ export type EditorCommand =
       writingMode: TextWritingMode;
     }
   | {
+      type: "set_text_typography_token";
+      nodeId: string;
+      tokenId: string;
+    }
+  | {
+      type: "set_text_content";
+      nodeId: string;
+      content: Extract<RendererNode["content"], { type: "text" }>;
+    }
+  | {
       type: "replace_image_asset";
       nodeId: string;
       assetId: string;
@@ -325,6 +335,28 @@ export function findNodeById(document: RendererDocument, nodeId: string): Render
 
 function findColorToken(document: RendererDocument, tokenId: string): DesignToken | null {
   return (document.tokens ?? []).find((token) => token.id === tokenId && token.type === "color") ?? null;
+}
+
+function findTypographyToken(document: RendererDocument, tokenId: string): DesignToken | null {
+  return (document.tokens ?? []).find((token) => token.id === tokenId && token.type === "typography") ?? null;
+}
+
+function parseTypographyToken(token: DesignToken): { fontFamily: string; fontSize: number; lineHeight?: number } | null {
+  try {
+    const parsed = JSON.parse(token.value) as Partial<{ fontFamily: string; fontSize: number; lineHeight: number }>;
+    const fontFamily = typeof parsed.fontFamily === "string" ? parsed.fontFamily.trim() : "";
+    const fontSize = Number(parsed.fontSize);
+    const lineHeight = parsed.lineHeight === undefined ? undefined : Number(parsed.lineHeight);
+    if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
+      return null;
+    }
+    if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
+      return null;
+    }
+    return { fontFamily, fontSize, ...(lineHeight !== undefined ? { lineHeight } : {}) };
+  } catch {
+    return null;
+  }
 }
 
 export function getNodeAbsolutePosition(
@@ -1361,6 +1393,53 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           type: "set_text_writing_mode",
           nodeId: command.nodeId,
           writingMode: previousWritingMode
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_text_typography_token": {
+      const node = findNodeById(next, command.nodeId);
+      const token = findTypographyToken(next, command.tokenId);
+      const typography = token ? parseTypographyToken(token) : null;
+      if (!node || isNodeLocked(node) || node.content.type !== "text" || !token || !typography) {
+        return { document, inverse: null };
+      }
+
+      const previousContent = { ...node.content };
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize,
+        typography_token: token.id
+      };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_text_content",
+          nodeId: command.nodeId,
+          content: previousContent
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_text_content": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node) || node.content.type !== "text") {
+        return { document, inverse: null };
+      }
+
+      const previousContent = { ...node.content };
+      node.content = { ...command.content };
+      relayoutDocument(next);
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_text_content",
+          nodeId: command.nodeId,
+          content: previousContent
         },
         selectedNodeId: command.nodeId
       };

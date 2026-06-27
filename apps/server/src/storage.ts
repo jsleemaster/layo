@@ -155,7 +155,14 @@ export interface DesignNode {
   };
   content:
     | { type: "empty" }
-    | { type: "text"; value: string; font_size: number; font_family: string; writing_mode?: TextWritingMode }
+    | {
+        type: "text";
+        value: string;
+        font_size: number;
+        font_family: string;
+        writing_mode?: TextWritingMode;
+        typography_token?: string | null;
+      }
     | {
         type: "image";
         asset_id: string;
@@ -214,7 +221,7 @@ export interface CodeComponentMapping {
 export interface DesignToken {
   id: string;
   name: string;
-  type: "color" | "spacing";
+  type: "color" | "spacing" | "typography";
   value: string;
 }
 

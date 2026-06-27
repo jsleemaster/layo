@@ -2924,6 +2924,54 @@ test("right inspector binds imported spacing tokens to layout gap and padding", 
   await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"dimension"/);
 });
 
+test("right inspector binds imported typography tokens to text layers", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const importedTokenJson = JSON.stringify(
+    {
+      global: {
+        Typography: {
+          "Heading LG": {
+            $type: "typography",
+            $value: {
+              fontFamily: "Inter",
+              fontSize: 32,
+              lineHeight: 40
+            }
+          }
+        }
+      }
+    },
+    null,
+    2
+  );
+
+  await page.getByTestId("dtcg-token-json").fill(importedTokenJson);
+  await page.getByRole("button", { name: "토큰 가져오기" }).click();
+  await expect(page.getByTestId("dtcg-token-status")).toContainText("1개 토큰 가져옴");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text-typography-token")).toBeVisible();
+  await page.getByTestId("inspector-text-typography-token").selectOption("typography-typography-heading-lg");
+
+  await expect
+    .poll(async () => {
+      const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(fileResponse.ok()).toBeTruthy();
+      const textNode = (await fileResponse.json()).file.pages[0].children[0].children[0];
+      return textNode.content;
+    })
+    .toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 32,
+      typography_token: "typography-typography-heading-lg"
+    });
+
+  await page.getByRole("button", { name: "토큰 내보내기" }).click();
+  await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"typography"/);
+  await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"fontSize": 32/);
+});
+
 test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

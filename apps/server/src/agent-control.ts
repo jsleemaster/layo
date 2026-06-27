@@ -83,6 +83,7 @@ export type AgentCommand =
   | { type: "set_fill"; nodeId: string; fill: string }
   | { type: "create_token"; token: DesignToken }
   | { type: "set_fill_token"; nodeId: string; tokenId: string }
+  | { type: "set_text_typography_token"; nodeId: string; tokenId: string }
   | {
       type: "set_layout_spacing_token";
       nodeId: string;
@@ -244,11 +245,21 @@ export function validateDocument(document: DesignFile): DocumentValidation {
       });
     }
     tokenTypes.set(token.id, token.type);
-    if (token.type !== "color" && token.type !== "spacing") {
+    if (token.type !== "color" && token.type !== "spacing" && token.type !== "typography") {
       issues.push({
         code: "invalid_token_type",
         message: `unsupported token type: ${token.id}`
       });
+    }
+    if (token.type === "typography") {
+      try {
+        parseTypographyTokenValue(token);
+      } catch {
+        issues.push({
+          code: "invalid_typography_token_value",
+          message: `typography token value is invalid: ${token.id}`
+        });
+      }
     }
     if (!token.value.trim()) {
       issues.push({
@@ -464,6 +475,7 @@ function validateNode(
   }
 
   validateLayoutSpacingTokenReferences(node, path, tokenTypes, issues);
+  validateTextTypographyTokenReference(node, path, tokenTypes, issues);
   validateExportPresets(node, path, issues);
 
   if (node.kind === "text" && node.content.type !== "text") {
@@ -530,6 +542,67 @@ function validateLayoutSpacingTokenReferences(
       });
     }
   }
+}
+
+function validateTextTypographyTokenReference(
+  node: DesignNode,
+  path: string[],
+  tokenTypes: Map<string, DesignToken["type"]>,
+  issues: DocumentValidationIssue[]
+) {
+  const tokenId = node.content.type === "text" ? node.content.typography_token : undefined;
+  if (!tokenId) {
+    return;
+  }
+  const tokenType = tokenTypes.get(tokenId);
+  if (!tokenType) {
+    issues.push({
+      code: "missing_text_typography_token",
+      message: `node references missing typography token: ${tokenId}`,
+      nodeId: node.id,
+      path
+    });
+  } else if (tokenType !== "typography") {
+    issues.push({
+      code: "invalid_text_typography_token_type",
+      message: `node typography token is not typography: ${tokenId}`,
+      nodeId: node.id,
+      path
+    });
+  }
+}
+
+interface TypographyTokenValue {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight?: number;
+}
+
+function parseTypographyTokenValue(token: DesignToken): TypographyTokenValue {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(token.value);
+  } catch {
+    throw new Error(`typography token value must be JSON: ${token.id}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`typography token value must be an object: ${token.id}`);
+  }
+  const candidate = parsed as Partial<TypographyTokenValue>;
+  const fontFamily = typeof candidate.fontFamily === "string" ? candidate.fontFamily.trim() : "";
+  const fontSize = Number(candidate.fontSize);
+  const lineHeight = candidate.lineHeight === undefined ? undefined : Number(candidate.lineHeight);
+  if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
+    throw new Error(`typography token must include fontFamily and positive fontSize: ${token.id}`);
+  }
+  if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
+    throw new Error(`typography token lineHeight must be positive: ${token.id}`);
+  }
+  return {
+    fontFamily,
+    fontSize,
+    ...(lineHeight !== undefined ? { lineHeight } : {})
+  };
 }
 
 function validateExportPresets(
@@ -644,6 +717,21 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       const node = requireNode(document, command.nodeId);
       const token = requireColorToken(document, command.tokenId);
       node.style = { ...node.style, fill: token.value, fill_token: token.id };
+      return node.id;
+    }
+    case "set_text_typography_token": {
+      const node = requireNode(document, command.nodeId);
+      if (node.content.type !== "text") {
+        throw new Error(`node is not text: ${command.nodeId}`);
+      }
+      const token = requireTypographyToken(document, command.tokenId);
+      const typography = parseTypographyTokenValue(token);
+      node.content = {
+        ...node.content,
+        font_family: typography.fontFamily,
+        font_size: typography.fontSize,
+        typography_token: token.id
+      };
       return node.id;
     }
     case "set_layout_spacing_token": {
@@ -845,6 +933,17 @@ function requireSpacingToken(document: DesignFile, tokenId: string): DesignToken
   }
   if (token.type !== "spacing") {
     throw new Error(`token is not a spacing token: ${tokenId}`);
+  }
+  return token;
+}
+
+function requireTypographyToken(document: DesignFile, tokenId: string): DesignToken {
+  const token = (document.tokens ?? []).find((candidate) => candidate.id === tokenId);
+  if (!token) {
+    throw new Error(`token not found: ${tokenId}`);
+  }
+  if (token.type !== "typography") {
+    throw new Error(`token is not a typography token: ${tokenId}`);
   }
   return token;
 }

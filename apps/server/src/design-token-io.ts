@@ -3,7 +3,7 @@ import type { DesignToken } from "./storage.js";
 type JsonRecord = Record<string, unknown>;
 
 const DTCG_TOKEN_SET = "global";
-const SUPPORTED_TOKEN_TYPES = new Set(["color", "spacing", "dimension"]);
+const SUPPORTED_TOKEN_TYPES = new Set(["color", "spacing", "dimension", "typography"]);
 
 export function exportDesignTokensToDtcg(tokens: DesignToken[]): JsonRecord {
   const root: JsonRecord = {
@@ -27,11 +27,11 @@ export function exportDesignTokensToDtcg(tokens: DesignToken[]): JsonRecord {
       if (!isRecord(existing) || "$value" in existing) {
         cursor[segment] = {};
       }
-      cursor = cursor[segment] as JsonRecord;
+    cursor = cursor[segment] as JsonRecord;
     }
     cursor[path[path.length - 1]] = {
       $type: token.type === "spacing" ? "dimension" : token.type,
-      $value: token.value
+      $value: token.type === "typography" ? typographyTokenValueToDtcg(token.value) : token.value
     };
   }
 
@@ -122,6 +122,9 @@ function normalizeTokenType(input: string | null): DesignToken["type"] | null {
   if (input === "spacing" || input === "dimension") {
     return "spacing";
   }
+  if (input === "typography") {
+    return "typography";
+  }
   return null;
 }
 
@@ -136,7 +139,55 @@ function normalizeTokenValue(tokenType: DesignToken["type"] | null, value: unkno
   if (tokenType === "spacing" && typeof value === "number" && Number.isFinite(value)) {
     return String(value);
   }
+  if (tokenType === "typography") {
+    return normalizeTypographyTokenValue(value);
+  }
   return null;
+}
+
+function normalizeTypographyTokenValue(value: unknown): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const fontFamily = typeof value.fontFamily === "string" ? value.fontFamily.trim() : "";
+  const fontSize = Number(value.fontSize);
+  const lineHeight = value.lineHeight === undefined ? undefined : Number(value.lineHeight);
+  if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
+    return null;
+  }
+  if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
+    return null;
+  }
+  return JSON.stringify({
+    fontFamily,
+    fontSize,
+    ...(lineHeight !== undefined ? { lineHeight } : {})
+  });
+}
+
+function typographyTokenValueToDtcg(value: string): unknown {
+  try {
+    const parsed = JSON.parse(value);
+    if (!isRecord(parsed)) {
+      return value;
+    }
+    const fontFamily = typeof parsed.fontFamily === "string" ? parsed.fontFamily.trim() : "";
+    const fontSize = Number(parsed.fontSize);
+    const lineHeight = parsed.lineHeight === undefined ? undefined : Number(parsed.lineHeight);
+    if (!fontFamily || !Number.isFinite(fontSize) || fontSize <= 0) {
+      return value;
+    }
+    if (lineHeight !== undefined && (!Number.isFinite(lineHeight) || lineHeight <= 0)) {
+      return value;
+    }
+    return {
+      fontFamily,
+      fontSize,
+      ...(lineHeight !== undefined ? { lineHeight } : {})
+    };
+  } catch {
+    return value;
+  }
 }
 
 function inheritedTokenType(node: JsonRecord): string | null {

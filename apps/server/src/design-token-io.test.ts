@@ -201,4 +201,45 @@ describe("DTCG color token import/export", () => {
       }
     });
   });
+
+  test("imports and exports DTCG typography composite tokens", () => {
+    const imported = importDesignTokensFromDtcg({
+      global: {
+        Typography: {
+          "Heading LG": {
+            $type: "typography",
+            $value: {
+              fontFamily: "Inter",
+              fontSize: 32,
+              lineHeight: 40
+            }
+          }
+        }
+      }
+    });
+
+    expect(imported).toEqual([
+      {
+        id: "typography-typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ]);
+
+    expect(exportDesignTokensToDtcg(imported)).toMatchObject({
+      global: {
+        Typography: {
+          "Heading LG": {
+            $type: "typography",
+            $value: {
+              fontFamily: "Inter",
+              fontSize: 32,
+              lineHeight: 40
+            }
+          }
+        }
+      }
+    });
+  });
 });

@@ -111,7 +111,7 @@ const nodeConstraintsSchema = z.object({
 const designTokenSchema = z.object({
   id: z.string(),
   name: z.string(),
-  type: z.enum(["color", "spacing"]),
+  type: z.enum(["color", "spacing", "typography"]),
   value: z.string()
 });
 
@@ -169,6 +169,11 @@ const agentCommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("set_fill_token"),
+    nodeId: z.string(),
+    tokenId: z.string()
+  }),
+  z.object({
+    type: z.literal("set_text_typography_token"),
     nodeId: z.string(),
     tokenId: z.string()
   }),

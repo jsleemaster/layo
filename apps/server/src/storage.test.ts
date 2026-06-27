@@ -1547,6 +1547,42 @@ describe("FileStorage", () => {
     expect(summary.updatedNodeIds).toEqual([]);
   });
 
+  test("persists agent-applied typography token bindings on text nodes", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: {
+            id: "typography-heading-lg",
+            name: "Typography / Heading LG",
+            type: "typography",
+            value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+          }
+        } as any,
+        {
+          type: "set_text_typography_token",
+          nodeId: "text-1",
+          tokenId: "typography-heading-lg"
+        } as any
+      ]
+    });
+
+    const persisted = await storage.readFile("sample-file");
+    const text = persisted.pages[0].children[0].children[0];
+
+    expect(text.content).toMatchObject({
+      type: "text",
+      font_family: "Inter",
+      font_size: 32,
+      typography_token: "typography-heading-lg"
+    });
+    expect(await storage.validateDocument("sample-file")).toMatchObject({ ok: true, issueCount: 0 });
+  });
+
   test("change summary reports changed descendants without duplicate parent updates", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

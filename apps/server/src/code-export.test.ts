@@ -164,6 +164,46 @@ describe("code export", () => {
     });
   });
 
+  test("exports typography token bindings as CSS variables and implementation metadata", () => {
+    const fixture = tossFixture() as any;
+    fixture.tokens = [
+      {
+        id: "typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ];
+    const label = fixture.pages[0].children[0].children[0];
+    label.content = {
+      ...label.content,
+      font_family: "Inter",
+      font_size: 32,
+      typography_token: "typography-heading-lg"
+    };
+
+    const result = exportDesignToCode(fixture);
+    const button = result.elements.find((element) => element.id === "tds-button-primary");
+
+    expect((result.implementationSpec.tokens as any).typography).toEqual([
+      {
+        id: "typography-heading-lg",
+        name: "Typography / Heading LG",
+        type: "typography",
+        value: JSON.stringify({ fontFamily: "Inter", fontSize: 32, lineHeight: 40 })
+      }
+    ]);
+    expect(result.css).toContain("--layo-token-typography-heading-lg-font-family: Inter, Arial, sans-serif;");
+    expect(result.css).toContain("--layo-token-typography-heading-lg-font-size: 32px;");
+    expect(result.css).toContain("--layo-token-typography-heading-lg-line-height: 40px;");
+    expect(result.css).toContain(
+      "font-family: var(--layo-token-typography-heading-lg-font-family, Inter, Arial, sans-serif);"
+    );
+    expect(result.css).toContain("font-size: var(--layo-token-typography-heading-lg-font-size, 32px);");
+    expect(result.css).toContain("line-height: var(--layo-token-typography-heading-lg-line-height, 40px);");
+    expect((button?.structure.children[0].content as any).typographyToken).toBe("typography-heading-lg");
+  });
+
   test("exports component definitions and instance references for agents", () => {
     const result = exportDesignToCode(componentFixture());
 
