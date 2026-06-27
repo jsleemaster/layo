@@ -612,11 +612,18 @@ test("inspector dev panel reviews multi-selection export presets before download
   await expect(review).toContainText("rectangle-review.svg");
 
   await page.getByTestId("dev-panel-export-review-toggle-rectangle-review:rectangle-review-svg").uncheck();
-  const downloadedNames: string[] = [];
-  page.on("download", (download) => downloadedNames.push(download.suggestedFilename()));
+  const partialZipPromise = page.waitForEvent("download");
   await page.getByTestId("dev-panel-export-review-download").click();
-  await expect.poll(() => [...downloadedNames].sort()).toEqual(["text-1@hero.png"]);
-  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset 다운로드됨");
+  const partialZip = await partialZipPromise;
+  expect(partialZip.suggestedFilename()).toBe("selected-layers-export-review.zip");
+  const partialZipPath = await partialZip.path();
+  if (!partialZipPath) {
+    throw new Error("multi-selection export review zip path missing");
+  }
+  const partialZipBytes = await readFile(partialZipPath);
+  expect(partialZipBytes.subarray(0, 2).toString("utf8")).toBe("PK");
+  expect(readStoredZipEntryNames(partialZipBytes)).toEqual(["text-1@hero.png"]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset ZIP 다운로드됨");
 });
 
 test("inspector dev panel reviews page export presets when no layer is selected", async ({ page }) => {
@@ -664,13 +671,65 @@ test("inspector dev panel reviews page export presets when no layer is selected"
   await expect(review).toContainText("검사기 SVG 1x");
   await expect(review).toContainText("rectangle-page-review.svg");
 
-  await page.getByTestId("dev-panel-export-review-toggle-rectangle-page-review:rectangle-page-svg").uncheck();
-  const downloadedNames: string[] = [];
-  page.on("download", (download) => downloadedNames.push(download.suggestedFilename()));
+  const fullZipPromise = page.waitForEvent("download");
   await page.getByTestId("dev-panel-export-review-download").click();
-  await expect.poll(() => [...downloadedNames].sort()).toEqual(["text-1@page.png"]);
-  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset 다운로드됨");
+  const fullZip = await fullZipPromise;
+  expect(fullZip.suggestedFilename()).toBe("페이지-1-export-review.zip");
+  const fullZipPath = await fullZip.path();
+  if (!fullZipPath) {
+    throw new Error("full export review zip path missing");
+  }
+  const fullZipBytes = await readFile(fullZipPath);
+  expect(fullZipBytes.subarray(0, 2).toString("utf8")).toBe("PK");
+  expect(readStoredZipEntryNames(fullZipBytes).sort()).toEqual([
+    "rectangle-page-review.svg",
+    "text-1@page.png"
+  ]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("2개 export preset ZIP 다운로드됨");
+
+  await page.getByTestId("dev-panel-export-review-toggle-rectangle-page-review:rectangle-page-svg").uncheck();
+  const partialZipPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-export-review-download").click();
+  const partialZip = await partialZipPromise;
+  expect(partialZip.suggestedFilename()).toBe("페이지-1-export-review.zip");
+  const partialZipPath = await partialZip.path();
+  if (!partialZipPath) {
+    throw new Error("partial export review zip path missing");
+  }
+  const partialZipBytes = await readFile(partialZipPath);
+  expect(partialZipBytes.subarray(0, 2).toString("utf8")).toBe("PK");
+  expect(readStoredZipEntryNames(partialZipBytes)).toEqual(["text-1@page.png"]);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("1/2개 export preset ZIP 다운로드됨");
 });
+
+function findEndOfCentralDirectory(zip: Buffer) {
+  const minimumOffset = Math.max(0, zip.length - 22 - 0xffff);
+  for (let offset = zip.length - 22; offset >= minimumOffset; offset -= 1) {
+    if (zip.readUInt32LE(offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  throw new Error("invalid zip archive");
+}
+
+function readStoredZipEntryNames(zip: Buffer) {
+  const eocdOffset = findEndOfCentralDirectory(zip);
+  const entryCount = zip.readUInt16LE(eocdOffset + 10);
+  let cursor = zip.readUInt32LE(eocdOffset + 16);
+  const names: string[] = [];
+  for (let index = 0; index < entryCount; index += 1) {
+    expect(zip.readUInt32LE(cursor)).toBe(0x02014b50);
+    expect(zip.readUInt16LE(cursor + 10)).toBe(0);
+    const fileNameLength = zip.readUInt16LE(cursor + 28);
+    const extraLength = zip.readUInt16LE(cursor + 30);
+    const commentLength = zip.readUInt16LE(cursor + 32);
+    const pathStart = cursor + 46;
+    const pathEnd = pathStart + fileNameLength;
+    names.push(zip.subarray(pathStart, pathEnd).toString("utf8"));
+    cursor = pathEnd + extraLength + commentLength;
+  }
+  return names;
+}
 
 function pngDimensions(png: Buffer) {
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

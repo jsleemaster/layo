@@ -91,6 +91,7 @@ import {
   exportPresetExtension,
   type ExportPresetReviewItem
 } from "./export-presets";
+import { createZipBlob, type ZipBlobEntry } from "./zip-archive";
 import {
   createProject as createSavedProject,
   deleteProject,
@@ -409,6 +410,21 @@ function downloadBlob(blob: Blob, filename: string) {
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const response = await fetch(dataUrl);
+  return response.blob();
+}
+
+function exportReviewZipName(scopeLabel: string) {
+  const normalized = scopeLabel
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${normalized || "layo"}-export-review.zip`;
 }
 
 function escapeSvgText(value: string) {
@@ -3235,7 +3251,8 @@ function DevPanel({
     format: "png" | "jpeg" | "webp",
     scale: PngExportScale,
     nodeId: string,
-    filename: string
+    filename: string,
+    options?: { download?: boolean }
   ) => string | null;
   onExportPresetsChange: (nodeId: string, presets: NodeExportPreset[]) => void;
 }) {
@@ -3405,41 +3422,56 @@ function DevPanel({
     );
   };
 
-  const downloadExportReviewItem = (item: ExportPresetReviewItem): boolean => {
+  const exportReviewItemToBlob = async (item: ExportPresetReviewItem): Promise<ZipBlobEntry | null> => {
     const node = exportReviewNodes.find((candidate) => candidate.id === item.nodeId);
     if (!node) {
-      return false;
+      return null;
     }
     const format = normalizeExportPresetFormat(item.format);
     try {
       if (format === "svg") {
-        downloadBlob(new Blob([svgForNode(node)], { type: "image/svg+xml" }), item.filename);
-      } else if (format === "pdf") {
-        downloadBlob(new Blob([pdfForNode(node)], { type: "application/pdf" }), item.filename);
-      } else {
-        return Boolean(onDownloadNodeRaster(format, presetRasterScale(item.scale), item.nodeId, item.filename));
+        return { path: item.filename, data: new Blob([svgForNode(node)], { type: "image/svg+xml" }) };
       }
-      return true;
+      if (format === "pdf") {
+        return { path: item.filename, data: new Blob([pdfForNode(node)], { type: "application/pdf" }) };
+      }
+      const dataUrl = onDownloadNodeRaster(format, presetRasterScale(item.scale), item.nodeId, item.filename, {
+        download: false
+      });
+      return dataUrl ? { path: item.filename, data: await dataUrlToBlob(dataUrl) } : null;
     } catch {
-      return false;
+      return null;
     }
   };
 
-  const downloadSelectedExportReviewItems = () => {
+  const downloadSelectedExportReviewItems = async () => {
     const includedItems = exportReviewItems.filter((item) => !excludedReviewItemKeys.includes(item.key));
     if (includedItems.length === 0) {
       setAssetStatus("선택된 export preset 없음");
       return;
     }
-    const downloadCount = includedItems.reduce(
-      (count, item) => count + (downloadExportReviewItem(item) ? 1 : 0),
-      0
-    );
-    setAssetStatus(
-      downloadCount === exportReviewItems.length
-        ? `${downloadCount}개 export preset 다운로드됨`
-        : `${downloadCount}/${exportReviewItems.length}개 export preset 다운로드됨`
-    );
+    const zipEntries: ZipBlobEntry[] = [];
+    for (const item of includedItems) {
+      const entry = await exportReviewItemToBlob(item);
+      if (entry) {
+        zipEntries.push(entry);
+      }
+    }
+    if (zipEntries.length === 0) {
+      setAssetStatus("export preset ZIP 다운로드 실패");
+      return;
+    }
+    try {
+      const zip = await createZipBlob(zipEntries);
+      downloadBlob(zip, exportReviewZipName(isPageExportReview ? pageName : "selected-layers"));
+      setAssetStatus(
+        zipEntries.length === exportReviewItems.length
+          ? `${zipEntries.length}개 export preset ZIP 다운로드됨`
+          : `${zipEntries.length}/${exportReviewItems.length}개 export preset ZIP 다운로드됨`
+      );
+    } catch {
+      setAssetStatus("export preset ZIP 다운로드 실패");
+    }
   };
 
   const renderExportReviewCard = () =>
@@ -3451,7 +3483,7 @@ function DevPanel({
             type="button"
             className="dev-panel-copy-button"
             data-testid="dev-panel-export-review-download"
-            onClick={downloadSelectedExportReviewItems}
+            onClick={() => void downloadSelectedExportReviewItems()}
           >
             선택 항목 다운로드
           </button>
@@ -3843,7 +3875,8 @@ function Inspector({
     format: "png" | "jpeg" | "webp",
     scale: PngExportScale,
     nodeId: string,
-    filename: string
+    filename: string,
+    options?: { download?: boolean }
   ) => string | null;
   onExportPresetsChange: (nodeId: string, presets: NodeExportPreset[]) => void;
   onTabChange: (tab: InspectorTab) => void;
@@ -6053,22 +6086,20 @@ export function App() {
     }
   };
 
-  const downloadSelectionRasterFromState = (
+  const renderSelectionRasterFromState = (
     scopedState: EditorState,
     {
       scale = 2,
       nodeId: explicitNodeId,
-      filename,
       mimeType,
       failureMessage
     }: {
       scale?: PngExportScale;
       nodeId?: string;
-      filename?: string;
       mimeType: "image/png" | "image/jpeg" | "image/webp";
       failureMessage: string;
     }
-  ): RendererNode | null => {
+  ): { node: RendererNode; dataUrl: string } | null => {
     const stage = konvaStageRef.current;
     if (!stage) {
       setProjectStatus(failureMessage);
@@ -6094,8 +6125,9 @@ export function App() {
     try {
       selectionOverlays.forEach((overlay) => overlay.visible(false));
       stage.draw();
-      downloadDataUrl(
-        stage.toDataURL({
+      return {
+        node,
+        dataUrl: stage.toDataURL({
           x,
           y,
           width,
@@ -6103,10 +6135,8 @@ export function App() {
           pixelRatio: scale,
           mimeType,
           quality: mimeType === "image/jpeg" || mimeType === "image/webp" ? 0.92 : undefined
-        }),
-        filename ?? `${node.id}.${mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png"}`
-      );
-      return node;
+        })
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : failureMessage;
       setProjectStatus(message);
@@ -6115,6 +6145,39 @@ export function App() {
       selectionOverlays.forEach((overlay) => overlay.visible(true));
       stage.draw();
     }
+  };
+
+  const downloadSelectionRasterFromState = (
+    scopedState: EditorState,
+    {
+      scale = 2,
+      nodeId: explicitNodeId,
+      filename,
+      mimeType,
+      failureMessage
+    }: {
+      scale?: PngExportScale;
+      nodeId?: string;
+      filename?: string;
+      mimeType: "image/png" | "image/jpeg" | "image/webp";
+      failureMessage: string;
+    }
+  ): RendererNode | null => {
+    const rendered = renderSelectionRasterFromState(scopedState, {
+      scale,
+      nodeId: explicitNodeId,
+      mimeType,
+      failureMessage
+    });
+    if (!rendered) {
+      return null;
+    }
+    downloadDataUrl(
+      rendered.dataUrl,
+      filename ??
+        `${rendered.node.id}.${mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png"}`
+    );
+    return rendered.node;
   };
 
   const downloadContextSelectionPng = () => {
@@ -6160,18 +6223,31 @@ export function App() {
     format: "png" | "jpeg" | "webp",
     scale: PngExportScale,
     nodeId: string,
-    filename: string
+    filename: string,
+    options: { download?: boolean } = {}
   ) => {
     const currentEditor = editorRef.current;
     if (!currentEditor) {
       return null;
     }
 
+    const mimeType = format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp";
+    if (options.download === false) {
+      return (
+        renderSelectionRasterFromState(currentEditor, {
+          scale,
+          nodeId,
+          mimeType,
+          failureMessage: `${format.toUpperCase()} 다운로드 실패`
+        })?.dataUrl ?? null
+      );
+    }
+
     const node = downloadSelectionRasterFromState(currentEditor, {
       scale,
       nodeId,
       filename,
-      mimeType: format === "png" ? "image/png" : format === "jpeg" ? "image/jpeg" : "image/webp",
+      mimeType,
       failureMessage: `${format.toUpperCase()} 다운로드 실패`
     });
     return node ? `${node.name} ${format.toUpperCase()}${scale === 2 ? "" : ` ${scale}x`} 다운로드됨` : null;
