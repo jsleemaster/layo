@@ -4334,6 +4334,44 @@ function updateComponentVariantPropertyTypeAcrossVariants(
   });
 }
 
+function updateComponentVariantMatrixCell(
+  variants: ComponentVariant[],
+  variantId: string,
+  propertyName: string,
+  value: string
+): ComponentVariant[] {
+  return variants.map((variant) => {
+    if (variant.id !== variantId) {
+      return variant;
+    }
+    const properties = visibleVariantProperties(variant);
+    const propertyIndex = properties.findIndex((property) => property.name.trim() === propertyName);
+    if (propertyIndex === -1) {
+      return variant;
+    }
+    const nextProperties = [...properties];
+    nextProperties[propertyIndex] = { ...nextProperties[propertyIndex], value };
+    return {
+      ...variant,
+      properties: nextProperties
+    };
+  });
+}
+
+function removeComponentVariantPropertyAcrossVariants(
+  variants: ComponentVariant[],
+  propertyName: string
+): ComponentVariant[] {
+  return variants.map((variant) => ({
+    ...variant,
+    properties: visibleVariantProperties(variant).filter((property) => property.name.trim() !== propertyName)
+  }));
+}
+
+function removeComponentVariant(variants: ComponentVariant[], variantId: string): ComponentVariant[] {
+  return variants.filter((variant) => variant.id !== variantId);
+}
+
 function addComponentVariantPropertyAcrossVariants(variants: ComponentVariant[]) {
   return variants.map((variant) => ({
     ...variant,
@@ -4885,6 +4923,20 @@ function Inspector({
       updateComponentDefinitionVariants(addComponentVariantPropertyAcrossVariants(componentDefinitionVariants));
     }
   };
+  const removeComponentDefinitionVariantProperty = (propertyName: string) => {
+    if (!selectedComponentDefinition || componentDefinitionVariantMatrix.propertyNames.length <= 1) {
+      return;
+    }
+    updateComponentDefinitionVariants(
+      removeComponentVariantPropertyAcrossVariants(componentDefinitionVariants, propertyName)
+    );
+  };
+  const removeComponentDefinitionVariant = (variantId: string) => {
+    if (!selectedComponentDefinition || componentDefinitionVariants.length <= 1) {
+      return;
+    }
+    updateComponentDefinitionVariants(removeComponentVariant(componentDefinitionVariants, variantId));
+  };
   const updateLayout = (patch: Partial<NodeLayout>) => {
     onLayoutChange(selectedNode.id, {
       ...layout,
@@ -5207,7 +5259,19 @@ function Inspector({
                       <th scope="col">변형</th>
                       {componentDefinitionVariantMatrix.propertyNames.map((name) => (
                         <th key={name} scope="col">
-                          {name}
+                          <div className="component-variant-matrix-header-cell">
+                            <span>{name}</span>
+                            <button
+                              type="button"
+                              className="inspector-icon-button"
+                              data-testid={`inspector-component-variant-property-remove-${safeTestId(name)}`}
+                              disabled={componentDefinitionVariantMatrix.propertyNames.length <= 1}
+                              aria-label={`${name} 속성 삭제`}
+                              onClick={() => removeComponentDefinitionVariantProperty(name)}
+                            >
+                              ×
+                            </button>
+                          </div>
                         </th>
                       ))}
                     </tr>
@@ -5219,9 +5283,43 @@ function Inspector({
                         className={row.duplicate ? "is-duplicate" : undefined}
                         data-testid={`inspector-component-variant-matrix-row-${safeTestId(row.variant.id)}`}
                       >
-                        <th scope="row">{row.variant.name}</th>
+                        <th scope="row">
+                          <div className="component-variant-matrix-header-cell">
+                            <span>{row.variant.name}</span>
+                            <button
+                              type="button"
+                              className="inspector-icon-button"
+                              data-testid={`inspector-component-variant-remove-${safeTestId(row.variant.id)}`}
+                              disabled={componentDefinitionVariants.length <= 1}
+                              aria-label={`${row.variant.name} 변형 삭제`}
+                              onClick={() => removeComponentDefinitionVariant(row.variant.id)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </th>
                         {componentDefinitionVariantMatrix.propertyNames.map((name) => (
-                          <td key={name}>{row.values[name] || "값 없음"}</td>
+                          <td key={name}>
+                            <input
+                              className="component-variant-matrix-input"
+                              data-testid={`inspector-component-variant-matrix-cell-${safeTestId(
+                                row.variant.id
+                              )}-${safeTestId(name)}`}
+                              aria-label={`${row.variant.name} ${name} 값`}
+                              value={row.values[name] ?? ""}
+                              placeholder="값 없음"
+                              onChange={(event) =>
+                                updateComponentDefinitionVariants(
+                                  updateComponentVariantMatrixCell(
+                                    componentDefinitionVariants,
+                                    row.variant.id,
+                                    name,
+                                    event.currentTarget.value
+                                  )
+                                )
+                              }
+                            />
+                          </td>
                         ))}
                       </tr>
                     ))}

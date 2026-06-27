@@ -1693,6 +1693,28 @@ button:disabled {
   white-space: nowrap;
 }
 
+.inspector-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--editor-space-lg);
+  height: var(--editor-space-lg);
+  min-width: var(--editor-space-lg);
+  padding: 0;
+  border: 1px solid var(--editor-color-border);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-surface);
+  color: var(--editor-color-text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.inspector-icon-button:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 .component-variant-editor-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1785,6 +1807,32 @@ button:disabled {
 .component-variant-matrix-table th {
   color: var(--editor-color-ink);
   font-weight: var(--editor-text-control-weight);
+}
+
+.component-variant-matrix-header-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+}
+
+.component-variant-matrix-header-cell span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.component-variant-matrix-input {
+  width: 100%;
+  min-width: 8ch;
+  height: var(--editor-space-xl);
+  padding: 0 var(--editor-space-xs);
+  border: 1px solid var(--editor-color-border);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-panel);
+  color: var(--editor-color-ink);
+  font: inherit;
 }
 
 .component-variant-matrix-table tr.is-duplicate td,
