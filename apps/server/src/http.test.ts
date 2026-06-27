@@ -1044,6 +1044,82 @@ describe("HTTP server", () => {
     ]);
   });
 
+  test("serves agent commands that combine components as variants", async () => {
+    const server = await createServerWithDocument();
+
+    const result = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_rectangle",
+            parentId: "page-1",
+            id: "button-primary",
+            name: "Button / Primary",
+            x: 160,
+            y: 120,
+            width: 140,
+            height: 64,
+            fill: "#2563eb"
+          },
+          {
+            type: "create_rectangle",
+            parentId: "page-1",
+            id: "button-secondary",
+            name: "Button / Secondary",
+            x: 340,
+            y: 120,
+            width: 140,
+            height: 64,
+            fill: "#0f766e"
+          },
+          {
+            type: "create_component",
+            nodeId: "button-primary",
+            componentId: "component-button-primary",
+            name: "Button / Primary"
+          },
+          {
+            type: "create_component",
+            nodeId: "button-secondary",
+            componentId: "component-button-secondary",
+            name: "Button / Secondary"
+          },
+          {
+            type: "combine_components_as_variants",
+            componentId: "component-button-primary",
+            nodeIds: ["button-primary", "button-secondary"],
+            propertyName: "variant"
+          }
+        ]
+      }
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.json().result.audit.commandTypes).toContain("combine_components_as_variants");
+
+    const listed = await server.inject({ method: "GET", url: "/files/sample-file/components" });
+    expect(listed.json().components).toHaveLength(1);
+    expect(listed.json().components[0]).toMatchObject({
+      id: "component-button-primary",
+      name: "Button",
+      variants: [
+        {
+          id: "variant-button-primary",
+          name: "Primary",
+          properties: [{ name: "variant", value: "Primary", type: "select" }]
+        },
+        {
+          id: "variant-button-secondary",
+          name: "Secondary",
+          properties: [{ name: "variant", value: "Secondary", type: "select" }]
+        }
+      ]
+    });
+  });
+
   test("serves repo component mappings and includes them in code export", async () => {
     const server = await createServerWithDocument();
 

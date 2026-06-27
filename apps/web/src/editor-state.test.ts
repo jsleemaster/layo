@@ -3241,4 +3241,66 @@ describe("editor state commands", () => {
       "variant-flat"
     );
   });
+
+  test("combines selected main components into generated variants with undo and redo", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    const frame = document.pages[0].children[0];
+    const rectangle = document.pages[0].children[1];
+    frame.kind = "component";
+    frame.name = "Button / Primary";
+    rectangle.kind = "component";
+    rectangle.name = "Button / Secondary";
+    document.components = [
+      {
+        id: "component-primary",
+        name: "Button / Primary",
+        source_node: structuredClone(frame),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      },
+      {
+        id: "component-secondary",
+        name: "Button / Secondary",
+        source_node: structuredClone(rectangle),
+        variants: [{ id: "default", name: "Default", properties: [] }]
+      }
+    ];
+
+    const selected = setMultiSelection(createEditorState(document), ["frame-1", "rectangle-1"], "frame-1");
+    const combined = executeEditorCommand(selected, {
+      type: "combine_components_as_variants",
+      componentId: "component-primary",
+      nodeIds: ["frame-1", "rectangle-1"],
+      propertyName: "variant"
+    });
+
+    expect(combined.document.components).toHaveLength(1);
+    expect(combined.document.components?.[0]).toMatchObject({
+      id: "component-primary",
+      name: "Button",
+      source_node: { id: "frame-1", name: "Button / Primary" },
+      variants: [
+        {
+          id: "variant-frame-1",
+          name: "Primary",
+          properties: [{ name: "variant", value: "Primary", type: "select" }]
+        },
+        {
+          id: "variant-rectangle-1",
+          name: "Secondary",
+          properties: [{ name: "variant", value: "Secondary", type: "select" }]
+        }
+      ]
+    });
+    expect(combined.selection).toEqual({ nodeId: "frame-1", nodeIds: ["frame-1"] });
+
+    const undone = undo(combined);
+    expect(undone.document.components).toEqual(document.components);
+
+    const redone = redo(undone);
+    expect(redone.document.components).toHaveLength(1);
+    expect(redone.document.components?.[0].variants.map((variant) => variant.name)).toEqual([
+      "Primary",
+      "Secondary"
+    ]);
+  });
 });

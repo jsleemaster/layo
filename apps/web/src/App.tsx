@@ -4073,6 +4073,90 @@ function safeTestId(value: string) {
     .replace(/^-+|-+$/g, "") || "property";
 }
 
+function combinedComponentName(names: string[], fallback: string): string {
+  const prefixes = names
+    .map((name) =>
+      name
+        .split("/")
+        .slice(0, -1)
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .join(" / ")
+    )
+    .filter(Boolean);
+  return prefixes.length === names.length && prefixes.every((prefix) => prefix === prefixes[0])
+    ? prefixes[0]
+    : fallback.trim() || "Component";
+}
+
+function isDefaultOnlyComponentDefinition(component: ComponentDefinition): boolean {
+  return (
+    component.variants.length === 1 &&
+    component.variants[0]?.id === "default" &&
+    component.variants[0]?.properties.length === 0
+  );
+}
+
+function findNodeParentId(document: RendererDocument, nodeId: string): string | null {
+  for (const page of document.pages) {
+    if (page.children.some((node) => node.id === nodeId)) {
+      return page.id;
+    }
+
+    for (const node of page.children) {
+      const parentId = findNodeParentIdInTree(node, nodeId);
+      if (parentId) {
+        return parentId;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findNodeParentIdInTree(parent: RendererNode, nodeId: string): string | null {
+  if (parent.children.some((node) => node.id === nodeId)) {
+    return parent.id;
+  }
+
+  for (const child of parent.children) {
+    const parentId = findNodeParentIdInTree(child, nodeId);
+    if (parentId) {
+      return parentId;
+    }
+  }
+
+  return null;
+}
+
+function canCombineComponentSourceNodes(
+  document: RendererDocument,
+  components: ComponentDefinition[],
+  nodeIds: string[]
+): boolean {
+  const uniqueNodeIds = Array.from(new Set(nodeIds));
+  if (uniqueNodeIds.length < 2) {
+    return false;
+  }
+
+  const parentIds = uniqueNodeIds.map((nodeId) => findNodeParentId(document, nodeId));
+  if (!parentIds[0] || parentIds.some((parentId) => parentId !== parentIds[0])) {
+    return false;
+  }
+
+  return uniqueNodeIds.every((nodeId) => {
+    const node = findNodeById(document, nodeId);
+    const component = components.find((candidate) => candidate.source_node.id === nodeId);
+    return Boolean(
+      node &&
+        node.kind === "component" &&
+        !isNodeLocked(node) &&
+        component &&
+        isDefaultOnlyComponentDefinition(component)
+    );
+  });
+}
+
 function styleGroupName(styleName: string) {
   const [group] = styleName.split("/");
   return group?.trim() || "기본";
@@ -7036,6 +7120,10 @@ export function App() {
   const selectedComponentInstanceDefinition = selectedNode?.component_instance
     ? components.find((component) => component.id === selectedNode.component_instance?.definition_id) ?? null
     : null;
+  const canCombineSelectedComponentsAsVariants = useMemo(
+    () => Boolean(editor && canCombineComponentSourceNodes(editor.document, components, selectedNodeIds)),
+    [components, editor, selectedNodeIds]
+  );
   const localSessionId = collabSession?.getLocalPresence().sessionId ?? null;
   const currentDocumentName = editor?.document.name ?? "문서 없음";
   const currentProjectName = currentProject?.name ?? "프로젝트 없음";
@@ -7594,6 +7682,43 @@ export function App() {
         x: node.transform.x + 440,
         y: node.transform.y + 40
       });
+    });
+  };
+
+  const combineContextComponentsAsVariants = () => {
+    runContextMenuStateAction((state) => {
+      const nodeId = state.selection.nodeId;
+      const components = state.document.components ?? [];
+      const baseComponent = nodeId
+        ? components.find((component) => component.source_node.id === nodeId)
+        : null;
+      if (
+        !nodeId ||
+        !baseComponent ||
+        !canCombineComponentSourceNodes(state.document, components, state.selection.nodeIds)
+      ) {
+        return state;
+      }
+
+      const selectedNodes = state.selection.nodeIds.flatMap((selectedNodeId) => {
+        const node = findNodeById(state.document, selectedNodeId);
+        return node ? [node] : [];
+      });
+      const statusName = combinedComponentName(
+        selectedNodes.map((node) => node.name),
+        baseComponent.name
+      );
+      const nextState = executeEditorCommand(state, {
+        type: "combine_components_as_variants",
+        componentId: baseComponent.id,
+        nodeIds: state.selection.nodeIds,
+        propertyName: "variant"
+      });
+      if (nextState !== state) {
+        setProjectStatus(`${statusName} 변형으로 결합됨`);
+        setCodeExportRevision((current) => current + 1);
+      }
+      return nextState;
     });
   };
 
@@ -12419,6 +12544,11 @@ export function App() {
                 !components.some((component) => component.source_node.id === contextMenuNode?.id)
               }
               onClick={createContextInstance}
+            />
+            <ContextMenuItem
+              label="변형으로 결합"
+              disabled={!canMutateContextMenuNode || !canCombineSelectedComponentsAsVariants}
+              onClick={combineContextComponentsAsVariants}
             />
             <ContextMenuItem
               label="인스턴스 분리"
