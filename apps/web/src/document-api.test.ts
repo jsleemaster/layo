@@ -250,6 +250,7 @@ describe("parseDocumentPayload", () => {
       const unsubscribe = subscribeToCommentEvents({
         fileId: "sample-file",
         viewerId: "사용자",
+        after: 7,
         onCommentEvent: (event) => events.push(event)
       });
 
@@ -259,11 +260,14 @@ describe("parseDocumentPayload", () => {
       expect(url.pathname).toBe("/comments/events");
       expect(url.searchParams.get("fileId")).toBe("sample-file");
       expect(url.searchParams.get("viewerId")).toBe("사용자");
+      expect(url.searchParams.get("after")).toBe("7");
 
       source.dispatchEvent(
         new MessageEvent("comment", {
           data: JSON.stringify({
             schemaVersion: 1,
+            eventId: "comment-event-1",
+            sequence: 8,
             type: "created",
             fileId: "sample-file",
             threadId: "comment-1",
@@ -275,6 +279,8 @@ describe("parseDocumentPayload", () => {
       expect(events).toEqual([
         {
           schemaVersion: 1,
+          eventId: "comment-event-1",
+          sequence: 8,
           type: "created",
           fileId: "sample-file",
           threadId: "comment-1",

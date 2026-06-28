@@ -1518,6 +1518,51 @@ describe("HTTP server", () => {
     }
   });
 
+  test("streams comment mutation events from a shared storage event log", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const publisherStorage = new FileStorage(tempRoot);
+    await publisherStorage.createProject({
+      projectId: "comment-project",
+      name: "코멘트 프로젝트",
+      documentId: "sample-file",
+      documentName: "코멘트 문서"
+    });
+
+    const streamServer = createHttpServer(new FileStorage(tempRoot));
+    const address = await streamServer.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const stream = await fetch(
+        `${address}/comments/events?viewerId=${encodeURIComponent("사용자")}&fileId=sample-file`,
+        { signal: controller.signal }
+      );
+      expect(stream.status).toBe(200);
+      expect(stream.headers.get("content-type")).toContain("text/event-stream");
+
+      const eventPromise = readCommentStreamEvent(stream);
+      const created = await publisherStorage.createCommentThread("sample-file", {
+        nodeId: "text-1",
+        body: "@사용자 공유 저장소 SSE 확인",
+        authorName: "디자인 팀",
+        mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+      });
+
+      const event = await eventPromise;
+      expect(event).toMatchObject({
+        schemaVersion: 1,
+        sequence: 1,
+        type: "created",
+        fileId: "sample-file",
+        threadId: created.threadId,
+        viewerId: "사용자"
+      });
+    } finally {
+      controller.abort();
+      await streamServer.close();
+    }
+  });
+
   test("streams library registry events from a shared storage event log", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const publisherStorage = new FileStorage(tempRoot);

@@ -121,6 +121,8 @@ export type CommentLiveEventType = "created" | "replied" | "resolved" | "read";
 
 export interface CommentLiveEvent {
   schemaVersion: 1;
+  eventId?: string;
+  sequence?: number;
   type: CommentLiveEventType;
   fileId: string;
   threadId?: string;
@@ -131,6 +133,7 @@ export interface CommentLiveEvent {
 export interface SubscribeToCommentEventsOptions {
   fileId?: string;
   viewerId?: string;
+  after?: number;
   onCommentEvent: (event: CommentLiveEvent) => void;
   onError?: () => void;
 }
@@ -979,6 +982,9 @@ export function subscribeToCommentEvents(options: SubscribeToCommentEventsOption
   }
   if (options.fileId?.trim()) {
     params.set("fileId", options.fileId);
+  }
+  if (typeof options.after === "number" && Number.isFinite(options.after) && options.after > 0) {
+    params.set("after", String(Math.floor(options.after)));
   }
   const query = params.toString() ? `?${params.toString()}` : "";
   const source = new EventSource(apiUrl(`/comments/events${query}`));

@@ -37,6 +37,7 @@ const LEGACY_SAMPLE_PROJECT_ID = "sample-project";
 const DEFAULT_STORAGE_DIR = ".layo";
 const AUTO_FILE_VERSION_EDIT_INTERVAL = 3;
 const COMMENT_ACTIVITY_RETENTION_LIMIT = 50;
+const COMMENT_LIVE_EVENT_RETENTION_LIMIT = 200;
 export const INPUT_VALIDATION_ERROR_CODE = "CANVAS_INPUT_VALIDATION";
 export const FILE_ARCHIVE_MIME_TYPE = "application/vnd.layo.file-archive+zip";
 export const PROJECT_ARCHIVE_MIME_TYPE = "application/vnd.layo.project-archive+zip";
@@ -383,6 +384,7 @@ export interface StoredCommentReply {
 }
 
 export type CommentActivityType = "created" | "replied" | "resolved";
+export type CommentLiveEventType = CommentActivityType | "read";
 export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
 
 export interface StoredCommentMentionTarget {
@@ -404,6 +406,17 @@ export interface StoredCommentActivityEvent {
   body: string;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
+  createdAt: string;
+}
+
+export interface StoredCommentLiveEvent {
+  schemaVersion: 1;
+  eventId: string;
+  sequence: number;
+  type: CommentLiveEventType;
+  fileId: string;
+  threadId?: string;
+  viewerId?: string;
   createdAt: string;
 }
 
@@ -439,6 +452,12 @@ export interface MarkFileCommentsReadInput {
 
 export interface ListCommentActivityOptions {
   viewerId?: string;
+  limit?: number;
+}
+
+export interface ListCommentLiveEventsOptions {
+  fileId?: string;
+  after?: number;
   limit?: number;
 }
 
@@ -480,6 +499,7 @@ interface StoredCommentThreadFile {
   fileId: string;
   threads: StoredCommentThread[];
   activity: StoredCommentActivityEvent[];
+  events: StoredCommentLiveEvent[];
 }
 
 interface AutoFileVersionState {
@@ -1290,6 +1310,34 @@ export class FileStorage {
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, limit)
     };
+  }
+
+  async listCommentLiveEvents(
+    options: ListCommentLiveEventsOptions = {}
+  ): Promise<StoredCommentLiveEvent[]> {
+    const after = Math.max(0, Math.floor(Number(options.after) || 0));
+    const limit = Math.max(0, Math.floor(Number(options.limit) || 0));
+
+    if (options.fileId) {
+      await this.readFile(options.fileId);
+      const store = await this.readCommentThreadFile(options.fileId);
+      const events = store.events.filter((event) => event.sequence > after);
+      return limit > 0 ? events.slice(-limit) : events;
+    }
+
+    const projects = await this.listProjects();
+    const fileIds = new Set(
+      projects.flatMap((project) => project.documents.map((document) => document.documentId))
+    );
+    const events: StoredCommentLiveEvent[] = [];
+    for (const fileId of fileIds) {
+      const store = await this.readCommentThreadFile(fileId);
+      events.push(...store.events.filter((event) => event.sequence > after));
+    }
+    const sorted = events.sort(
+      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.fileId.localeCompare(b.fileId) || a.sequence - b.sequence
+    );
+    return limit > 0 ? sorted.slice(-limit) : sorted;
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
@@ -2172,6 +2220,12 @@ export class FileStorage {
         mentions: thread.mentions,
         mentionTargets: thread.mentionTargets,
         createdAt: thread.createdAt
+      }),
+      events: appendCommentLiveEvent(store.events, {
+        type: "created",
+        fileId,
+        threadId: thread.threadId,
+        createdAt: thread.createdAt
       })
     });
     return thread;
@@ -2223,6 +2277,12 @@ export class FileStorage {
         mentions: reply.mentions,
         mentionTargets: reply.mentionTargets,
         createdAt: reply.createdAt
+      }),
+      events: appendCommentLiveEvent(store.events, {
+        type: "replied",
+        fileId,
+        threadId,
+        createdAt: reply.createdAt
       })
     });
     return repliedThread;
@@ -2250,7 +2310,14 @@ export class FileStorage {
       ...store,
       threads: store.threads.map((candidate) =>
         candidate.threadId === threadId ? readThread : candidate
-      )
+      ),
+      events: appendCommentLiveEvent(store.events, {
+        type: "read",
+        fileId,
+        threadId,
+        viewerId,
+        createdAt: createMonotonicCommentTimestamp()
+      })
     });
     return withViewerUnread(readThread, viewerId);
   }
@@ -2270,7 +2337,16 @@ export class FileStorage {
           }
         : thread
     );
-    await this.writeCommentThreadFile({ ...store, threads });
+    await this.writeCommentThreadFile({
+      ...store,
+      threads,
+      events: appendCommentLiveEvent(store.events, {
+        type: "read",
+        fileId,
+        viewerId,
+        createdAt: createMonotonicCommentTimestamp()
+      })
+    });
     return threads.map((thread) => withViewerUnread(thread, viewerId));
   }
 
@@ -2303,6 +2379,12 @@ export class FileStorage {
         body: thread.body,
         mentions: thread.mentions,
         mentionTargets: thread.mentionTargets,
+        createdAt: resolvedAt
+      }),
+      events: appendCommentLiveEvent(store.events, {
+        type: "resolved",
+        fileId,
+        threadId,
         createdAt: resolvedAt
       })
     });
@@ -2893,7 +2975,7 @@ export class FileStorage {
     try {
       raw = await readFile(this.commentThreadsPathFor(fileId), "utf8");
     } catch {
-      return { schemaVersion: 1, fileId, threads: [], activity: [] };
+      return { schemaVersion: 1, fileId, threads: [], activity: [], events: [] };
     }
 
     return parseStoredCommentThreadFile(JSON.parse(raw), fileId);
@@ -3356,6 +3438,23 @@ function prependCommentActivity(
     event,
     ...current
   ].slice(0, COMMENT_ACTIVITY_RETENTION_LIMIT);
+}
+
+function appendCommentLiveEvent(
+  current: StoredCommentLiveEvent[],
+  input: Omit<StoredCommentLiveEvent, "schemaVersion" | "eventId" | "sequence">
+): StoredCommentLiveEvent[] {
+  const sequence = Math.max(0, ...current.map((event) => event.sequence)) + 1;
+  const event: StoredCommentLiveEvent = {
+    schemaVersion: 1,
+    eventId: createStorageId("comment-event"),
+    sequence,
+    ...input
+  };
+  return [
+    ...current,
+    event
+  ].slice(-COMMENT_LIVE_EVENT_RETENTION_LIMIT);
 }
 
 function priorStorageDirectoryName() {
@@ -4219,6 +4318,11 @@ function parseStoredCommentThreadFile(input: unknown, expectedFileId: string): S
     threads: candidate.threads.map((thread) => parseStoredCommentThread(thread, expectedFileId)),
     activity: Array.isArray(candidate.activity)
       ? candidate.activity.map((event) => parseStoredCommentActivityEvent(event, expectedFileId))
+      : [],
+    events: Array.isArray(candidate.events)
+      ? candidate.events
+          .map((event) => parseStoredCommentLiveEvent(event, expectedFileId))
+          .sort((a, b) => a.sequence - b.sequence)
       : []
   };
 }
@@ -4325,6 +4429,42 @@ function parseStoredCommentActivityEvent(
     body,
     mentions: normalizeCommentMentionList(candidate.mentions, body),
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
+    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
+  };
+}
+
+function parseStoredCommentLiveEvent(
+  input: unknown,
+  expectedFileId: string
+): StoredCommentLiveEvent {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid comment live event");
+  }
+
+  const candidate = input as StoredCommentLiveEvent;
+  if (candidate.schemaVersion !== 1) {
+    throw new Error(`unsupported comment live event schema: ${String(candidate.schemaVersion)}`);
+  }
+  assertSafeStorageId(candidate.eventId);
+  assertSafeStorageId(candidate.fileId);
+  if (candidate.threadId) {
+    assertSafeStorageId(candidate.threadId);
+  }
+  if (candidate.fileId !== expectedFileId) {
+    throw new Error(`comment live event file mismatch: ${candidate.fileId}`);
+  }
+  if (!["created", "replied", "resolved", "read"].includes(candidate.type)) {
+    throw new Error(`unsupported comment live event type: ${String(candidate.type)}`);
+  }
+
+  return {
+    schemaVersion: 1,
+    eventId: candidate.eventId,
+    sequence: Math.max(0, Math.round(Number(candidate.sequence) || 0)),
+    type: candidate.type,
+    fileId: candidate.fileId,
+    ...(candidate.threadId ? { threadId: candidate.threadId } : {}),
+    ...(candidate.viewerId ? { viewerId: normalizeName(candidate.viewerId, "사용자") } : {}),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
   };
 }

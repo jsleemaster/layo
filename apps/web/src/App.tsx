@@ -7577,6 +7577,7 @@ export function App() {
   const [componentVariantSourceReorderSession, setComponentVariantSourceReorderSession] =
     useState<ComponentVariantSourceReorderSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
+  const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
@@ -7676,24 +7677,32 @@ export function App() {
     }
   };
 
-  const refreshCommentThreads = async (fileId: string, status?: string) => {
+  const refreshCommentThreads = async (
+    fileId: string,
+    status?: string,
+    options: { preserveStatus?: boolean } = {}
+  ) => {
     try {
       const threads = await listCommentThreads(fileId, false, fetch, LOCAL_COMMENT_VIEWER_ID);
       const unreadCount = threads.filter((thread) => thread.unread).length;
       setCommentThreads(threads);
-      setCommentStatus(
-        status ??
-          (unreadCount > 0
-            ? `${unreadCount}개 읽지 않은 코멘트`
-            : threads.length > 0
-              ? `${threads.length}개 활성 코멘트`
-              : "활성 코멘트 없음")
-      );
+      if (!options.preserveStatus) {
+        setCommentStatus(
+          status ??
+            (unreadCount > 0
+              ? `${unreadCount}개 읽지 않은 코멘트`
+              : threads.length > 0
+                ? `${threads.length}개 활성 코멘트`
+                : "활성 코멘트 없음")
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 불러오지 못했습니다";
       setCommentThreads([]);
       setCommentReplyBodies({});
-      setCommentStatus(message);
+      if (!options.preserveStatus) {
+        setCommentStatus(message);
+      }
     }
   };
 
@@ -7723,12 +7732,19 @@ export function App() {
     return subscribeToCommentEvents({
       fileId,
       viewerId: LOCAL_COMMENT_VIEWER_ID,
+      after: commentEventSequenceByFileRef.current.get(fileId) ?? 0,
       onCommentEvent: (event) => {
         if (event.fileId !== fileId) {
           return;
         }
+        if (typeof event.sequence === "number") {
+          commentEventSequenceByFileRef.current.set(
+            fileId,
+            Math.max(commentEventSequenceByFileRef.current.get(fileId) ?? 0, event.sequence)
+          );
+        }
         void Promise.all([
-          refreshCommentThreads(fileId),
+          refreshCommentThreads(fileId, undefined, { preserveStatus: true }),
           refreshCommentNotifications(),
           refreshCommentActivity()
         ]);

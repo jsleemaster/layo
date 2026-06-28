@@ -22,23 +22,6 @@ export interface HttpServerOptions {
   webDistDir?: string | null;
 }
 
-type CommentMutationEventType = "created" | "replied" | "resolved" | "read";
-
-interface CommentMutationEvent {
-  schemaVersion: 1;
-  type: CommentMutationEventType;
-  fileId: string;
-  threadId?: string;
-  viewerId?: string;
-  createdAt: string;
-}
-
-interface CommentEventSubscriber {
-  fileId?: string;
-  send: (event: CommentMutationEvent) => void;
-  close: () => void;
-}
-
 const DEFAULT_WEB_BASE_PATH = "/app/";
 const DEFAULT_WEB_DIST_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -47,17 +30,8 @@ const DEFAULT_WEB_DIST_DIR = path.resolve(
 
 export function createHttpServer(storage = new FileStorage(), options: HttpServerOptions = {}) {
   const server = Fastify({ logger: true });
-  const commentEventSubscribers = new Set<CommentEventSubscriber>();
+  const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
-
-  const publishCommentEvent = (event: CommentMutationEvent) => {
-    for (const subscriber of [...commentEventSubscribers]) {
-      if (subscriber.fileId && subscriber.fileId !== event.fileId) {
-        continue;
-      }
-      subscriber.send(event);
-    }
-  };
 
   server.setErrorHandler((error, _request, reply) => {
     if ((error as { code?: string }).code === INPUT_VALIDATION_ERROR_CODE) {
@@ -84,8 +58,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.addHook("onClose", async () => {
-    for (const subscriber of [...commentEventSubscribers]) {
-      subscriber.close();
+    for (const close of [...commentEventStreamClosers]) {
+      close();
     }
     for (const close of [...libraryRegistryStreamClosers]) {
       close();
@@ -486,7 +460,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
   );
 
-  server.get<{ Querystring: { viewerId?: string; fileId?: string } }>(
+  server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
       reply.hijack();
@@ -506,30 +480,54 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
       };
 
+      let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
+      let sending = false;
+      const sendPendingEvents = async () => {
+        if (sending || reply.raw.destroyed) {
+          return;
+        }
+        sending = true;
+        try {
+          const events = await storage.listCommentLiveEvents({
+            after: lastSequence,
+            fileId: request.query.fileId,
+            limit: 100
+          });
+          for (const event of events) {
+            lastSequence = Math.max(lastSequence, event.sequence);
+            sendBlock("comment", {
+              ...event,
+              viewerId: request.query.viewerId ?? event.viewerId
+            });
+          }
+        } catch (error) {
+          sendBlock("comment-error", {
+            message: error instanceof Error ? error.message : "comment event stream failed"
+          });
+        } finally {
+          sending = false;
+        }
+      };
+
       const heartbeatId = setInterval(() => {
         if (!reply.raw.destroyed) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
+      const pollId = setInterval(() => {
+        void sendPendingEvents();
+      }, 250);
 
-      let subscriber: CommentEventSubscriber;
-      subscriber = {
-        fileId: request.query.fileId,
-        send: (event) => {
-          sendBlock("comment", {
-            ...event,
-            viewerId: request.query.viewerId ?? event.viewerId
-          });
-        },
-        close: () => {
-          clearInterval(heartbeatId);
-          commentEventSubscribers.delete(subscriber);
-        }
+      const close = () => {
+        clearInterval(heartbeatId);
+        clearInterval(pollId);
+        commentEventStreamClosers.delete(close);
       };
 
-      commentEventSubscribers.add(subscriber);
-      sendBlock("ready", { ok: true });
-      request.raw.on("close", subscriber.close);
+      commentEventStreamClosers.add(close);
+      sendBlock("ready", { ok: true, lastSequence });
+      void sendPendingEvents();
+      request.raw.on("close", close);
     }
   );
 
@@ -538,13 +536,6 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Body: { nodeId: string; body: string; authorName?: string };
   }>("/files/:fileId/comments", async (request) => {
     const thread = await storage.createCommentThread(request.params.fileId, request.body);
-    publishCommentEvent({
-      schemaVersion: 1,
-      type: "created",
-      fileId: request.params.fileId,
-      threadId: thread.threadId,
-      createdAt: thread.createdAt
-    });
     return {
       thread
     };
@@ -570,13 +561,6 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/read", async (request) => {
     const threads = await storage.markFileCommentsRead(request.params.fileId, request.body);
-    publishCommentEvent({
-      schemaVersion: 1,
-      type: "read",
-      fileId: request.params.fileId,
-      viewerId: request.body.viewerId,
-      createdAt: new Date().toISOString()
-    });
     return {
       threads
     };
@@ -591,14 +575,6 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       request.params.threadId,
       request.body
     );
-    const reply = thread.replies.at(-1);
-    publishCommentEvent({
-      schemaVersion: 1,
-      type: "replied",
-      fileId: request.params.fileId,
-      threadId: request.params.threadId,
-      createdAt: reply?.createdAt ?? new Date().toISOString()
-    });
     return {
       thread
     };
@@ -613,14 +589,6 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       request.params.threadId,
       request.body
     );
-    publishCommentEvent({
-      schemaVersion: 1,
-      type: "read",
-      fileId: request.params.fileId,
-      threadId: request.params.threadId,
-      viewerId: request.body.viewerId,
-      createdAt: new Date().toISOString()
-    });
     return {
       thread
     };
@@ -630,13 +598,6 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     "/files/:fileId/comments/:threadId/resolve",
     async (request) => {
       const thread = await storage.resolveCommentThread(request.params.fileId, request.params.threadId);
-      publishCommentEvent({
-        schemaVersion: 1,
-        type: "resolved",
-        fileId: request.params.fileId,
-        threadId: request.params.threadId,
-        createdAt: thread.resolvedAt ?? new Date().toISOString()
-      });
       return {
         thread
       };

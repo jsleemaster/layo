@@ -1675,6 +1675,57 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment live events are durable across storage instances and replay after a sequence", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const writer = await storageWithDocument(tempRoot);
+    const created = await writer.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "@사용자 멀티 인스턴스 확인",
+      authorName: "디자인 팀",
+      mentionTargets: [{ userId: "사용자", displayName: "사용자", role: "editor" }]
+    });
+    await writer.addCommentReply("sample-file", created.threadId, {
+      body: "@사용자 답글 확인",
+      authorName: "개발 팀"
+    });
+    await writer.markCommentThreadRead("sample-file", created.threadId, { viewerId: "사용자" });
+    await writer.resolveCommentThread("sample-file", created.threadId);
+
+    const reader = new FileStorage(tempRoot);
+    await expect(reader.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        sequence: 1,
+        type: "created",
+        fileId: "sample-file",
+        threadId: created.threadId
+      }),
+      expect.objectContaining({
+        sequence: 2,
+        type: "replied",
+        fileId: "sample-file",
+        threadId: created.threadId
+      }),
+      expect.objectContaining({
+        sequence: 3,
+        type: "read",
+        fileId: "sample-file",
+        threadId: created.threadId,
+        viewerId: "사용자"
+      }),
+      expect.objectContaining({
+        sequence: 4,
+        type: "resolved",
+        fileId: "sample-file",
+        threadId: created.threadId
+      })
+    ]);
+    await expect(reader.listCommentLiveEvents({ fileId: "sample-file", after: 2 })).resolves.toEqual([
+      expect.objectContaining({ sequence: 3, type: "read" }),
+      expect.objectContaining({ sequence: 4, type: "resolved" })
+    ]);
+  });
+
   test("comment threads reject a missing body with a validation error", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
