@@ -12,6 +12,8 @@ import {
   importLibraryRegistryTokens,
   listLibraryRegistry,
   listLibraryRegistrySubscriptions,
+  listLibraryRegistryTokenSubscriptions,
+  listLibraryRegistryTokenUpdates,
   listLibraryRegistryUpdates,
   listCommentActivity,
   listCommentNotifications,
@@ -33,7 +35,8 @@ import {
   publishLibraryToRegistry,
   subscribeToCommentEvents,
   summarizeDocumentChanges,
-  updateLibraryRegistryItem
+  updateLibraryRegistryItem,
+  updateLibraryRegistryTokens
 } from "./document-api";
 
 describe("parseDocumentPayload", () => {
@@ -721,6 +724,91 @@ describe("file version API helpers", () => {
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/files/target-file/import/library/registry/tokens/review"), "POST"],
       [expect.stringContaining("/files/target-file/import/library/registry/tokens"), "POST"]
+    ]);
+  });
+
+  test("lists and applies registry library token bundle updates", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/files/target-file/libraries/token-subscriptions") {
+        return jsonResponse({
+          subscriptions: [
+            {
+              fileId: "target-file",
+              libraryId: "team-kit",
+              libraryName: "Team Kit",
+              sourceFileId: "document-1",
+              sourceName: "Source",
+              tokenCount: 3,
+              tokenSetCount: 3,
+              tokenThemeCount: 1,
+              importedAt: "2026-06-28T00:00:00.000Z",
+              importedRegistryUpdatedAt: "2026-06-28T00:00:00.000Z"
+            }
+          ]
+        });
+      }
+
+      if (pathname === "/files/target-file/libraries/token-updates") {
+        return jsonResponse({
+          updates: [
+            {
+              fileId: "target-file",
+              libraryId: "team-kit",
+              libraryName: "Team Kit",
+              sourceFileId: "document-1",
+              sourceName: "Source",
+              tokenCount: 4,
+              tokenSetCount: 4,
+              tokenThemeCount: 1,
+              importedRegistryUpdatedAt: "2026-06-28T00:00:00.000Z",
+              registryUpdatedAt: "2026-06-28T00:05:00.000Z"
+            }
+          ]
+        });
+      }
+
+      if (pathname === "/files/target-file/import/library/registry/tokens/update" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
+        return jsonResponse({
+          imported: {
+            fileId: "target-file",
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            originalFileId: "document-1",
+            originalName: "Source",
+            tokenCount: 4,
+            tokenSetCount: 4,
+            tokenThemeCount: 1,
+            replacedTokenCount: 3,
+            replacedTokenSetCount: 3,
+            replacedTokenThemeCount: 1
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(listLibraryRegistryTokenSubscriptions("target-file", fetcher as typeof fetch)).resolves.toEqual([
+      expect.objectContaining({ libraryId: "team-kit", tokenSetCount: 3, tokenThemeCount: 1 })
+    ]);
+    await expect(listLibraryRegistryTokenUpdates("target-file", fetcher as typeof fetch)).resolves.toEqual([
+      expect.objectContaining({ libraryId: "team-kit", tokenCount: 4, tokenSetCount: 4 })
+    ]);
+    await expect(updateLibraryRegistryTokens("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
+      libraryId: "team-kit",
+      tokenCount: 4,
+      replacedTokenSetCount: 3
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/files/target-file/libraries/token-subscriptions"), "GET"],
+      [expect.stringContaining("/files/target-file/libraries/token-updates"), "GET"],
+      [expect.stringContaining("/files/target-file/import/library/registry/tokens/update"), "POST"]
     ]);
   });
 

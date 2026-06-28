@@ -126,6 +126,18 @@ describe("MCP AI editing workflow", () => {
       idempotentHint: false,
       openWorldHint: false
     });
+    expect(byName.get("list_library_registry_token_subscriptions")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+    expect(byName.get("list_library_registry_token_updates")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
     expect(byName.get("list_library_registry_subscriptions")?.annotations).toMatchObject({
       readOnlyHint: true,
       destructiveHint: false,
@@ -139,6 +151,12 @@ describe("MCP AI editing workflow", () => {
       openWorldHint: false
     });
     expect(byName.get("update_library_registry_item")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("update_library_registry_tokens")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
@@ -884,6 +902,189 @@ describe("MCP AI editing workflow", () => {
         name: "Brand Theme",
         group: "mode",
         selectedTokenSets: ["base", "light", "dark"]
+      }
+    ]);
+  });
+
+  test("lets an MCP client list and apply registry token bundle updates", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "library-token-project",
+        name: "Library Token Project",
+        documentId: "library-token-file",
+        documentName: "Library Token File"
+      }
+    });
+    await client.callTool({
+      name: "import_design_tokens",
+      arguments: {
+        fileId: "library-token-file",
+        tokens: {
+          $metadata: {
+            tokenSetOrder: ["base", "light", "dark"],
+            activeTokenSets: ["base", "light"]
+          },
+          base: { Brand: { Primary: { $type: "color", $value: "#2563eb" } } },
+          light: { Brand: { Primary: { $type: "color", $value: "#1d4ed8" } } },
+          dark: { Brand: { Primary: { $type: "color", $value: "#93c5fd" } } }
+        }
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "library-token-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-brand",
+              name: "Brand Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "light", "dark"]
+            }
+          }
+        ]
+      }
+    });
+    const firstPublish = parseToolJson(
+      await client.callTool({
+        name: "publish_library_registry_item",
+        arguments: { fileId: "library-token-file", libraryId: "team-kit", name: "Team Kit" }
+      })
+    );
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "target-token-project",
+        name: "Target Token Project",
+        documentId: "target-token-file",
+        documentName: "Target Token File"
+      }
+    });
+    await client.callTool({
+      name: "import_library_registry_tokens",
+      arguments: { fileId: "target-token-file", libraryId: "team-kit" }
+    });
+
+    const subscriptions = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry_token_subscriptions",
+        arguments: { fileId: "target-token-file" }
+      })
+    );
+    expect(subscriptions.subscriptions).toEqual([
+      expect.objectContaining({
+        libraryId: "team-kit",
+        importedRegistryUpdatedAt: firstPublish.library.updatedAt,
+        tokenCount: 3,
+        tokenSetCount: 3,
+        tokenThemeCount: 1
+      })
+    ]);
+    const noUpdates = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry_token_updates",
+        arguments: { fileId: "target-token-file" }
+      })
+    );
+    expect(noUpdates.updates).toEqual([]);
+
+    await client.callTool({
+      name: "import_design_tokens",
+      arguments: {
+        fileId: "library-token-file",
+        tokens: {
+          $metadata: {
+            tokenSetOrder: ["base", "light", "dark", "contrast"],
+            activeTokenSets: ["base", "dark"]
+          },
+          base: { Brand: { Primary: { $type: "color", $value: "#0ea5e9" } } },
+          light: { Brand: { Primary: { $type: "color", $value: "#38bdf8" } } },
+          dark: { Brand: { Primary: { $type: "color", $value: "#bae6fd" } } },
+          contrast: { Brand: { Primary: { $type: "color", $value: "#082f49" } } }
+        }
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "library-token-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-brand",
+              name: "Brand Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "dark"]
+            }
+          }
+        ]
+      }
+    });
+    const secondPublish = parseToolJson(
+      await client.callTool({
+        name: "publish_library_registry_item",
+        arguments: { fileId: "library-token-file", libraryId: "team-kit", name: "Team Kit" }
+      })
+    );
+
+    const updates = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry_token_updates",
+        arguments: { fileId: "target-token-file" }
+      })
+    );
+    expect(updates.updates).toEqual([
+      expect.objectContaining({
+        libraryId: "team-kit",
+        importedRegistryUpdatedAt: firstPublish.library.updatedAt,
+        registryUpdatedAt: secondPublish.library.updatedAt,
+        tokenCount: 4,
+        tokenSetCount: 4,
+        tokenThemeCount: 1
+      })
+    ]);
+
+    const applied = parseToolJson(
+      await client.callTool({
+        name: "update_library_registry_tokens",
+        arguments: { fileId: "target-token-file", libraryId: "team-kit" }
+      })
+    );
+    expect(applied.imported).toMatchObject({
+      libraryId: "team-kit",
+      tokenCount: 4,
+      tokenSetCount: 4,
+      tokenThemeCount: 1
+    });
+    const exported = parseToolJson(
+      await client.callTool({
+        name: "export_design_tokens",
+        arguments: { fileId: "target-token-file" }
+      })
+    );
+    expect(exported.tokens).toMatchObject({
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark", "contrast"],
+        activeThemes: ["theme-brand"]
+      }
+    });
+    expect(exported.tokens.$themes).toEqual([
+      {
+        id: "theme-brand",
+        name: "Brand Theme",
+        group: "mode",
+        selectedTokenSets: ["base", "dark"]
       }
     ]);
   });

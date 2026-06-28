@@ -304,12 +304,33 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
+  server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/token-subscriptions", async (request) => {
+    return {
+      subscriptions: await storage.listLibraryRegistryTokenSubscriptions(request.params.fileId)
+    };
+  });
+
+  server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/token-updates", async (request) => {
+    return {
+      updates: await storage.listLibraryRegistryTokenUpdates(request.params.fileId)
+    };
+  });
+
   server.post<{
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/update", async (request) => {
     return {
       imported: await storage.updateLibraryRegistryItem(request.params.fileId, request.body.libraryId)
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { libraryId: string };
+  }>("/files/:fileId/import/library/registry/tokens/update", async (request) => {
+    return {
+      imported: await storage.updateLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
     };
   });
 

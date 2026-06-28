@@ -55,6 +55,7 @@ import {
   importLibraryRegistryTokens,
   importDesignTokensDtcg,
   listLibraryRegistry,
+  listLibraryRegistryTokenUpdates,
   listLibraryRegistryUpdates,
   listCommentActivity,
   listCommentNotifications,
@@ -77,6 +78,7 @@ import {
   subscribeToCommentEvents,
   summarizeDocumentChanges,
   updateLibraryRegistryItem,
+  updateLibraryRegistryTokens,
   type CommentActivityFeed,
   type CommentMentionTarget,
   type CommentNotificationSummary,
@@ -90,6 +92,7 @@ import {
   type LibraryRegistryEntry,
   type LibraryRegistryReview,
   type LibraryRegistryTokenReview,
+  type LibraryRegistryTokenUpdateNotification,
   type LibraryRegistryUpdateNotification
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
@@ -7531,6 +7534,9 @@ export function App() {
   const [libraryRegistryTokenReview, setLibraryRegistryTokenReview] =
     useState<LibraryRegistryTokenReviewState | null>(null);
   const [libraryRegistryUpdates, setLibraryRegistryUpdates] = useState<LibraryRegistryUpdateNotification[]>([]);
+  const [libraryRegistryTokenUpdates, setLibraryRegistryTokenUpdates] = useState<
+    LibraryRegistryTokenUpdateNotification[]
+  >([]);
   const [libraryRegistryStatus, setLibraryRegistryStatus] = useState("게시 라이브러리 대기 중");
   const [projectArchiveReview, setProjectArchiveReview] = useState<ProjectArchiveReviewState | null>(null);
   const [projectArchiveImportName, setProjectArchiveImportName] = useState("");
@@ -7772,14 +7778,20 @@ export function App() {
   const refreshLibraryRegistryUpdates = async (fileId?: string) => {
     if (!fileId) {
       setLibraryRegistryUpdates([]);
+      setLibraryRegistryTokenUpdates([]);
       return [];
     }
     try {
-      const updates = await listLibraryRegistryUpdates(fileId);
+      const [updates, tokenUpdates] = await Promise.all([
+        listLibraryRegistryUpdates(fileId),
+        listLibraryRegistryTokenUpdates(fileId)
+      ]);
       setLibraryRegistryUpdates(updates);
+      setLibraryRegistryTokenUpdates(tokenUpdates);
       return updates;
     } catch {
       setLibraryRegistryUpdates([]);
+      setLibraryRegistryTokenUpdates([]);
       return [];
     }
   };
@@ -7806,6 +7818,7 @@ export function App() {
     const fileId = currentProject?.currentDocumentId;
     if (!fileId) {
       setLibraryRegistryUpdates([]);
+      setLibraryRegistryTokenUpdates([]);
       return;
     }
     const intervalId = window.setInterval(() => {
@@ -11325,6 +11338,7 @@ export function App() {
         libraryRegistryTokenReview.review.libraryId
       );
       await loadProjectDocument(currentProject, projects);
+      await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
       setLibraryRegistryTokenReview(null);
       setLibraryRegistryStatus(
         `${imported.libraryName} 토큰 가져옴 · 토큰 ${imported.tokenCount}개 · 세트 ${imported.tokenSetCount}개 · 테마 ${imported.tokenThemeCount}개`
@@ -11332,6 +11346,28 @@ export function App() {
       setProjectStatus("게시 라이브러리 토큰 가져옴");
     } catch (error) {
       const message = error instanceof Error ? error.message : "게시 라이브러리 토큰을 가져오지 못했습니다";
+      setLibraryRegistryStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
+  const applyLibraryRegistryTokenUpdate = async (libraryId: string) => {
+    if (!currentProject) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("게시 라이브러리 토큰 업데이트 적용 중");
+      const imported = await updateLibraryRegistryTokens(currentProject.currentDocumentId, libraryId);
+      await loadProjectDocument(currentProject, projects);
+      await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
+      setLibraryRegistryStatus(
+        `${imported.libraryName} 토큰 업데이트 적용됨 · 토큰 ${imported.tokenCount}개 · 세트 ${imported.tokenSetCount}개 · 테마 ${imported.tokenThemeCount}개`
+      );
+      setProjectStatus("게시 라이브러리 토큰 업데이트 적용됨");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리 토큰 업데이트를 적용하지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
     }
@@ -12913,6 +12949,30 @@ export function App() {
                         ))
                       ) : (
                         <span>적용할 업데이트 없음</span>
+                      )}
+                    </div>
+                    <div
+                      className="file-archive-review-body library-registry-updates"
+                      data-testid="library-registry-token-updates"
+                    >
+                      {libraryRegistryTokenUpdates.length > 0 ? (
+                        libraryRegistryTokenUpdates.map((update) => (
+                          <span key={`${update.fileId}-${update.libraryId}`}>
+                            <strong>{update.libraryName}</strong> 토큰 업데이트 가능 · 토큰{" "}
+                            {update.tokenCount}개 · 세트 {update.tokenSetCount}개 · 테마{" "}
+                            {update.tokenThemeCount}개
+                            <button
+                              type="button"
+                              className="inspector-compact-button"
+                              data-testid={`library-registry-token-update-${update.libraryId}`}
+                              onClick={() => void applyLibraryRegistryTokenUpdate(update.libraryId)}
+                            >
+                              토큰 업데이트 적용
+                            </button>
+                          </span>
+                        ))
+                      ) : (
+                        <span>적용할 토큰 업데이트 없음</span>
                       )}
                     </div>
                     {libraryRegistryReview ? (

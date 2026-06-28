@@ -939,6 +939,56 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "list_library_registry_token_subscriptions",
+    {
+      description: "List shared registry token-bundle subscriptions imported into a Layo document.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        fileId: z.string().optional().describe("Optional target design file id returned by list_files")
+      }
+    },
+    async ({ fileId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              subscriptions: await storage.listLibraryRegistryTokenSubscriptions(fileId)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "list_library_registry_token_updates",
+    {
+      description: "List shared registry token-bundle updates available for subscribed Layo documents.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        fileId: z.string().optional().describe("Optional target design file id returned by list_files")
+      }
+    },
+    async ({ fileId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              updates: await storage.listLibraryRegistryTokenUpdates(fileId)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "list_library_registry_subscriptions",
     {
       description: "List shared library registry subscriptions imported into a Layo document.",
@@ -1005,6 +1055,32 @@ export function createMcpServer(storage = new FileStorage()) {
           text: JSON.stringify(
             {
               imported: await storage.updateLibraryRegistryItem(fileId, libraryId)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "update_library_registry_tokens",
+    {
+      description: "Apply the latest shared registry token bundle to a subscribed target Layo document.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Target design file id returned by list_files"),
+        libraryId: z.string().describe("Shared library id returned by list_library_registry_token_updates")
+      }
+    },
+    async ({ fileId, libraryId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              imported: await storage.updateLibraryRegistryTokens(fileId, libraryId)
             },
             null,
             2

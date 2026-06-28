@@ -603,6 +603,94 @@ test("file panel reviews and imports shared library token bundles", async ({ pag
       token_set_ids: ["base", "light", "dark"]
     }
   ]);
+
+  const updatedSourceTokens = await page.request.put(`http://127.0.0.1:4317/files/${documentId}/tokens/dtcg`, {
+    data: {
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark", "contrast"],
+        activeTokenSets: ["base", "dark"]
+      },
+      base: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#0ea5e9"
+          }
+        }
+      },
+      light: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#38bdf8"
+          }
+        }
+      },
+      dark: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#bae6fd"
+          }
+        }
+      },
+      contrast: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#082f49"
+          }
+        }
+      }
+    }
+  });
+  expect(updatedSourceTokens.ok()).toBeTruthy();
+  const updatedSourceTheme = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "upsert_token_theme",
+          tokenTheme: {
+            id: "theme-brand",
+            name: "Brand Theme",
+            group: "mode",
+            enabled: true,
+            token_set_ids: ["base", "dark"]
+          }
+        }
+      ]
+    }
+  });
+  expect(updatedSourceTheme.ok()).toBeTruthy();
+  const republished = await page.request.post("http://127.0.0.1:4317/libraries", {
+    data: { fileId: documentId, name: "Team Kit" }
+  });
+  expect(republished.ok()).toBeTruthy();
+
+  await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  await expect(page.getByTestId("library-registry-token-updates")).toContainText("Team Kit 토큰 업데이트 가능");
+  await page.getByTestId(`library-registry-token-update-${documentId}`).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 토큰 업데이트 적용됨");
+
+  const updatedFileResponse = await page.request.get(`http://127.0.0.1:4317/files/${targetDocumentId}`);
+  expect(updatedFileResponse.ok()).toBeTruthy();
+  const updatedPayload = await updatedFileResponse.json();
+  expect(updatedPayload.file.tokens.map((token: { id: string; value: string }) => [token.id, token.value])).toEqual([
+    ["color-base-brand-primary", "#0ea5e9"],
+    ["color-light-brand-primary", "#38bdf8"],
+    ["color-dark-brand-primary", "#bae6fd"],
+    ["color-contrast-brand-primary", "#082f49"]
+  ]);
+  expect(updatedPayload.file.token_themes).toEqual([
+    {
+      id: "theme-brand",
+      name: "Brand Theme",
+      group: "mode",
+      enabled: true,
+      token_set_ids: ["base", "dark"]
+    }
+  ]);
 });
 
 test("inspector dev panel shows selected layer handoff specs and code", async ({ page }) => {

@@ -750,6 +750,32 @@ export interface LibraryRegistryUpdateNotification {
   registryUpdatedAt: string;
 }
 
+export interface LibraryRegistryTokenSubscription {
+  fileId: string;
+  libraryId: string;
+  libraryName: string;
+  sourceFileId: string;
+  sourceName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  importedAt: string;
+  importedRegistryUpdatedAt: string;
+}
+
+export interface LibraryRegistryTokenUpdateNotification {
+  fileId: string;
+  libraryId: string;
+  libraryName: string;
+  sourceFileId: string;
+  sourceName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  importedRegistryUpdatedAt: string;
+  registryUpdatedAt: string;
+}
+
 export interface PublishLibraryRegistryOptions {
   libraryId?: string;
   name?: string;
@@ -865,6 +891,10 @@ export class FileStorage {
 
   private librarySubscriptionsPath() {
     return path.join(this.librariesDir, "subscriptions.json");
+  }
+
+  private libraryTokenSubscriptionsPath() {
+    return path.join(this.librariesDir, "token-subscriptions.json");
   }
 
   private libraryArchivePathFor(libraryId: string) {
@@ -1695,6 +1725,42 @@ export class FileStorage {
     });
   }
 
+  async listLibraryRegistryTokenSubscriptions(fileId?: string): Promise<LibraryRegistryTokenSubscription[]> {
+    const subscriptions = await this.readLibraryRegistryTokenSubscriptions();
+    return fileId ? subscriptions.filter((subscription) => subscription.fileId === fileId) : subscriptions;
+  }
+
+  async listLibraryRegistryTokenUpdates(fileId?: string): Promise<LibraryRegistryTokenUpdateNotification[]> {
+    const [subscriptions, registry] = await Promise.all([
+      this.listLibraryRegistryTokenSubscriptions(fileId),
+      this.readLibraryRegistryEntries()
+    ]);
+    const registryById = new Map(registry.map((entry) => [entry.libraryId, entry]));
+    const notifications = await Promise.all(
+      subscriptions.map(async (subscription) => {
+        const entry = registryById.get(subscription.libraryId);
+        if (!entry || entry.updatedAt <= subscription.importedRegistryUpdatedAt) {
+          return null;
+        }
+        const { archive } = await this.readLibraryRegistryArchive(entry.libraryId);
+        const library = readLibraryArchivePayload(readZipArchive(archive));
+        return {
+          fileId: subscription.fileId,
+          libraryId: entry.libraryId,
+          libraryName: entry.name,
+          sourceFileId: entry.sourceFileId,
+          sourceName: entry.sourceName,
+          tokenCount: library.library.tokens.length,
+          tokenSetCount: library.library.token_sets.length,
+          tokenThemeCount: library.library.token_themes.length,
+          importedRegistryUpdatedAt: subscription.importedRegistryUpdatedAt,
+          registryUpdatedAt: entry.updatedAt
+        };
+      })
+    );
+    return notifications.filter((notification): notification is LibraryRegistryTokenUpdateNotification => Boolean(notification));
+  }
+
   async reviewLibraryRegistryItem(
     fileId: string,
     libraryId: string
@@ -1752,8 +1818,35 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const target = await this.readFile(fileId);
     const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
+    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
+    return imported;
+  }
+
+  async updateLibraryRegistryTokens(
+    fileId: string,
+    libraryId: string
+  ): Promise<ImportedLibraryRegistryTokens> {
+    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+    const subscription = (await this.listLibraryRegistryTokenSubscriptions(fileId)).find(
+      (candidate) => candidate.libraryId === normalizedLibraryId
+    );
+    if (!subscription) {
+      throw notFoundError(`library registry token subscription not found: ${normalizedLibraryId}`);
+    }
+    const { entry, archive } = await this.readLibraryRegistryArchive(normalizedLibraryId);
+    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
+    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
+    return imported;
+  }
+
+  private async replaceFileTokensFromLibraryRegistryArchive(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    archive: Buffer
+  ): Promise<ImportedLibraryRegistryTokens> {
+    const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const replacedTokenCount = (target.tokens ?? []).length;
     const replacedTokenSetCount = (target.token_sets ?? []).length;
@@ -2795,6 +2888,30 @@ export class FileStorage {
     );
   }
 
+  private async readLibraryRegistryTokenSubscriptions(): Promise<LibraryRegistryTokenSubscription[]> {
+    try {
+      const raw = await readFile(this.libraryTokenSubscriptionsPath(), "utf8");
+      const parsed = JSON.parse(raw) as { subscriptions?: unknown[] };
+      return Array.isArray(parsed.subscriptions)
+        ? parsed.subscriptions.map(parseLibraryRegistryTokenSubscription)
+        : [];
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async writeLibraryRegistryTokenSubscriptions(subscriptions: LibraryRegistryTokenSubscription[]): Promise<void> {
+    await mkdir(this.librariesDir, { recursive: true });
+    await writeFile(
+      this.libraryTokenSubscriptionsPath(),
+      `${JSON.stringify({ schemaVersion: 1, subscriptions }, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
   private async upsertLibraryRegistrySubscription(
     fileId: string,
     entry: LibraryRegistryEntry,
@@ -2830,6 +2947,39 @@ export class FileStorage {
         a.libraryId.localeCompare(b.libraryId)
     );
     await this.writeLibraryRegistrySubscriptions(nextSubscriptions);
+  }
+
+  private async upsertLibraryRegistryTokenSubscription(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    imported: ImportedLibraryRegistryTokens
+  ): Promise<void> {
+    assertSafeStorageId(fileId);
+    const subscriptions = await this.readLibraryRegistryTokenSubscriptions();
+    const subscription: LibraryRegistryTokenSubscription = {
+      fileId,
+      libraryId: entry.libraryId,
+      libraryName: entry.name,
+      sourceFileId: entry.sourceFileId,
+      sourceName: entry.sourceName,
+      tokenCount: imported.tokenCount,
+      tokenSetCount: imported.tokenSetCount,
+      tokenThemeCount: imported.tokenThemeCount,
+      importedAt: new Date().toISOString(),
+      importedRegistryUpdatedAt: entry.updatedAt
+    };
+    const nextSubscriptions = [
+      subscription,
+      ...subscriptions.filter(
+        (candidate) => candidate.fileId !== fileId || candidate.libraryId !== entry.libraryId
+      )
+    ].sort(
+      (a, b) =>
+        a.fileId.localeCompare(b.fileId) ||
+        a.libraryName.localeCompare(b.libraryName) ||
+        a.libraryId.localeCompare(b.libraryId)
+    );
+    await this.writeLibraryRegistryTokenSubscriptions(nextSubscriptions);
   }
 
   private async readLibraryRegistryArchive(libraryId: string): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
@@ -3353,6 +3503,33 @@ function parseLibraryRegistrySubscription(input: unknown): LibraryRegistrySubscr
     assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0)),
     componentIdMap: parseSafeIdMap(candidate.componentIdMap, "library component id map"),
     tokenIdMap: parseSafeIdMap(candidate.tokenIdMap, "library token id map"),
+    importedAt: normalizeName(candidate.importedAt, new Date(0).toISOString()),
+    importedRegistryUpdatedAt: normalizeName(
+      candidate.importedRegistryUpdatedAt,
+      candidate.importedAt ?? new Date(0).toISOString()
+    )
+  };
+}
+
+function parseLibraryRegistryTokenSubscription(input: unknown): LibraryRegistryTokenSubscription {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library registry token subscription");
+  }
+  const candidate = input as Partial<LibraryRegistryTokenSubscription>;
+  const fileId = normalizeName(candidate.fileId, "");
+  assertSafeStorageId(fileId);
+  const libraryId = normalizeLibraryRegistryId(candidate.libraryId);
+  const sourceFileId = normalizeName(candidate.sourceFileId, libraryId);
+  assertSafeStorageId(sourceFileId);
+  return {
+    fileId,
+    libraryId,
+    libraryName: normalizeName(candidate.libraryName, libraryId),
+    sourceFileId,
+    sourceName: normalizeName(candidate.sourceName, sourceFileId),
+    tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
+    tokenSetCount: Math.max(0, Math.round(Number(candidate.tokenSetCount) || 0)),
+    tokenThemeCount: Math.max(0, Math.round(Number(candidate.tokenThemeCount) || 0)),
     importedAt: normalizeName(candidate.importedAt, new Date(0).toISOString()),
     importedRegistryUpdatedAt: normalizeName(
       candidate.importedRegistryUpdatedAt,

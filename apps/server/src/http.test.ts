@@ -707,6 +707,217 @@ describe("HTTP server", () => {
     ]);
   });
 
+  test("reports and applies registry library token bundle updates through HTTP", async () => {
+    const server = await createServerWithDocument();
+    await server.inject({
+      method: "PUT",
+      url: "/files/sample-file/tokens/dtcg",
+      payload: {
+        $metadata: {
+          tokenSetOrder: ["base", "light", "dark"],
+          activeTokenSets: ["base", "light"]
+        },
+        base: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#2563eb"
+            }
+          }
+        },
+        light: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#1d4ed8"
+            }
+          }
+        },
+        dark: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#93c5fd"
+            }
+          }
+        }
+      }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-brand",
+              name: "Brand Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "light", "dark"]
+            }
+          }
+        ]
+      }
+    });
+    const firstPublish = await server.inject({
+      method: "POST",
+      url: "/libraries",
+      payload: { fileId: "sample-file", libraryId: "team-kit", name: "Team Kit" }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/projects",
+      payload: {
+        projectId: "target-project",
+        name: "대상 프로젝트",
+        documentId: "target-file",
+        documentName: "대상 문서"
+      }
+    });
+    const imported = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry/tokens",
+      payload: { libraryId: "team-kit" }
+    });
+    expect(imported.statusCode).toBe(200);
+
+    const subscriptions = await server.inject({
+      method: "GET",
+      url: "/files/target-file/libraries/token-subscriptions"
+    });
+    expect(subscriptions.statusCode).toBe(200);
+    expect(subscriptions.json().subscriptions).toEqual([
+      expect.objectContaining({
+        fileId: "target-file",
+        libraryId: "team-kit",
+        tokenCount: 3,
+        tokenSetCount: 3,
+        tokenThemeCount: 1,
+        importedRegistryUpdatedAt: firstPublish.json().library.updatedAt
+      })
+    ]);
+    const noUpdates = await server.inject({ method: "GET", url: "/files/target-file/libraries/token-updates" });
+    expect(noUpdates.statusCode).toBe(200);
+    expect(noUpdates.json().updates).toEqual([]);
+
+    await server.inject({
+      method: "PUT",
+      url: "/files/sample-file/tokens/dtcg",
+      payload: {
+        $metadata: {
+          tokenSetOrder: ["base", "light", "dark", "contrast"],
+          activeTokenSets: ["base", "dark"]
+        },
+        base: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#0ea5e9"
+            }
+          }
+        },
+        light: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#38bdf8"
+            }
+          }
+        },
+        dark: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#bae6fd"
+            }
+          }
+        },
+        contrast: {
+          Brand: {
+            Primary: {
+              $type: "color",
+              $value: "#082f49"
+            }
+          }
+        }
+      }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-brand",
+              name: "Brand Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "dark"]
+            }
+          }
+        ]
+      }
+    });
+    const secondPublish = await server.inject({
+      method: "POST",
+      url: "/libraries",
+      payload: { fileId: "sample-file", libraryId: "team-kit", name: "Team Kit" }
+    });
+
+    const updates = await server.inject({ method: "GET", url: "/files/target-file/libraries/token-updates" });
+    expect(updates.statusCode).toBe(200);
+    expect(updates.json().updates).toEqual([
+      expect.objectContaining({
+        fileId: "target-file",
+        libraryId: "team-kit",
+        libraryName: "Team Kit",
+        importedRegistryUpdatedAt: firstPublish.json().library.updatedAt,
+        registryUpdatedAt: secondPublish.json().library.updatedAt,
+        tokenCount: 4,
+        tokenSetCount: 4,
+        tokenThemeCount: 1
+      })
+    ]);
+
+    const applied = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry/tokens/update",
+      payload: { libraryId: "team-kit" }
+    });
+    expect(applied.statusCode).toBe(200);
+    expect(applied.json().imported).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      tokenCount: 4,
+      tokenSetCount: 4,
+      tokenThemeCount: 1
+    });
+    const afterApply = await server.inject({ method: "GET", url: "/files/target-file/libraries/token-updates" });
+    expect(afterApply.json().updates).toEqual([]);
+    const file = await server.inject({ method: "GET", url: "/files/target-file" });
+    expect(file.json().file.tokens.map((token: { id: string; value: string }) => [token.id, token.value])).toEqual([
+      ["color-base-brand-primary", "#0ea5e9"],
+      ["color-light-brand-primary", "#38bdf8"],
+      ["color-dark-brand-primary", "#bae6fd"],
+      ["color-contrast-brand-primary", "#082f49"]
+    ]);
+    expect(file.json().file.token_themes).toEqual([
+      {
+        id: "theme-brand",
+        name: "Brand Theme",
+        group: "mode",
+        enabled: true,
+        token_set_ids: ["base", "dark"]
+      }
+    ]);
+  });
+
   test("reports and applies registry library updates for subscribed files", async () => {
     const server = await createServerWithDocument();
     await server.inject({
