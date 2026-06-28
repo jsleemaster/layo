@@ -377,6 +377,40 @@ test("file panel exports a shared library archive and imports reusable component
 });
 
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoEventSourceUrls?: string[];
+      __layoLibraryRegistryEventCount?: number;
+      __layoSuppressedLibraryRegistryPolling?: boolean;
+    };
+    const NativeEventSource = window.EventSource;
+    const nativeSetInterval = window.setInterval.bind(window);
+
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === 2_000) {
+        instrumentedWindow.__layoSuppressedLibraryRegistryPolling = true;
+        return 0;
+      }
+      return nativeSetInterval(handler, timeout, ...args);
+    }) as typeof window.setInterval;
+
+    class InstrumentedEventSource extends NativeEventSource {
+      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
+        super(url, eventSourceInitDict);
+        instrumentedWindow.__layoEventSourceUrls = [
+          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
+          String(url)
+        ];
+        this.addEventListener("library-registry", () => {
+          instrumentedWindow.__layoLibraryRegistryEventCount =
+            (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) + 1;
+        });
+      }
+    }
+
+    window.EventSource = InstrumentedEventSource;
+  });
+
   const { documentId } = await createProjectFromEmptyState(page);
   const commands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
     data: {
@@ -421,6 +455,33 @@ test("file panel publishes imports and updates a shared library registry item", 
   await page.getByRole("button", { name: "검토한 게시 라이브러리 가져오기" }).click();
   await expect(page.getByTestId("library-registry-status")).toContainText("게시 라이브러리 가져옴");
   await expect(page.getByTestId("library-registry-updates")).toContainText("적용할 업데이트 없음");
+  const targetProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${targetProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const targetDocumentId = (await projectResponse.json()).project.currentDocumentId as string;
+  await page.waitForFunction(
+    ({ targetDocumentId: expectedDocumentId }) => {
+      const instrumentedWindow = window as Window & {
+        __layoEventSourceUrls?: string[];
+        __layoSuppressedLibraryRegistryPolling?: boolean;
+      };
+      return (
+        instrumentedWindow.__layoSuppressedLibraryRegistryPolling === true &&
+        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+          const parsedUrl = new URL(url, window.location.href);
+          return (
+            parsedUrl.pathname === "/libraries/events" &&
+            parsedUrl.searchParams.get("fileId") === expectedDocumentId
+          );
+        })
+      );
+    },
+    { targetDocumentId }
+  );
+  const libraryRegistryEventCountBeforeRepublish = await page.evaluate(() => {
+    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
+    return instrumentedWindow.__layoLibraryRegistryEventCount ?? 0;
+  });
 
   const updateCommands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
     data: {
@@ -445,14 +506,14 @@ test("file panel publishes imports and updates a shared library registry item", 
   });
   expect(republished.ok()).toBeTruthy();
 
+  await page.waitForFunction((previousCount) => {
+    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
+    return (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) > previousCount;
+  }, libraryRegistryEventCountBeforeRepublish);
   await expect(page.getByTestId("library-registry-updates")).toContainText("Team Kit 업데이트 가능");
   await page.getByTestId(`library-registry-update-${documentId}`).click();
   await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 업데이트 적용됨");
 
-  const targetProjectId = await page.getByTestId("project-switcher").inputValue();
-  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${targetProjectId}`);
-  expect(projectResponse.ok()).toBeTruthy();
-  const targetDocumentId = (await projectResponse.json()).project.currentDocumentId as string;
   const response = await page.request.get(`http://127.0.0.1:4317/files/${targetDocumentId}`);
   expect(response.ok()).toBeTruthy();
   const payload = await response.json();

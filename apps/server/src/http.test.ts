@@ -1518,6 +1518,95 @@ describe("HTTP server", () => {
     }
   });
 
+  test("streams library registry events from a shared storage event log", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const publisherStorage = new FileStorage(tempRoot);
+    await publisherStorage.createProject({
+      projectId: "source-project",
+      name: "소스 프로젝트",
+      documentId: "source-file",
+      documentName: "소스 문서"
+    });
+    await publisherStorage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    await publisherStorage.applyAgentCommands("source-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ] as any
+    });
+    await publisherStorage.publishLibraryToRegistry("source-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+
+    const streamStorage = new FileStorage(tempRoot);
+    await streamStorage.createProject({
+      projectId: "target-project",
+      name: "대상 프로젝트",
+      documentId: "target-file",
+      documentName: "대상 문서"
+    });
+    await streamStorage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
+
+    const streamServer = createHttpServer(streamStorage);
+    const address = await streamServer.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const stream = await fetch(`${address}/libraries/events?fileId=target-file&after=1`, {
+        signal: controller.signal
+      });
+      expect(stream.status).toBe(200);
+      expect(stream.headers.get("content-type")).toContain("text/event-stream");
+
+      const eventPromise = readSseEvent(stream, "library-registry");
+      await publisherStorage.applyAgentCommands("source-file", {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-badge",
+            name: "Library Badge",
+            width: 80,
+            height: 32,
+            fill: "#2563eb"
+          },
+          { type: "create_component", nodeId: "library-badge", componentId: "component-badge", name: "Badge" }
+        ] as any
+      });
+      const secondPublish = await publisherStorage.publishLibraryToRegistry("source-file", {
+        libraryId: "team-kit",
+        name: "Team Kit"
+      });
+
+      const event = await eventPromise;
+      expect(event).toMatchObject({
+        schemaVersion: 1,
+        sequence: 2,
+        type: "published",
+        libraryId: "team-kit",
+        libraryName: "Team Kit",
+        sourceFileId: "source-file",
+        teamId: "team-alpha",
+        componentCount: 2,
+        registryUpdatedAt: secondPublish.updatedAt
+      });
+    } finally {
+      controller.abort();
+      await streamServer.close();
+    }
+  });
+
   test("updates image node assets and persists replacement metadata", async () => {
     const server = await createServerWithDocument();
 
@@ -2699,9 +2788,13 @@ describe("HTTP server", () => {
 });
 
 async function readCommentStreamEvent(response: Response): Promise<Record<string, unknown>> {
+  return readSseEvent(response, "comment");
+}
+
+async function readSseEvent(response: Response, eventName: string): Promise<Record<string, unknown>> {
   const reader = response.body?.getReader();
   if (!reader) {
-    throw new Error("comment event stream has no readable body");
+    throw new Error(`${eventName} event stream has no readable body`);
   }
 
   const decoder = new TextDecoder();
@@ -2712,7 +2805,7 @@ async function readCommentStreamEvent(response: Response): Promise<Record<string
     const result = await Promise.race([
       reader.read(),
       new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) =>
-        setTimeout(() => reject(new Error("timed out waiting for comment event")), 3_000)
+        setTimeout(() => reject(new Error(`timed out waiting for ${eventName} event`)), 3_000)
       )
     ]);
     if (result.done) {
@@ -2722,7 +2815,7 @@ async function readCommentStreamEvent(response: Response): Promise<Record<string
     const blocks = buffer.split("\n\n");
     buffer = blocks.pop() ?? "";
     for (const block of blocks) {
-      if (!block.includes("event: comment")) {
+      if (!block.includes(`event: ${eventName}`)) {
         continue;
       }
       const data = block
@@ -2734,5 +2827,5 @@ async function readCommentStreamEvent(response: Response): Promise<Record<string
     }
   }
 
-  throw new Error("comment event was not emitted");
+  throw new Error(`${eventName} event was not emitted`);
 }

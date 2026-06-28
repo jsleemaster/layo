@@ -722,6 +722,31 @@ export interface LibraryRegistryEntry {
   updatedAt: string;
 }
 
+export interface LibraryRegistryEvent {
+  schemaVersion: 1;
+  eventId: string;
+  sequence: number;
+  type: "published";
+  libraryId: string;
+  libraryName: string;
+  sourceFileId: string;
+  sourceName: string;
+  teamId?: string;
+  componentCount: number;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  assetCount: number;
+  registryUpdatedAt: string;
+  createdAt: string;
+}
+
+export interface ListLibraryRegistryEventsOptions {
+  after?: number;
+  fileId?: string;
+  limit?: number;
+}
+
 export interface LibraryRegistrySubscription {
   fileId: string;
   libraryId: string;
@@ -888,6 +913,10 @@ export class FileStorage {
 
   private libraryRegistryPath() {
     return path.join(this.librariesDir, "registry.json");
+  }
+
+  private libraryRegistryEventsPath() {
+    return path.join(this.librariesDir, "registry-events.json");
   }
 
   private librarySubscriptionsPath() {
@@ -1691,6 +1720,7 @@ export class FileStorage {
     await mkdir(this.librariesDir, { recursive: true });
     await writeFile(this.libraryArchivePathFor(libraryId), exported.archive);
     await this.writeLibraryRegistryEntries(nextEntries);
+    await this.appendLibraryRegistryEvent(entry, exported);
     return entry;
   }
 
@@ -1702,6 +1732,18 @@ export class FileStorage {
       return entries;
     }
     return this.filterLibraryRegistryEntriesForFile(fileId, entries);
+  }
+
+  async listLibraryRegistryEvents(
+    options: ListLibraryRegistryEventsOptions = {}
+  ): Promise<LibraryRegistryEvent[]> {
+    const after = Math.max(0, Math.floor(Number(options.after) || 0));
+    const events = (await this.readLibraryRegistryEvents()).filter((event) => event.sequence > after);
+    const visibleEvents = options.fileId
+      ? await this.filterLibraryRegistryEventsForFile(options.fileId, events)
+      : events;
+    const limit = Math.max(0, Math.floor(Number(options.limit) || 0));
+    return limit > 0 ? visibleEvents.slice(-limit) : visibleEvents;
   }
 
   async listLibraryRegistrySubscriptions(fileId?: string): Promise<LibraryRegistrySubscription[]> {
@@ -2888,6 +2930,30 @@ export class FileStorage {
     );
   }
 
+  private async readLibraryRegistryEvents(): Promise<LibraryRegistryEvent[]> {
+    try {
+      const raw = await readFile(this.libraryRegistryEventsPath(), "utf8");
+      const parsed = JSON.parse(raw) as { events?: unknown[] };
+      return Array.isArray(parsed.events)
+        ? parsed.events.map(parseLibraryRegistryEvent).sort((a, b) => a.sequence - b.sequence)
+        : [];
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async writeLibraryRegistryEvents(events: LibraryRegistryEvent[]): Promise<void> {
+    await mkdir(this.librariesDir, { recursive: true });
+    await writeFile(
+      this.libraryRegistryEventsPath(),
+      `${JSON.stringify({ schemaVersion: 1, events }, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
   private async readLibraryRegistrySubscriptions(): Promise<LibraryRegistrySubscription[]> {
     try {
       const raw = await readFile(this.librarySubscriptionsPath(), "utf8");
@@ -3006,6 +3072,34 @@ export class FileStorage {
     await this.writeLibraryRegistryTokenSubscriptions(nextSubscriptions);
   }
 
+  private async appendLibraryRegistryEvent(
+    entry: LibraryRegistryEntry,
+    exported: ExportedLibraryArchive
+  ): Promise<LibraryRegistryEvent> {
+    const events = await this.readLibraryRegistryEvents();
+    const sequence = Math.max(0, ...events.map((event) => event.sequence)) + 1;
+    const event: LibraryRegistryEvent = {
+      schemaVersion: 1,
+      eventId: `library-registry-${sequence}`,
+      sequence,
+      type: "published",
+      libraryId: entry.libraryId,
+      libraryName: entry.name,
+      sourceFileId: entry.sourceFileId,
+      sourceName: entry.sourceName,
+      ...(entry.teamId ? { teamId: entry.teamId } : {}),
+      componentCount: entry.componentCount,
+      tokenCount: entry.tokenCount,
+      tokenSetCount: exported.tokenSetCount,
+      tokenThemeCount: exported.tokenThemeCount,
+      assetCount: entry.assetCount,
+      registryUpdatedAt: entry.updatedAt,
+      createdAt: entry.updatedAt
+    };
+    await this.writeLibraryRegistryEvents([...events, event]);
+    return event;
+  }
+
   private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
     assertSafeStorageId(fileId);
     const projects = await this.listProjects();
@@ -3026,6 +3120,14 @@ export class FileStorage {
   ): Promise<LibraryRegistryEntry[]> {
     const teamIds = await this.findTeamIdsForFile(fileId);
     return entries.filter((entry) => !entry.teamId || teamIds.has(entry.teamId));
+  }
+
+  private async filterLibraryRegistryEventsForFile(
+    fileId: string,
+    events: LibraryRegistryEvent[]
+  ): Promise<LibraryRegistryEvent[]> {
+    const teamIds = await this.findTeamIdsForFile(fileId);
+    return events.filter((event) => !event.teamId || teamIds.has(event.teamId));
   }
 
   private async assertLibraryRegistryEntryAccessible(fileId: string, entry: LibraryRegistryEntry): Promise<void> {
@@ -3547,6 +3649,38 @@ function parseLibraryRegistryEntry(input: unknown): LibraryRegistryEntry {
     assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0)),
     publishedAt: normalizeName(candidate.publishedAt, new Date(0).toISOString()),
     updatedAt: normalizeName(candidate.updatedAt, candidate.publishedAt ?? new Date(0).toISOString())
+  };
+}
+
+function parseLibraryRegistryEvent(input: unknown): LibraryRegistryEvent {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library registry event");
+  }
+  const candidate = input as Partial<LibraryRegistryEvent>;
+  const libraryId = normalizeLibraryRegistryId(candidate.libraryId);
+  const sourceFileId = normalizeName(candidate.sourceFileId, libraryId);
+  assertSafeStorageId(sourceFileId);
+  const sequence = Math.max(0, Math.round(Number(candidate.sequence) || 0));
+  const registryUpdatedAt = normalizeName(candidate.registryUpdatedAt, new Date(0).toISOString());
+  return {
+    schemaVersion: 1,
+    eventId: normalizeName(candidate.eventId, `library-registry-${sequence}`),
+    sequence,
+    type: "published",
+    libraryId,
+    libraryName: normalizeName(candidate.libraryName, libraryId),
+    sourceFileId,
+    sourceName: normalizeName(candidate.sourceName, sourceFileId),
+    ...(typeof candidate.teamId === "string" && candidate.teamId.trim()
+      ? { teamId: candidate.teamId.trim() }
+      : {}),
+    componentCount: Math.max(0, Math.round(Number(candidate.componentCount) || 0)),
+    tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
+    tokenSetCount: Math.max(0, Math.round(Number(candidate.tokenSetCount) || 0)),
+    tokenThemeCount: Math.max(0, Math.round(Number(candidate.tokenThemeCount) || 0)),
+    assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0)),
+    registryUpdatedAt,
+    createdAt: normalizeName(candidate.createdAt, registryUpdatedAt)
   };
 }
 

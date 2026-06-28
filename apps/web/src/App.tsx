@@ -76,6 +76,7 @@ import {
   setFileVersionPinned,
   publishLibraryToRegistry,
   subscribeToCommentEvents,
+  subscribeToLibraryRegistryEvents,
   summarizeDocumentChanges,
   updateLibraryRegistryItem,
   updateLibraryRegistryTokens,
@@ -7576,6 +7577,7 @@ export function App() {
   const [componentVariantSourceReorderSession, setComponentVariantSourceReorderSession] =
     useState<ComponentVariantSourceReorderSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
+  const libraryRegistryEventSequenceRef = useRef(0);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
@@ -7825,6 +7827,27 @@ export function App() {
       void refreshLibraryRegistryUpdates(fileId);
     }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
+  }, [currentProject?.currentDocumentId]);
+
+  useEffect(() => {
+    const fileId = currentProject?.currentDocumentId;
+    if (!fileId) {
+      libraryRegistryEventSequenceRef.current = 0;
+      return;
+    }
+
+    libraryRegistryEventSequenceRef.current = 0;
+    return subscribeToLibraryRegistryEvents({
+      fileId,
+      after: libraryRegistryEventSequenceRef.current,
+      onLibraryRegistryEvent: (event) => {
+        libraryRegistryEventSequenceRef.current = Math.max(
+          libraryRegistryEventSequenceRef.current,
+          event.sequence
+        );
+        void refreshLibraryRegistry(undefined, fileId);
+      }
+    });
   }, [currentProject?.currentDocumentId]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {

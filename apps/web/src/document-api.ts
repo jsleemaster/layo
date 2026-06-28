@@ -228,11 +228,31 @@ export interface LibraryRegistryEntry {
   name: string;
   sourceFileId: string;
   sourceName: string;
+  teamId?: string;
   componentCount: number;
   tokenCount: number;
   assetCount: number;
   publishedAt: string;
   updatedAt: string;
+}
+
+export interface LibraryRegistryLiveEvent {
+  schemaVersion: 1;
+  eventId: string;
+  sequence: number;
+  type: "published";
+  libraryId: string;
+  libraryName: string;
+  sourceFileId: string;
+  sourceName: string;
+  teamId?: string;
+  componentCount: number;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  assetCount: number;
+  registryUpdatedAt: string;
+  createdAt: string;
 }
 
 export interface LibraryRegistrySubscription {
@@ -293,6 +313,13 @@ export interface LibraryRegistryTokenUpdateNotification {
 export interface PublishLibraryRegistryInput {
   libraryId?: string;
   name?: string;
+}
+
+export interface SubscribeToLibraryRegistryEventsOptions {
+  fileId?: string;
+  after?: number;
+  onLibraryRegistryEvent: (event: LibraryRegistryLiveEvent) => void;
+  onError?: EventListener;
 }
 
 export interface LibraryRegistryReview extends LibraryArchiveReview {
@@ -974,6 +1001,52 @@ export function subscribeToCommentEvents(options: SubscribeToCommentEventsOption
 
   return () => {
     source.removeEventListener("comment", handleComment as EventListener);
+    if (options.onError) {
+      source.removeEventListener("error", options.onError);
+    }
+    source.close();
+  };
+}
+
+export function subscribeToLibraryRegistryEvents(options: SubscribeToLibraryRegistryEventsOptions): () => void {
+  if (typeof EventSource === "undefined") {
+    return () => {};
+  }
+
+  const params = new URLSearchParams();
+  if (options.fileId?.trim()) {
+    params.set("fileId", options.fileId);
+  }
+  if (typeof options.after === "number" && Number.isFinite(options.after) && options.after > 0) {
+    params.set("after", String(Math.floor(options.after)));
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const source = new EventSource(apiUrl(`/libraries/events${query}`));
+  const handleLibraryRegistry = (message: MessageEvent<string>) => {
+    try {
+      const event = JSON.parse(message.data) as Partial<LibraryRegistryLiveEvent>;
+      if (
+        event.schemaVersion !== 1 ||
+        event.type !== "published" ||
+        typeof event.sequence !== "number" ||
+        typeof event.libraryId !== "string" ||
+        typeof event.registryUpdatedAt !== "string"
+      ) {
+        return;
+      }
+      options.onLibraryRegistryEvent(event as LibraryRegistryLiveEvent);
+    } catch {
+      // Ignore malformed stream messages. EventSource will keep the connection alive.
+    }
+  };
+
+  source.addEventListener("library-registry", handleLibraryRegistry as EventListener);
+  if (options.onError) {
+    source.addEventListener("error", options.onError);
+  }
+
+  return () => {
+    source.removeEventListener("library-registry", handleLibraryRegistry as EventListener);
     if (options.onError) {
       source.removeEventListener("error", options.onError);
     }

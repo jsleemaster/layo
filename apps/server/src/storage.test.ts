@@ -1234,6 +1234,100 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("library registry events are durable across storage instances and scoped to target file teams", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const publishingStorage = new FileStorage(tempRoot);
+    await publishingStorage.createProject({
+      projectId: "source-project",
+      name: "소스 프로젝트",
+      documentId: "source-file",
+      documentName: "소스 문서"
+    });
+    await publishingStorage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    await publishingStorage.applyAgentCommands("source-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ] as any
+    });
+    const firstPublish = await publishingStorage.publishLibraryToRegistry("source-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+
+    const subscriberStorage = new FileStorage(tempRoot);
+    await subscriberStorage.createProject({
+      projectId: "target-project",
+      name: "대상 프로젝트",
+      documentId: "target-file",
+      documentName: "대상 문서"
+    });
+    await subscriberStorage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
+    await subscriberStorage.createProject({
+      projectId: "other-project",
+      name: "다른 팀 프로젝트",
+      documentId: "other-file",
+      documentName: "다른 팀 문서"
+    });
+    await subscriberStorage.setProjectSharing("other-project", { mode: "team", teamId: "team-beta" });
+
+    await expect(subscriberStorage.listLibraryRegistryEvents({ fileId: "target-file" })).resolves.toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        sequence: 1,
+        type: "published",
+        libraryId: "team-kit",
+        libraryName: "Team Kit",
+        sourceFileId: "source-file",
+        sourceName: "소스 문서",
+        teamId: "team-alpha",
+        componentCount: 1,
+        tokenCount: 0,
+        assetCount: 0,
+        registryUpdatedAt: firstPublish.updatedAt
+      })
+    ]);
+    await expect(subscriberStorage.listLibraryRegistryEvents({ fileId: "other-file" })).resolves.toEqual([]);
+
+    await publishingStorage.applyAgentCommands("source-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-badge",
+          name: "Library Badge",
+          width: 80,
+          height: 32,
+          fill: "#2563eb"
+        },
+        { type: "create_component", nodeId: "library-badge", componentId: "component-badge", name: "Badge" }
+      ] as any
+    });
+    const secondPublish = await publishingStorage.publishLibraryToRegistry("source-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+
+    await expect(subscriberStorage.listLibraryRegistryEvents({ fileId: "target-file", after: 1 })).resolves.toEqual([
+      expect.objectContaining({
+        sequence: 2,
+        libraryId: "team-kit",
+        componentCount: 2,
+        registryUpdatedAt: secondPublish.updatedAt
+      })
+    ]);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

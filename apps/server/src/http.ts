@@ -48,6 +48,7 @@ const DEFAULT_WEB_DIST_DIR = path.resolve(
 export function createHttpServer(storage = new FileStorage(), options: HttpServerOptions = {}) {
   const server = Fastify({ logger: true });
   const commentEventSubscribers = new Set<CommentEventSubscriber>();
+  const libraryRegistryStreamClosers = new Set<() => void>();
 
   const publishCommentEvent = (event: CommentMutationEvent) => {
     for (const subscriber of [...commentEventSubscribers]) {
@@ -85,6 +86,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.addHook("onClose", async () => {
     for (const subscriber of [...commentEventSubscribers]) {
       subscriber.close();
+    }
+    for (const close of [...libraryRegistryStreamClosers]) {
+      close();
     }
   });
 
@@ -191,6 +195,74 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       })
     };
   });
+
+  server.get<{ Querystring: { fileId?: string; after?: string } }>(
+    "/libraries/events",
+    async (request, reply) => {
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "Access-Control-Allow-Origin": "*",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no"
+      });
+
+      const sendBlock = (eventName: string, payload: unknown) => {
+        if (reply.raw.destroyed) {
+          return;
+        }
+        reply.raw.write(`event: ${eventName}\n`);
+        reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
+      };
+
+      let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
+      let sending = false;
+      const sendPendingEvents = async () => {
+        if (sending || reply.raw.destroyed) {
+          return;
+        }
+        sending = true;
+        try {
+          const events = await storage.listLibraryRegistryEvents({
+            after: lastSequence,
+            fileId: request.query.fileId,
+            limit: 100
+          });
+          for (const event of events) {
+            lastSequence = Math.max(lastSequence, event.sequence);
+            sendBlock("library-registry", event);
+          }
+        } catch (error) {
+          sendBlock("library-registry-error", {
+            message: error instanceof Error ? error.message : "library registry event stream failed"
+          });
+        } finally {
+          sending = false;
+        }
+      };
+
+      const heartbeatId = setInterval(() => {
+        if (!reply.raw.destroyed) {
+          reply.raw.write(": keepalive\n\n");
+        }
+      }, 25_000);
+      const pollId = setInterval(() => {
+        void sendPendingEvents();
+      }, 250);
+
+      const close = () => {
+        clearInterval(heartbeatId);
+        clearInterval(pollId);
+        libraryRegistryStreamClosers.delete(close);
+      };
+
+      libraryRegistryStreamClosers.add(close);
+      sendBlock("ready", { ok: true, lastSequence });
+      void sendPendingEvents();
+      request.raw.on("close", close);
+    }
+  );
 
   server.get("/files", async () => {
     return { files: await storage.listFiles() };

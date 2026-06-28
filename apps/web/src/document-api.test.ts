@@ -34,6 +34,7 @@ import {
   setFileVersionPinned,
   publishLibraryToRegistry,
   subscribeToCommentEvents,
+  subscribeToLibraryRegistryEvents,
   summarizeDocumentChanges,
   updateLibraryRegistryItem,
   updateLibraryRegistryTokens
@@ -280,6 +281,77 @@ describe("parseDocumentPayload", () => {
           viewerId: "사용자",
           createdAt: "2026-06-27T00:00:00.000Z"
         }
+      ]);
+
+      unsubscribe();
+      expect(source.closed).toBe(true);
+    } finally {
+      globalThis.EventSource = originalEventSource;
+    }
+  });
+
+  test("subscribes to live library registry events with EventSource", () => {
+    const originalEventSource = globalThis.EventSource;
+    const createdSources: FakeEventSource[] = [];
+    class FakeEventSource extends EventTarget {
+      closed = false;
+
+      constructor(readonly url: string) {
+        super();
+        createdSources.push(this);
+      }
+
+      close() {
+        this.closed = true;
+      }
+    }
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    try {
+      const events: unknown[] = [];
+      const unsubscribe = subscribeToLibraryRegistryEvents({
+        fileId: "target-file",
+        after: 3,
+        onLibraryRegistryEvent: (event) => events.push(event)
+      });
+
+      expect(createdSources).toHaveLength(1);
+      const source = createdSources[0];
+      const url = new URL(source.url, "http://127.0.0.1:4317");
+      expect(url.pathname).toBe("/libraries/events");
+      expect(url.searchParams.get("fileId")).toBe("target-file");
+      expect(url.searchParams.get("after")).toBe("3");
+
+      source.dispatchEvent(
+        new MessageEvent("library-registry", {
+          data: JSON.stringify({
+            schemaVersion: 1,
+            eventId: "library-registry-4",
+            sequence: 4,
+            type: "published",
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            sourceFileId: "source-file",
+            sourceName: "소스 문서",
+            teamId: "team-alpha",
+            componentCount: 2,
+            tokenCount: 1,
+            tokenSetCount: 0,
+            tokenThemeCount: 0,
+            assetCount: 0,
+            registryUpdatedAt: "2026-06-28T00:00:04.000Z",
+            createdAt: "2026-06-28T00:00:04.000Z"
+          })
+        })
+      );
+      expect(events).toEqual([
+        expect.objectContaining({
+          schemaVersion: 1,
+          sequence: 4,
+          type: "published",
+          libraryId: "team-kit",
+          registryUpdatedAt: "2026-06-28T00:00:04.000Z"
+        })
       ]);
 
       unsubscribe();
