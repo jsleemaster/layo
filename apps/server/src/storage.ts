@@ -25,6 +25,10 @@ import {
   exportDesignTokensToDtcg,
   importDesignTokenDocumentFromDtcg
 } from "./design-token-io.js";
+import {
+  importExternalMigrationArchive as importExternalMigrationDesignArchive,
+  type ExternalMigrationSource
+} from "./external-migration.js";
 import { createZipArchive, readZipArchive, type ZipArchiveEntry } from "./file-archive.js";
 import {
   applyConstraintsAfterParentResize,
@@ -665,6 +669,25 @@ export interface ImportProjectArchiveOptions {
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
+}
+
+export interface ImportExternalMigrationArchiveOptions {
+  projectId?: string;
+  documentId?: string;
+  name?: string;
+  documentName?: string;
+  fileName?: string;
+  sourceHint?: ExternalMigrationSource;
+}
+
+export interface ImportedExternalMigrationArchive {
+  project: ProjectManifest;
+  file: DesignFile;
+  source: ExternalMigrationSource;
+  sourceLabel: string;
+  mappedNodeCount: number;
+  skippedNodeCount: number;
+  warnings: string[];
 }
 
 export interface LibraryArchiveManifest {
@@ -1518,6 +1541,59 @@ export class FileStorage {
         pageCount: document.pages.length,
         nodeCount: countDocumentNodes(document)
       }))
+    };
+  }
+
+  async importExternalMigrationArchive(
+    archive: Buffer,
+    options: ImportExternalMigrationArchiveOptions = {}
+  ): Promise<ImportedExternalMigrationArchive> {
+    const projectId = options.projectId ?? createStorageId("project");
+    const documentId = options.documentId ?? createStorageId("document");
+    assertSafeStorageId(projectId);
+    assertSafeStorageId(documentId);
+    if (await pathExists(this.projectPathFor(projectId))) {
+      throw inputValidationError(`project already exists: ${projectId}`);
+    }
+    if (await pathExists(this.filePathFor(documentId))) {
+      throw inputValidationError(`document already exists: ${documentId}`);
+    }
+
+    const imported = importExternalMigrationDesignArchive(archive, {
+      fileId: documentId,
+      fileName: options.fileName,
+      sourceHint: options.sourceHint,
+      name: options.documentName ?? options.name
+    });
+    const documentName = normalizeName(options.documentName ?? options.name, imported.file.name);
+    const projectName = normalizeName(options.name, documentName);
+    const now = new Date().toISOString();
+    const file: DesignFile = {
+      ...imported.file,
+      id: documentId,
+      name: documentName
+    };
+
+    await this.writeFile(documentId, file);
+    const project = await this.writeProject({
+      schemaVersion: 1,
+      projectId,
+      name: projectName,
+      createdAt: now,
+      updatedAt: now,
+      currentDocumentId: documentId,
+      documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
+      sharing: { mode: "private" }
+    });
+
+    return {
+      project,
+      file,
+      source: imported.source,
+      sourceLabel: imported.sourceLabel,
+      mappedNodeCount: imported.mappedNodeCount,
+      skippedNodeCount: imported.skippedNodeCount,
+      warnings: imported.warnings
     };
   }
 

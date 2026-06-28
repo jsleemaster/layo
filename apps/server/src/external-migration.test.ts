@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
-import { reviewExternalMigrationArchive } from "./external-migration";
+import { importExternalMigrationArchive, reviewExternalMigrationArchive } from "./external-migration";
 
 describe("external design migration preflight", () => {
   test("reviews a Penpot-style ZIP without writing imported files", () => {
@@ -44,7 +44,7 @@ describe("external design migration preflight", () => {
     expect(review.nextSteps.join(" ")).toContain("Penpot");
   });
 
-  test("reviews a Figma REST file JSON and keeps import blocked until mapping exists", () => {
+  test("reviews a Figma REST file JSON as importable when basic node mapping is available", () => {
     const figmaFile = Buffer.from(
       JSON.stringify({
         name: "Figma landing",
@@ -73,15 +73,118 @@ describe("external design migration preflight", () => {
       source: "figma",
       sourceLabel: "Figma",
       archiveKind: "json",
-      canImport: false,
+      canImport: true,
       documentCandidateCount: 1,
-      blockedBy: expect.arrayContaining(["mapping_not_implemented", "figma_images_required"])
+      blockedBy: []
     });
     expect(review.documentCandidates[0]).toMatchObject({
       name: "Figma landing",
       path: "landing.figma.json",
       pageCount: 1,
       nodeCount: 3
+    });
+  });
+
+  test("imports basic Figma REST JSON into a Layo design file", () => {
+    const figmaFile = Buffer.from(
+      JSON.stringify({
+        name: "Figma landing",
+        document: {
+          id: "0:0",
+          name: "Document",
+          type: "DOCUMENT",
+          children: [
+            {
+              id: "1:1",
+              name: "Page 1",
+              type: "CANVAS",
+              children: [
+                {
+                  id: "2:1",
+                  name: "Hero",
+                  type: "FRAME",
+                  absoluteBoundingBox: { x: 100, y: 200, width: 360, height: 240 },
+                  fills: [
+                    { type: "SOLID", visible: true, color: { r: 1, g: 1, b: 1 }, opacity: 1 }
+                  ],
+                  children: [
+                    {
+                      id: "3:1",
+                      name: "CTA background",
+                      type: "RECTANGLE",
+                      absoluteBoundingBox: { x: 120, y: 230, width: 180, height: 56 },
+                      fills: [
+                        { type: "SOLID", visible: true, color: { r: 0.1, g: 0.2, b: 0.3 }, opacity: 1 }
+                      ],
+                      strokes: [{ type: "SOLID", visible: true, color: { r: 0, g: 0, b: 0 } }],
+                      strokeWeight: 2
+                    },
+                    {
+                      id: "4:1",
+                      name: "Headline",
+                      type: "TEXT",
+                      characters: "Imported headline",
+                      absoluteBoundingBox: { x: 144, y: 260, width: 220, height: 32 },
+                      fills: [{ type: "SOLID", visible: true, color: { r: 0, g: 0, b: 0 } }],
+                      style: { fontSize: 18, fontFamily: "Inter" }
+                    },
+                    {
+                      id: "5:1",
+                      name: "Unsupported vector",
+                      type: "LINE",
+                      absoluteBoundingBox: { x: 100, y: 100, width: 20, height: 1 }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }),
+      "utf8"
+    );
+
+    const imported = importExternalMigrationArchive(figmaFile, {
+      fileName: "landing.figma.json",
+      fileId: "figma-imported-file"
+    });
+
+    expect(imported).toMatchObject({
+      source: "figma",
+      sourceLabel: "Figma",
+      mappedNodeCount: 3,
+      skippedNodeCount: 1
+    });
+    expect(imported.warnings.join(" ")).toContain("LINE");
+    expect(imported.file).toMatchObject({
+      id: "figma-imported-file",
+      name: "Figma landing",
+      pages: [{ name: "Page 1" }]
+    });
+    const frame = imported.file.pages[0].children[0];
+    expect(frame).toMatchObject({
+      id: "figma-2-1",
+      kind: "frame",
+      name: "Hero",
+      transform: { x: 100, y: 200, rotation: 0 },
+      size: { width: 360, height: 240 },
+      style: { fill: "#ffffff" }
+    });
+    expect(frame.children[0]).toMatchObject({
+      id: "figma-3-1",
+      kind: "rectangle",
+      name: "CTA background",
+      transform: { x: 20, y: 30, rotation: 0 },
+      size: { width: 180, height: 56 },
+      style: { fill: "#1a334d", stroke: "#000000", stroke_width: 2 }
+    });
+    expect(frame.children[1]).toMatchObject({
+      id: "figma-4-1",
+      kind: "text",
+      name: "Headline",
+      transform: { x: 44, y: 60, rotation: 0 },
+      size: { width: 220, height: 32 },
+      content: { type: "text", value: "Imported headline", font_size: 18, font_family: "Inter" }
     });
   });
 

@@ -1,4 +1,5 @@
 import { readZipArchive } from "./file-archive.js";
+import type { DesignFile, DesignNode } from "./storage.js";
 
 export type ExternalMigrationSource = "penpot" | "figma" | "unknown";
 export type ExternalMigrationArchiveKind = "zip" | "json" | "binary";
@@ -34,7 +35,7 @@ export interface ExternalMigrationReview {
   sourceLabel: string;
   archiveKind: ExternalMigrationArchiveKind;
   fileName?: string;
-  canImport: false;
+  canImport: boolean;
   entryCount: number;
   assetCount: number;
   documentCandidateCount: number;
@@ -46,7 +47,34 @@ export interface ExternalMigrationReview {
   nextSteps: string[];
 }
 
+export interface ExternalMigrationImportOptions extends ExternalMigrationReviewOptions {
+  fileId?: string;
+  name?: string;
+}
+
+export interface ExternalMigrationImportResult {
+  source: ExternalMigrationSource;
+  sourceLabel: string;
+  file: DesignFile;
+  mappedNodeCount: number;
+  skippedNodeCount: number;
+  warnings: string[];
+}
+
 type JsonRecord = Record<string, unknown>;
+
+interface FigmaBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface FigmaMappingState {
+  mappedNodeCount: number;
+  skippedNodeCount: number;
+  warnings: string[];
+}
 
 const JSON_TEXT_EXTENSIONS = new Set([".json"]);
 const ASSET_MEDIA_TYPES = new Map<string, string>([
@@ -77,6 +105,33 @@ export function reviewExternalMigrationArchive(
   }
 
   return reviewBinaryArchive(archive, { fileName, sourceHint });
+}
+
+export function importExternalMigrationArchive(
+  archive: Buffer,
+  options: ExternalMigrationImportOptions = {}
+): ExternalMigrationImportResult {
+  const fileName = safeFileName(options.fileName);
+  const sourceHint = normalizeSourceHint(options.sourceHint);
+  const parsedJson = parseJsonBuffer(archive);
+  if (!parsedJson || !isFigmaJson(parsedJson)) {
+    throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
+  }
+
+  const source = detectSource({
+    fileName,
+    sourceHint,
+    json: parsedJson,
+    documentCandidates: [summarizeJsonDocument(fileName ?? "external-file.json", parsedJson)]
+  });
+  if (source !== "figma") {
+    throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
+  }
+
+  return mapFigmaRestJsonToDesignFile(parsedJson, {
+    fileId: options.fileId,
+    name: options.name ?? stringValue((parsedJson as JsonRecord).name) ?? fileName
+  });
 }
 
 function reviewZipArchive(
@@ -155,6 +210,7 @@ function reviewJsonArchive(
     kind: "document",
     bytes: byteLength
   };
+  const canImport = source === "figma" && isFigmaJson(parsedJson) && documentCandidate.pageCount > 0;
 
   return baseReview({
     source,
@@ -164,7 +220,8 @@ function reviewJsonArchive(
     assetCandidates: [],
     documentCandidates: [documentCandidate],
     warnings: source === "figma" ? ["Figma image fills still require exported image assets from the Images API."] : [],
-    blockedBy: blockedByForSource(source, "json")
+    blockedBy: canImport ? [] : blockedByForSource(source, "json"),
+    canImport
   });
 }
 
@@ -198,6 +255,126 @@ function reviewBinaryArchive(
   });
 }
 
+function mapFigmaRestJsonToDesignFile(
+  value: unknown,
+  options: { fileId?: string; name?: string }
+): ExternalMigrationImportResult {
+  if (!isRecord(value) || !isRecord(value.document)) {
+    throw inputValidationError("Figma REST JSON document root is required.");
+  }
+  const documentNode = value.document;
+  const children = Array.isArray(documentNode.children) ? documentNode.children : [];
+  const state: FigmaMappingState = { mappedNodeCount: 0, skippedNodeCount: 0, warnings: [] };
+  const pages = children
+    .filter((child): child is JsonRecord => isRecord(child) && child.type === "CANVAS")
+    .map((page, index) => ({
+      id: figmaStorageId(page.id, `page-${index + 1}`),
+      name: stringValue(page.name) ?? `Page ${index + 1}`,
+      children: mapFigmaNodeChildren(page, undefined, state)
+    }));
+
+  if (pages.length === 0) {
+    throw inputValidationError("Figma REST JSON does not contain any CANVAS pages.");
+  }
+
+  const fileName = normalizeImportName(
+    options.name,
+    stringValue(value.name) ?? stringValue(documentNode.name) ?? "Imported Figma"
+  );
+  return {
+    source: "figma",
+    sourceLabel: sourceLabel("figma"),
+    file: {
+      id: safeStorageId(options.fileId, "figma-import"),
+      name: fileName,
+      pages
+    },
+    mappedNodeCount: state.mappedNodeCount,
+    skippedNodeCount: state.skippedNodeCount,
+    warnings: state.warnings
+  };
+}
+
+function mapFigmaNodeChildren(
+  parent: JsonRecord,
+  parentBounds: FigmaBounds | undefined,
+  state: FigmaMappingState
+): DesignNode[] {
+  const children = Array.isArray(parent.children) ? parent.children : [];
+  return children.flatMap((child) => {
+    if (!isRecord(child)) {
+      return [];
+    }
+    const mapped = mapFigmaNode(child, parentBounds, state);
+    return mapped ? [mapped] : [];
+  });
+}
+
+function mapFigmaNode(
+  node: JsonRecord,
+  parentBounds: FigmaBounds | undefined,
+  state: FigmaMappingState
+): DesignNode | null {
+  if (node.visible === false) {
+    state.skippedNodeCount += 1;
+    state.warnings.push(`Skipped hidden Figma node ${stringValue(node.name) ?? stringValue(node.id) ?? "unknown"}.`);
+    return null;
+  }
+
+  const type = stringValue(node.type);
+  if (type !== "FRAME" && type !== "RECTANGLE" && type !== "TEXT") {
+    state.skippedNodeCount += 1;
+    state.warnings.push(
+      `Skipped unsupported Figma node type ${type ?? "unknown"} (${stringValue(node.name) ?? "unnamed"}).`
+    );
+    return null;
+  }
+
+  const bounds = boundsForNode(node);
+  const transform = {
+    x: roundGeometry(bounds.x - (parentBounds?.x ?? 0)),
+    y: roundGeometry(bounds.y - (parentBounds?.y ?? 0)),
+    rotation: 0
+  };
+  const fill = solidPaintHex(node.fills) ?? defaultFillForFigmaType(type);
+  const stroke = solidPaintHex(node.strokes);
+  const nodeId = figmaStorageId(node.id, `${type.toLowerCase()}-${state.mappedNodeCount + 1}`);
+  state.mappedNodeCount += 1;
+
+  const mapped: DesignNode = {
+    id: nodeId,
+    kind: type === "FRAME" ? "frame" : type === "TEXT" ? "text" : "rectangle",
+    name: stringValue(node.name) ?? type.toLowerCase(),
+    transform,
+    size: {
+      width: roundGeometry(Math.max(1, bounds.width)),
+      height: roundGeometry(Math.max(1, bounds.height))
+    },
+    style: {
+      fill,
+      stroke,
+      stroke_width: finiteNumber(node.strokeWeight, stroke ? 1 : 0),
+      opacity: finiteNumber(node.opacity, 1)
+    },
+    content:
+      type === "TEXT"
+        ? {
+            type: "text",
+            value: stringValue(node.characters) ?? "",
+            font_size: finiteNumber(isRecord(node.style) ? node.style.fontSize : undefined, 16),
+            font_family: stringValue(isRecord(node.style) ? node.style.fontFamily : undefined) ?? "Inter"
+          }
+        : { type: "empty" },
+    children: []
+  };
+
+  if (type === "FRAME") {
+    mapped.children = mapFigmaNodeChildren(node, bounds, state);
+  }
+
+  return mapped;
+}
+
 function baseReview(input: {
   source: ExternalMigrationSource;
   archiveKind: ExternalMigrationArchiveKind;
@@ -207,6 +384,7 @@ function baseReview(input: {
   documentCandidates: ExternalMigrationDocumentCandidate[];
   blockedBy: string[];
   warnings: string[];
+  canImport?: boolean;
 }): ExternalMigrationReview {
   return {
     schemaVersion: 1,
@@ -214,7 +392,7 @@ function baseReview(input: {
     sourceLabel: sourceLabel(input.source),
     archiveKind: input.archiveKind,
     fileName: input.fileName,
-    canImport: false,
+    canImport: input.canImport ?? false,
     entryCount: input.entries.length,
     assetCount: input.assetCandidates.length,
     documentCandidateCount: input.documentCandidates.length,
@@ -378,6 +556,86 @@ function isFigmaJson(value: unknown): boolean {
     return true;
   }
   return typeof value.version === "string" && isRecord(value.document);
+}
+
+function boundsForNode(node: JsonRecord): FigmaBounds {
+  const absoluteBounds = isRecord(node.absoluteBoundingBox) ? node.absoluteBoundingBox : undefined;
+  const size = isRecord(node.size) ? node.size : undefined;
+  return {
+    x: finiteNumber(absoluteBounds?.x, 0),
+    y: finiteNumber(absoluteBounds?.y, 0),
+    width: finiteNumber(absoluteBounds?.width ?? size?.x, 100),
+    height: finiteNumber(absoluteBounds?.height ?? size?.y, 48)
+  };
+}
+
+function solidPaintHex(value: unknown): string | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const paint = value.find((candidate) => {
+    if (!isRecord(candidate)) {
+      return false;
+    }
+    return candidate.type === "SOLID" && candidate.visible !== false && isRecord(candidate.color);
+  });
+  if (!isRecord(paint) || !isRecord(paint.color)) {
+    return null;
+  }
+  return rgbToHex(paint.color);
+}
+
+function rgbToHex(color: JsonRecord): string {
+  const red = colorChannelToHex(color.r);
+  const green = colorChannelToHex(color.g);
+  const blue = colorChannelToHex(color.b);
+  return `#${red}${green}${blue}`;
+}
+
+function colorChannelToHex(value: unknown): string {
+  return Math.round(Math.min(1, Math.max(0, finiteNumber(value, 0))) * 255)
+    .toString(16)
+    .padStart(2, "0");
+}
+
+function defaultFillForFigmaType(type: string): string {
+  if (type === "TEXT") {
+    return "#111827";
+  }
+  if (type === "FRAME") {
+    return "#ffffff";
+  }
+  return "#e5e7eb";
+}
+
+function figmaStorageId(value: unknown, fallback: string): string {
+  const source = stringValue(value) ?? fallback;
+  return `figma-${source.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function safeStorageId(value: string | undefined, fallback: string): string {
+  const source = value?.trim() || `${fallback}-${Date.now().toString(36)}`;
+  return source.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function normalizeImportName(value: string | undefined, fallback: string): string {
+  return value?.trim() || fallback.trim() || "Imported Figma";
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : fallback;
+}
+
+function roundGeometry(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function inputValidationError(message: string): Error {
+  const error = new Error(message) as Error & { code: string; statusCode: number };
+  error.code = "CANVAS_INPUT_VALIDATION";
+  error.statusCode = 400;
+  return error;
 }
 
 function parseJsonBuffer(data: Buffer): unknown | undefined {

@@ -175,6 +175,87 @@ describe("HTTP server", () => {
     expect(await new FileStorage(tempRoot).listProjects()).toEqual([]);
   });
 
+  test("imports external Figma REST JSON into a fresh project", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    const server = createHttpServer(storage);
+    const figmaFile = Buffer.from(
+      JSON.stringify({
+        name: "Figma landing",
+        document: {
+          id: "0:0",
+          name: "Document",
+          type: "DOCUMENT",
+          children: [
+            {
+              id: "1:1",
+              name: "Page 1",
+              type: "CANVAS",
+              children: [
+                {
+                  id: "2:1",
+                  name: "Hero",
+                  type: "FRAME",
+                  absoluteBoundingBox: { x: 10, y: 20, width: 320, height: 180 },
+                  children: [
+                    {
+                      id: "3:1",
+                      name: "Imported title",
+                      type: "TEXT",
+                      characters: "Hello from Figma",
+                      absoluteBoundingBox: { x: 34, y: 48, width: 180, height: 28 },
+                      style: { fontSize: 20, fontFamily: "Inter" }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }),
+      "utf8"
+    );
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: {
+        archiveBase64: figmaFile.toString("base64"),
+        fileName: "landing.figma.json",
+        name: "Imported Figma"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.imported).toMatchObject({
+      source: "figma",
+      sourceLabel: "Figma",
+      mappedNodeCount: 2,
+      skippedNodeCount: 0,
+      project: {
+        name: "Imported Figma"
+      },
+      file: {
+        name: "Imported Figma",
+        pages: [{ name: "Page 1" }]
+      }
+    });
+    const projects = await storage.listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0]).toMatchObject({
+      projectId: body.imported.project.projectId,
+      currentDocumentId: body.imported.project.currentDocumentId,
+      name: "Imported Figma"
+    });
+    const persisted = await storage.readFile(projects[0].currentDocumentId);
+    expect(persisted.pages[0].children[0].children[0]).toMatchObject({
+      kind: "text",
+      name: "Imported title",
+      content: { type: "text", value: "Hello from Figma" }
+    });
+  });
+
   test("stores and serves image assets", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));

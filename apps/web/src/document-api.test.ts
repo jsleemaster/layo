@@ -6,6 +6,7 @@ import {
   exportCode,
   exportFileArchive,
   exportLibraryArchive,
+  importExternalMigrationArchive,
   importFileArchive,
   importLibraryArchive,
   importLibraryRegistryItem,
@@ -578,6 +579,76 @@ describe("file version API helpers", () => {
     });
     expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
       [expect.stringContaining("/migrations/external/review"), "POST"]
+    ]);
+  });
+
+  test("imports external migration archives through the write route", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/migrations/external/import" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({
+          archiveBase64: "eyJkb2N1bWVudCI6e319",
+          fileName: "landing.figma.json",
+          sourceHint: "figma",
+          name: "Figma landing"
+        });
+        return jsonResponse({
+          imported: {
+            source: "figma",
+            sourceLabel: "Figma",
+            mappedNodeCount: 2,
+            skippedNodeCount: 0,
+            warnings: [],
+            project: {
+              schemaVersion: 1,
+              projectId: "project-figma",
+              name: "Figma landing",
+              createdAt: "2026-06-28T00:00:00.000Z",
+              updatedAt: "2026-06-28T00:00:00.000Z",
+              currentDocumentId: "document-figma",
+              documents: [
+                {
+                  documentId: "document-figma",
+                  name: "Figma landing",
+                  createdAt: "2026-06-28T00:00:00.000Z",
+                  updatedAt: "2026-06-28T00:00:00.000Z"
+                }
+              ],
+              sharing: { mode: "private" }
+            },
+            file: {
+              id: "document-figma",
+              name: "Figma landing",
+              pages: [{ id: "figma-1-1", name: "Page 1", children: [] }]
+            }
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(
+      importExternalMigrationArchive(
+        {
+          archiveBase64: "eyJkb2N1bWVudCI6e319",
+          fileName: "landing.figma.json",
+          sourceHint: "figma",
+          name: "Figma landing"
+        },
+        fetcher as typeof fetch
+      )
+    ).resolves.toMatchObject({
+      source: "figma",
+      project: { projectId: "project-figma", name: "Figma landing" },
+      file: { id: "document-figma", name: "Figma landing" }
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/migrations/external/import"), "POST"]
     ]);
   });
 

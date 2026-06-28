@@ -2753,6 +2753,13 @@ button:disabled {
   line-height: var(--editor-text-small-line);
 }
 
+.file-archive-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--editor-space-xxs);
+}
+
 .file-version-preview button,
 .file-archive-review button,
 .library-registry-panel button {

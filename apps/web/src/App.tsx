@@ -49,6 +49,7 @@ import {
   exportFileArchive,
   exportLibraryArchive,
   exportDesignTokensDtcg,
+  importExternalMigrationArchive,
   importFileArchive,
   importLibraryArchive,
   importLibraryRegistryItem,
@@ -835,6 +836,7 @@ interface FileArchiveReviewState {
 
 interface ExternalMigrationReviewState {
   review: ExternalMigrationReview;
+  archiveBase64: string;
   sourceFileName: string;
 }
 
@@ -11151,6 +11153,7 @@ export function App() {
       const review = await reviewExternalMigrationArchive(archiveBase64, { fileName: file.name });
       setExternalMigrationReview({
         review,
+        archiveBase64,
         sourceFileName: file.name
       });
       setExternalMigrationStatus(`외부 디자인 검토됨 · ${review.sourceLabel}`);
@@ -11166,6 +11169,40 @@ export function App() {
   const cancelExternalMigrationReview = () => {
     setExternalMigrationReview(null);
     setExternalMigrationStatus("외부 디자인 검토 취소됨");
+  };
+
+  const importReviewedExternalMigration = async () => {
+    if (!externalMigrationReview) {
+      setExternalMigrationStatus("검토된 외부 디자인 없음");
+      return;
+    }
+    if (!externalMigrationReview.review.canImport) {
+      setExternalMigrationStatus("아직 가져올 수 없는 외부 디자인입니다");
+      return;
+    }
+
+    const importName = externalMigrationReview.review.documentCandidates[0]?.name || "가져온 외부 디자인";
+    try {
+      setExternalMigrationStatus("외부 디자인 가져오는 중");
+      const imported = await importExternalMigrationArchive({
+        archiveBase64: externalMigrationReview.archiveBase64,
+        fileName: externalMigrationReview.sourceFileName,
+        sourceHint: externalMigrationReview.review.source,
+        name: importName
+      });
+      const nextProjects = [
+        imported.project,
+        ...projects.filter((candidate) => candidate.projectId !== imported.project.projectId)
+      ];
+      await loadProjectDocument(imported.project, nextProjects);
+      setExternalMigrationReview(null);
+      setExternalMigrationStatus(`${imported.project.name} 가져옴 · ${imported.sourceLabel}`);
+      setProjectStatus(`${imported.project.name} 가져옴`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "외부 디자인을 가져오지 못했습니다";
+      setExternalMigrationStatus(message);
+      setProjectStatus(message);
+    }
   };
 
   const importReviewedFileArchive = async () => {
@@ -12953,23 +12990,33 @@ export function App() {
                     <div className="file-archive-review" data-testid="external-migration-review">
                       <div className="file-archive-review-header">
                         <span>
-                          <strong>쓰기 없음 외부 디자인 검토</strong>
+                          <strong>외부 디자인 검토</strong>
                           <span>
                             {externalMigrationReview.review.sourceLabel} · {externalMigrationReview.sourceFileName}
                           </span>
                         </span>
-                        <button type="button" onClick={cancelExternalMigrationReview}>
-                          검토 취소
-                        </button>
+                        <span className="file-archive-review-actions">
+                          {externalMigrationReview.review.canImport ? (
+                            <button type="button" onClick={() => void importReviewedExternalMigration()}>
+                              외부 디자인 가져오기
+                            </button>
+                          ) : null}
+                          <button type="button" onClick={cancelExternalMigrationReview}>
+                            검토 취소
+                          </button>
+                        </span>
                       </div>
                       <div className="file-archive-review-body">
+                        <span>{externalMigrationReview.review.canImport ? "가져오기 가능" : "가져오기 차단"}</span>
                         <span>
                           {externalMigrationReview.review.archiveKind.toUpperCase()} · 항목{" "}
                           {externalMigrationReview.review.entryCount}개 · 문서 후보{" "}
                           {externalMigrationReview.review.documentCandidateCount}개 · 에셋{" "}
                           {externalMigrationReview.review.assetCount}개
                         </span>
-                        <span>차단: {externalMigrationReview.review.blockedBy.join(", ")}</span>
+                        {externalMigrationReview.review.blockedBy.length > 0 ? (
+                          <span>차단: {externalMigrationReview.review.blockedBy.join(", ")}</span>
+                        ) : null}
                         {externalMigrationReview.review.documentCandidates.slice(0, 4).map((candidate) => (
                           <span key={candidate.path}>
                             {candidate.name} · 페이지 {candidate.pageCount}개 · 객체 {candidate.nodeCount}개

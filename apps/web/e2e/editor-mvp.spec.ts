@@ -316,7 +316,7 @@ test("file panel exports a Layo archive and reviews it before import", async ({ 
   await expect(page.getByTestId("project-name")).toHaveValue("아카이브 복원본");
 });
 
-test("file panel reviews an external migration file without importing it", async ({ page }, testInfo) => {
+test("file panel reviews and imports an external Figma JSON file", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const figmaJsonPath = testInfo.outputPath("landing.figma.json");
   await writeFile(
@@ -332,7 +332,32 @@ test("file panel reviews an external migration file without importing it", async
             id: "1:1",
             name: "Page 1",
             type: "CANVAS",
-            children: [{ id: "2:1", name: "Hero", type: "FRAME", children: [] }]
+            children: [
+              {
+                id: "2:1",
+                name: "Hero",
+                type: "FRAME",
+                absoluteBoundingBox: { x: 80, y: 96, width: 320, height: 180 },
+                fills: [{ type: "SOLID", visible: true, color: { r: 1, g: 1, b: 1 } }],
+                children: [
+                  {
+                    id: "3:1",
+                    name: "Imported card",
+                    type: "RECTANGLE",
+                    absoluteBoundingBox: { x: 104, y: 122, width: 180, height: 56 },
+                    fills: [{ type: "SOLID", visible: true, color: { r: 0.1, g: 0.2, b: 0.3 } }]
+                  },
+                  {
+                    id: "4:1",
+                    name: "Imported headline",
+                    type: "TEXT",
+                    characters: "Hello from Figma",
+                    absoluteBoundingBox: { x: 112, y: 138, width: 160, height: 24 },
+                    style: { fontSize: 18, fontFamily: "Inter" }
+                  }
+                ]
+              }
+            ]
           }
         ]
       }
@@ -342,11 +367,30 @@ test("file panel reviews an external migration file without importing it", async
   await page.getByTestId("external-migration-upload").setInputFiles(figmaJsonPath);
   const review = page.getByTestId("external-migration-review");
   await expect(review).toContainText("Figma");
-  await expect(review).toContainText("쓰기 없음");
+  await expect(review).toContainText("가져오기 가능");
   await expect(review).toContainText("문서 후보 1개");
-  await expect(review).toContainText("mapping_not_implemented");
   await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
-  await expect(page.getByRole("button", { name: "외부 디자인 가져오기" })).toHaveCount(0);
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("external-migration-status")).toContainText("Figma landing 가져옴");
+  await expect(page.getByTestId("project-status")).toContainText("Figma landing 가져옴");
+  await expect(page.getByTestId("project-name")).toHaveValue("Figma landing");
+  await expect(page.getByTestId("layer-panel")).toContainText("Imported headline");
+
+  const importedProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const projectPayload = await projectResponse.json();
+  const fileResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}`
+  );
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const frame = filePayload.file.pages[0].children[0];
+  expect(frame).toMatchObject({ name: "Hero", kind: "frame" });
+  expect(frame.children.map((node: { name: string }) => node.name)).toEqual([
+    "Imported card",
+    "Imported headline"
+  ]);
 });
 
 test("file panel exports a shared library archive and imports reusable components and tokens", async ({ page }) => {

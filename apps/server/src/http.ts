@@ -69,6 +69,29 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
+  server.post<{
+    Body: {
+      archiveBase64: string;
+      fileName?: string;
+      sourceHint?: ExternalMigrationSource;
+      projectId?: string;
+      documentId?: string;
+      name?: string;
+      documentName?: string;
+    };
+  }>("/migrations/external/import", async (request) => {
+    return {
+      imported: await storage.importExternalMigrationArchive(Buffer.from(request.body.archiveBase64, "base64"), {
+        fileName: request.body.fileName,
+        sourceHint: request.body.sourceHint,
+        projectId: request.body.projectId,
+        documentId: request.body.documentId,
+        name: request.body.name,
+        documentName: request.body.documentName
+      })
+    };
+  });
+
   server.addHook("onClose", async () => {
     for (const close of [...commentEventStreamClosers]) {
       close();

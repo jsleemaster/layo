@@ -1,5 +1,6 @@
 import type { DesignToken, DesignTokenSet, DesignTokenTheme, RendererDocument } from "@layo/renderer";
 import { apiUrl } from "./api-base";
+import type { ProjectManifest } from "./project-api";
 
 export interface FileVersionSummary {
   schemaVersion: 1;
@@ -197,7 +198,7 @@ export interface ExternalMigrationReview {
   sourceLabel: string;
   archiveKind: ExternalMigrationArchiveKind;
   fileName?: string;
-  canImport: false;
+  canImport: boolean;
   entryCount: number;
   assetCount: number;
   documentCandidateCount: number;
@@ -212,6 +213,26 @@ export interface ExternalMigrationReview {
 export interface ReviewExternalMigrationArchiveOptions {
   fileName?: string;
   sourceHint?: ExternalMigrationSource;
+}
+
+export interface ImportExternalMigrationArchiveInput {
+  archiveBase64: string;
+  fileName?: string;
+  sourceHint?: ExternalMigrationSource;
+  projectId?: string;
+  documentId?: string;
+  name?: string;
+  documentName?: string;
+}
+
+export interface ImportedExternalMigrationArchive {
+  project: ProjectManifest;
+  file: RendererDocument;
+  source: ExternalMigrationSource;
+  sourceLabel: string;
+  mappedNodeCount: number;
+  skippedNodeCount: number;
+  warnings: string[];
 }
 
 export interface ImportedFileArchive {
@@ -571,6 +592,19 @@ export async function reviewExternalMigrationArchive(
   });
   const payload = await readDocumentJson(response);
   return (payload as { review: ExternalMigrationReview }).review;
+}
+
+export async function importExternalMigrationArchive(
+  input: ImportExternalMigrationArchiveInput,
+  fetcher: typeof fetch = fetch
+): Promise<ImportedExternalMigrationArchive> {
+  const response = await fetcher(apiUrl("/migrations/external/import"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { imported: ImportedExternalMigrationArchive }).imported;
 }
 
 export async function importFileArchive(
