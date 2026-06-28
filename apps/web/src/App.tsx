@@ -68,6 +68,7 @@ import {
   restoreFileVersion,
   resolveCommentThread,
   pruneFileVersions,
+  reviewExternalMigrationArchive,
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
@@ -86,6 +87,7 @@ import {
   type CommentThread,
   type CodeExportPayload,
   type CodeStructureNode,
+  type ExternalMigrationReview,
   type FileArchiveReview,
   type FileVersionChangeSummary,
   type FileVersionSummary,
@@ -828,6 +830,11 @@ interface FileVersionPreviewState {
 interface FileArchiveReviewState {
   review: FileArchiveReview;
   archiveBase64: string;
+  sourceFileName: string;
+}
+
+interface ExternalMigrationReviewState {
+  review: ExternalMigrationReview;
   sourceFileName: string;
 }
 
@@ -7525,6 +7532,8 @@ export function App() {
   const [fileArchiveReview, setFileArchiveReview] = useState<FileArchiveReviewState | null>(null);
   const [fileArchiveImportName, setFileArchiveImportName] = useState("");
   const [fileArchiveStatus, setFileArchiveStatus] = useState("아카이브 대기 중");
+  const [externalMigrationReview, setExternalMigrationReview] = useState<ExternalMigrationReviewState | null>(null);
+  const [externalMigrationStatus, setExternalMigrationStatus] = useState("외부 디자인 검토 대기 중");
   const [libraryArchiveReview, setLibraryArchiveReview] = useState<LibraryArchiveReviewState | null>(null);
   const [libraryArchivePrefix, setLibraryArchivePrefix] = useState("shared");
   const [libraryArchiveStatus, setLibraryArchiveStatus] = useState("라이브러리 아카이브 대기 중");
@@ -7604,6 +7613,7 @@ export function App() {
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
   const manifestFileInputRef = useRef<HTMLInputElement | null>(null);
   const fileArchiveInputRef = useRef<HTMLInputElement | null>(null);
+  const externalMigrationInputRef = useRef<HTMLInputElement | null>(null);
   const libraryArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const projectArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -11128,6 +11138,36 @@ export function App() {
     setFileArchiveStatus("아카이브 가져오기 취소됨");
   };
 
+  const reviewSelectedExternalMigration = async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      setExternalMigrationStatus("외부 디자인 검토 중");
+      const archiveBase64 = await readFileAsBase64(file);
+      const review = await reviewExternalMigrationArchive(archiveBase64, { fileName: file.name });
+      setExternalMigrationReview({
+        review,
+        sourceFileName: file.name
+      });
+      setExternalMigrationStatus(`외부 디자인 검토됨 · ${review.sourceLabel}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "외부 디자인 파일을 검토하지 못했습니다";
+      setExternalMigrationReview(null);
+      setExternalMigrationStatus(message);
+    } finally {
+      input.value = "";
+    }
+  };
+
+  const cancelExternalMigrationReview = () => {
+    setExternalMigrationReview(null);
+    setExternalMigrationStatus("외부 디자인 검토 취소됨");
+  };
+
   const importReviewedFileArchive = async () => {
     if (!fileArchiveReview) {
       setFileArchiveStatus("검토된 아카이브 없음");
@@ -12882,6 +12922,71 @@ export function App() {
                       >
                         검토한 아카이브 가져오기
                       </button>
+                    </div>
+                  ) : null}
+                </section>
+                <section
+                  className="file-archive-panel"
+                  data-testid="external-migration-panel"
+                  aria-label="외부 디자인 마이그레이션"
+                >
+                  <div className="file-archive-heading">
+                    <strong>외부 디자인 마이그레이션</strong>
+                  </div>
+                  <div className="project-actions file-archive-actions">
+                    <button type="button" onClick={() => externalMigrationInputRef.current?.click()}>
+                      Penpot/Figma 파일 검토
+                    </button>
+                  </div>
+                  <input
+                    ref={externalMigrationInputRef}
+                    className="visually-hidden"
+                    data-testid="external-migration-upload"
+                    type="file"
+                    accept=".penpot,.fig,.figma,.json,.zip,application/json,application/zip"
+                    onChange={(event) => void reviewSelectedExternalMigration(event)}
+                  />
+                  <div className="project-status" data-testid="external-migration-status">
+                    {externalMigrationStatus}
+                  </div>
+                  {externalMigrationReview ? (
+                    <div className="file-archive-review" data-testid="external-migration-review">
+                      <div className="file-archive-review-header">
+                        <span>
+                          <strong>쓰기 없음 외부 디자인 검토</strong>
+                          <span>
+                            {externalMigrationReview.review.sourceLabel} · {externalMigrationReview.sourceFileName}
+                          </span>
+                        </span>
+                        <button type="button" onClick={cancelExternalMigrationReview}>
+                          검토 취소
+                        </button>
+                      </div>
+                      <div className="file-archive-review-body">
+                        <span>
+                          {externalMigrationReview.review.archiveKind.toUpperCase()} · 항목{" "}
+                          {externalMigrationReview.review.entryCount}개 · 문서 후보{" "}
+                          {externalMigrationReview.review.documentCandidateCount}개 · 에셋{" "}
+                          {externalMigrationReview.review.assetCount}개
+                        </span>
+                        <span>차단: {externalMigrationReview.review.blockedBy.join(", ")}</span>
+                        {externalMigrationReview.review.documentCandidates.slice(0, 4).map((candidate) => (
+                          <span key={candidate.path}>
+                            {candidate.name} · 페이지 {candidate.pageCount}개 · 객체 {candidate.nodeCount}개
+                          </span>
+                        ))}
+                        {externalMigrationReview.review.assetCandidates.slice(0, 4).map((asset) => (
+                          <span key={asset.path}>
+                            {asset.path} · {asset.mediaType} · {asset.bytes} bytes
+                          </span>
+                        ))}
+                        {externalMigrationReview.review.warnings.map((warning) => (
+                          <span key={warning}>경고: {warning}</span>
+                        ))}
+                        {externalMigrationReview.review.nextSteps.map((step) => (
+                          <span key={step}>다음: {step}</span>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                 </section>

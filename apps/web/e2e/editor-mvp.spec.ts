@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 
 test.beforeEach(async () => {
   await rm(".layo", { recursive: true, force: true });
@@ -314,6 +314,39 @@ test("file panel exports a Layo archive and reviews it before import", async ({ 
   await page.getByRole("button", { name: "검토한 아카이브 가져오기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("아카이브 복원본 가져옴");
   await expect(page.getByTestId("project-name")).toHaveValue("아카이브 복원본");
+});
+
+test("file panel reviews an external migration file without importing it", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const figmaJsonPath = testInfo.outputPath("landing.figma.json");
+  await writeFile(
+    figmaJsonPath,
+    JSON.stringify({
+      name: "Figma landing",
+      document: {
+        id: "0:0",
+        name: "Document",
+        type: "DOCUMENT",
+        children: [
+          {
+            id: "1:1",
+            name: "Page 1",
+            type: "CANVAS",
+            children: [{ id: "2:1", name: "Hero", type: "FRAME", children: [] }]
+          }
+        ]
+      }
+    })
+  );
+
+  await page.getByTestId("external-migration-upload").setInputFiles(figmaJsonPath);
+  const review = page.getByTestId("external-migration-review");
+  await expect(review).toContainText("Figma");
+  await expect(review).toContainText("쓰기 없음");
+  await expect(review).toContainText("문서 후보 1개");
+  await expect(review).toContainText("mapping_not_implemented");
+  await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
+  await expect(page.getByRole("button", { name: "외부 디자인 가져오기" })).toHaveCount(0);
 });
 
 test("file panel exports a shared library archive and imports reusable components and tokens", async ({ page }) => {

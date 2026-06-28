@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { createZipArchive } from "./file-archive";
 import { createHttpServer } from "./http";
 import { FileStorage } from "./storage";
 
@@ -145,6 +146,33 @@ describe("HTTP server", () => {
     expect(response.headers["access-control-allow-origin"]).toBe("*");
     expect(response.headers["access-control-allow-methods"]).toContain("POST");
     expect(response.headers["access-control-allow-headers"]).toContain("Content-Type");
+  });
+
+  test("reviews external Penpot migration payloads without importing", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const server = createHttpServer(new FileStorage(tempRoot));
+    const penpotArchive = createZipArchive([
+      { path: "manifest.json", data: Buffer.from('{"source":"penpot"}', "utf8") },
+      { path: "files/home.json", data: Buffer.from('{"name":"Home","pages":[{"id":"page-1"}]}', "utf8") }
+    ]);
+
+    const review = await server.inject({
+      method: "POST",
+      url: "/migrations/external/review",
+      payload: {
+        archiveBase64: penpotArchive.toString("base64"),
+        fileName: "handoff.penpot"
+      }
+    });
+
+    expect(review.statusCode).toBe(200);
+    expect(review.json().review).toMatchObject({
+      source: "penpot",
+      archiveKind: "zip",
+      canImport: false,
+      blockedBy: expect.arrayContaining(["mapping_not_implemented"])
+    });
+    expect(await new FileStorage(tempRoot).listProjects()).toEqual([]);
   });
 
   test("stores and serves image assets", async () => {

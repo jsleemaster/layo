@@ -1,3 +1,5 @@
+import { inflateRawSync } from "node:zlib";
+
 export interface ZipArchiveEntry {
   path: string;
   data: Buffer;
@@ -7,11 +9,13 @@ const LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
 const CENTRAL_DIRECTORY_HEADER_SIGNATURE = 0x02014b50;
 const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
 const ZIP_STORE_METHOD = 0;
+const ZIP_DEFLATE_METHOD = 8;
 const ZIP_VERSION_NEEDED = 20;
 const MAX_UINT32 = 0xffffffff;
 
 interface CentralDirectoryRecord {
   path: string;
+  compressionMethod: number;
   crc32: number;
   compressedSize: number;
   uncompressedSize: number;
@@ -50,6 +54,7 @@ export function createZipArchive(entries: ZipArchiveEntry[]): Buffer {
     localParts.push(header, fileName, entry.data);
     centralRecords.push({
       path: safePath,
+      compressionMethod: ZIP_STORE_METHOD,
       crc32: crc,
       compressedSize: entry.data.length,
       uncompressedSize: entry.data.length,
@@ -122,7 +127,7 @@ export function readZipArchive(archive: Buffer): Map<string, Buffer> {
     }
 
     const compressionMethod = archive.readUInt16LE(cursor + 10);
-    if (compressionMethod !== ZIP_STORE_METHOD) {
+    if (compressionMethod !== ZIP_STORE_METHOD && compressionMethod !== ZIP_DEFLATE_METHOD) {
       throw new Error("unsupported compressed archive entry");
     }
     const expectedCrc = archive.readUInt32LE(cursor + 16);
@@ -136,7 +141,7 @@ export function readZipArchive(archive: Buffer): Map<string, Buffer> {
     const pathEnd = pathStart + fileNameLength;
     const safePath = normalizeArchivePath(archive.subarray(pathStart, pathEnd).toString("utf8"));
 
-    if (compressedSize !== uncompressedSize) {
+    if (compressionMethod === ZIP_STORE_METHOD && compressedSize !== uncompressedSize) {
       throw new Error("invalid stored archive entry size");
     }
     if (entries.has(safePath)) {
@@ -145,6 +150,7 @@ export function readZipArchive(archive: Buffer): Map<string, Buffer> {
 
     const data = readStoredEntryData(archive, {
       path: safePath,
+      compressionMethod,
       compressedSize,
       uncompressedSize,
       localHeaderOffset,
@@ -167,7 +173,10 @@ function readStoredEntryData(archive: Buffer, record: CentralDirectoryRecord): B
     throw new Error("invalid archive local entry");
   }
   const compressionMethod = archive.readUInt16LE(cursor + 8);
-  if (compressionMethod !== ZIP_STORE_METHOD) {
+  if (compressionMethod !== record.compressionMethod) {
+    throw new Error("archive entry compression method mismatch");
+  }
+  if (compressionMethod !== ZIP_STORE_METHOD && compressionMethod !== ZIP_DEFLATE_METHOD) {
     throw new Error("unsupported compressed archive entry");
   }
   const fileNameLength = archive.readUInt16LE(cursor + 26);
@@ -177,7 +186,11 @@ function readStoredEntryData(archive: Buffer, record: CentralDirectoryRecord): B
   if (dataEnd > archive.length) {
     throw new Error("archive entry data exceeds archive size");
   }
-  const data = archive.subarray(dataStart, dataEnd);
+  const compressedData = archive.subarray(dataStart, dataEnd);
+  const data = compressionMethod === ZIP_DEFLATE_METHOD ? inflateRawSync(compressedData) : Buffer.from(compressedData);
+  if (data.length !== record.uncompressedSize) {
+    throw new Error(`archive entry size mismatch: ${record.path}`);
+  }
   if (crc32(data) !== record.crc32) {
     throw new Error(`archive entry checksum mismatch: ${record.path}`);
   }
