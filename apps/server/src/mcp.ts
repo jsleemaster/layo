@@ -854,6 +854,33 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "review_library_registry_tokens",
+    {
+      description:
+        "Preview token, token set, and token theme replacement before importing a shared registry library token bundle into a target document.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Target design file id returned by list_files"),
+        libraryId: z.string().describe("Shared library id returned by list_library_registry")
+      }
+    },
+    async ({ fileId, libraryId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              review: await storage.reviewLibraryRegistryTokens(fileId, libraryId)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "import_library_registry_item",
     {
       description:
@@ -875,6 +902,33 @@ export function createMcpServer(storage = new FileStorage()) {
           text: JSON.stringify(
             {
               imported: await storage.importLibraryRegistryItem(fileId, libraryId, { idPrefix })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "import_library_registry_tokens",
+    {
+      description:
+        "Replace a target document's tokens, token sets, and token themes with the token bundle from a shared registry library.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Target design file id returned by list_files"),
+        libraryId: z.string().describe("Shared library id returned by list_library_registry")
+      }
+    },
+    async ({ fileId, libraryId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              imported: await storage.importLibraryRegistryTokens(fileId, libraryId)
             },
             null,
             2

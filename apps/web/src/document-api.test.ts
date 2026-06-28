@@ -9,6 +9,7 @@ import {
   importFileArchive,
   importLibraryArchive,
   importLibraryRegistryItem,
+  importLibraryRegistryTokens,
   listLibraryRegistry,
   listLibraryRegistrySubscriptions,
   listLibraryRegistryUpdates,
@@ -26,6 +27,7 @@ import {
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
+  reviewLibraryRegistryTokens,
   saveFileVersion,
   setFileVersionPinned,
   publishLibraryToRegistry,
@@ -641,6 +643,84 @@ describe("file version API helpers", () => {
       [expect.stringContaining("/files/target-file/libraries/subscriptions"), "GET"],
       [expect.stringContaining("/files/target-file/libraries/updates"), "GET"],
       [expect.stringContaining("/files/target-file/import/library/registry/update"), "POST"]
+    ]);
+  });
+
+  test("reviews and imports registry library token bundles", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/files/target-file/import/library/registry/tokens/review" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
+        return jsonResponse({
+          review: {
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            originalFileId: "document-1",
+            originalName: "Source",
+            tokenCount: 3,
+            tokenSetCount: 3,
+            tokenThemeCount: 1,
+            replacesTokenCount: 1,
+            replacesTokenSetCount: 1,
+            replacesTokenThemeCount: 1,
+            tokens: [
+              { id: "color-base-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+            ],
+            tokenSets: [{ id: "base", name: "base", enabled: true }],
+            tokenThemes: [
+              {
+                id: "theme-brand",
+                name: "Brand Theme",
+                group: "mode",
+                enabled: true,
+                token_set_ids: ["base"]
+              }
+            ]
+          }
+        });
+      }
+
+      if (pathname === "/files/target-file/import/library/registry/tokens" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
+        return jsonResponse({
+          imported: {
+            fileId: "target-file",
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            originalFileId: "document-1",
+            originalName: "Source",
+            tokenCount: 3,
+            tokenSetCount: 3,
+            tokenThemeCount: 1,
+            replacedTokenCount: 1,
+            replacedTokenSetCount: 1,
+            replacedTokenThemeCount: 1
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(reviewLibraryRegistryTokens("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
+      libraryId: "team-kit",
+      tokenSetCount: 3,
+      tokenThemeCount: 1,
+      replacesTokenThemeCount: 1
+    });
+    await expect(importLibraryRegistryTokens("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
+      libraryId: "team-kit",
+      tokenCount: 3,
+      replacedTokenSetCount: 1
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/files/target-file/import/library/registry/tokens/review"), "POST"],
+      [expect.stringContaining("/files/target-file/import/library/registry/tokens"), "POST"]
     ]);
   });
 

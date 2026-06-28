@@ -655,6 +655,8 @@ export interface LibraryArchiveManifest {
   name: string;
   componentCount: number;
   tokenCount: number;
+  tokenSetCount?: number;
+  tokenThemeCount?: number;
   assetCount: number;
 }
 
@@ -663,6 +665,8 @@ export interface ExportedLibraryArchive {
   name: string;
   componentCount: number;
   tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
   assetCount: number;
   mimeType: typeof LIBRARY_ARCHIVE_MIME_TYPE;
   fileName: string;
@@ -675,6 +679,8 @@ export interface ReviewedLibraryArchive {
   originalName: string;
   componentCount: number;
   tokenCount: number;
+  tokenSetCount?: number;
+  tokenThemeCount?: number;
   assetCount: number;
   components: Array<{ originalComponentId: string; name: string; nodeCount: number; conflict: boolean }>;
   tokens: Array<{
@@ -692,6 +698,8 @@ export interface ImportedLibraryArchive {
   originalName: string;
   componentCount: number;
   tokenCount: number;
+  tokenSetCount?: number;
+  tokenThemeCount?: number;
   assetCount: number;
   componentIdMap: Record<string, string>;
   tokenIdMap: Record<string, string>;
@@ -755,6 +763,36 @@ export interface ReviewedLibraryRegistryItem extends ReviewedLibraryArchive {
 export interface ImportedLibraryRegistryItem extends ImportedLibraryArchive {
   libraryId: string;
   libraryName: string;
+}
+
+export interface ReviewedLibraryRegistryTokens {
+  libraryId: string;
+  libraryName: string;
+  originalFileId: string;
+  originalName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  replacesTokenCount: number;
+  replacesTokenSetCount: number;
+  replacesTokenThemeCount: number;
+  tokens: DesignToken[];
+  tokenSets: DesignTokenSet[];
+  tokenThemes: DesignTokenTheme[];
+}
+
+export interface ImportedLibraryRegistryTokens {
+  fileId: string;
+  libraryId: string;
+  libraryName: string;
+  originalFileId: string;
+  originalName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  replacedTokenCount: number;
+  replacedTokenSetCount: number;
+  replacedTokenThemeCount: number;
 }
 
 export class FileStorage {
@@ -1450,6 +1488,8 @@ export class FileStorage {
   async exportLibraryArchive(fileId: string): Promise<ExportedLibraryArchive> {
     const document = await this.readFile(fileId);
     const tokens = document.tokens ?? [];
+    const tokenSets = document.token_sets ?? [];
+    const tokenThemes = document.token_themes ?? [];
     const components = document.components ?? [];
     const assetIds = collectComponentImageAssetIds(components);
     const assets = await Promise.all(assetIds.map((assetId) => this.readAsset(assetId)));
@@ -1461,12 +1501,16 @@ export class FileStorage {
       name: document.name,
       componentCount: components.length,
       tokenCount: tokens.length,
+      tokenSetCount: tokenSets.length,
+      tokenThemeCount: tokenThemes.length,
       assetCount: assets.length
     };
     const library: LibraryArchivePayloadFile = {
       fileId: document.id,
       name: document.name,
       tokens,
+      token_sets: tokenSets,
+      token_themes: tokenThemes,
       components
     };
     const entries: ZipArchiveEntry[] = [
@@ -1492,6 +1536,8 @@ export class FileStorage {
       name: document.name,
       componentCount: components.length,
       tokenCount: tokens.length,
+      tokenSetCount: tokenSets.length,
+      tokenThemeCount: tokenThemes.length,
       assetCount: assets.length,
       mimeType: LIBRARY_ARCHIVE_MIME_TYPE,
       fileName: `${document.id}.layo-library.zip`,
@@ -1522,6 +1568,8 @@ export class FileStorage {
       originalName: library.manifest.name,
       componentCount: library.library.components.length,
       tokenCount: library.library.tokens.length,
+      tokenSetCount: library.library.token_sets.length,
+      tokenThemeCount: library.library.token_themes.length,
       assetCount: library.assetIds.length,
       components: componentConflicts,
       tokens: tokenConflicts
@@ -1571,6 +1619,8 @@ export class FileStorage {
       originalName: library.manifest.name,
       componentCount: importedComponents.length,
       tokenCount: library.library.tokens.length,
+      tokenSetCount: library.library.token_sets.length,
+      tokenThemeCount: library.library.token_themes.length,
       assetCount: library.assetIds.length,
       componentIdMap,
       tokenIdMap
@@ -1672,6 +1722,61 @@ export class FileStorage {
     };
     await this.upsertLibraryRegistrySubscription(fileId, entry, registryImport, options.idPrefix);
     return registryImport;
+  }
+
+  async reviewLibraryRegistryTokens(
+    fileId: string,
+    libraryId: string
+  ): Promise<ReviewedLibraryRegistryTokens> {
+    const target = await this.readFile(fileId);
+    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    return {
+      libraryId: entry.libraryId,
+      libraryName: entry.name,
+      originalFileId: library.manifest.fileId,
+      originalName: library.manifest.name,
+      tokenCount: library.library.tokens.length,
+      tokenSetCount: library.library.token_sets.length,
+      tokenThemeCount: library.library.token_themes.length,
+      replacesTokenCount: (target.tokens ?? []).length,
+      replacesTokenSetCount: (target.token_sets ?? []).length,
+      replacesTokenThemeCount: (target.token_themes ?? []).length,
+      tokens: structuredClone(library.library.tokens),
+      tokenSets: structuredClone(library.library.token_sets),
+      tokenThemes: structuredClone(library.library.token_themes)
+    };
+  }
+
+  async importLibraryRegistryTokens(
+    fileId: string,
+    libraryId: string
+  ): Promise<ImportedLibraryRegistryTokens> {
+    const target = await this.readFile(fileId);
+    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const replacedTokenCount = (target.tokens ?? []).length;
+    const replacedTokenSetCount = (target.token_sets ?? []).length;
+    const replacedTokenThemeCount = (target.token_themes ?? []).length;
+
+    target.tokens = structuredClone(library.library.tokens);
+    target.token_sets = structuredClone(library.library.token_sets);
+    target.token_themes = structuredClone(library.library.token_themes);
+    await this.writeFile(fileId, target);
+
+    return {
+      fileId,
+      libraryId: entry.libraryId,
+      libraryName: entry.name,
+      originalFileId: library.manifest.fileId,
+      originalName: library.manifest.name,
+      tokenCount: library.library.tokens.length,
+      tokenSetCount: library.library.token_sets.length,
+      tokenThemeCount: library.library.token_themes.length,
+      replacedTokenCount,
+      replacedTokenSetCount,
+      replacedTokenThemeCount
+    };
   }
 
   async updateLibraryRegistryItem(
@@ -3177,6 +3282,8 @@ function parseLibraryArchiveManifest(input: unknown): LibraryArchiveManifest {
     name: normalizeName(candidate.name, candidate.fileId),
     componentCount: Math.max(0, Math.round(Number(candidate.componentCount) || 0)),
     tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
+    tokenSetCount: Math.max(0, Math.round(Number(candidate.tokenSetCount) || 0)),
+    tokenThemeCount: Math.max(0, Math.round(Number(candidate.tokenThemeCount) || 0)),
     assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0))
   };
 }
@@ -3286,6 +3393,12 @@ function parseLibraryArchivePayloadFile(input: unknown): LibraryArchivePayloadFi
     fileId: candidate.fileId,
     name: normalizeName(candidate.name, candidate.fileId),
     tokens: candidate.tokens.map(parseLibraryArchiveToken),
+    token_sets: Array.isArray(candidate.token_sets)
+      ? candidate.token_sets.map(parseLibraryArchiveTokenSet)
+      : [],
+    token_themes: Array.isArray(candidate.token_themes)
+      ? candidate.token_themes.map(parseLibraryArchiveTokenTheme)
+      : [],
     components: candidate.components.map(parseLibraryArchiveComponent)
   };
 }
@@ -3304,6 +3417,36 @@ function parseLibraryArchiveToken(input: unknown): DesignToken {
     name: normalizeName(candidate.name, candidate.id),
     type: candidate.type,
     value: normalizeName(candidate.value, "")
+  };
+}
+
+function parseLibraryArchiveTokenSet(input: unknown): DesignTokenSet {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive token set");
+  }
+  const candidate = input as DesignTokenSet;
+  assertSafeStorageId(candidate.id);
+  return {
+    id: candidate.id,
+    name: normalizeName(candidate.name, candidate.id),
+    enabled: Boolean(candidate.enabled)
+  };
+}
+
+function parseLibraryArchiveTokenTheme(input: unknown): DesignTokenTheme {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library archive token theme");
+  }
+  const candidate = input as DesignTokenTheme;
+  assertSafeStorageId(candidate.id);
+  return {
+    id: candidate.id,
+    name: normalizeName(candidate.name, candidate.id),
+    group: typeof candidate.group === "string" ? candidate.group : null,
+    enabled: Boolean(candidate.enabled),
+    token_set_ids: Array.isArray(candidate.token_set_ids)
+      ? candidate.token_set_ids.filter((tokenSetId): tokenSetId is string => typeof tokenSetId === "string")
+      : []
   };
 }
 
@@ -3338,6 +3481,8 @@ interface LibraryArchivePayloadFile {
   fileId: string;
   name: string;
   tokens: DesignToken[];
+  token_sets: DesignTokenSet[];
+  token_themes: DesignTokenTheme[];
   components: ComponentDefinition[];
 }
 
@@ -3400,6 +3545,12 @@ function readLibraryArchivePayload(entries: Map<string, Buffer>): LibraryArchive
   }
   if (library.tokens.length !== manifest.tokenCount) {
     throw new Error("library archive token count mismatch");
+  }
+  if (manifest.tokenSetCount !== undefined && library.token_sets.length !== manifest.tokenSetCount) {
+    throw new Error("library archive token set count mismatch");
+  }
+  if (manifest.tokenThemeCount !== undefined && library.token_themes.length !== manifest.tokenThemeCount) {
+    throw new Error("library archive token theme count mismatch");
   }
 
   const assetIds = collectComponentImageAssetIds(library.components);
