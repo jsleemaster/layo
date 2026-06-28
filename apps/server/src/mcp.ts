@@ -782,6 +782,109 @@ export function createMcpServer(storage = new FileStorage()) {
   );
 
   server.registerTool(
+    "publish_library_registry_item",
+    {
+      description:
+        "Publish the current document's local components and design tokens into the shared Layo library registry.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        libraryId: z.string().optional().describe("Optional safe shared library id"),
+        name: z.string().optional().describe("Optional shared library display name")
+      }
+    },
+    async ({ fileId, libraryId, name }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              library: await storage.publishLibraryToRegistry(fileId, { libraryId, name })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "list_library_registry",
+    {
+      description: "List shared Layo libraries published into the local team registry.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {}
+    },
+    async () => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ libraries: await storage.listLibraryRegistry() }, null, 2)
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "review_library_registry_item",
+    {
+      description:
+        "Preview component and token conflicts before importing a shared registry library into a target document.",
+      annotations: readOnlyToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Target design file id returned by list_files"),
+        libraryId: z.string().describe("Shared library id returned by list_library_registry")
+      }
+    },
+    async ({ fileId, libraryId }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              review: await storage.reviewLibraryRegistryItem(fileId, libraryId)
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
+    "import_library_registry_item",
+    {
+      description:
+        "Import components and design tokens from a shared registry library into a target Layo document.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Target design file id returned by list_files"),
+        libraryId: z.string().describe("Shared library id returned by list_library_registry"),
+        idPrefix: z
+          .string()
+          .optional()
+          .describe("Optional safe prefix applied to imported component ids and conflicting token ids")
+      }
+    },
+    async ({ fileId, libraryId, idPrefix }) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify(
+            {
+              imported: await storage.importLibraryRegistryItem(fileId, libraryId, { idPrefix })
+            },
+            null,
+            2
+          )
+        }
+      ]
+    })
+  );
+
+  server.registerTool(
     "export_design_tokens",
     {
       description: "Export document-local Layo design tokens as W3C/DTCG JSON.",

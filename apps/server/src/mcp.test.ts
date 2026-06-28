@@ -66,6 +66,18 @@ describe("MCP AI editing workflow", () => {
       idempotentHint: true,
       openWorldHint: false
     });
+    expect(byName.get("list_library_registry")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+    expect(byName.get("review_library_registry_item")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
     expect(byName.get("import_design_tokens")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
@@ -85,6 +97,18 @@ describe("MCP AI editing workflow", () => {
       openWorldHint: false
     });
     expect(byName.get("import_file_archive")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("publish_library_registry_item")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("import_library_registry_item")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
@@ -513,6 +537,143 @@ describe("MCP AI editing workflow", () => {
       })
     );
     expect(JSON.stringify(copied)).toContain("아카이브 원본");
+  });
+
+  test("lets an MCP client publish review and import registry libraries", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "library-project",
+        name: "Library Project",
+        documentId: "library-file",
+        documentName: "Library File"
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "library-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "create_token",
+            token: {
+              id: "color-brand-primary",
+              name: "Brand / Primary",
+              type: "color",
+              value: "#2563eb"
+            }
+          },
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-card",
+            name: "Library Card",
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+          { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+        ]
+      }
+    });
+
+    const published = parseToolJson(
+      await client.callTool({
+        name: "publish_library_registry_item",
+        arguments: {
+          fileId: "library-file",
+          libraryId: "team-kit",
+          name: "Team Kit"
+        }
+      })
+    );
+    expect(published.library).toMatchObject({
+      libraryId: "team-kit",
+      name: "Team Kit",
+      sourceFileId: "library-file",
+      sourceName: "Library File",
+      componentCount: 1,
+      tokenCount: 1,
+      assetCount: 0
+    });
+    expect(published.library.publishedAt).toEqual(expect.any(String));
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: {}
+      })
+    );
+    expect(listed.libraries).toEqual([expect.objectContaining({ libraryId: "team-kit", name: "Team Kit" })]);
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "target-library-project",
+        name: "Target Library Project",
+        documentId: "target-library-file",
+        documentName: "Target Library File"
+      }
+    });
+    const review = parseToolJson(
+      await client.callTool({
+        name: "review_library_registry_item",
+        arguments: {
+          fileId: "target-library-file",
+          libraryId: "team-kit"
+        }
+      })
+    );
+    expect(review.review).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      originalFileId: "library-file",
+      originalName: "Library File",
+      componentCount: 1,
+      tokenCount: 1,
+      components: [expect.objectContaining({ originalComponentId: "component-card", name: "Card", conflict: false })],
+      tokens: [expect.objectContaining({ originalTokenId: "color-brand-primary", name: "Brand / Primary", conflict: false })]
+    });
+
+    const imported = parseToolJson(
+      await client.callTool({
+        name: "import_library_registry_item",
+        arguments: {
+          fileId: "target-library-file",
+          libraryId: "team-kit",
+          idPrefix: "team"
+        }
+      })
+    );
+    expect(imported.imported).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      componentCount: 1,
+      tokenCount: 1,
+      componentIdMap: {
+        "component-card": "team-component-card"
+      },
+      tokenIdMap: {
+        "color-brand-primary": "color-brand-primary"
+      }
+    });
+
+    const target = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "target-library-file" }
+      })
+    );
+    expect(target.inspection.components).toEqual([
+      expect.objectContaining({ id: "team-component-card", name: "Card" })
+    ]);
+    expect(target.inspection.tokens).toEqual([
+      expect.objectContaining({ id: "color-brand-primary", name: "Brand / Primary" })
+    ]);
   });
 
   test("lets an MCP client save, read, list, and restore file versions", async () => {
