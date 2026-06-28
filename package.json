@@ -12,6 +12,7 @@
     "dev": "pnpm --parallel --filter @layo/server --filter @layo/web dev",
     "dev:collab": "pnpm --filter @layo/collab-relay dev",
     "dev:collab:rust": "cargo run -p collab-relay",
+    "storage:backup": "node scripts/layo-storage-backup.mjs",
     "test": "node --test scripts/check-design-rules.test.mjs && node --test scripts/check-deployment-artifacts.test.mjs && node --test scripts/check-agent-learning-loop.test.mjs && node --test scripts/check-post-merge-cleanup.test.mjs && node --test scripts/check-layo-branding.test.mjs && node --test scripts/check-dev-scripts.test.mjs && pnpm run check:penpot-maturity && pnpm run check:design-rules && pnpm -r test && cargo test --workspace",
     "test:e2e": "node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts apps/web/e2e/mcp-stdio.spec.ts --workers=1 --reporter=line",
     "test:e2e:collab": "playwright test apps/web/e2e/collaboration.spec.ts --reporter=line",

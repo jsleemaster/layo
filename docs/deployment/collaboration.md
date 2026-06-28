@@ -94,6 +94,34 @@ editor shell and API routing, but it is not durable team storage. Set
 team storage still needs a durable database/object-store implementation before
 it can replace local project manifests.
 
+## Storage backup and restore
+
+For team-owned hosts with persistent writable storage, back up the `.layo`
+storage root before upgrades, migrations, or host moves. The archive contains a
+readable `manifest.json` plus the storage files under `storage/`.
+
+```bash
+mkdir -p backups
+pnpm run storage:backup -- backup --storage-dir .layo --out backups/layo-storage.zip
+pnpm run storage:backup -- review --archive backups/layo-storage.zip
+```
+
+Restore into a fresh directory first, then run the server against that restored
+root before replacing the live storage directory:
+
+```bash
+rm -rf /tmp/layo-restore
+pnpm run storage:backup -- restore --archive backups/layo-storage.zip --storage-dir /tmp/layo-restore
+LAYO_STORAGE_DIR=/tmp/layo-restore HOST=127.0.0.1 PORT=4317 pnpm --filter @layo/server dev
+curl http://127.0.0.1:4317/health
+```
+
+Restoring over an existing storage directory is refused by default. Use
+`--force` only after the archive review and restore smoke check have passed.
+This repository-owned runbook covers local filesystem storage. Hosted
+database/object-store backups, retention policy, and scheduled restore drills
+remain production operations work.
+
 ## Full-stack web and API deployment
 
 For a remote editor that can create projects, save documents, upload images, and reload state, build the web shell under `/app/` and run the Node API server. The server serves the built web app from `/app/` while keeping API routes at `/projects`, `/files`, and `/assets/:assetId`.

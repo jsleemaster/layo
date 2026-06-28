@@ -34,3 +34,16 @@ test("e2e script starts required local services before Playwright", async () => 
   assert.match(runner, /http:\/\/127\.0\.0\.1:5173\//);
   assert.match(runner, /"pnpm",\s*\["exec",\s*"playwright",\s*"test"/);
 });
+
+test("storage backup script exposes backup review and restore operations", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const backupScript = packageJson.scripts?.["storage:backup"];
+  const runner = await readFile("scripts/layo-storage-backup.mjs", "utf8");
+
+  assert.equal(backupScript, "node scripts/layo-storage-backup.mjs");
+  assert.match(runner, /backup/);
+  assert.match(runner, /review/);
+  assert.match(runner, /restore/);
+  assert.match(runner, /--storage-dir/);
+  assert.match(runner, /--archive|--out/);
+});
