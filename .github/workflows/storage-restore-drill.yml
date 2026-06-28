@@ -1,0 +1,55 @@
+name: Storage Restore Drill
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/storage-restore-drill.yml"
+      - "apps/server/src/storage-backup.ts"
+      - "apps/server/src/storage-backup-cli.ts"
+      - "apps/server/src/storage-backup.test.ts"
+      - "scripts/layo-storage-backup.mjs"
+      - "scripts/check-dev-scripts.test.mjs"
+      - "scripts/check-deployment-artifacts.test.mjs"
+      - "docs/deployment/collaboration.md"
+      - "docs/product/penpot-maturity-benchmark.md"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  restore-drill:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Seed storage and run restore drill
+        shell: bash
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: |
+          tmp_dir="$(mktemp -d)"
+          source_dir="$tmp_dir/source"
+          work_dir="$tmp_dir/drill"
+          export SOURCE_ROOT="$source_dir"
+          pnpm --filter @layo/server exec tsx -e 'import { FileStorage } from "./src/storage.ts"; (async () => { const storage = new FileStorage(process.env.SOURCE_ROOT!); await storage.createProject({ projectId: "ci-project", name: "CI 프로젝트", documentId: "ci-file", documentName: "CI 문서" }); await storage.saveFileVersion("ci-file", { message: "restore drill baseline" }); })();'
+          pnpm run storage:backup -- drill --storage-dir "$source_dir" --work-dir "$work_dir" --expect-project ci-project --expect-file ci-file

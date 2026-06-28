@@ -33,6 +33,26 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
 });
 
+test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
+  const workflow = await readText(".github/workflows/storage-restore-drill.yml");
+
+  assert.match(workflow, /name: Storage Restore Drill/);
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /mktemp -d/);
+  assert.match(workflow, /new FileStorage\(process\.env\.SOURCE_ROOT!\)/);
+  assert.match(workflow, /projectId: "ci-project"/);
+  assert.match(workflow, /documentId: "ci-file"/);
+  assert.match(workflow, /saveFileVersion\("ci-file"/);
+  assert.match(workflow, /pnpm run storage:backup -- drill/);
+  assert.match(workflow, /--storage-dir "\$source_dir"/);
+  assert.match(workflow, /--work-dir "\$work_dir"/);
+  assert.match(workflow, /--expect-project ci-project/);
+  assert.match(workflow, /--expect-file ci-file/);
+  assert.doesNotMatch(workflow, /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN/);
+});
+
 test("relay Docker artifacts expose team-owned relay configuration", async () => {
   const dockerfile = await readText("apps/collab-relay/Dockerfile");
   const compose = await readText("deploy/collab-relay/docker-compose.yml");

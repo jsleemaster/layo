@@ -118,9 +118,20 @@ curl http://127.0.0.1:4317/health
 
 Restoring over an existing storage directory is refused by default. Use
 `--force` only after the archive review and restore smoke check have passed.
-This repository-owned runbook covers local filesystem storage. Hosted
-database/object-store backups, retention policy, and scheduled restore drills
-remain production operations work.
+Run the same backup-restore-read sequence as a restore drill when changing
+storage code or before upgrades:
+
+```bash
+pnpm run storage:backup -- drill --storage-dir .layo --work-dir /tmp/layo-drill --expect-project <project-id> --expect-file <file-id>
+```
+
+`.github/workflows/storage-restore-drill.yml` runs a scheduled seeded restore
+drill without hosted secrets. It creates a temporary `FileStorage` root, saves a
+project and file version, backs it up, restores into a scratch directory, and
+verifies the expected project/file/version evidence can be read. This
+repository-owned runbook covers local filesystem storage. Hosted
+database/object-store backups and retention policy remain production operations
+work.
 
 ## Full-stack web and API deployment
 

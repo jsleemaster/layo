@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { FileStorage } from "./storage";
 import {
   createStorageBackupArchive,
+  runStorageRestoreDrill,
   restoreStorageBackupArchive,
   reviewStorageBackupArchive
 } from "./storage-backup";
@@ -120,6 +121,37 @@ describe("storage backup archive", () => {
     });
     await expect(new FileStorage(targetRoot).readProject("test-project")).resolves.toMatchObject({
       currentDocumentId: "sample-file"
+    });
+  });
+
+  test("runs a restore drill that proves expected project and file can be read", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-backup-"));
+    const sourceRoot = path.join(tempRoot, "source");
+    const workDir = path.join(tempRoot, "drill");
+    const source = await storageWithDocument(sourceRoot);
+    await source.saveFileVersion("sample-file", { message: "restore drill baseline" });
+
+    const drill = await runStorageRestoreDrill(sourceRoot, {
+      workDir,
+      expectProjectId: "test-project",
+      expectFileId: "sample-file"
+    });
+
+    expect(drill.review.entries).toEqual(
+      expect.arrayContaining([
+        "storage/files/sample-file.json",
+        "storage/history/sample-file/" + drill.checks.expectedFileVersionIds[0] + ".json",
+        "storage/projects/test-project.json"
+      ])
+    );
+    expect(drill.restoreRoot).toBe(path.join(workDir, "restore"));
+    expect(drill.checks).toMatchObject({
+      projectCount: 1,
+      expectedProjectId: "test-project",
+      expectedProjectFound: true,
+      expectedFileId: "sample-file",
+      expectedFileFound: true,
+      expectedFileVersionCount: 1
     });
   });
 });

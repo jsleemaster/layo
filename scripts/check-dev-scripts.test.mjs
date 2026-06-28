@@ -44,6 +44,10 @@ test("storage backup script exposes backup review and restore operations", async
   assert.match(runner, /backup/);
   assert.match(runner, /review/);
   assert.match(runner, /restore/);
+  assert.match(runner, /drill/);
   assert.match(runner, /--storage-dir/);
   assert.match(runner, /--archive|--out/);
+  assert.match(runner, /--work-dir/);
+  assert.match(runner, /--expect-project/);
+  assert.match(runner, /--expect-file/);
 });

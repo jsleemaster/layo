@@ -2,7 +2,8 @@
 import { spawnSync } from "node:child_process";
 
 // Operations: backup --storage-dir <dir> --out <archive>,
-// review --archive <archive>, restore --archive <archive> --storage-dir <dir> --force.
+// review --archive <archive>, restore --archive <archive> --storage-dir <dir> --force,
+// drill --storage-dir <dir> --work-dir <dir> --expect-project <project-id> --expect-file <file-id>.
 const result = spawnSync(
   "pnpm",
   ["--filter", "@layo/server", "exec", "tsx", "src/storage-backup-cli.ts", ...process.argv.slice(2)],
