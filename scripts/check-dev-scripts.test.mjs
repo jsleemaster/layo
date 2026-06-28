@@ -61,6 +61,19 @@ test("storage backup script exposes backup review and restore operations", async
   assert.match(runner, /--conditions=development/);
 });
 
+test("external migration review script is exposed and stays no-write", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const migrationScript = packageJson.scripts?.["migration:review"];
+  const runner = await readFile("scripts/layo-migration-review.mjs", "utf8");
+
+  assert.equal(migrationScript, "node scripts/layo-migration-review.mjs");
+  assert.match(runner, /external-migration-cli/);
+  assert.match(runner, /--conditions=development/);
+  assert.match(runner, /--archive/);
+  assert.match(runner, /--source/);
+  assert.doesNotMatch(runner, /importProjectArchive|importFileArchive|restoreStorageBackupArchive/);
+});
+
 test("GitHub homepage sync script is exposed and verifies deployment before patching", async () => {
   const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const syncScript = packageJson.scripts?.["sync:github-homepage"];

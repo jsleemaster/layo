@@ -168,6 +168,52 @@ export interface FileArchiveReview {
   nodeCount: number;
 }
 
+export type ExternalMigrationSource = "penpot" | "figma" | "unknown";
+export type ExternalMigrationArchiveKind = "zip" | "json" | "binary";
+export type ExternalMigrationEntryKind = "manifest" | "document" | "asset" | "metadata" | "unknown";
+
+export interface ExternalMigrationEntrySummary {
+  path: string;
+  kind: ExternalMigrationEntryKind;
+  bytes: number;
+}
+
+export interface ExternalMigrationAssetCandidate {
+  path: string;
+  bytes: number;
+  mediaType: string;
+}
+
+export interface ExternalMigrationDocumentCandidate {
+  path: string;
+  name: string;
+  pageCount: number;
+  nodeCount: number;
+}
+
+export interface ExternalMigrationReview {
+  schemaVersion: 1;
+  source: ExternalMigrationSource;
+  sourceLabel: string;
+  archiveKind: ExternalMigrationArchiveKind;
+  fileName?: string;
+  canImport: false;
+  entryCount: number;
+  assetCount: number;
+  documentCandidateCount: number;
+  entries: ExternalMigrationEntrySummary[];
+  assetCandidates: ExternalMigrationAssetCandidate[];
+  documentCandidates: ExternalMigrationDocumentCandidate[];
+  blockedBy: string[];
+  warnings: string[];
+  nextSteps: string[];
+}
+
+export interface ReviewExternalMigrationArchiveOptions {
+  fileName?: string;
+  sourceHint?: ExternalMigrationSource;
+}
+
 export interface ImportedFileArchive {
   fileId: string;
   name: string;
@@ -507,6 +553,24 @@ export async function reviewFileArchive(
   });
   const payload = await readDocumentJson(response);
   return (payload as { review: FileArchiveReview }).review;
+}
+
+export async function reviewExternalMigrationArchive(
+  archiveBase64: string,
+  options: ReviewExternalMigrationArchiveOptions = {},
+  fetcher: typeof fetch = fetch
+): Promise<ExternalMigrationReview> {
+  const response = await fetcher(apiUrl("/migrations/external/review"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      archiveBase64,
+      fileName: options.fileName,
+      sourceHint: options.sourceHint
+    })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { review: ExternalMigrationReview }).review;
 }
 
 export async function importFileArchive(

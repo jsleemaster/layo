@@ -26,6 +26,7 @@ import {
   resolveCommentThread,
   restoreFileVersion,
   pruneFileVersions,
+  reviewExternalMigrationArchive,
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
@@ -524,6 +525,59 @@ describe("file version API helpers", () => {
       [expect.stringContaining("/files/document-1/import/library/review"), "POST"],
       [expect.stringContaining("/files/document-1/import/library"), "POST"],
       [expect.stringContaining("/files/document-1/export/library"), "GET"]
+    ]);
+  });
+
+  test("reviews external migration archives through the no-write route", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/migrations/external/review" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({
+          archiveBase64: "eyJkb2N1bWVudCI6e319",
+          fileName: "landing.figma.json",
+          sourceHint: "figma"
+        });
+        return jsonResponse({
+          review: {
+            schemaVersion: 1,
+            source: "figma",
+            sourceLabel: "Figma",
+            archiveKind: "json",
+            fileName: "landing.figma.json",
+            canImport: false,
+            entryCount: 1,
+            assetCount: 0,
+            documentCandidateCount: 1,
+            entries: [{ path: "landing.figma.json", kind: "document", bytes: 15 }],
+            assetCandidates: [],
+            documentCandidates: [{ path: "landing.figma.json", name: "Landing", pageCount: 1, nodeCount: 2 }],
+            blockedBy: ["mapping_not_implemented"],
+            warnings: [],
+            nextSteps: ["Build the Figma node mapper before enabling import."]
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(
+      reviewExternalMigrationArchive(
+        "eyJkb2N1bWVudCI6e319",
+        { fileName: "landing.figma.json", sourceHint: "figma" },
+        fetcher as typeof fetch
+      )
+    ).resolves.toMatchObject({
+      source: "figma",
+      canImport: false,
+      documentCandidateCount: 1
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/migrations/external/review"), "POST"]
     ]);
   });
 

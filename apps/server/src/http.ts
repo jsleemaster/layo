@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
+import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./external-migration.js";
 import {
   FILE_ARCHIVE_MIME_TYPE,
   FileStorage,
@@ -55,6 +56,17 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.options("*", async (_request, reply) => {
     return reply.code(204).send();
+  });
+
+  server.post<{
+    Body: { archiveBase64: string; fileName?: string; sourceHint?: ExternalMigrationSource };
+  }>("/migrations/external/review", async (request) => {
+    return {
+      review: reviewExternalMigrationArchive(Buffer.from(request.body.archiveBase64, "base64"), {
+        fileName: request.body.fileName,
+        sourceHint: request.body.sourceHint
+      })
+    };
   });
 
   server.addHook("onClose", async () => {
