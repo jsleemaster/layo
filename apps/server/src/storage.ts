@@ -714,6 +714,7 @@ export interface LibraryRegistryEntry {
   name: string;
   sourceFileId: string;
   sourceName: string;
+  teamId?: string;
   componentCount: number;
   tokenCount: number;
   assetCount: number;
@@ -1663,14 +1664,19 @@ export class FileStorage {
   ): Promise<LibraryRegistryEntry> {
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
+    const teamId = await this.findTeamIdForFile(fileId);
     const existingEntries = await this.readLibraryRegistryEntries();
     const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+    if (existing?.teamId && existing.teamId !== teamId) {
+      throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
+    }
     const now = nextIsoTimestamp(existing?.updatedAt);
     const entry: LibraryRegistryEntry = {
       libraryId,
       name: normalizeName(options.name, exported.name),
       sourceFileId: exported.fileId,
       sourceName: exported.name,
+      teamId,
       componentCount: exported.componentCount,
       tokenCount: exported.tokenCount,
       assetCount: exported.assetCount,
@@ -1688,13 +1694,25 @@ export class FileStorage {
     return entry;
   }
 
-  async listLibraryRegistry(): Promise<LibraryRegistryEntry[]> {
-    return this.readLibraryRegistryEntries();
+  async listLibraryRegistry(): Promise<LibraryRegistryEntry[]>;
+  async listLibraryRegistry(fileId: string): Promise<LibraryRegistryEntry[]>;
+  async listLibraryRegistry(fileId?: string): Promise<LibraryRegistryEntry[]> {
+    const entries = await this.readLibraryRegistryEntries();
+    if (!fileId) {
+      return entries;
+    }
+    return this.filterLibraryRegistryEntriesForFile(fileId, entries);
   }
 
   async listLibraryRegistrySubscriptions(fileId?: string): Promise<LibraryRegistrySubscription[]> {
     const subscriptions = await this.readLibraryRegistrySubscriptions();
-    return fileId ? subscriptions.filter((subscription) => subscription.fileId === fileId) : subscriptions;
+    if (!fileId) {
+      return subscriptions;
+    }
+    const accessibleLibraries = new Set((await this.listLibraryRegistry(fileId)).map((entry) => entry.libraryId));
+    return subscriptions.filter(
+      (subscription) => subscription.fileId === fileId && accessibleLibraries.has(subscription.libraryId)
+    );
   }
 
   async listLibraryRegistryUpdates(fileId?: string): Promise<LibraryRegistryUpdateNotification[]> {
@@ -1727,7 +1745,13 @@ export class FileStorage {
 
   async listLibraryRegistryTokenSubscriptions(fileId?: string): Promise<LibraryRegistryTokenSubscription[]> {
     const subscriptions = await this.readLibraryRegistryTokenSubscriptions();
-    return fileId ? subscriptions.filter((subscription) => subscription.fileId === fileId) : subscriptions;
+    if (!fileId) {
+      return subscriptions;
+    }
+    const accessibleLibraries = new Set((await this.listLibraryRegistry(fileId)).map((entry) => entry.libraryId));
+    return subscriptions.filter(
+      (subscription) => subscription.fileId === fileId && accessibleLibraries.has(subscription.libraryId)
+    );
   }
 
   async listLibraryRegistryTokenUpdates(fileId?: string): Promise<LibraryRegistryTokenUpdateNotification[]> {
@@ -1765,7 +1789,7 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ReviewedLibraryRegistryItem> {
-    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     const review = await this.reviewLibraryArchive(fileId, archive);
     return {
       ...review,
@@ -1779,7 +1803,7 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     const imported = await this.importLibraryArchive(fileId, archive, options);
     const registryImport = {
       ...imported,
@@ -1795,7 +1819,7 @@ export class FileStorage {
     libraryId: string
   ): Promise<ReviewedLibraryRegistryTokens> {
     const target = await this.readFile(fileId);
-    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     return {
       libraryId: entry.libraryId,
@@ -1818,7 +1842,7 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
     await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
     return imported;
@@ -1835,7 +1859,7 @@ export class FileStorage {
     if (!subscription) {
       throw notFoundError(`library registry token subscription not found: ${normalizedLibraryId}`);
     }
-    const { entry, archive } = await this.readLibraryRegistryArchive(normalizedLibraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
     const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
     await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
     return imported;
@@ -1883,7 +1907,7 @@ export class FileStorage {
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
     }
-    const { entry, archive } = await this.readLibraryRegistryArchive(normalizedLibraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const tokenIdMap = {
@@ -2982,6 +3006,47 @@ export class FileStorage {
     await this.writeLibraryRegistryTokenSubscriptions(nextSubscriptions);
   }
 
+  private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
+    assertSafeStorageId(fileId);
+    const projects = await this.listProjects();
+    return new Set(
+      projects
+        .filter((project) => project.documents.some((document) => document.documentId === fileId))
+        .flatMap((project) => project.sharing.mode === "team" ? [project.sharing.teamId] : [])
+    );
+  }
+
+  private async findTeamIdForFile(fileId: string): Promise<string | undefined> {
+    return Array.from(await this.findTeamIdsForFile(fileId)).sort()[0];
+  }
+
+  private async filterLibraryRegistryEntriesForFile(
+    fileId: string,
+    entries: LibraryRegistryEntry[]
+  ): Promise<LibraryRegistryEntry[]> {
+    const teamIds = await this.findTeamIdsForFile(fileId);
+    return entries.filter((entry) => !entry.teamId || teamIds.has(entry.teamId));
+  }
+
+  private async assertLibraryRegistryEntryAccessible(fileId: string, entry: LibraryRegistryEntry): Promise<void> {
+    if (!entry.teamId) {
+      return;
+    }
+    const teamIds = await this.findTeamIdsForFile(fileId);
+    if (!teamIds.has(entry.teamId)) {
+      throw forbiddenError(`library registry item not authorized for file: ${entry.libraryId}`);
+    }
+  }
+
+  private async readAccessibleLibraryRegistryArchive(
+    fileId: string,
+    libraryId: string
+  ): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
+    const result = await this.readLibraryRegistryArchive(libraryId);
+    await this.assertLibraryRegistryEntryAccessible(fileId, result.entry);
+    return result;
+  }
+
   private async readLibraryRegistryArchive(libraryId: string): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
     const entry = (await this.readLibraryRegistryEntries()).find(
@@ -3024,6 +3089,13 @@ function nextIsoTimestamp(previousTimestamp: string | undefined) {
 function notFoundError(message: string) {
   const error = new Error(message) as Error & { code: string };
   error.code = "ENOENT";
+  return error;
+}
+
+function forbiddenError(message: string) {
+  const error = new Error(message) as Error & { code: string; statusCode: number };
+  error.code = "EACCES";
+  error.statusCode = 403;
   return error;
 }
 
@@ -3467,6 +3539,9 @@ function parseLibraryRegistryEntry(input: unknown): LibraryRegistryEntry {
     name: normalizeName(candidate.name, libraryId),
     sourceFileId,
     sourceName: normalizeName(candidate.sourceName, sourceFileId),
+    ...(typeof candidate.teamId === "string" && candidate.teamId.trim()
+      ? { teamId: candidate.teamId.trim() }
+      : {}),
     componentCount: Math.max(0, Math.round(Number(candidate.componentCount) || 0)),
     tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
     assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0)),

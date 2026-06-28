@@ -814,13 +814,24 @@ export function createMcpServer(storage = new FileStorage()) {
     {
       description: "List shared Layo libraries published into the local team registry.",
       annotations: readOnlyToolAnnotations,
-      inputSchema: {}
+      inputSchema: {
+        fileId: z
+          .string()
+          .optional()
+          .describe("Optional target design file id; when present, only libraries accessible to that file's team are returned")
+      }
     },
-    async () => ({
+    async ({ fileId }) => ({
       content: [
         {
           type: "text",
-          text: JSON.stringify({ libraries: await storage.listLibraryRegistry() }, null, 2)
+          text: JSON.stringify(
+            {
+              libraries: fileId ? await storage.listLibraryRegistry(fileId) : await storage.listLibraryRegistry()
+            },
+            null,
+            2
+          )
         }
       ]
     })

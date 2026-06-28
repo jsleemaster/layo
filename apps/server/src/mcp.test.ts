@@ -724,6 +724,133 @@ describe("MCP AI editing workflow", () => {
     ]);
   });
 
+  test("scopes registry library MCP list and imports to matching project teams", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "library-project",
+        name: "Library Project",
+        documentId: "library-file",
+        documentName: "Library File"
+      }
+    });
+    await client.callTool({
+      name: "set_project_sharing",
+      arguments: { projectId: "library-project", mode: "team", teamId: "team-alpha" }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "library-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "create_token",
+            token: {
+              id: "color-brand-primary",
+              name: "Brand / Primary",
+              type: "color",
+              value: "#2563eb"
+            }
+          },
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-card",
+            name: "Library Card",
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+          { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+        ]
+      }
+    });
+    const published = parseToolJson(
+      await client.callTool({
+        name: "publish_library_registry_item",
+        arguments: {
+          fileId: "library-file",
+          libraryId: "team-kit",
+          name: "Team Kit"
+        }
+      })
+    );
+    expect(published.library).toMatchObject({ libraryId: "team-kit", teamId: "team-alpha" });
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "target-project",
+        name: "Target Project",
+        documentId: "target-file",
+        documentName: "Target File"
+      }
+    });
+    await client.callTool({
+      name: "set_project_sharing",
+      arguments: { projectId: "target-project", mode: "team", teamId: "team-alpha" }
+    });
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "other-project",
+        name: "Other Project",
+        documentId: "other-file",
+        documentName: "Other File"
+      }
+    });
+    await client.callTool({
+      name: "set_project_sharing",
+      arguments: { projectId: "other-project", mode: "team", teamId: "team-beta" }
+    });
+
+    const targetList = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: { fileId: "target-file" }
+      })
+    );
+    expect(targetList.libraries).toEqual([
+      expect.objectContaining({ libraryId: "team-kit", teamId: "team-alpha" })
+    ]);
+
+    const otherList = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: { fileId: "other-file" }
+      })
+    );
+    expect(otherList.libraries).toEqual([]);
+
+    const targetReview = parseToolJson(
+      await client.callTool({
+        name: "review_library_registry_item",
+        arguments: {
+          fileId: "target-file",
+          libraryId: "team-kit"
+        }
+      })
+    );
+    expect(targetReview.review).toMatchObject({ libraryId: "team-kit", componentCount: 1 });
+
+    const unauthorizedImport = await client.callTool({
+        name: "import_library_registry_item",
+        arguments: {
+          fileId: "other-file",
+          libraryId: "team-kit",
+          idPrefix: "team"
+        }
+    });
+    expect(unauthorizedImport).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/not authorized/i) })]
+    });
+  });
+
   test("lets an MCP client review and import registry token bundles", async () => {
     const client = await connectMcpClient();
 

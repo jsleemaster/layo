@@ -649,6 +649,38 @@ describe("file version API helpers", () => {
     ]);
   });
 
+  test("passes target file id when listing scoped registry libraries", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const parsed = new URL(String(url), "http://127.0.0.1:4317");
+      expect(parsed.pathname).toBe("/libraries");
+      expect(parsed.searchParams.get("fileId")).toBe("target-file");
+      return jsonResponse({
+        libraries: [
+          {
+            libraryId: "team-kit",
+            name: "Team Kit",
+            sourceFileId: "source-file",
+            sourceName: "Source",
+            teamId: "team-alpha",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            publishedAt: "2026-06-28T00:00:00.000Z"
+          }
+        ]
+      });
+    };
+
+    await expect(listLibraryRegistry("target-file", fetcher as typeof fetch)).resolves.toEqual([
+      expect.objectContaining({ libraryId: "team-kit", teamId: "team-alpha" })
+    ]);
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/libraries?fileId=target-file"), "GET"]
+    ]);
+  });
+
   test("reviews and imports registry library token bundles", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {

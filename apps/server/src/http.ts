@@ -173,8 +173,12 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return { project: await storage.deleteProject(request.params.projectId) };
   });
 
-  server.get("/libraries", async () => {
-    return { libraries: await storage.listLibraryRegistry() };
+  server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
+    return {
+      libraries: request.query.fileId
+        ? await storage.listLibraryRegistry(request.query.fileId)
+        : await storage.listLibraryRegistry()
+    };
   });
 
   server.post<{

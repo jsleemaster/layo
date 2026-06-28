@@ -546,6 +546,109 @@ describe("HTTP server", () => {
     });
   });
 
+  test("scopes registry library HTTP list and imports to matching project teams", async () => {
+    const server = await createServerWithDocument();
+    await server.inject({
+      method: "PATCH",
+      url: "/projects/test-project/sharing",
+      payload: { mode: "team", teamId: "team-alpha" }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_token",
+            token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+          },
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-card",
+            name: "Library Card",
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+          { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+        ]
+      }
+    });
+
+    const published = await server.inject({
+      method: "POST",
+      url: "/libraries",
+      payload: { fileId: "sample-file", libraryId: "team-kit", name: "Team Kit" }
+    });
+    expect(published.statusCode).toBe(200);
+    expect(published.json().library).toMatchObject({ libraryId: "team-kit", teamId: "team-alpha" });
+
+    await server.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { projectId: "target-project", name: "Target", documentId: "target-file", documentName: "Target" }
+    });
+    await server.inject({
+      method: "PATCH",
+      url: "/projects/target-project/sharing",
+      payload: { mode: "team", teamId: "team-alpha" }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { projectId: "other-project", name: "Other", documentId: "other-file", documentName: "Other" }
+    });
+    await server.inject({
+      method: "PATCH",
+      url: "/projects/other-project/sharing",
+      payload: { mode: "team", teamId: "team-beta" }
+    });
+    await server.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { projectId: "private-project", name: "Private", documentId: "private-file", documentName: "Private" }
+    });
+
+    const targetList = await server.inject({ method: "GET", url: "/libraries?fileId=target-file" });
+    expect(targetList.statusCode).toBe(200);
+    expect(targetList.json().libraries).toEqual([
+      expect.objectContaining({ libraryId: "team-kit", teamId: "team-alpha" })
+    ]);
+
+    const otherList = await server.inject({ method: "GET", url: "/libraries?fileId=other-file" });
+    expect(otherList.statusCode).toBe(200);
+    expect(otherList.json().libraries).toEqual([]);
+
+    const privateList = await server.inject({ method: "GET", url: "/libraries?fileId=private-file" });
+    expect(privateList.statusCode).toBe(200);
+    expect(privateList.json().libraries).toEqual([]);
+
+    const targetReview = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry/review",
+      payload: { libraryId: "team-kit" }
+    });
+    expect(targetReview.statusCode).toBe(200);
+    expect(targetReview.json().review).toMatchObject({ libraryId: "team-kit", componentCount: 1 });
+
+    const otherReview = await server.inject({
+      method: "POST",
+      url: "/files/other-file/import/library/registry/review",
+      payload: { libraryId: "team-kit" }
+    });
+    expect(otherReview.statusCode).toBe(403);
+
+    const privateImport = await server.inject({
+      method: "POST",
+      url: "/files/private-file/import/library/registry",
+      payload: { libraryId: "team-kit", idPrefix: "team" }
+    });
+    expect(privateImport.statusCode).toBe(403);
+  });
+
   test("reviews and imports registry library token bundles through HTTP", async () => {
     const server = await createServerWithDocument();
     await server.inject({

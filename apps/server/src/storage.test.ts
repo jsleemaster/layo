@@ -679,6 +679,88 @@ describe("FileStorage", () => {
     expect(targetDocument.tokens?.map((token) => token.name)).toEqual(["Brand / Primary"]);
   });
 
+  test("library registry scopes team-published libraries to files shared with the same team", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createProject({
+      projectId: "source-project",
+      name: "Source Project",
+      documentId: "source-file",
+      documentName: "Source File"
+    });
+    await storage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    await storage.applyAgentCommands("source-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ] as any
+    });
+
+    const published = await storage.publishLibraryToRegistry("source-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+    expect(published).toMatchObject({
+      libraryId: "team-kit",
+      teamId: "team-alpha"
+    });
+
+    await storage.createProject({
+      projectId: "target-project",
+      name: "Target Project",
+      documentId: "target-file",
+      documentName: "Target File"
+    });
+    await storage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
+    await storage.createProject({
+      projectId: "other-project",
+      name: "Other Project",
+      documentId: "other-file",
+      documentName: "Other File"
+    });
+    await storage.setProjectSharing("other-project", { mode: "team", teamId: "team-beta" });
+    await storage.createProject({
+      projectId: "private-project",
+      name: "Private Project",
+      documentId: "private-file",
+      documentName: "Private File"
+    });
+
+    expect(await storage.listLibraryRegistry()).toEqual([
+      expect.objectContaining({ libraryId: "team-kit", teamId: "team-alpha" })
+    ]);
+    expect(await storage.listLibraryRegistry("target-file")).toEqual([
+      expect.objectContaining({ libraryId: "team-kit", teamId: "team-alpha" })
+    ]);
+    expect(await storage.listLibraryRegistry("other-file")).toEqual([]);
+    expect(await storage.listLibraryRegistry("private-file")).toEqual([]);
+
+    await expect(storage.reviewLibraryRegistryItem("target-file", "team-kit")).resolves.toMatchObject({
+      libraryId: "team-kit",
+      componentCount: 1
+    });
+    await expect(storage.importLibraryRegistryItem("target-file", "team-kit", { idPrefix: "team" })).resolves.toMatchObject({
+      libraryId: "team-kit",
+      componentIdMap: { "component-card": "team-component-card" }
+    });
+    await expect(storage.reviewLibraryRegistryItem("other-file", "team-kit")).rejects.toThrow(/not authorized/i);
+    await expect(storage.importLibraryRegistryItem("private-file", "team-kit")).rejects.toThrow(/not authorized/i);
+  });
+
   test("library registry reviews and imports published token sets and themes as a replacement bundle", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

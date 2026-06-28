@@ -7799,7 +7799,7 @@ export function App() {
   const refreshLibraryRegistry = async (status?: string, fileId = currentProject?.currentDocumentId) => {
     try {
       const [libraries] = await Promise.all([
-        listLibraryRegistry(),
+        fileId ? listLibraryRegistry(fileId) : listLibraryRegistry(),
         refreshLibraryRegistryUpdates(fileId)
       ]);
       setLibraryRegistry(libraries);
