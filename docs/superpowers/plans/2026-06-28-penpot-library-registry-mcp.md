@@ -50,7 +50,18 @@ to deterministic MCP tools backed by the already-landed server-local registry.
 - [x] `pnpm test`
 - [x] `pnpm test:e2e` with 142 passing Playwright CLI tests.
 - [x] `git diff --check`
-- [ ] PR merge and worktree cleanup evidence.
+- [x] PR merge and worktree cleanup evidence.
+
+## Merge And Cleanup Evidence
+
+- PR #183, `https://github.com/jsleemaster/layo/pull/183`, was squash-merged
+  into `main` as `11160c2165da3703c6afc4fdc1337befac9f4dde`.
+- Local `main` was fast-forwarded to `11160c2`.
+- The feature worktree at
+  `/Users/leeo/jsleemaster/layo/.worktrees/penpot-library-registry-mcp` was
+  removed.
+- The local and remote `codex/penpot-library-registry-mcp` branches were
+  deleted.
 
 ## Remaining Gaps
 
