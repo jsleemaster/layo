@@ -28,7 +28,10 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.match(workflow, /printf 'url=%s\\n' "\$deployment_url" >> "\$GITHUB_OUTPUT"/);
   assert.match(workflow, /pnpm run check:live-deployment -- --url "\$\{\{ steps\.deploy-production\.outputs\.url \}\}"/);
   assert.match(workflow, /Update GitHub About homepage/);
-  assert.match(workflow, /homepage: process\.env\.LAYO_DEPLOYMENT_URL/);
+  assert.match(workflow, /GH_REPOSITORY_TOKEN: \$\{\{ secrets\.LAYO_REPOSITORY_ADMIN_TOKEN \}\}/);
+  assert.match(workflow, /LAYO_DEPLOYMENT_URL: \$\{\{ steps\.deploy-production\.outputs\.url \}\}/);
+  assert.match(workflow, /node scripts\/sync-github-about-homepage\.mjs --url "\$LAYO_DEPLOYMENT_URL"/);
+  assert.doesNotMatch(workflow, /homepage: process\.env\.LAYO_DEPLOYMENT_URL/);
   assert.doesNotMatch(workflow, /pnpm run check:live-deployment -- --url https:\/\/layo\.vercel\.app/);
   assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
 });

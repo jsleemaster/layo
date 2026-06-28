@@ -66,8 +66,9 @@ The workflow runs on `main` pushes and manual dispatch, then:
 6. Captures the URL returned by `vercel deploy`.
 7. Runs `pnpm run check:live-deployment -- --url <deployment-url>` against
    that returned URL.
-8. Updates the GitHub About homepage to the verified deployment URL only after
-   the smoke check passes.
+8. Runs `node scripts/sync-github-about-homepage.mjs --url <deployment-url>`,
+   which repeats the live smoke check and updates the GitHub About homepage to
+   the verified deployment URL only after the check passes.
 
 Do not report production as deployed from the GitHub About link alone. The
 workflow or the live smoke command must prove that the public Vercel URL serves
@@ -86,6 +87,19 @@ route. The command intentionally has no hard-coded production URL fallback; if
 no URL is provided through `--url` or `LAYO_PRODUCTION_URL`, it fails before
 fetching anything. If this command fails, the GitHub About link may point at
 Vercel, but the production site is not verified as the Layo editor.
+
+To manually reconcile GitHub About after a verified deployment, run the same
+guarded sync script with a repository-admin token:
+
+```bash
+GH_REPOSITORY_TOKEN=<repo-admin-token> \
+GITHUB_REPOSITORY=jsleemaster/layo \
+pnpm run sync:github-homepage -- --url <verified-vercel-url>
+```
+
+The sync script first runs the live deployment smoke check. If the URL serves a
+non-Layo page, such as the current stale `https://layo.vercel.app/` host, it
+exits before calling the GitHub repository PATCH API.
 
 By default, Vercel runtime writes use `/tmp/layo` because the deployment
 filesystem is otherwise read-only. This is useful for validating the deployed

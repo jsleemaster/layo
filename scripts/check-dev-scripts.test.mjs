@@ -51,3 +51,15 @@ test("storage backup script exposes backup review and restore operations", async
   assert.match(runner, /--expect-project/);
   assert.match(runner, /--expect-file/);
 });
+
+test("GitHub homepage sync script is exposed and verifies deployment before patching", async () => {
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
+  const syncScript = packageJson.scripts?.["sync:github-homepage"];
+  const runner = await readFile("scripts/sync-github-about-homepage.mjs", "utf8");
+
+  assert.equal(syncScript, "node scripts/sync-github-about-homepage.mjs");
+  assert.match(runner, /checkLiveDeployment/);
+  assert.match(runner, /https:\/\/api\.github\.com\/repos\/\$\{repository\}/);
+  assert.match(runner, /homepage: verified\.url/);
+  assert.doesNotMatch(runner, /homepage: process\.env\.LAYO_DEPLOYMENT_URL/);
+});
