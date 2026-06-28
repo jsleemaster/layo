@@ -679,6 +679,160 @@ describe("FileStorage", () => {
     expect(targetDocument.tokens?.map((token) => token.name)).toEqual(["Brand / Primary"]);
   });
 
+  test("library registry reviews and imports published token sets and themes as a replacement bundle", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.importTokensDtcg("sample-file", {
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeTokenSets: ["base", "light"]
+      },
+      base: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#2563eb"
+          }
+        }
+      },
+      light: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#1d4ed8"
+          }
+        }
+      },
+      dark: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#93c5fd"
+          }
+        }
+      }
+    });
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "upsert_token_theme",
+          tokenTheme: {
+            id: "theme-brand",
+            name: "Brand Theme",
+            group: "mode",
+            enabled: true,
+            token_set_ids: ["base", "light", "dark"]
+          }
+        }
+      ] as any
+    });
+    await storage.publishLibraryToRegistry("sample-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+
+    const target = await storage.createProject({
+      projectId: "target-project",
+      name: "대상 프로젝트",
+      documentId: "target-file",
+      documentName: "대상 문서"
+    });
+    const targetFileId = target.currentDocumentId;
+    await storage.importTokensDtcg(targetFileId, {
+      $metadata: {
+        tokenSetOrder: ["legacy"],
+        activeTokenSets: ["legacy"]
+      },
+      legacy: {
+        Legacy: {
+          Primary: {
+            $type: "color",
+            $value: "#111827"
+          }
+        }
+      }
+    });
+    await storage.applyAgentCommands(targetFileId, {
+      dryRun: false,
+      commands: [
+        {
+          type: "upsert_token_theme",
+          tokenTheme: {
+            id: "theme-legacy",
+            name: "Legacy Theme",
+            group: "mode",
+            enabled: true,
+            token_set_ids: ["legacy"]
+          }
+        }
+      ] as any
+    });
+
+    const review = await storage.reviewLibraryRegistryTokens(targetFileId, "team-kit");
+    expect(review).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      originalFileId: "sample-file",
+      originalName: "테스트 문서",
+      tokenCount: 3,
+      tokenSetCount: 3,
+      tokenThemeCount: 1,
+      replacesTokenCount: 1,
+      replacesTokenSetCount: 1,
+      replacesTokenThemeCount: 1,
+      tokenSets: [
+        { id: "base", name: "base", enabled: true },
+        { id: "light", name: "light", enabled: true },
+        { id: "dark", name: "dark", enabled: false }
+      ],
+      tokenThemes: [
+        {
+          id: "theme-brand",
+          name: "Brand Theme",
+          group: "mode",
+          enabled: true,
+          token_set_ids: ["base", "light", "dark"]
+        }
+      ]
+    });
+
+    const imported = await storage.importLibraryRegistryTokens(targetFileId, "team-kit");
+    expect(imported).toMatchObject({
+      fileId: targetFileId,
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      tokenCount: 3,
+      tokenSetCount: 3,
+      tokenThemeCount: 1,
+      replacedTokenCount: 1,
+      replacedTokenSetCount: 1,
+      replacedTokenThemeCount: 1
+    });
+
+    const targetDocument = await storage.readFile(targetFileId);
+    expect(targetDocument.tokens?.map((token) => [token.id, token.value])).toEqual([
+      ["color-base-brand-primary", "#2563eb"],
+      ["color-light-brand-primary", "#1d4ed8"],
+      ["color-dark-brand-primary", "#93c5fd"]
+    ]);
+    expect(targetDocument.token_sets).toEqual([
+      { id: "base", name: "base", enabled: true },
+      { id: "light", name: "light", enabled: true },
+      { id: "dark", name: "dark", enabled: false }
+    ]);
+    expect(targetDocument.token_themes).toEqual([
+      {
+        id: "theme-brand",
+        name: "Brand Theme",
+        group: "mode",
+        enabled: true,
+        token_set_ids: ["base", "light", "dark"]
+      }
+    ]);
+    expect(targetDocument.components ?? []).toEqual([]);
+  });
+
   test("library registry subscriptions report and apply updates without duplicating components", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

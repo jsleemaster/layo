@@ -465,6 +465,146 @@ test("file panel publishes imports and updates a shared library registry item", 
   ]);
 });
 
+test("file panel reviews and imports shared library token bundles", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const sourceTokens = await page.request.put(`http://127.0.0.1:4317/files/${documentId}/tokens/dtcg`, {
+    data: {
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeTokenSets: ["base", "light"]
+      },
+      base: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#2563eb"
+          }
+        }
+      },
+      light: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#1d4ed8"
+          }
+        }
+      },
+      dark: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#93c5fd"
+          }
+        }
+      }
+    }
+  });
+  expect(sourceTokens.ok()).toBeTruthy();
+  const sourceTheme = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "upsert_token_theme",
+          tokenTheme: {
+            id: "theme-brand",
+            name: "Brand Theme",
+            group: "mode",
+            enabled: true,
+            token_set_ids: ["base", "light", "dark"]
+          }
+        }
+      ]
+    }
+  });
+  expect(sourceTheme.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("library-registry-name").fill("Team Kit");
+  await page.getByRole("button", { name: "현재 파일 라이브러리 게시" }).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 게시됨");
+
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  const targetProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${targetProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const targetDocumentId = (await projectResponse.json()).project.currentDocumentId as string;
+  const legacyTokens = await page.request.put(`http://127.0.0.1:4317/files/${targetDocumentId}/tokens/dtcg`, {
+    data: {
+      $metadata: {
+        tokenSetOrder: ["legacy"],
+        activeTokenSets: ["legacy"]
+      },
+      legacy: {
+        Legacy: {
+          Primary: {
+            $type: "color",
+            $value: "#111827"
+          }
+        }
+      }
+    }
+  });
+  expect(legacyTokens.ok()).toBeTruthy();
+  const legacyTheme = await page.request.post(`http://127.0.0.1:4317/files/${targetDocumentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "upsert_token_theme",
+          tokenTheme: {
+            id: "theme-legacy",
+            name: "Legacy Theme",
+            group: "mode",
+            enabled: true,
+            token_set_ids: ["legacy"]
+          }
+        }
+      ]
+    }
+  });
+  expect(legacyTheme.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await expect(page.getByTestId("library-registry-list")).toContainText("Team Kit");
+  await page.getByTestId(`library-registry-token-review-${documentId}`).click();
+  const review = page.getByTestId("library-registry-token-review");
+  await expect(review).toContainText("게시 라이브러리 토큰 검토");
+  await expect(review).toContainText("토큰 3개");
+  await expect(review).toContainText("세트 3개");
+  await expect(review).toContainText("테마 1개");
+  await expect(review).toContainText("현재 토큰 1개 교체");
+  await expect(review).toContainText("Brand Theme");
+  await page.getByRole("button", { name: "게시 라이브러리 토큰 가져오기" }).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 토큰 가져옴");
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${targetDocumentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const payload = await fileResponse.json();
+  expect(payload.file.tokens.map((token: { id: string }) => token.id)).toEqual([
+    "color-base-brand-primary",
+    "color-light-brand-primary",
+    "color-dark-brand-primary"
+  ]);
+  expect(payload.file.token_sets).toEqual([
+    { id: "base", name: "base", enabled: true },
+    { id: "light", name: "light", enabled: true },
+    { id: "dark", name: "dark", enabled: false }
+  ]);
+  expect(payload.file.token_themes).toEqual([
+    {
+      id: "theme-brand",
+      name: "Brand Theme",
+      group: "mode",
+      enabled: true,
+      token_set_ids: ["base", "light", "dark"]
+    }
+  ]);
+});
+
 test("inspector dev panel shows selected layer handoff specs and code", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

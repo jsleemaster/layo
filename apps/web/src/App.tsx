@@ -52,6 +52,7 @@ import {
   importFileArchive,
   importLibraryArchive,
   importLibraryRegistryItem,
+  importLibraryRegistryTokens,
   importDesignTokensDtcg,
   listLibraryRegistry,
   listLibraryRegistryUpdates,
@@ -69,6 +70,7 @@ import {
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
+  reviewLibraryRegistryTokens,
   saveFileVersion,
   setFileVersionPinned,
   publishLibraryToRegistry,
@@ -87,6 +89,7 @@ import {
   type LibraryArchiveReview,
   type LibraryRegistryEntry,
   type LibraryRegistryReview,
+  type LibraryRegistryTokenReview,
   type LibraryRegistryUpdateNotification
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
@@ -832,6 +835,10 @@ interface LibraryArchiveReviewState {
 
 interface LibraryRegistryReviewState {
   review: LibraryRegistryReview;
+}
+
+interface LibraryRegistryTokenReviewState {
+  review: LibraryRegistryTokenReview;
 }
 
 interface ProjectArchiveReviewState {
@@ -7521,6 +7528,8 @@ export function App() {
   const [libraryRegistryName, setLibraryRegistryName] = useState("");
   const [libraryRegistryPrefix, setLibraryRegistryPrefix] = useState("team");
   const [libraryRegistryReview, setLibraryRegistryReview] = useState<LibraryRegistryReviewState | null>(null);
+  const [libraryRegistryTokenReview, setLibraryRegistryTokenReview] =
+    useState<LibraryRegistryTokenReviewState | null>(null);
   const [libraryRegistryUpdates, setLibraryRegistryUpdates] = useState<LibraryRegistryUpdateNotification[]>([]);
   const [libraryRegistryStatus, setLibraryRegistryStatus] = useState("게시 라이브러리 대기 중");
   const [projectArchiveReview, setProjectArchiveReview] = useState<ProjectArchiveReviewState | null>(null);
@@ -11231,6 +11240,7 @@ export function App() {
       setLibraryRegistryStatus("게시 라이브러리 검토 중");
       const review = await reviewLibraryRegistryItem(currentProject.currentDocumentId, libraryId);
       setLibraryRegistryReview({ review });
+      setLibraryRegistryTokenReview(null);
       setLibraryRegistryPrefix("team");
       setLibraryRegistryStatus(`${review.libraryName} 검토됨`);
     } catch (error) {
@@ -11240,9 +11250,33 @@ export function App() {
     }
   };
 
+  const reviewPublishedLibraryTokens = async (libraryId: string) => {
+    if (!currentProject) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("게시 라이브러리 토큰 검토 중");
+      const review = await reviewLibraryRegistryTokens(currentProject.currentDocumentId, libraryId);
+      setLibraryRegistryTokenReview({ review });
+      setLibraryRegistryReview(null);
+      setLibraryRegistryStatus(`${review.libraryName} 토큰 검토됨`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리 토큰을 검토하지 못했습니다";
+      setLibraryRegistryTokenReview(null);
+      setLibraryRegistryStatus(message);
+    }
+  };
+
   const cancelLibraryRegistryImport = () => {
     setLibraryRegistryReview(null);
     setLibraryRegistryStatus("게시 라이브러리 가져오기 취소됨");
+  };
+
+  const cancelLibraryRegistryTokenImport = () => {
+    setLibraryRegistryTokenReview(null);
+    setLibraryRegistryStatus("게시 라이브러리 토큰 가져오기 취소됨");
   };
 
   const importReviewedLibraryRegistry = async () => {
@@ -11269,6 +11303,35 @@ export function App() {
       setProjectStatus("게시 라이브러리 가져옴");
     } catch (error) {
       const message = error instanceof Error ? error.message : "게시 라이브러리를 가져오지 못했습니다";
+      setLibraryRegistryStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
+  const importReviewedLibraryRegistryTokens = async () => {
+    if (!currentProject) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+    if (!libraryRegistryTokenReview) {
+      setLibraryRegistryStatus("검토된 게시 라이브러리 토큰 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("게시 라이브러리 토큰 가져오는 중");
+      const imported = await importLibraryRegistryTokens(
+        currentProject.currentDocumentId,
+        libraryRegistryTokenReview.review.libraryId
+      );
+      await loadProjectDocument(currentProject, projects);
+      setLibraryRegistryTokenReview(null);
+      setLibraryRegistryStatus(
+        `${imported.libraryName} 토큰 가져옴 · 토큰 ${imported.tokenCount}개 · 세트 ${imported.tokenSetCount}개 · 테마 ${imported.tokenThemeCount}개`
+      );
+      setProjectStatus("게시 라이브러리 토큰 가져옴");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리 토큰을 가져오지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
     }
@@ -12815,6 +12878,14 @@ export function App() {
                             >
                               검토
                             </button>
+                            <button
+                              type="button"
+                              className="inspector-compact-button"
+                              data-testid={`library-registry-token-review-${library.libraryId}`}
+                              onClick={() => void reviewPublishedLibraryTokens(library.libraryId)}
+                            >
+                              토큰 검토
+                            </button>
                           </span>
                         ))
                       ) : (
@@ -12891,6 +12962,53 @@ export function App() {
                           onClick={() => void importReviewedLibraryRegistry()}
                         >
                           검토한 게시 라이브러리 가져오기
+                        </button>
+                      </div>
+                    ) : null}
+                    {libraryRegistryTokenReview ? (
+                      <div className="file-archive-review" data-testid="library-registry-token-review">
+                        <div className="file-archive-review-header">
+                          <span>
+                            <strong>게시 라이브러리 토큰 검토</strong>
+                            <span>
+                              {libraryRegistryTokenReview.review.libraryName} ·{" "}
+                              {libraryRegistryTokenReview.review.originalName}
+                            </span>
+                          </span>
+                          <button type="button" onClick={cancelLibraryRegistryTokenImport}>
+                            검토 취소
+                          </button>
+                        </div>
+                        <div className="file-archive-review-body">
+                          <span>
+                            토큰 {libraryRegistryTokenReview.review.tokenCount}개 · 세트{" "}
+                            {libraryRegistryTokenReview.review.tokenSetCount}개 · 테마{" "}
+                            {libraryRegistryTokenReview.review.tokenThemeCount}개
+                          </span>
+                          <span>
+                            현재 토큰 {libraryRegistryTokenReview.review.replacesTokenCount}개 교체 · 세트{" "}
+                            {libraryRegistryTokenReview.review.replacesTokenSetCount}개 교체 · 테마{" "}
+                            {libraryRegistryTokenReview.review.replacesTokenThemeCount}개 교체
+                          </span>
+                          {libraryRegistryTokenReview.review.tokenSets.map((tokenSet) => (
+                            <span key={tokenSet.id}>
+                              세트 {tokenSet.name}
+                              {tokenSet.enabled ? " · 활성" : " · 비활성"}
+                            </span>
+                          ))}
+                          {libraryRegistryTokenReview.review.tokenThemes.map((theme) => (
+                            <span key={theme.id}>
+                              {theme.name} · 테마
+                              {theme.group ? ` · ${theme.group}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="file-archive-import"
+                          onClick={() => void importReviewedLibraryRegistryTokens()}
+                        >
+                          게시 라이브러리 토큰 가져오기
                         </button>
                       </div>
                     ) : null}

@@ -1,4 +1,4 @@
-import type { DesignToken, DesignTokenSet, RendererDocument } from "@layo/renderer";
+import type { DesignToken, DesignTokenSet, DesignTokenTheme, RendererDocument } from "@layo/renderer";
 import { apiUrl } from "./api-base";
 
 export interface FileVersionSummary {
@@ -284,6 +284,36 @@ export interface ImportLibraryRegistryInput {
   idPrefix?: string;
 }
 
+export interface LibraryRegistryTokenReview {
+  libraryId: string;
+  libraryName: string;
+  originalFileId: string;
+  originalName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  replacesTokenCount: number;
+  replacesTokenSetCount: number;
+  replacesTokenThemeCount: number;
+  tokens: DesignToken[];
+  tokenSets: DesignTokenSet[];
+  tokenThemes: DesignTokenTheme[];
+}
+
+export interface ImportedLibraryRegistryTokens {
+  fileId: string;
+  libraryId: string;
+  libraryName: string;
+  originalFileId: string;
+  originalName: string;
+  tokenCount: number;
+  tokenSetCount: number;
+  tokenThemeCount: number;
+  replacedTokenCount: number;
+  replacedTokenSetCount: number;
+  replacedTokenThemeCount: number;
+}
+
 export interface ExportCodeOptions {
   moduleBasePath?: string;
 }
@@ -547,6 +577,34 @@ export async function importLibraryRegistryItem(
   });
   const payload = await readDocumentJson(response);
   return (payload as { imported: ImportedLibraryRegistryItem }).imported;
+}
+
+export async function reviewLibraryRegistryTokens(
+  fileId: string,
+  libraryId: string,
+  fetcher: typeof fetch = fetch
+): Promise<LibraryRegistryTokenReview> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/tokens/review`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ libraryId })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { review: LibraryRegistryTokenReview }).review;
+}
+
+export async function importLibraryRegistryTokens(
+  fileId: string,
+  libraryId: string,
+  fetcher: typeof fetch = fetch
+): Promise<ImportedLibraryRegistryTokens> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/tokens`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ libraryId })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { imported: ImportedLibraryRegistryTokens }).imported;
 }
 
 export async function listLibraryRegistrySubscriptions(

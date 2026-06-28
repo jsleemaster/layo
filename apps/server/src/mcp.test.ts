@@ -78,6 +78,12 @@ describe("MCP AI editing workflow", () => {
       idempotentHint: true,
       openWorldHint: false
     });
+    expect(byName.get("review_library_registry_tokens")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
     expect(byName.get("import_design_tokens")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
@@ -109,6 +115,12 @@ describe("MCP AI editing workflow", () => {
       openWorldHint: false
     });
     expect(byName.get("import_library_registry_item")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("import_library_registry_tokens")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
@@ -691,6 +703,188 @@ describe("MCP AI editing workflow", () => {
     ]);
     expect(target.inspection.tokens).toEqual([
       expect.objectContaining({ id: "color-brand-primary", name: "Brand / Primary" })
+    ]);
+  });
+
+  test("lets an MCP client review and import registry token bundles", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "library-token-project",
+        name: "Library Token Project",
+        documentId: "library-token-file",
+        documentName: "Library Token File"
+      }
+    });
+    await client.callTool({
+      name: "import_design_tokens",
+      arguments: {
+        fileId: "library-token-file",
+        tokens: {
+          $metadata: {
+            tokenSetOrder: ["base", "light", "dark"],
+            activeTokenSets: ["base", "light"]
+          },
+          base: {
+            Brand: {
+              Primary: {
+                $type: "color",
+                $value: "#2563eb"
+              }
+            }
+          },
+          light: {
+            Brand: {
+              Primary: {
+                $type: "color",
+                $value: "#1d4ed8"
+              }
+            }
+          },
+          dark: {
+            Brand: {
+              Primary: {
+                $type: "color",
+                $value: "#93c5fd"
+              }
+            }
+          }
+        }
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "library-token-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-brand",
+              name: "Brand Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["base", "light", "dark"]
+            }
+          }
+        ]
+      }
+    });
+    await client.callTool({
+      name: "publish_library_registry_item",
+      arguments: {
+        fileId: "library-token-file",
+        libraryId: "team-kit",
+        name: "Team Kit"
+      }
+    });
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "target-token-project",
+        name: "Target Token Project",
+        documentId: "target-token-file",
+        documentName: "Target Token File"
+      }
+    });
+    await client.callTool({
+      name: "import_design_tokens",
+      arguments: {
+        fileId: "target-token-file",
+        tokens: {
+          $metadata: {
+            tokenSetOrder: ["legacy"],
+            activeTokenSets: ["legacy"]
+          },
+          legacy: {
+            Legacy: {
+              Primary: {
+                $type: "color",
+                $value: "#111827"
+              }
+            }
+          }
+        }
+      }
+    });
+    await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "target-token-file",
+        dryRun: false,
+        commands: [
+          {
+            type: "upsert_token_theme",
+            tokenTheme: {
+              id: "theme-legacy",
+              name: "Legacy Theme",
+              group: "mode",
+              enabled: true,
+              token_set_ids: ["legacy"]
+            }
+          }
+        ]
+      }
+    });
+
+    const review = parseToolJson(
+      await client.callTool({
+        name: "review_library_registry_tokens",
+        arguments: { fileId: "target-token-file", libraryId: "team-kit" }
+      })
+    );
+    expect(review.review).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      tokenCount: 3,
+      tokenSetCount: 3,
+      tokenThemeCount: 1,
+      replacesTokenCount: 1,
+      replacesTokenSetCount: 1,
+      replacesTokenThemeCount: 1,
+      tokenThemes: [expect.objectContaining({ id: "theme-brand", token_set_ids: ["base", "light", "dark"] })]
+    });
+
+    const imported = parseToolJson(
+      await client.callTool({
+        name: "import_library_registry_tokens",
+        arguments: { fileId: "target-token-file", libraryId: "team-kit" }
+      })
+    );
+    expect(imported.imported).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      tokenCount: 3,
+      tokenSetCount: 3,
+      tokenThemeCount: 1,
+      replacedTokenCount: 1,
+      replacedTokenSetCount: 1,
+      replacedTokenThemeCount: 1
+    });
+
+    const exported = parseToolJson(
+      await client.callTool({
+        name: "export_design_tokens",
+        arguments: { fileId: "target-token-file" }
+      })
+    );
+    expect(exported.tokens).toMatchObject({
+      $metadata: {
+        tokenSetOrder: ["base", "light", "dark"],
+        activeThemes: ["theme-brand"]
+      }
+    });
+    expect(exported.tokens.$themes).toEqual([
+      {
+        id: "theme-brand",
+        name: "Brand Theme",
+        group: "mode",
+        selectedTokenSets: ["base", "light", "dark"]
+      }
     ]);
   });
 

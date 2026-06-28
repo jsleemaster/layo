@@ -265,6 +265,24 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.post<{
     Params: { fileId: string };
+    Body: { libraryId: string };
+  }>("/files/:fileId/import/library/registry/tokens/review", async (request) => {
+    return {
+      review: await storage.reviewLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { libraryId: string };
+  }>("/files/:fileId/import/library/registry/tokens", async (request) => {
+    return {
+      imported: await storage.importLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
     Body: { libraryId: string; idPrefix?: string };
   }>("/files/:fileId/import/library/registry", async (request) => {
     return {
