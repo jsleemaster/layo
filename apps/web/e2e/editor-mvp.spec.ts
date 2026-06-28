@@ -1773,6 +1773,19 @@ function pngDimensions(png: Buffer) {
   };
 }
 
+async function imageDimensions(page: Page, image: Buffer, mimeType: "image/png" | "image/jpeg" | "image/webp") {
+  return page.evaluate(
+    async ({ base64, mime }) =>
+      new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => resolve({ width: element.naturalWidth, height: element.naturalHeight });
+        element.onerror = () => reject(new Error(`Could not decode ${mime}`));
+        element.src = `data:${mime};base64,${base64}`;
+      }),
+    { base64: image.toString("base64"), mime: mimeType }
+  );
+}
+
 test("inspector dev panel downloads png assets at the selected scale", async ({ page }) => {
   await createProjectFromEmptyState(page);
 
@@ -1803,6 +1816,48 @@ test("inspector dev panel downloads png assets at the selected scale", async ({ 
   expect(scaledSize.width).toBeGreaterThan(defaultSize.width);
   expect(scaledSize.height).toBeGreaterThan(defaultSize.height);
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("헤드라인 PNG 3x 다운로드됨");
+});
+
+test("inspector dev panel includes effect shadows in selected raster artifacts", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const plainPngDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const plainPngDownload = await plainPngDownloadPromise;
+  const plainPngPath = await plainPngDownload.path();
+  if (!plainPngPath) {
+    throw new Error("plain png download path missing");
+  }
+  const plainSize = await imageDimensions(page, await readFile(plainPngPath), "image/png");
+
+  await page.getByTestId("inspector-tab-design").click();
+  await page
+    .getByTestId("inspector-effect-shadow-stack")
+    .fill("20px 14px 16px 0px rgba(15, 23, 42, 0.35)\n-18px -10px 12px 0px rgba(59, 130, 246, 0.28)");
+  await page.getByTestId("inspector-tab-dev").click();
+
+  for (const { testId, mimeType, filename } of [
+    { testId: "dev-panel-download-png", mimeType: "image/png" as const, filename: "text-1.png" },
+    { testId: "dev-panel-download-jpeg", mimeType: "image/jpeg" as const, filename: "text-1.jpg" },
+    { testId: "dev-panel-download-webp", mimeType: "image/webp" as const, filename: "text-1.webp" }
+  ]) {
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId(testId).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(filename);
+    const downloadPath = await download.path();
+    if (!downloadPath) {
+      throw new Error(`${filename} download path missing`);
+    }
+    const size = await imageDimensions(page, await readFile(downloadPath), mimeType);
+    expect(size.width).toBeGreaterThan(plainSize.width + 60);
+    expect(size.height).toBeGreaterThan(plainSize.height + 40);
+  }
+
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("헤드라인 WEBP 다운로드됨");
 });
 
 test("file panel exports a project archive and reviews every document before import", async ({ page }) => {

@@ -209,25 +209,154 @@ function parseCssLength(value: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
-function konvaShadowProps(effectShadow: string | null | undefined): Record<string, number | string> {
-  const value = effectShadow?.trim();
-  if (!value || /[;{}\n\r]/.test(value)) {
-    return {};
+interface ParsedEffectShadowLayer {
+  offsetX: number;
+  offsetY: number;
+  blur: number;
+  spread: number;
+  color: string;
+}
+
+interface LocalVisualBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+function splitCssShadowLayers(value: string) {
+  const layers: string[] = [];
+  let current = "";
+  let depth = 0;
+
+  for (const character of value) {
+    if (character === "(") {
+      depth += 1;
+    } else if (character === ")") {
+      depth = Math.max(0, depth - 1);
+    }
+
+    if (character === "," && depth === 0) {
+      if (current.trim()) {
+        layers.push(current.trim());
+      }
+      current = "";
+    } else {
+      current += character;
+    }
   }
 
-  const colorMatch = value.match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/);
+  if (current.trim()) {
+    layers.push(current.trim());
+  }
+  return layers;
+}
+
+function parseEffectShadowLayer(value: string): ParsedEffectShadowLayer | null {
+  const trimmed = value.trim();
+  if (!trimmed || /[;{}\n\r]/.test(trimmed) || /\binset\b/i.test(trimmed)) {
+    return null;
+  }
+
+  const colorMatch = trimmed.match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/);
   const color = colorMatch?.[1] ?? "rgba(15, 23, 42, 0.2)";
-  const lengthText = colorMatch ? value.slice(0, colorMatch.index).trim() : value;
+  const lengthText = colorMatch ? trimmed.slice(0, colorMatch.index).trim() : trimmed;
   const lengths = lengthText.split(/\s+/).map(parseCssLength);
   if (lengths.length < 3 || lengths.slice(0, 3).some((length) => length === null)) {
-    return {};
+    return null;
   }
 
   return {
-    shadowOffsetX: lengths[0] ?? 0,
-    shadowOffsetY: lengths[1] ?? 0,
-    shadowBlur: Math.max(0, lengths[2] ?? 0),
-    shadowColor: color
+    offsetX: lengths[0] ?? 0,
+    offsetY: lengths[1] ?? 0,
+    blur: Math.max(0, lengths[2] ?? 0),
+    spread: Math.max(0, lengths[3] ?? 0),
+    color
+  };
+}
+
+function effectShadowValuesForNode(node: RendererNode) {
+  if (node.style.effect_shadows?.length) {
+    return node.style.effect_shadows.map((shadow) => shadow.trim()).filter(Boolean);
+  }
+  return node.style.effect_shadow ? splitCssShadowLayers(node.style.effect_shadow) : [];
+}
+
+function effectShadowLayersForNode(node: RendererNode) {
+  if (node.kind === "group") {
+    return [];
+  }
+  return effectShadowValuesForNode(node)
+    .map(parseEffectShadowLayer)
+    .filter((layer): layer is ParsedEffectShadowLayer => Boolean(layer));
+}
+
+function konvaShadowPropsForLayer(layer: ParsedEffectShadowLayer): Record<string, number | string> {
+  return {
+    shadowOffsetX: layer.offsetX,
+    shadowOffsetY: layer.offsetY,
+    shadowBlur: layer.blur,
+    shadowColor: layer.color
+  };
+}
+
+function mergeLocalVisualBounds(a: LocalVisualBounds, b: LocalVisualBounds): LocalVisualBounds {
+  return {
+    left: Math.min(a.left, b.left),
+    top: Math.min(a.top, b.top),
+    right: Math.max(a.right, b.right),
+    bottom: Math.max(a.bottom, b.bottom)
+  };
+}
+
+function localShadowBoundsForNode(node: RendererNode): LocalVisualBounds | null {
+  const layers = effectShadowLayersForNode(node);
+  if (layers.length === 0) {
+    return null;
+  }
+
+  return layers.reduce<LocalVisualBounds>(
+    (bounds, layer) => {
+      const expansion = layer.blur * 2 + layer.spread;
+      return mergeLocalVisualBounds(bounds, {
+        left: layer.offsetX - expansion,
+        top: layer.offsetY - expansion,
+        right: node.size.width + layer.offsetX + expansion,
+        bottom: node.size.height + layer.offsetY + expansion
+      });
+    },
+    { left: 0, top: 0, right: node.size.width, bottom: node.size.height }
+  );
+}
+
+function localVisualBoundsForNode(node: RendererNode): LocalVisualBounds {
+  let bounds = localShadowBoundsForNode(node) ?? {
+    left: 0,
+    top: 0,
+    right: node.size.width,
+    bottom: node.size.height
+  };
+
+  for (const child of node.children) {
+    const childBounds = localVisualBoundsForNode(child);
+    bounds = mergeLocalVisualBounds(bounds, {
+      left: child.transform.x + childBounds.left,
+      top: child.transform.y + childBounds.top,
+      right: child.transform.x + childBounds.right,
+      bottom: child.transform.y + childBounds.bottom
+    });
+  }
+
+  return bounds;
+}
+
+function rasterExportBoundsForNode(node: RendererNode, bounds: SelectionBounds): SelectionBounds {
+  const visualBounds = localVisualBoundsForNode(node);
+  return {
+    x: bounds.x + visualBounds.left,
+    y: bounds.y + visualBounds.top,
+    width: Math.max(1, visualBounds.right - visualBounds.left),
+    height: Math.max(1, visualBounds.bottom - visualBounds.top)
   };
 }
 
@@ -1652,7 +1781,8 @@ function CanvasImageBody({
   opacity,
   fitMode,
   naturalWidth,
-  naturalHeight
+  naturalHeight,
+  shadowProps = {}
 }: {
   assetId: string;
   width: number;
@@ -1661,6 +1791,7 @@ function CanvasImageBody({
   fitMode: ImageFitMode;
   naturalWidth?: number;
   naturalHeight?: number;
+  shadowProps?: Record<string, number | string>;
 }) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
 
@@ -1697,7 +1828,7 @@ function CanvasImageBody({
 
   return (
     <>
-      <Rect width={width} height={height} fill={editorKonvaTokens.image.placeholderFill} opacity={opacity} />
+      <Rect width={width} height={height} fill={editorKonvaTokens.image.placeholderFill} opacity={opacity} {...shadowProps} />
       {image && drawConfig ? (
         <KonvaImage
           image={image}
@@ -1707,6 +1838,7 @@ function CanvasImageBody({
           height={drawConfig.height}
           crop={drawConfig.crop}
           opacity={opacity}
+          {...shadowProps}
         />
       ) : null}
     </>
@@ -3375,8 +3507,7 @@ function renderNode({
     onTextEditStart(node.id);
   };
 
-  const shadowProps = konvaShadowProps(node.style.effect_shadow);
-  const body =
+  const renderBody = (shadowProps: Record<string, number | string> = {}): ReactNode =>
     node.kind === "group" ? null : node.kind === "image" && node.content.type === "image" ? (
       <CanvasImageBody
         assetId={node.content.asset_id}
@@ -3386,6 +3517,7 @@ function renderNode({
         fitMode={node.content.fit_mode ?? "fill"}
         naturalWidth={node.content.natural_width}
         naturalHeight={node.content.natural_height}
+        shadowProps={shadowProps}
       />
     ) : node.kind === "text" && node.content.type === "text" ? (
       <Text
@@ -3409,6 +3541,12 @@ function renderNode({
         {...shadowProps}
       />
     );
+  const shadowBodies = effectShadowLayersForNode(node).map((layer, index) => (
+    <Group key={`shadow-${index}`} listening={false}>
+      {renderBody(konvaShadowPropsForLayer(layer))}
+    </Group>
+  ));
+  const body = renderBody();
 
   return (
     <Group
@@ -3427,6 +3565,7 @@ function renderNode({
       onDragMove={(event) => onDragMove(node.id, event)}
       onDragEnd={(event) => onDragEnd(node.id, event)}
     >
+      {shadowBodies}
       {body}
       {isSelected ? (
         <>
@@ -8443,7 +8582,8 @@ export function App() {
       return null;
     }
 
-    const viewportRect = viewportBounds(bounds, scopedState.viewport);
+    const exportBounds = rasterExportBoundsForNode(node, bounds);
+    const viewportRect = viewportBounds(exportBounds, scopedState.viewport);
     const padding = 2;
     const x = Math.max(0, viewportRect.left - padding);
     const y = Math.max(0, viewportRect.top - padding);
