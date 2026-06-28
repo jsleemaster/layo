@@ -579,6 +579,106 @@ describe("FileStorage", () => {
     expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
   });
 
+  test("library registry publishes lists reviews and imports the latest shared library", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ] as any
+    });
+
+    const published = await storage.publishLibraryToRegistry("sample-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+    expect(published).toMatchObject({
+      libraryId: "team-kit",
+      name: "Team Kit",
+      sourceFileId: "sample-file",
+      sourceName: "테스트 문서",
+      componentCount: 1,
+      tokenCount: 1,
+      assetCount: 0
+    });
+    expect(published.publishedAt).toEqual(expect.any(String));
+
+    await storage.applyAgentCommands("sample-file", {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-badge",
+          name: "Library Badge",
+          width: 80,
+          height: 32,
+          fill: "#2563eb"
+        },
+        { type: "create_component", nodeId: "library-badge", componentId: "component-badge", name: "Badge" }
+      ] as any
+    });
+    const republished = await storage.publishLibraryToRegistry("sample-file", {
+      libraryId: "team-kit",
+      name: "Team Kit"
+    });
+    expect(republished.componentCount).toBe(2);
+    expect(await storage.listLibraryRegistry()).toEqual([expect.objectContaining({ libraryId: "team-kit" })]);
+
+    const target = await storage.createProject({
+      projectId: "target-project",
+      name: "대상 프로젝트",
+      documentId: "target-file",
+      documentName: "대상 문서"
+    });
+    const targetFileId = target.currentDocumentId;
+    const review = await storage.reviewLibraryRegistryItem(targetFileId, "team-kit");
+    expect(review).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      originalFileId: "sample-file",
+      componentCount: 2,
+      tokenCount: 1,
+      components: [
+        expect.objectContaining({ originalComponentId: "component-card", name: "Card" }),
+        expect.objectContaining({ originalComponentId: "component-badge", name: "Badge" })
+      ]
+    });
+
+    const imported = await storage.importLibraryRegistryItem(targetFileId, "team-kit", { idPrefix: "team" });
+    expect(imported).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      componentCount: 2,
+      tokenCount: 1,
+      componentIdMap: {
+        "component-card": "team-component-card",
+        "component-badge": "team-component-badge"
+      },
+      tokenIdMap: {
+        "color-brand-primary": "color-brand-primary"
+      }
+    });
+    const targetDocument = await storage.readFile(targetFileId);
+    expect(targetDocument.components?.map((component) => component.name)).toEqual(["Card", "Badge"]);
+    expect(targetDocument.tokens?.map((token) => token.name)).toEqual(["Brand / Primary"]);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

@@ -468,6 +468,84 @@ describe("HTTP server", () => {
     });
   });
 
+  test("publishes lists reviews and imports registry libraries", async () => {
+    const server = await createServerWithDocument();
+    await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [
+          {
+            type: "create_token",
+            token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+          },
+          {
+            type: "create_rectangle",
+            parentId: "frame-1",
+            id: "library-card",
+            name: "Library Card",
+            width: 160,
+            height: 96,
+            fill: "#ffffff"
+          },
+          { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+          { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+        ]
+      }
+    });
+
+    const published = await server.inject({
+      method: "POST",
+      url: "/libraries",
+      payload: { fileId: "sample-file", libraryId: "team-kit", name: "Team Kit" }
+    });
+    expect(published.statusCode).toBe(200);
+    expect(published.json().library).toMatchObject({
+      libraryId: "team-kit",
+      name: "Team Kit",
+      sourceFileId: "sample-file",
+      componentCount: 1,
+      tokenCount: 1
+    });
+
+    const libraries = await server.inject({ method: "GET", url: "/libraries" });
+    expect(libraries.statusCode).toBe(200);
+    expect(libraries.json().libraries).toEqual([expect.objectContaining({ libraryId: "team-kit" })]);
+
+    await server.inject({
+      method: "POST",
+      url: "/projects",
+      payload: { projectId: "target-project", name: "대상 프로젝트", documentId: "target-file", documentName: "대상 문서" }
+    });
+    const reviewed = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry/review",
+      payload: { libraryId: "team-kit" }
+    });
+    expect(reviewed.statusCode).toBe(200);
+    expect(reviewed.json().review).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      componentCount: 1,
+      tokens: [expect.objectContaining({ originalTokenId: "color-brand-primary" })]
+    });
+
+    const imported = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry",
+      payload: { libraryId: "team-kit", idPrefix: "team" }
+    });
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().imported).toMatchObject({
+      libraryId: "team-kit",
+      libraryName: "Team Kit",
+      fileId: "target-file",
+      componentCount: 1,
+      tokenCount: 1
+    });
+  });
+
   test("exports reviews and imports project archives", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const sourceServer = createHttpServer(new FileStorage(path.join(tempRoot, "source")));

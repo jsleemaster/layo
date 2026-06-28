@@ -223,6 +223,38 @@ export interface ExportedLibraryArchiveDownload {
   mimeType: string;
 }
 
+export interface LibraryRegistryEntry {
+  libraryId: string;
+  name: string;
+  sourceFileId: string;
+  sourceName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  publishedAt: string;
+  updatedAt: string;
+}
+
+export interface PublishLibraryRegistryInput {
+  libraryId?: string;
+  name?: string;
+}
+
+export interface LibraryRegistryReview extends LibraryArchiveReview {
+  libraryId: string;
+  libraryName: string;
+}
+
+export interface ImportedLibraryRegistryItem extends ImportedLibraryArchive {
+  libraryId: string;
+  libraryName: string;
+}
+
+export interface ImportLibraryRegistryInput {
+  libraryId: string;
+  idPrefix?: string;
+}
+
 export interface ExportCodeOptions {
   moduleBasePath?: string;
 }
@@ -438,6 +470,54 @@ export async function exportLibraryArchive(
     fileName,
     mimeType
   };
+}
+
+export async function publishLibraryToRegistry(
+  fileId: string,
+  input: PublishLibraryRegistryInput = {},
+  fetcher: typeof fetch = fetch
+): Promise<LibraryRegistryEntry> {
+  const response = await fetcher(apiUrl("/libraries"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileId, ...input })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { library: LibraryRegistryEntry }).library;
+}
+
+export async function listLibraryRegistry(fetcher: typeof fetch = fetch): Promise<LibraryRegistryEntry[]> {
+  const response = await fetcher(apiUrl("/libraries"));
+  const payload = await readDocumentJson(response);
+  return (payload as { libraries: LibraryRegistryEntry[] }).libraries;
+}
+
+export async function reviewLibraryRegistryItem(
+  fileId: string,
+  libraryId: string,
+  fetcher: typeof fetch = fetch
+): Promise<LibraryRegistryReview> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/review`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ libraryId })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { review: LibraryRegistryReview }).review;
+}
+
+export async function importLibraryRegistryItem(
+  fileId: string,
+  input: ImportLibraryRegistryInput,
+  fetcher: typeof fetch = fetch
+): Promise<ImportedLibraryRegistryItem> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { imported: ImportedLibraryRegistryItem }).imported;
 }
 
 export async function exportCode(

@@ -701,6 +701,33 @@ export interface ImportLibraryArchiveOptions {
   idPrefix?: string;
 }
 
+export interface LibraryRegistryEntry {
+  libraryId: string;
+  name: string;
+  sourceFileId: string;
+  sourceName: string;
+  componentCount: number;
+  tokenCount: number;
+  assetCount: number;
+  publishedAt: string;
+  updatedAt: string;
+}
+
+export interface PublishLibraryRegistryOptions {
+  libraryId?: string;
+  name?: string;
+}
+
+export interface ReviewedLibraryRegistryItem extends ReviewedLibraryArchive {
+  libraryId: string;
+  libraryName: string;
+}
+
+export interface ImportedLibraryRegistryItem extends ImportedLibraryArchive {
+  libraryId: string;
+  libraryName: string;
+}
+
 export class FileStorage {
   private readonly priorRootDir: string | null;
 
@@ -736,6 +763,10 @@ export class FileStorage {
     return path.join(this.rootDir, "comments");
   }
 
+  private get librariesDir() {
+    return path.join(this.rootDir, "libraries");
+  }
+
   private filePathFor(fileId: string) {
     const safeFileId = fileId.replace(/[^a-zA-Z0-9_-]/g, "");
     return path.join(this.filesDir, `${safeFileId}.json`);
@@ -759,6 +790,15 @@ export class FileStorage {
   private commentThreadsPathFor(fileId: string) {
     assertSafeStorageId(fileId);
     return path.join(this.commentsDir, `${fileId}.json`);
+  }
+
+  private libraryRegistryPath() {
+    return path.join(this.librariesDir, "registry.json");
+  }
+
+  private libraryArchivePathFor(libraryId: string) {
+    assertSafeStorageId(libraryId);
+    return path.join(this.librariesDir, `${libraryId}.layo-library.zip`);
   }
 
   private projectPathFor(projectId: string) {
@@ -1501,6 +1541,68 @@ export class FileStorage {
       assetCount: library.assetIds.length,
       componentIdMap,
       tokenIdMap
+    };
+  }
+
+  async publishLibraryToRegistry(
+    fileId: string,
+    options: PublishLibraryRegistryOptions = {}
+  ): Promise<LibraryRegistryEntry> {
+    const exported = await this.exportLibraryArchive(fileId);
+    const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
+    const existingEntries = await this.readLibraryRegistryEntries();
+    const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+    const now = new Date().toISOString();
+    const entry: LibraryRegistryEntry = {
+      libraryId,
+      name: normalizeName(options.name, exported.name),
+      sourceFileId: exported.fileId,
+      sourceName: exported.name,
+      componentCount: exported.componentCount,
+      tokenCount: exported.tokenCount,
+      assetCount: exported.assetCount,
+      publishedAt: existing?.publishedAt ?? now,
+      updatedAt: now
+    };
+    const nextEntries = [
+      entry,
+      ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
+    ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    await mkdir(this.librariesDir, { recursive: true });
+    await writeFile(this.libraryArchivePathFor(libraryId), exported.archive);
+    await this.writeLibraryRegistryEntries(nextEntries);
+    return entry;
+  }
+
+  async listLibraryRegistry(): Promise<LibraryRegistryEntry[]> {
+    return this.readLibraryRegistryEntries();
+  }
+
+  async reviewLibraryRegistryItem(
+    fileId: string,
+    libraryId: string
+  ): Promise<ReviewedLibraryRegistryItem> {
+    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const review = await this.reviewLibraryArchive(fileId, archive);
+    return {
+      ...review,
+      libraryId: entry.libraryId,
+      libraryName: entry.name
+    };
+  }
+
+  async importLibraryRegistryItem(
+    fileId: string,
+    libraryId: string,
+    options: ImportLibraryArchiveOptions = {}
+  ): Promise<ImportedLibraryRegistryItem> {
+    const { entry, archive } = await this.readLibraryRegistryArchive(libraryId);
+    const imported = await this.importLibraryArchive(fileId, archive, options);
+    return {
+      ...imported,
+      libraryId: entry.libraryId,
+      libraryName: entry.name
     };
   }
 
@@ -2389,12 +2491,60 @@ export class FileStorage {
       "utf8"
     );
   }
+
+  private async readLibraryRegistryEntries(): Promise<LibraryRegistryEntry[]> {
+    try {
+      const raw = await readFile(this.libraryRegistryPath(), "utf8");
+      const parsed = JSON.parse(raw) as { libraries?: unknown[] };
+      return Array.isArray(parsed.libraries) ? parsed.libraries.map(parseLibraryRegistryEntry) : [];
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async writeLibraryRegistryEntries(libraries: LibraryRegistryEntry[]): Promise<void> {
+    await mkdir(this.librariesDir, { recursive: true });
+    await writeFile(
+      this.libraryRegistryPath(),
+      `${JSON.stringify({ schemaVersion: 1, libraries }, null, 2)}\n`,
+      "utf8"
+    );
+  }
+
+  private async readLibraryRegistryArchive(libraryId: string): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
+    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+    const entry = (await this.readLibraryRegistryEntries()).find(
+      (candidate) => candidate.libraryId === normalizedLibraryId
+    );
+    if (!entry) {
+      throw notFoundError(`library registry item not found: ${normalizedLibraryId}`);
+    }
+    return {
+      entry,
+      archive: await readFile(this.libraryArchivePathFor(entry.libraryId))
+    };
+  }
 }
 
 function assertSafeStorageId(value: string) {
   if (!/^[a-zA-Z0-9_-]+$/.test(value)) {
     throw new Error(`safe id is required: ${value}`);
   }
+}
+
+function normalizeLibraryRegistryId(value: string | undefined) {
+  const libraryId = value?.trim() || "library";
+  assertSafeStorageId(libraryId);
+  return libraryId;
+}
+
+function notFoundError(message: string) {
+  const error = new Error(message) as Error & { code: string };
+  error.code = "ENOENT";
+  return error;
 }
 
 function createStorageId(prefix: string) {
@@ -2819,6 +2969,27 @@ function parseDesignFileArchiveDocument(input: unknown): DesignFile {
     ...candidate,
     name: normalizeName(candidate.name, candidate.id),
     pages: candidate.pages
+  };
+}
+
+function parseLibraryRegistryEntry(input: unknown): LibraryRegistryEntry {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library registry entry");
+  }
+  const candidate = input as Partial<LibraryRegistryEntry>;
+  const libraryId = normalizeLibraryRegistryId(candidate.libraryId);
+  const sourceFileId = normalizeName(candidate.sourceFileId, libraryId);
+  assertSafeStorageId(sourceFileId);
+  return {
+    libraryId,
+    name: normalizeName(candidate.name, libraryId),
+    sourceFileId,
+    sourceName: normalizeName(candidate.sourceName, sourceFileId),
+    componentCount: Math.max(0, Math.round(Number(candidate.componentCount) || 0)),
+    tokenCount: Math.max(0, Math.round(Number(candidate.tokenCount) || 0)),
+    assetCount: Math.max(0, Math.round(Number(candidate.assetCount) || 0)),
+    publishedAt: normalizeName(candidate.publishedAt, new Date(0).toISOString()),
+    updatedAt: normalizeName(candidate.updatedAt, candidate.publishedAt ?? new Date(0).toISOString())
   };
 }
 

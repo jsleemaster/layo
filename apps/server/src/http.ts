@@ -173,6 +173,21 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return { project: await storage.deleteProject(request.params.projectId) };
   });
 
+  server.get("/libraries", async () => {
+    return { libraries: await storage.listLibraryRegistry() };
+  });
+
+  server.post<{
+    Body: { fileId: string; libraryId?: string; name?: string };
+  }>("/libraries", async (request) => {
+    return {
+      library: await storage.publishLibraryToRegistry(request.body.fileId, {
+        libraryId: request.body.libraryId,
+        name: request.body.name
+      })
+    };
+  });
+
   server.get("/files", async () => {
     return { files: await storage.listFiles() };
   });
@@ -236,6 +251,26 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           idPrefix: request.body.idPrefix
         }
       )
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { libraryId: string };
+  }>("/files/:fileId/import/library/registry/review", async (request) => {
+    return {
+      review: await storage.reviewLibraryRegistryItem(request.params.fileId, request.body.libraryId)
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { libraryId: string; idPrefix?: string };
+  }>("/files/:fileId/import/library/registry", async (request) => {
+    return {
+      imported: await storage.importLibraryRegistryItem(request.params.fileId, request.body.libraryId, {
+        idPrefix: request.body.idPrefix
+      })
     };
   });
 

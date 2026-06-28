@@ -51,7 +51,9 @@ import {
   exportDesignTokensDtcg,
   importFileArchive,
   importLibraryArchive,
+  importLibraryRegistryItem,
   importDesignTokensDtcg,
+  listLibraryRegistry,
   listCommentActivity,
   listCommentNotifications,
   listCommentThreads,
@@ -65,8 +67,10 @@ import {
   pruneFileVersions,
   reviewFileArchive,
   reviewLibraryArchive,
+  reviewLibraryRegistryItem,
   saveFileVersion,
   setFileVersionPinned,
+  publishLibraryToRegistry,
   subscribeToCommentEvents,
   summarizeDocumentChanges,
   type CommentActivityFeed,
@@ -78,7 +82,9 @@ import {
   type FileArchiveReview,
   type FileVersionChangeSummary,
   type FileVersionSummary,
-  type LibraryArchiveReview
+  type LibraryArchiveReview,
+  type LibraryRegistryEntry,
+  type LibraryRegistryReview
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
 import { imageAssetIdsForNode, pdfForNode, svgForNode, type NodeArtifactAsset } from "./node-artifacts";
@@ -819,6 +825,10 @@ interface LibraryArchiveReviewState {
   review: LibraryArchiveReview;
   archiveBase64: string;
   sourceFileName: string;
+}
+
+interface LibraryRegistryReviewState {
+  review: LibraryRegistryReview;
 }
 
 interface ProjectArchiveReviewState {
@@ -7504,6 +7514,11 @@ export function App() {
   const [libraryArchiveReview, setLibraryArchiveReview] = useState<LibraryArchiveReviewState | null>(null);
   const [libraryArchivePrefix, setLibraryArchivePrefix] = useState("shared");
   const [libraryArchiveStatus, setLibraryArchiveStatus] = useState("라이브러리 아카이브 대기 중");
+  const [libraryRegistry, setLibraryRegistry] = useState<LibraryRegistryEntry[]>([]);
+  const [libraryRegistryName, setLibraryRegistryName] = useState("");
+  const [libraryRegistryPrefix, setLibraryRegistryPrefix] = useState("team");
+  const [libraryRegistryReview, setLibraryRegistryReview] = useState<LibraryRegistryReviewState | null>(null);
+  const [libraryRegistryStatus, setLibraryRegistryStatus] = useState("게시 라이브러리 대기 중");
   const [projectArchiveReview, setProjectArchiveReview] = useState<ProjectArchiveReviewState | null>(null);
   const [projectArchiveImportName, setProjectArchiveImportName] = useState("");
   const [projectArchiveStatus, setProjectArchiveStatus] = useState("프로젝트 아카이브 대기 중");
@@ -7741,6 +7756,20 @@ export function App() {
     editorRef.current = editor;
   }, [editor]);
 
+  const refreshLibraryRegistry = async (status?: string) => {
+    try {
+      const libraries = await listLibraryRegistry();
+      setLibraryRegistry(libraries);
+      setLibraryRegistryStatus(
+        status ?? (libraries.length > 0 ? `게시 라이브러리 ${libraries.length}개` : "게시 라이브러리 없음")
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리를 불러오지 못했습니다";
+      setLibraryRegistry([]);
+      setLibraryRegistryStatus(message);
+    }
+  };
+
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
     const response = await fetch(apiUrl(`/files/${project.currentDocumentId}`));
     if (!response.ok) {
@@ -7760,6 +7789,7 @@ export function App() {
     void refreshCommentThreads(project.currentDocumentId);
     void refreshCommentNotifications();
     void refreshCommentActivity();
+    await refreshLibraryRegistry();
   };
 
   useEffect(() => {
@@ -7787,6 +7817,7 @@ export function App() {
             resetCommentNotifications();
             resetCommentActivity();
             setEditor(null);
+            void refreshLibraryRegistry();
           }
           return;
         }
@@ -7812,6 +7843,7 @@ export function App() {
         void refreshCommentThreads(selectedProject.currentDocumentId);
         void refreshCommentNotifications();
         void refreshCommentActivity();
+        void refreshLibraryRegistry();
       } catch {
         if (!cancelled) {
           setProjectStatus("로컬 서버를 시작하면 프로젝트를 불러옵니다");
@@ -11133,6 +11165,80 @@ export function App() {
     }
   };
 
+  const publishCurrentLibraryRegistry = async () => {
+    if (!currentProject || !editor) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("라이브러리 게시 중");
+      const published = await publishLibraryToRegistry(currentProject.currentDocumentId, {
+        name: libraryRegistryName.trim() || editor.document.name
+      });
+      setLibraryRegistryName(published.name);
+      await refreshLibraryRegistry(`${published.name} 게시됨`);
+      setProjectStatus(`${published.name} 게시됨`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "라이브러리를 게시하지 못했습니다";
+      setLibraryRegistryStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
+  const reviewPublishedLibrary = async (libraryId: string) => {
+    if (!currentProject) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("게시 라이브러리 검토 중");
+      const review = await reviewLibraryRegistryItem(currentProject.currentDocumentId, libraryId);
+      setLibraryRegistryReview({ review });
+      setLibraryRegistryPrefix("team");
+      setLibraryRegistryStatus(`${review.libraryName} 검토됨`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리를 검토하지 못했습니다";
+      setLibraryRegistryReview(null);
+      setLibraryRegistryStatus(message);
+    }
+  };
+
+  const cancelLibraryRegistryImport = () => {
+    setLibraryRegistryReview(null);
+    setLibraryRegistryStatus("게시 라이브러리 가져오기 취소됨");
+  };
+
+  const importReviewedLibraryRegistry = async () => {
+    if (!currentProject) {
+      setLibraryRegistryStatus("프로젝트 없음");
+      return;
+    }
+    if (!libraryRegistryReview) {
+      setLibraryRegistryStatus("검토된 게시 라이브러리 없음");
+      return;
+    }
+
+    try {
+      setLibraryRegistryStatus("게시 라이브러리 가져오는 중");
+      const imported = await importLibraryRegistryItem(currentProject.currentDocumentId, {
+        libraryId: libraryRegistryReview.review.libraryId,
+        idPrefix: libraryRegistryPrefix.trim() || undefined
+      });
+      await loadProjectDocument(currentProject, projects);
+      setLibraryRegistryReview(null);
+      setLibraryRegistryStatus(
+        `게시 라이브러리 가져옴 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
+      );
+      setProjectStatus("게시 라이브러리 가져옴");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "게시 라이브러리를 가져오지 못했습니다";
+      setLibraryRegistryStatus(message);
+      setProjectStatus(message);
+    }
+  };
+
   const exportCurrentProjectArchive = async () => {
     if (!currentProject) {
       setProjectArchiveStatus("프로젝트 없음");
@@ -12611,6 +12717,104 @@ export function App() {
                   />
                   <div className="project-status" data-testid="library-archive-status">
                     {libraryArchiveStatus}
+                  </div>
+                  <div className="library-registry-panel" data-testid="library-registry-panel">
+                    <div className="file-archive-review-header">
+                      <span>
+                        <strong>게시 라이브러리</strong>
+                        <span>팀 소유 registry에서 재사용</span>
+                      </span>
+                      <button type="button" onClick={() => void refreshLibraryRegistry()}>
+                        게시 목록 갱신
+                      </button>
+                    </div>
+                    <label>
+                      게시 이름
+                      <input
+                        data-testid="library-registry-name"
+                        value={libraryRegistryName}
+                        placeholder={editor?.document.name ?? "게시 이름"}
+                        onChange={(event) => setLibraryRegistryName(event.currentTarget.value)}
+                      />
+                    </label>
+                    <div className="project-actions file-archive-actions">
+                      <button type="button" onClick={() => void publishCurrentLibraryRegistry()} disabled={!currentProject}>
+                        현재 파일 라이브러리 게시
+                      </button>
+                    </div>
+                    <div className="project-status" data-testid="library-registry-status">
+                      {libraryRegistryStatus}
+                    </div>
+                    <div className="file-archive-review-body" data-testid="library-registry-list">
+                      {libraryRegistry.length > 0 ? (
+                        libraryRegistry.map((library) => (
+                          <span key={library.libraryId}>
+                            <strong>{library.name}</strong> · 컴포넌트 {library.componentCount}개 · 토큰{" "}
+                            {library.tokenCount}개 · 원본 {library.sourceName}
+                            <button
+                              type="button"
+                              className="inspector-compact-button"
+                              data-testid={`library-registry-review-${library.libraryId}`}
+                              onClick={() => void reviewPublishedLibrary(library.libraryId)}
+                            >
+                              검토
+                            </button>
+                          </span>
+                        ))
+                      ) : (
+                        <span>게시된 라이브러리 없음</span>
+                      )}
+                    </div>
+                    {libraryRegistryReview ? (
+                      <div className="file-archive-review" data-testid="library-registry-review">
+                        <div className="file-archive-review-header">
+                          <span>
+                            <strong>게시된 라이브러리 검토</strong>
+                            <span>
+                              {libraryRegistryReview.review.libraryName} ·{" "}
+                              {libraryRegistryReview.review.originalName}
+                            </span>
+                          </span>
+                          <button type="button" onClick={cancelLibraryRegistryImport}>
+                            검토 취소
+                          </button>
+                        </div>
+                        <div className="file-archive-review-body">
+                          <span>
+                            컴포넌트 {libraryRegistryReview.review.componentCount}개 · 토큰{" "}
+                            {libraryRegistryReview.review.tokenCount}개 · 에셋{" "}
+                            {libraryRegistryReview.review.assetCount}개
+                          </span>
+                          {libraryRegistryReview.review.components.map((component) => (
+                            <span key={component.originalComponentId}>
+                              {component.name} · 객체 {component.nodeCount}개
+                              {component.conflict ? " · 충돌" : ""}
+                            </span>
+                          ))}
+                          {libraryRegistryReview.review.tokens.map((token) => (
+                            <span key={token.originalTokenId}>
+                              {token.name} · {token.type}
+                              {token.conflict ? " · 충돌" : ""}
+                            </span>
+                          ))}
+                        </div>
+                        <label>
+                          가져올 ID 접두어
+                          <input
+                            data-testid="library-registry-prefix"
+                            value={libraryRegistryPrefix}
+                            onChange={(event) => setLibraryRegistryPrefix(event.currentTarget.value)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="file-archive-import"
+                          onClick={() => void importReviewedLibraryRegistry()}
+                        >
+                          검토한 게시 라이브러리 가져오기
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                   {libraryArchiveReview ? (
                     <div className="file-archive-review" data-testid="library-archive-review">

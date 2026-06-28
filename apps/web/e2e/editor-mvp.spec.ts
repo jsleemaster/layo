@@ -376,6 +376,64 @@ test("file panel exports a shared library archive and imports reusable component
   ]);
 });
 
+test("file panel publishes a shared library registry item and imports it into another project", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const commands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "create_token",
+          token: { id: "color-brand-primary", name: "Brand / Primary", type: "color", value: "#2563eb" }
+        },
+        {
+          type: "create_rectangle",
+          parentId: "frame-1",
+          id: "library-card",
+          name: "Library Card",
+          width: 160,
+          height: 96,
+          fill: "#ffffff"
+        },
+        { type: "set_fill_token", nodeId: "library-card", tokenId: "color-brand-primary" },
+        { type: "create_component", nodeId: "library-card", componentId: "component-card", name: "Card" }
+      ]
+    }
+  });
+  expect(commands.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("library-registry-name").fill("Team Kit");
+  await page.getByRole("button", { name: "현재 파일 라이브러리 게시" }).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 게시됨");
+  await expect(page.getByTestId("library-registry-list")).toContainText("Team Kit");
+  await expect(page.getByTestId("library-registry-list")).toContainText("컴포넌트 1개");
+
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  await expect(page.getByTestId("library-registry-list")).toContainText("Team Kit");
+  await page.getByTestId(`library-registry-review-${documentId}`).click();
+  await expect(page.getByTestId("library-registry-review")).toContainText("게시된 라이브러리 검토");
+  await expect(page.getByTestId("library-registry-review")).toContainText("Card");
+  await expect(page.getByTestId("library-registry-review")).toContainText("Brand / Primary");
+  await page.getByTestId("library-registry-prefix").fill("team");
+  await page.getByRole("button", { name: "검토한 게시 라이브러리 가져오기" }).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText("게시 라이브러리 가져옴");
+
+  const targetProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${targetProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const targetDocumentId = (await projectResponse.json()).project.currentDocumentId as string;
+  const response = await page.request.get(`http://127.0.0.1:4317/files/${targetDocumentId}`);
+  expect(response.ok()).toBeTruthy();
+  const payload = await response.json();
+  expect(payload.file.components).toEqual([expect.objectContaining({ id: "team-component-card", name: "Card" })]);
+  expect(payload.file.tokens).toEqual([
+    expect.objectContaining({ id: "color-brand-primary", value: "#2563eb" })
+  ]);
+});
+
 test("inspector dev panel shows selected layer handoff specs and code", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

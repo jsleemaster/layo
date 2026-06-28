@@ -8,6 +8,8 @@ import {
   exportLibraryArchive,
   importFileArchive,
   importLibraryArchive,
+  importLibraryRegistryItem,
+  listLibraryRegistry,
   listCommentActivity,
   listCommentNotifications,
   listCommentThreads,
@@ -21,8 +23,10 @@ import {
   pruneFileVersions,
   reviewFileArchive,
   reviewLibraryArchive,
+  reviewLibraryRegistryItem,
   saveFileVersion,
   setFileVersionPinned,
+  publishLibraryToRegistry,
   subscribeToCommentEvents,
   summarizeDocumentChanges
 } from "./document-api";
@@ -434,6 +438,127 @@ describe("file version API helpers", () => {
       [expect.stringContaining("/files/document-1/import/library/review"), "POST"],
       [expect.stringContaining("/files/document-1/import/library"), "POST"],
       [expect.stringContaining("/files/document-1/export/library"), "GET"]
+    ]);
+  });
+
+  test("publishes lists reviews and imports registry libraries", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+
+      if (pathname === "/libraries" && init?.method === "POST") {
+        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(JSON.parse(String(init.body))).toEqual({
+          fileId: "document-1",
+          libraryId: "team-kit",
+          name: "Team Kit"
+        });
+        return jsonResponse({
+          library: {
+            libraryId: "team-kit",
+            name: "Team Kit",
+            sourceFileId: "document-1",
+            sourceName: "Source",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            publishedAt: "2026-06-28T00:00:00.000Z"
+          }
+        });
+      }
+
+      if (pathname === "/libraries") {
+        return jsonResponse({
+          libraries: [
+            {
+              libraryId: "team-kit",
+              name: "Team Kit",
+              sourceFileId: "document-1",
+              sourceName: "Source",
+              componentCount: 1,
+              tokenCount: 1,
+              assetCount: 0,
+              publishedAt: "2026-06-28T00:00:00.000Z"
+            }
+          ]
+        });
+      }
+
+      if (pathname === "/files/target-file/import/library/registry/review" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
+        return jsonResponse({
+          review: {
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            originalFileId: "document-1",
+            originalName: "Source",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            components: [{ originalComponentId: "component-card", name: "Card", nodeCount: 1, conflict: false }],
+            tokens: [
+              {
+                originalTokenId: "color-brand-primary",
+                name: "Brand / Primary",
+                type: "color",
+                value: "#2563eb",
+                conflict: false
+              }
+            ]
+          }
+        });
+      }
+
+      if (pathname === "/files/target-file/import/library/registry" && init?.method === "POST") {
+        expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit", idPrefix: "team" });
+        return jsonResponse({
+          imported: {
+            libraryId: "team-kit",
+            libraryName: "Team Kit",
+            fileId: "target-file",
+            originalFileId: "document-1",
+            originalName: "Source",
+            componentCount: 1,
+            tokenCount: 1,
+            assetCount: 0,
+            componentIdMap: { "component-card": "team-component-card" },
+            tokenIdMap: { "color-brand-primary": "color-brand-primary" }
+          }
+        });
+      }
+
+      return new Response("not found", { status: 404 });
+    };
+
+    await expect(
+      publishLibraryToRegistry(
+        "document-1",
+        { libraryId: "team-kit", name: "Team Kit" },
+        fetcher as typeof fetch
+      )
+    ).resolves.toMatchObject({ libraryId: "team-kit", componentCount: 1 });
+    await expect(listLibraryRegistry(fetcher as typeof fetch)).resolves.toEqual([
+      expect.objectContaining({ libraryId: "team-kit", name: "Team Kit" })
+    ]);
+    await expect(
+      reviewLibraryRegistryItem("target-file", "team-kit", fetcher as typeof fetch)
+    ).resolves.toMatchObject({
+      libraryId: "team-kit",
+      components: [expect.objectContaining({ originalComponentId: "component-card" })]
+    });
+    await expect(
+      importLibraryRegistryItem("target-file", { libraryId: "team-kit", idPrefix: "team" }, fetcher as typeof fetch)
+    ).resolves.toMatchObject({
+      libraryId: "team-kit",
+      fileId: "target-file",
+      componentCount: 1
+    });
+    expect(calls.map((call) => [call.url, call.init?.method ?? "GET"])).toEqual([
+      [expect.stringContaining("/libraries"), "POST"],
+      [expect.stringContaining("/libraries"), "GET"],
+      [expect.stringContaining("/files/target-file/import/library/registry/review"), "POST"],
+      [expect.stringContaining("/files/target-file/import/library/registry"), "POST"]
     ]);
   });
 
