@@ -5,9 +5,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import { FileStorage } from "./storage";
 import {
   createStorageBackupArchive,
+  listStorageBackupRepository,
+  pruneStorageBackupRepository,
   runStorageRestoreDrill,
   restoreStorageBackupArchive,
-  reviewStorageBackupArchive
+  reviewStorageBackupArchive,
+  writeStorageBackupToRepository
 } from "./storage-backup";
 
 let tempRoot: string | undefined;
@@ -153,6 +156,65 @@ describe("storage backup archive", () => {
       expectedFileFound: true,
       expectedFileVersionCount: 1
     });
+  });
+
+  test("writes and lists local backup repository archives newest first", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-backup-"));
+    const sourceRoot = path.join(tempRoot, "source");
+    const repositoryRoot = path.join(tempRoot, "backups");
+    await storageWithDocument(sourceRoot);
+
+    const older = await writeStorageBackupToRepository(sourceRoot, repositoryRoot, {
+      backupId: "older",
+      createdAt: new Date("2026-06-25T00:00:00.000Z")
+    });
+    const newer = await writeStorageBackupToRepository(sourceRoot, repositoryRoot, {
+      backupId: "newer",
+      createdAt: new Date("2026-06-28T00:00:00.000Z")
+    });
+
+    expect(older.archivePath).toBe(path.join(repositoryRoot, "older.zip"));
+    expect(newer.archivePath).toBe(path.join(repositoryRoot, "newer.zip"));
+    await expect(listStorageBackupRepository(repositoryRoot)).resolves.toMatchObject([
+      { backupId: "newer", createdAt: "2026-06-28T00:00:00.000Z", fileCount: expect.any(Number) },
+      { backupId: "older", createdAt: "2026-06-25T00:00:00.000Z", fileCount: expect.any(Number) }
+    ]);
+  });
+
+  test("dry-runs and prunes backup repository archives by retention policy", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-backup-"));
+    const sourceRoot = path.join(tempRoot, "source");
+    const repositoryRoot = path.join(tempRoot, "backups");
+    await storageWithDocument(sourceRoot);
+    for (const [backupId, createdAt] of [
+      ["oldest", "2026-06-20T00:00:00.000Z"],
+      ["middle", "2026-06-24T00:00:00.000Z"],
+      ["newest", "2026-06-28T00:00:00.000Z"]
+    ] as const) {
+      await writeStorageBackupToRepository(sourceRoot, repositoryRoot, { backupId, createdAt: new Date(createdAt) });
+    }
+
+    const dryRun = await pruneStorageBackupRepository(repositoryRoot, {
+      keepLast: 2,
+      maxAgeDays: 3,
+      now: new Date("2026-06-28T12:00:00.000Z"),
+      dryRun: true
+    });
+    expect(dryRun.dryRun).toBe(true);
+    expect(dryRun.deleted.map((entry) => entry.backupId)).toEqual(["oldest"]);
+    expect(dryRun.kept.map((entry) => entry.backupId)).toEqual(["newest", "middle"]);
+    await expect(listStorageBackupRepository(repositoryRoot)).resolves.toHaveLength(3);
+
+    const pruned = await pruneStorageBackupRepository(repositoryRoot, {
+      keepLast: 2,
+      maxAgeDays: 3,
+      now: new Date("2026-06-28T12:00:00.000Z")
+    });
+    expect(pruned.deleted.map((entry) => entry.backupId)).toEqual(["oldest"]);
+    await expect(listStorageBackupRepository(repositoryRoot)).resolves.toMatchObject([
+      { backupId: "newest" },
+      { backupId: "middle" }
+    ]);
   });
 });
 

@@ -1,0 +1,60 @@
+name: Storage Backup Retention
+
+on:
+  schedule:
+    - cron: "31 3 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/storage-backup-retention.yml"
+      - "apps/server/src/storage-backup.ts"
+      - "apps/server/src/storage-backup-cli.ts"
+      - "apps/server/src/storage-backup.test.ts"
+      - "scripts/layo-storage-backup.mjs"
+      - "scripts/check-dev-scripts.test.mjs"
+      - "scripts/check-deployment-artifacts.test.mjs"
+      - "docs/deployment/collaboration.md"
+      - "docs/product/penpot-maturity-benchmark.md"
+      - "package.json"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  retention:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Seed backups and verify retention
+        shell: bash
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: |
+          tmp_dir="$(mktemp -d)"
+          source_dir="$tmp_dir/source"
+          backup_dir="$tmp_dir/backups"
+          export SOURCE_ROOT="$source_dir"
+          export BACKUP_ROOT="$backup_dir"
+          pnpm --filter @layo/server exec tsx -e 'import { FileStorage } from "./src/storage.ts"; import { writeStorageBackupToRepository } from "./src/storage-backup.ts"; (async () => { const storage = new FileStorage(process.env.SOURCE_ROOT!); await storage.createProject({ projectId: "ci-project", name: "CI 프로젝트", documentId: "ci-file", documentName: "CI 문서" }); await storage.saveFileVersion("ci-file", { message: "retention baseline" }); await writeStorageBackupToRepository(process.env.SOURCE_ROOT!, process.env.BACKUP_ROOT!, { backupId: "retention-oldest", createdAt: new Date("2026-06-20T00:00:00.000Z") }); await writeStorageBackupToRepository(process.env.SOURCE_ROOT!, process.env.BACKUP_ROOT!, { backupId: "retention-middle", createdAt: new Date("2026-06-24T00:00:00.000Z") }); await writeStorageBackupToRepository(process.env.SOURCE_ROOT!, process.env.BACKUP_ROOT!, { backupId: "retention-newest", createdAt: new Date("2026-06-28T00:00:00.000Z") }); })();'
+          pnpm run storage:backup -- repository-list --repository-dir "$backup_dir"
+          pnpm run storage:backup -- repository-prune --repository-dir "$backup_dir" --keep-last 2 --max-age-days 3 --dry-run
+          pnpm run storage:backup -- repository-prune --repository-dir "$backup_dir" --keep-last 2 --max-age-days 3
+          archive_count="$(find "$backup_dir" -name '*.zip' | wc -l | tr -d ' ')"
+          test "$archive_count" = "2"

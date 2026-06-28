@@ -56,6 +56,26 @@ test("storage restore drill workflow verifies backup restorability without hoste
   assert.doesNotMatch(workflow, /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN/);
 });
 
+test("storage backup retention workflow dry-runs and prunes local backup archives", async () => {
+  const workflow = await readText(".github/workflows/storage-backup-retention.yml");
+
+  assert.match(workflow, /name: Storage Backup Retention/);
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /writeStorageBackupToRepository/);
+  assert.match(workflow, /backupId: "retention-oldest"/);
+  assert.match(workflow, /backupId: "retention-middle"/);
+  assert.match(workflow, /backupId: "retention-newest"/);
+  assert.match(workflow, /pnpm run storage:backup -- repository-list/);
+  assert.match(workflow, /pnpm run storage:backup -- repository-prune/);
+  assert.match(workflow, /--keep-last 2/);
+  assert.match(workflow, /--dry-run/);
+  assert.match(workflow, /archive_count="\$\(find "\$backup_dir" -name '\*\.zip' \| wc -l \| tr -d ' '\)"/);
+  assert.match(workflow, /test "\$archive_count" = "2"/);
+  assert.doesNotMatch(workflow, /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN/);
+});
+
 test("relay Docker artifacts expose team-owned relay configuration", async () => {
   const dockerfile = await readText("apps/collab-relay/Dockerfile");
   const compose = await readText("deploy/collab-relay/docker-compose.yml");

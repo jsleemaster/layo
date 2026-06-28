@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,6 +17,38 @@ export interface StorageBackupManifest {
 
 export interface StorageBackupReview extends StorageBackupManifest {
   directories: string[];
+}
+
+export interface StorageBackupRepositoryEntry {
+  backupId: string;
+  archivePath: string;
+  createdAt: string;
+  fileCount: number;
+  totalBytes: number;
+  archiveBytes: number;
+  directories: string[];
+}
+
+export interface StorageBackupRepositoryWriteOptions {
+  backupId?: string;
+  createdAt?: Date;
+}
+
+export interface StorageBackupRetentionOptions {
+  keepLast?: number;
+  maxAgeDays?: number;
+  now?: Date;
+  dryRun?: boolean;
+}
+
+export interface StorageBackupRetentionResult {
+  dryRun: boolean;
+  policy: {
+    keepLast?: number;
+    maxAgeDays?: number;
+  };
+  kept: StorageBackupRepositoryEntry[];
+  deleted: StorageBackupRepositoryEntry[];
 }
 
 export interface StorageRestoreDrillOptions {
@@ -41,13 +74,16 @@ export interface StorageRestoreDrillResult {
 const MANIFEST_ENTRY_PATH = "manifest.json";
 const STORAGE_ENTRY_PREFIX = "storage/";
 
-export async function createStorageBackupArchive(rootDir: string): Promise<Buffer> {
+export async function createStorageBackupArchive(
+  rootDir: string,
+  options: { createdAt?: Date } = {}
+): Promise<Buffer> {
   const storageEntries = await collectStorageEntries(rootDir);
   const manifest: StorageBackupManifest = {
     schemaVersion: 1,
     product: "Layo",
     storageDirectory: ".layo",
-    createdAt: new Date().toISOString(),
+    createdAt: (options.createdAt ?? new Date()).toISOString(),
     fileCount: storageEntries.length,
     totalBytes: storageEntries.reduce((total, entry) => total + entry.data.length, 0),
     entries: storageEntries.map((entry) => entry.path)
@@ -60,6 +96,81 @@ export async function createStorageBackupArchive(rootDir: string): Promise<Buffe
     },
     ...storageEntries
   ]);
+}
+
+export async function writeStorageBackupToRepository(
+  rootDir: string,
+  repositoryDir: string,
+  options: StorageBackupRepositoryWriteOptions = {}
+): Promise<StorageBackupRepositoryEntry> {
+  await mkdir(repositoryDir, { recursive: true });
+  const archive = await createStorageBackupArchive(rootDir, { createdAt: options.createdAt });
+  const review = reviewStorageBackupArchive(archive);
+  const backupId = normalizeBackupId(options.backupId ?? generatedBackupId(review.createdAt));
+  const archivePath = path.join(repositoryDir, `${backupId}.zip`);
+  await writeFile(archivePath, archive, { flag: "wx" });
+  return entryFromReview(backupId, archivePath, archive.length, review);
+}
+
+export async function listStorageBackupRepository(repositoryDir: string): Promise<StorageBackupRepositoryEntry[]> {
+  if (!(await pathExists(repositoryDir))) {
+    return [];
+  }
+
+  const children = await readdir(repositoryDir, { withFileTypes: true });
+  const entries = await Promise.all(
+    children
+      .filter((child) => child.isFile() && child.name.endsWith(".zip"))
+      .map(async (child) => {
+        const archivePath = path.join(repositoryDir, child.name);
+        const archive = await readFile(archivePath);
+        const review = reviewStorageBackupArchive(archive);
+        const archiveStat = await stat(archivePath);
+        return entryFromReview(path.basename(child.name, ".zip"), archivePath, archiveStat.size, review);
+      })
+  );
+
+  return entries.sort(compareBackupRepositoryEntries);
+}
+
+export async function pruneStorageBackupRepository(
+  repositoryDir: string,
+  options: StorageBackupRetentionOptions
+): Promise<StorageBackupRetentionResult> {
+  const policy = normalizeRetentionPolicy(options);
+  const entries = await listStorageBackupRepository(repositoryDir);
+  const cutoffTime =
+    policy.maxAgeDays === undefined
+      ? undefined
+      : (options.now ?? new Date()).getTime() - policy.maxAgeDays * 24 * 60 * 60 * 1000;
+  const protectedBackupIds = new Set(
+    policy.keepLast === undefined ? [] : entries.slice(0, policy.keepLast).map((entry) => entry.backupId)
+  );
+  const deleted = entries.filter((entry, index) => {
+    if (protectedBackupIds.has(entry.backupId)) {
+      return false;
+    }
+    if (policy.keepLast !== undefined && policy.maxAgeDays === undefined) {
+      return index >= policy.keepLast;
+    }
+    if (cutoffTime !== undefined) {
+      return Date.parse(entry.createdAt) < cutoffTime;
+    }
+    return false;
+  });
+  const deletedIds = new Set(deleted.map((entry) => entry.backupId));
+  const kept = entries.filter((entry) => !deletedIds.has(entry.backupId));
+
+  if (!options.dryRun) {
+    await Promise.all(deleted.map((entry) => rm(entry.archivePath, { force: true })));
+  }
+
+  return {
+    dryRun: options.dryRun === true,
+    policy,
+    kept,
+    deleted
+  };
 }
 
 export function reviewStorageBackupArchive(archive: Buffer): StorageBackupReview {
@@ -283,4 +394,58 @@ async function isEmptyDirectory(directory: string): Promise<boolean> {
 
 function arraysEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function generatedBackupId(createdAt: string): string {
+  return `layo-storage-${createdAt.replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+}
+
+function normalizeBackupId(backupId: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(backupId)) {
+    throw new Error("backup id may only contain letters, numbers, dot, underscore, and dash");
+  }
+  return backupId;
+}
+
+function entryFromReview(
+  backupId: string,
+  archivePath: string,
+  archiveBytes: number,
+  review: StorageBackupReview
+): StorageBackupRepositoryEntry {
+  return {
+    backupId,
+    archivePath,
+    createdAt: review.createdAt,
+    fileCount: review.fileCount,
+    totalBytes: review.totalBytes,
+    archiveBytes,
+    directories: review.directories
+  };
+}
+
+function compareBackupRepositoryEntries(
+  left: StorageBackupRepositoryEntry,
+  right: StorageBackupRepositoryEntry
+): number {
+  const createdAtDelta = Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  return createdAtDelta === 0 ? right.backupId.localeCompare(left.backupId) : createdAtDelta;
+}
+
+function normalizeRetentionPolicy(options: StorageBackupRetentionOptions): StorageBackupRetentionResult["policy"] {
+  const keepLast = options.keepLast;
+  const maxAgeDays = options.maxAgeDays;
+  if (keepLast === undefined && maxAgeDays === undefined) {
+    throw new Error("retention policy requires --keep-last or --max-age-days");
+  }
+  if (keepLast !== undefined && (!Number.isInteger(keepLast) || keepLast < 1)) {
+    throw new Error("keepLast must be a positive integer");
+  }
+  if (maxAgeDays !== undefined && (!Number.isInteger(maxAgeDays) || maxAgeDays < 0)) {
+    throw new Error("maxAgeDays must be a non-negative integer");
+  }
+  return {
+    keepLast,
+    maxAgeDays
+  };
 }

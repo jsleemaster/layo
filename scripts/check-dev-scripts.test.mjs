@@ -45,11 +45,20 @@ test("storage backup script exposes backup review and restore operations", async
   assert.match(runner, /review/);
   assert.match(runner, /restore/);
   assert.match(runner, /drill/);
+  assert.match(runner, /repository-put/);
+  assert.match(runner, /repository-list/);
+  assert.match(runner, /repository-prune/);
   assert.match(runner, /--storage-dir/);
+  assert.match(runner, /--repository-dir/);
+  assert.match(runner, /--keep-last/);
+  assert.match(runner, /--max-age-days/);
+  assert.match(runner, /--dry-run/);
   assert.match(runner, /--archive|--out/);
   assert.match(runner, /--work-dir/);
   assert.match(runner, /--expect-project/);
   assert.match(runner, /--expect-file/);
+  assert.match(runner, /NODE_OPTIONS/);
+  assert.match(runner, /--conditions=development/);
 });
 
 test("GitHub homepage sync script is exposed and verifies deployment before patching", async () => {

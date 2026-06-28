@@ -143,9 +143,26 @@ pnpm run storage:backup -- drill --storage-dir .layo --work-dir /tmp/layo-drill 
 drill without hosted secrets. It creates a temporary `FileStorage` root, saves a
 project and file version, backs it up, restores into a scratch directory, and
 verifies the expected project/file/version evidence can be read. This
-repository-owned runbook covers local filesystem storage. Hosted
-database/object-store backups and retention policy remain production operations
-work.
+repository-owned runbook covers local filesystem storage.
+
+For retained local backup archives, use a backup repository directory instead
+of isolated one-off zip files:
+
+```bash
+mkdir -p backups
+pnpm run storage:backup -- repository-put --storage-dir .layo --repository-dir backups
+pnpm run storage:backup -- repository-list --repository-dir backups
+pnpm run storage:backup -- repository-prune --repository-dir backups --keep-last 7 --max-age-days 30 --dry-run
+pnpm run storage:backup -- repository-prune --repository-dir backups --keep-last 7 --max-age-days 30
+```
+
+`repository-prune` always protects the newest `--keep-last` archives before
+applying the age policy. Use `--dry-run` first during operations reviews.
+`.github/workflows/storage-backup-retention.yml` runs a scheduled seeded
+retention check without hosted secrets: it creates three dated backups, lists
+them, dry-runs the policy, applies it, and verifies exactly two zip archives
+remain. Hosted database/object-store backup storage remains production
+operations work beyond this local repository adapter.
 
 ## Full-stack web and API deployment
 
