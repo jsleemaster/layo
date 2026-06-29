@@ -101,6 +101,17 @@ The sync script first runs the live deployment smoke check. If the URL serves a
 non-Layo page, such as the current stale `https://layo.vercel.app/` host, it
 exits before calling the GitHub repository PATCH API.
 
+The current manually verified `jsleemasters-projects/layo` production URL is:
+
+```bash
+pnpm run check:live-deployment -- --url https://layo-three.vercel.app/
+```
+
+This proves the public editor shell and same-origin `/health` route for the
+manual Vercel deployment. It does not replace the GitHub Actions production
+workflow; repository secrets still need to be configured before production
+deployments are repeatable from CI.
+
 By default, Vercel runtime writes use `/tmp/layo` because the deployment
 filesystem is otherwise read-only. This is useful for validating the deployed
 editor shell and API routing, but it is not durable team storage. Set
