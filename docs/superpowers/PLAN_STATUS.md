@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-01-figma-image-asset-import.md` | Blocked | PR #199 remains open. The three P2 review findings are addressed through code/test commit `c09d0c0` with regression tests, and review threads have replies. Remote PR checks pass at current head `7680c75` (`Vercel`, `Vercel Preview Comments`, `restore-drill`, `retention`). The plan stays active because GitHub reports `mergeable_state: blocked`, full PR-head local/e2e verification is not trusted while `git status --short --branch` exits `134`, and merge plus post-merge cleanup are not complete. |
+| `2026-07-01-figma-image-asset-import.md` | Blocked | PR #199 remains open. The three P2 review findings are addressed through code/test commit `c09d0c0` with regression tests, and review threads have replies. Remote PR checks pass for the latest checked PR head (`Vercel`, `Vercel Preview Comments`, `restore-drill`, `retention`). The plan stays active because GitHub reports `mergeable_state: blocked`, full PR-head local/e2e verification is not trusted while `git status --short --branch` exits `134`, and merge plus post-merge cleanup are not complete. |
 
 ## Completed Plans
 
