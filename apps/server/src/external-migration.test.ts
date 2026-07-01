@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
 import { importExternalMigrationArchive, reviewExternalMigrationArchive } from "./external-migration";
 
+const pixelPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+
 describe("external design migration preflight", () => {
   test("reviews a Penpot-style ZIP without writing imported files", () => {
     const archive = createZipArchive([
@@ -186,6 +188,107 @@ describe("external design migration preflight", () => {
       size: { width: 220, height: 32 },
       content: { type: "text", value: "Imported headline", font_size: 18, font_family: "Inter" }
     });
+  });
+
+  test("imports Figma JSON packages with image fills as image nodes", () => {
+    const pngBytes = Buffer.from(pixelPngBase64, "base64");
+    const figmaJson = {
+      name: "Figma image landing",
+      document: {
+        id: "0:0",
+        name: "Document",
+        type: "DOCUMENT",
+        children: [
+          {
+            id: "1:1",
+            name: "Page 1",
+            type: "CANVAS",
+            children: [
+              {
+                id: "2:1",
+                name: "Hero",
+                type: "FRAME",
+                absoluteBoundingBox: { x: 80, y: 96, width: 320, height: 180 },
+                children: [
+                  {
+                    id: "3:1",
+                    name: "Hero image",
+                    type: "RECTANGLE",
+                    absoluteBoundingBox: { x: 104, y: 122, width: 180, height: 96 },
+                    fills: [
+                      {
+                        type: "IMAGE",
+                        visible: true,
+                        imageRef: "figma-image-hero",
+                        scaleMode: "FILL"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    };
+    const archive = createZipArchive([
+      { path: "figma-file.json", data: Buffer.from(JSON.stringify(figmaJson), "utf8") },
+      { path: "assets/figma-image-hero.png", data: pngBytes }
+    ]);
+
+    const review = reviewExternalMigrationArchive(archive, { fileName: "figma-image-package.zip" });
+
+    expect(review).toMatchObject({
+      source: "figma",
+      sourceLabel: "Figma",
+      archiveKind: "zip",
+      canImport: true,
+      assetCount: 1,
+      documentCandidateCount: 1,
+      blockedBy: []
+    });
+    expect(review.assetCandidates[0]).toMatchObject({
+      path: "assets/figma-image-hero.png",
+      mediaType: "image/png",
+      bytes: pngBytes.length
+    });
+
+    const imported = importExternalMigrationArchive(archive, {
+      fileName: "figma-image-package.zip",
+      fileId: "figma-image-imported-file"
+    });
+
+    expect(imported).toMatchObject({
+      source: "figma",
+      sourceLabel: "Figma",
+      mappedNodeCount: 2,
+      skippedNodeCount: 0
+    });
+    const image = imported.file.pages[0].children[0].children[0];
+    expect(image).toMatchObject({
+      id: "figma-3-1",
+      kind: "image",
+      name: "Hero image",
+      transform: { x: 24, y: 26, rotation: 0 },
+      size: { width: 180, height: 96 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0 },
+      content: {
+        type: "image",
+        asset_id: "figma-asset-figma-image-hero",
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fill"
+      }
+    });
+    expect(imported.importedAssets).toHaveLength(1);
+    expect(imported.importedAssets[0].metadata).toMatchObject({
+      assetId: "figma-asset-figma-image-hero",
+      name: "figma-image-hero.png",
+      mimeType: "image/png",
+      byteLength: pngBytes.length,
+      url: "/assets/figma-asset-figma-image-hero"
+    });
+    expect(imported.importedAssets[0].data.equals(pngBytes)).toBe(true);
   });
 
   test("rejects opaque Figma binaries with a concrete REST-export next step", () => {

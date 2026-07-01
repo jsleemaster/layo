@@ -230,6 +230,7 @@ export interface ImportedExternalMigrationArchive {
   file: RendererDocument;
   source: ExternalMigrationSource;
   sourceLabel: string;
+  assetCount: number;
   mappedNodeCount: number;
   skippedNodeCount: number;
   warnings: string[];

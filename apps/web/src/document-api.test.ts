@@ -600,6 +600,7 @@ describe("file version API helpers", () => {
           imported: {
             source: "figma",
             sourceLabel: "Figma",
+            assetCount: 1,
             mappedNodeCount: 2,
             skippedNodeCount: 0,
             warnings: [],
@@ -644,6 +645,7 @@ describe("file version API helpers", () => {
       )
     ).resolves.toMatchObject({
       source: "figma",
+      assetCount: 1,
       project: { projectId: "project-figma", name: "Figma landing" },
       file: { id: "document-figma", name: "Figma landing" }
     });
