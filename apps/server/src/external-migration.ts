@@ -234,7 +234,7 @@ function reviewZipArchive(
     json: figmaDocument?.json,
     documentCandidates
   });
-  const canImport = source === \"figma\" && (figmaDocument?.summary.pageCount ?? 0) > 0;
+  const canImport = source === "figma" && (figmaDocument?.summary.pageCount ?? 0) > 0;
 
   return baseReview({
     source,
@@ -450,12 +450,12 @@ function mapFigmaNode(
   if (frameImageContent && imageAsset) {
     mapped.children.push({
       id: `${nodeId}-image-fill`,
-      kind: \"image\",
+      kind: "image",
       name: `${mapped.name} image fill`,
       transform: { x: 0, y: 0, rotation: 0 },
       size: mapped.size,
       style: {
-        fill: \"#f3f4f6\",
+        fill: "#f3f4f6",
         stroke: null,
         stroke_width: 0,
         opacity: finiteNumber(node.opacity, 1)
@@ -470,7 +470,7 @@ function mapFigmaNode(
     state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
   }
 
-  if (type === \"FRAME\") {
+  if (type === "FRAME") {
     mapped.children = [...mapped.children, ...mapFigmaNodeChildren(node, bounds, state)];
   }
 
@@ -484,7 +484,7 @@ function readFigmaPackage(entries: Map<string, Buffer>): {
   const document = [...entries.entries()]
     .filter(([entryPath]) => {
       const kind = entryKindForPath(entryPath);
-      return kind === \"document\" || kind === \"manifest\" || kind === \"metadata\";
+      return kind === "document" || kind === "manifest" || kind === "metadata";
     })
     .map(([entryPath, data]) => ({ path: entryPath, json: parseJsonBuffer(data) }))
     .filter((entry): entry is FigmaPackageDocument => entry.json !== undefined && isFigmaJson(entry.json))
