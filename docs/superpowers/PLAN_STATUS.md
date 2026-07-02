@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-06-28
+Last audited: 2026-07-02
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -24,6 +24,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-02-penpot-baseline-align-self.md` | Completed | PR #206 adapts the next Penpot/CSS layout maturity slice by adding per-item `align_self: baseline` participation for auto-layout and grid children, including Inspector control, MCP/HTTP/storage/Rust contracts, server and web layout solvers, and selected-layer code export handoff. The failure loop is recorded: Full Verification #28581835617 passed core tests but failed Playwright e2e because Inspector layout-item updates were local-only for Dev handoff; follow-up commit `f98ad3f2` persists `set_layout_item` and refreshes export state. Verified with Full Verification #28582398003. Vercel preview remained blocked by account build-rate-limit and deployment is intentionally deferred. |
 | `2026-07-02-penpot-vertical-text-unicode-orientation.md` | Completed | PR #205 narrows the typography/layout maturity gap after PR #204 by replacing ASCII-only mixed vertical canvas orientation with representative Unicode script and punctuation coverage. Verified with Full Verification #28571441681, Storage Restore Drill #28571441677, and Storage Backup Retention #28571441686. Deployment remains intentionally deferred for this loop. |
 | `2026-07-02-penpot-text-orientation-controls.md` | Completed | PR #204 closes the next layout maturity gap after PR #203 by adding explicit text-orientation metadata/control/export and mixed/upright/sideways vertical glyph rendering in the Konva canvas. Remaining layout gaps are deeper Unicode punctuation/script orientation fidelity, deeper CSS baseline group semantics, and remaining resizing semantics. |
 | `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Completed | PR #203 closes the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. Layo adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. Remaining layout gaps are glyph-orientation controls, deeper CSS baseline group semantics, and remaining resizing semantics. |
