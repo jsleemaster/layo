@@ -1,5 +1,5 @@
 import { readZipArchive } from "./file-archive.js";
-import type { DesignFile, DesignNode } from "./storage.js";
+import type { DesignFile, DesignNode, ImageFitMode, StoredAsset } from "./storage.js";
 
 export type ExternalMigrationSource = "penpot" | "figma" | "unknown";
 export type ExternalMigrationArchiveKind = "zip" | "json" | "binary";
@@ -52,10 +52,16 @@ export interface ExternalMigrationImportOptions extends ExternalMigrationReviewO
   name?: string;
 }
 
+export interface ExternalMigrationImportedAsset {
+  metadata: StoredAsset;
+  data: Buffer;
+}
+
 export interface ExternalMigrationImportResult {
   source: ExternalMigrationSource;
   sourceLabel: string;
   file: DesignFile;
+  importedAssets: ExternalMigrationImportedAsset[];
   mappedNodeCount: number;
   skippedNodeCount: number;
   warnings: string[];
@@ -74,6 +80,20 @@ interface FigmaMappingState {
   mappedNodeCount: number;
   skippedNodeCount: number;
   warnings: string[];
+  assetsByRef: Map<string, FigmaPackageAsset>;
+  usedAssets: Map<string, FigmaPackageAsset>;
+}
+
+interface FigmaPackageDocument {
+  path: string;
+  json: unknown;
+}
+
+interface FigmaPackageAsset extends ExternalMigrationImportedAsset {
+  imageRef: string;
+  path: string;
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 const JSON_TEXT_EXTENSIONS = new Set([".json"]);
@@ -87,6 +107,8 @@ const ASSET_MEDIA_TYPES = new Map<string, string>([
   [".avif", "image/avif"],
   [".pdf", "application/pdf"]
 ]);
+const IMPORTABLE_IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function reviewExternalMigrationArchive(
   archive: Buffer,
@@ -113,6 +135,35 @@ export function importExternalMigrationArchive(
 ): ExternalMigrationImportResult {
   const fileName = safeFileName(options.fileName);
   const sourceHint = normalizeSourceHint(options.sourceHint);
+  if (looksLikeZip(archive)) {
+    let entries: Map<string, Buffer>;
+    try {
+      entries = readZipArchive(archive);
+    } catch (error) {
+      throw inputValidationError(`ZIP archive could not be inspected: ${messageFromError(error)}`);
+    }
+    const figmaPackage = readFigmaPackage(entries);
+    if (!figmaPackage) {
+      throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
+    }
+
+    const source = detectSource({
+      fileName,
+      sourceHint,
+      json: figmaPackage.document.json,
+      documentCandidates: [summarizeJsonDocument(figmaPackage.document.path, figmaPackage.document.json)]
+    });
+    if (source !== "figma") {
+      throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
+    }
+
+    return mapFigmaRestJsonToDesignFile(figmaPackage.document.json, {
+      assetsByRef: figmaPackage.assetsByRef,
+      fileId: options.fileId,
+      name: options.name ?? stringValue((figmaPackage.document.json as JsonRecord).name) ?? fileName
+    });
+  }
+
   const parsedJson = parseJsonBuffer(archive);
   if (!parsedJson || !isFigmaJson(parsedJson)) {
     throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
@@ -129,6 +180,7 @@ export function importExternalMigrationArchive(
   }
 
   return mapFigmaRestJsonToDesignFile(parsedJson, {
+    assetsByRef: new Map(),
     fileId: options.fileId,
     name: options.name ?? stringValue((parsedJson as JsonRecord).name) ?? fileName
   });
@@ -166,19 +218,23 @@ function reviewZipArchive(
       bytes: entry.bytes,
       mediaType: ASSET_MEDIA_TYPES.get(extensionForPath(entry.path)) ?? "application/octet-stream"
     }));
-  const documentCandidates = summaries
+  const parsedDocuments = summaries
     .filter((entry) => entry.kind === "document" || entry.kind === "manifest" || entry.kind === "metadata")
     .flatMap((entry) => {
       const data = entries.get(entry.path);
       const parsed = data ? parseJsonBuffer(data) : undefined;
-      return parsed === undefined ? [] : [summarizeJsonDocument(entry.path, parsed)];
+      return parsed === undefined ? [] : [{ path: entry.path, json: parsed, summary: summarizeJsonDocument(entry.path, parsed) }];
     });
+  const documentCandidates = parsedDocuments.map((entry) => entry.summary);
+  const figmaDocument = parsedDocuments.find((entry) => isFigmaJson(entry.json));
   const source = detectSource({
     fileName: options.fileName,
     sourceHint: options.sourceHint,
     entries: summaries,
+    json: figmaDocument?.json,
     documentCandidates
   });
+  const canImport = source === "figma" && (figmaDocument?.summary.pageCount ?? 0) > 0;
 
   return baseReview({
     source,
@@ -188,7 +244,8 @@ function reviewZipArchive(
     assetCandidates,
     documentCandidates,
     warnings,
-    blockedBy: blockedByForSource(source, "zip")
+    blockedBy: canImport ? [] : blockedByForSource(source, "zip"),
+    canImport
   });
 }
 
@@ -257,14 +314,20 @@ function reviewBinaryArchive(
 
 function mapFigmaRestJsonToDesignFile(
   value: unknown,
-  options: { fileId?: string; name?: string }
+  options: { assetsByRef: Map<string, FigmaPackageAsset>; fileId?: string; name?: string }
 ): ExternalMigrationImportResult {
   if (!isRecord(value) || !isRecord(value.document)) {
     throw inputValidationError("Figma REST JSON document root is required.");
   }
   const documentNode = value.document;
   const children = Array.isArray(documentNode.children) ? documentNode.children : [];
-  const state: FigmaMappingState = { mappedNodeCount: 0, skippedNodeCount: 0, warnings: [] };
+  const state: FigmaMappingState = {
+    mappedNodeCount: 0,
+    skippedNodeCount: 0,
+    warnings: [],
+    assetsByRef: options.assetsByRef,
+    usedAssets: new Map()
+  };
   const pages = children
     .filter((child): child is JsonRecord => isRecord(child) && child.type === "CANVAS")
     .map((page, index) => ({
@@ -289,6 +352,10 @@ function mapFigmaRestJsonToDesignFile(
       name: fileName,
       pages
     },
+    importedAssets: [...state.usedAssets.values()].map((asset) => ({
+      metadata: asset.metadata,
+      data: asset.data
+    })),
     mappedNodeCount: state.mappedNodeCount,
     skippedNodeCount: state.skippedNodeCount,
     warnings: state.warnings
@@ -336,14 +403,26 @@ function mapFigmaNode(
     y: roundGeometry(bounds.y - (parentBounds?.y ?? 0)),
     rotation: 0
   };
-  const fill = solidPaintHex(node.fills) ?? defaultFillForFigmaType(type);
+  const imagePaint = type !== "TEXT" ? imagePaintForNode(node.fills) : null;
+  const imageAsset = imagePaint ? state.assetsByRef.get(imagePaint.imageRef) : undefined;
+  if (imagePaint && !imageAsset) {
+    state.warnings.push(
+      `Figma image fill ${imagePaint.imageRef} (${stringValue(node.name) ?? "unnamed"}) was not packaged with an asset.`
+    );
+  }
+  const imageContent =
+    type !== "FRAME" && imagePaint && imageAsset ? imageContentForAsset(imageAsset, imagePaint) : null;
+  const frameImageContent =
+    type === "FRAME" && imagePaint && imageAsset ? imageContentForAsset(imageAsset, imagePaint) : null;
+  const mapsAsImage = imageContent !== null;
+  const fill = mapsAsImage ? "#f3f4f6" : solidPaintHex(node.fills) ?? defaultFillForFigmaType(type);
   const stroke = solidPaintHex(node.strokes);
   const nodeId = figmaStorageId(node.id, `${type.toLowerCase()}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
 
   const mapped: DesignNode = {
     id: nodeId,
-    kind: type === "FRAME" ? "frame" : type === "TEXT" ? "text" : "rectangle",
+    kind: mapsAsImage ? "image" : type === "FRAME" ? "frame" : type === "TEXT" ? "text" : "rectangle",
     name: stringValue(node.name) ?? type.toLowerCase(),
     transform,
     size: {
@@ -352,12 +431,14 @@ function mapFigmaNode(
     },
     style: {
       fill,
-      stroke,
-      stroke_width: finiteNumber(node.strokeWeight, stroke ? 1 : 0),
+      stroke: mapsAsImage ? null : stroke,
+      stroke_width: mapsAsImage ? 0 : finiteNumber(node.strokeWeight, stroke ? 1 : 0),
       opacity: finiteNumber(node.opacity, 1)
     },
     content:
-      type === "TEXT"
+      mapsAsImage
+        ? imageContent
+        : type === "TEXT"
         ? {
             type: "text",
             value: stringValue(node.characters) ?? "",
@@ -368,11 +449,132 @@ function mapFigmaNode(
     children: []
   };
 
+  if (frameImageContent && imageAsset) {
+    mapped.children.push({
+      id: `${nodeId}-image-fill`,
+      kind: "image",
+      name: `${mapped.name} image fill`,
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: mapped.size,
+      style: {
+        fill: "#f3f4f6",
+        stroke: null,
+        stroke_width: 0,
+        opacity: finiteNumber(node.opacity, 1)
+      },
+      content: frameImageContent,
+      children: []
+    });
+    state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
+  }
+
+  if (mapsAsImage && imageAsset) {
+    state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
+  }
+
   if (type === "FRAME") {
-    mapped.children = mapFigmaNodeChildren(node, bounds, state);
+    mapped.children = [...mapped.children, ...mapFigmaNodeChildren(node, bounds, state)];
   }
 
   return mapped;
+}
+
+function readFigmaPackage(entries: Map<string, Buffer>): {
+  document: FigmaPackageDocument;
+  assetsByRef: Map<string, FigmaPackageAsset>;
+} | null {
+  const document = [...entries.entries()]
+    .filter(([entryPath]) => {
+      const kind = entryKindForPath(entryPath);
+      return kind === "document" || kind === "manifest" || kind === "metadata";
+    })
+    .map(([entryPath, data]) => ({ path: entryPath, json: parseJsonBuffer(data) }))
+    .filter((entry): entry is FigmaPackageDocument => entry.json !== undefined && isFigmaJson(entry.json))
+    .sort((left, right) => left.path.localeCompare(right.path))[0];
+  if (!document) {
+    return null;
+  }
+
+  return {
+    document,
+    assetsByRef: figmaPackageAssetsByRef(entries)
+  };
+}
+
+function figmaPackageAssetsByRef(entries: Map<string, Buffer>): Map<string, FigmaPackageAsset> {
+  const assetsByRef = new Map<string, FigmaPackageAsset>();
+  const sortedEntries = [...entries.entries()].sort(([left], [right]) => left.localeCompare(right));
+  for (const [entryPath, data] of sortedEntries) {
+    if (entryKindForPath(entryPath) !== "asset") {
+      continue;
+    }
+    const mediaType = ASSET_MEDIA_TYPES.get(extensionForPath(entryPath));
+    if (!mediaType || !IMPORTABLE_IMAGE_MEDIA_TYPES.has(mediaType)) {
+      continue;
+    }
+    const imageRef = imageRefForAssetPath(entryPath);
+    if (!imageRef || assetsByRef.has(imageRef)) {
+      continue;
+    }
+    const dimensions = dimensionsForImage(data, mediaType);
+    const assetId = figmaAssetStorageId(imageRef);
+    assetsByRef.set(imageRef, {
+      imageRef,
+      path: entryPath,
+      naturalWidth: dimensions?.width,
+      naturalHeight: dimensions?.height,
+      metadata: {
+        assetId,
+        name: fileNameForPath(entryPath),
+        mimeType: mediaType,
+        byteLength: data.length,
+        url: `/assets/${assetId}`
+      },
+      data
+    });
+  }
+  return assetsByRef;
+}
+
+function imagePaintForNode(value: unknown): { imageRef: string; fitMode: ImageFitMode } | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const paint = value.find((candidate) => {
+    if (!isRecord(candidate)) {
+      return false;
+    }
+    return candidate.type === "IMAGE" && candidate.visible !== false && typeof candidate.imageRef === "string";
+  });
+  if (!isRecord(paint)) {
+    return null;
+  }
+  const imageRef = stringValue(paint.imageRef);
+  if (!imageRef) {
+    return null;
+  }
+  return {
+    imageRef,
+    fitMode: stringValue(paint.scaleMode) === "FIT" ? "fit" : "fill"
+  };
+}
+
+function imageContentForAsset(
+  asset: FigmaPackageAsset,
+  imagePaint: { fitMode: ImageFitMode }
+): Extract<DesignNode["content"], { type: "image" }> {
+  const content: Extract<DesignNode["content"], { type: "image" }> = {
+    type: "image",
+    asset_id: asset.metadata.assetId,
+    fit_mode: imagePaint.fitMode
+  };
+  if (asset.naturalWidth) {
+    content.natural_width = asset.naturalWidth;
+  }
+  if (asset.naturalHeight) {
+    content.natural_height = asset.naturalHeight;
+  }
+  return content;
 }
 
 function baseReview(input: {
@@ -608,14 +810,29 @@ function defaultFillForFigmaType(type: string): string {
   return "#e5e7eb";
 }
 
+function imageRefForAssetPath(entryPath: string): string | null {
+  const fileName = fileNameForPath(entryPath);
+  const dotIndex = fileName.lastIndexOf(".");
+  const stem = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+  return stem.trim() || null;
+}
+
+function figmaAssetStorageId(imageRef: string): string {
+  return `figma-asset-${storageIdSegment(imageRef)}`;
+}
+
 function figmaStorageId(value: unknown, fallback: string): string {
   const source = stringValue(value) ?? fallback;
-  return `figma-${source.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  return `figma-${storageIdSegment(source)}`;
 }
 
 function safeStorageId(value: string | undefined, fallback: string): string {
   const source = value?.trim() || `${fallback}-${Date.now().toString(36)}`;
-  return source.replace(/[^a-zA-Z0-9_-]/g, "-");
+  return storageIdSegment(source);
+}
+
+function storageIdSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^-+|-+$/g, "") || "imported";
 }
 
 function normalizeImportName(value: string | undefined, fallback: string): string {
@@ -667,6 +884,36 @@ function extensionForPath(entryPath: string): string {
   const lastSegment = entryPath.toLowerCase().split("/").pop() ?? entryPath.toLowerCase();
   const dotIndex = lastSegment.lastIndexOf(".");
   return dotIndex >= 0 ? lastSegment.slice(dotIndex) : "";
+}
+
+function fileNameForPath(entryPath: string): string {
+  return entryPath.split("/").pop()?.trim() || "image";
+}
+
+function dimensionsForImage(data: Buffer, mediaType: string): { width: number; height: number } | null {
+  if (mediaType === "image/png" && data.length >= 24 && data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+    const width = data.readUInt32BE(16);
+    const height = data.readUInt32BE(20);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  const textHeader = data.subarray(0, 512).toString("utf8").replace(/^\uFEFF/, "").trimStart();
+  if (mediaType === "image/svg+xml" && textHeader.startsWith("<svg")) {
+    const width = numberAttribute(textHeader, "width");
+    const height = numberAttribute(textHeader, "height");
+    return width && height ? { width, height } : null;
+  }
+
+  return null;
+}
+
+function numberAttribute(text: string, attributeName: "width" | "height"): number | null {
+  const match = text.match(new RegExp(`${attributeName}=["']([0-9.]+)`));
+  if (!match) {
+    return null;
+  }
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function stringValue(value: unknown): string | undefined {

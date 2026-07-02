@@ -685,6 +685,7 @@ export interface ImportedExternalMigrationArchive {
   file: DesignFile;
   source: ExternalMigrationSource;
   sourceLabel: string;
+  assetCount: number;
   mappedNodeCount: number;
   skippedNodeCount: number;
   warnings: string[];
@@ -1574,6 +1575,7 @@ export class FileStorage {
       name: documentName
     };
 
+    await Promise.all(imported.importedAssets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
     await this.writeFile(documentId, file);
     const project = await this.writeProject({
       schemaVersion: 1,
@@ -1591,6 +1593,7 @@ export class FileStorage {
       file,
       source: imported.source,
       sourceLabel: imported.sourceLabel,
+      assetCount: imported.importedAssets.length,
       mappedNodeCount: imported.mappedNodeCount,
       skippedNodeCount: imported.skippedNodeCount,
       warnings: imported.warnings

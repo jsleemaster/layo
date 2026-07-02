@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
 import { readFile, rm, writeFile } from "node:fs/promises";
+import { createZipArchive } from "../../server/src/file-archive";
 
 test.beforeEach(async () => {
   await rm(".layo", { recursive: true, force: true });
@@ -316,12 +317,14 @@ test("file panel exports a Layo archive and reviews it before import", async ({ 
   await expect(page.getByTestId("project-name")).toHaveValue("아카이브 복원본");
 });
 
-test("file panel reviews and imports an external Figma JSON file", async ({ page }, testInfo) => {
+test("file panel reviews and imports an external Figma image package", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
-  const figmaJsonPath = testInfo.outputPath("landing.figma.json");
-  await writeFile(
-    figmaJsonPath,
-    JSON.stringify({
+  const figmaZipPath = testInfo.outputPath("landing.figma.zip");
+  const image = await createImageUploadFile(page, "figma-image-hero.png", { width: 12, height: 8 }, "#1d4ed8");
+  const figmaArchive = createZipArchive([
+    {
+      path: "figma-file.json",
+      data: Buffer.from(JSON.stringify({
       name: "Figma landing",
       document: {
         id: "0:0",
@@ -342,17 +345,24 @@ test("file panel reviews and imports an external Figma JSON file", async ({ page
                 children: [
                   {
                     id: "3:1",
-                    name: "Imported card",
+                    name: "Hero image",
                     type: "RECTANGLE",
-                    absoluteBoundingBox: { x: 104, y: 122, width: 180, height: 56 },
-                    fills: [{ type: "SOLID", visible: true, color: { r: 0.1, g: 0.2, b: 0.3 } }]
+                    absoluteBoundingBox: { x: 104, y: 122, width: 180, height: 96 },
+                    fills: [
+                      {
+                        type: "IMAGE",
+                        visible: true,
+                        imageRef: "figma-image-hero",
+                        scaleMode: "FILL"
+                      }
+                    ]
                   },
                   {
                     id: "4:1",
                     name: "Imported headline",
                     type: "TEXT",
                     characters: "Hello from Figma",
-                    absoluteBoundingBox: { x: 112, y: 138, width: 160, height: 24 },
+                    absoluteBoundingBox: { x: 112, y: 232, width: 160, height: 24 },
                     style: { fontSize: 18, fontFamily: "Inter" }
                   }
                 ]
@@ -361,20 +371,27 @@ test("file panel reviews and imports an external Figma JSON file", async ({ page
           }
         ]
       }
-    })
-  );
+    }), "utf8")
+    },
+    { path: `assets/${image.name}`, data: image.buffer }
+  ]);
+  await writeFile(figmaZipPath, figmaArchive);
 
-  await page.getByTestId("external-migration-upload").setInputFiles(figmaJsonPath);
+  await page.getByTestId("external-migration-upload").setInputFiles(figmaZipPath);
   const review = page.getByTestId("external-migration-review");
   await expect(review).toContainText("Figma");
+  await expect(review).toContainText("ZIP");
   await expect(review).toContainText("가져오기 가능");
   await expect(review).toContainText("문서 후보 1개");
+  await expect(review).toContainText("에셋 1개");
+  await expect(review).toContainText("assets/figma-image-hero.png");
   await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
   await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
   await expect(page.getByTestId("external-migration-status")).toContainText("Figma landing 가져옴");
   await expect(page.getByTestId("project-status")).toContainText("Figma landing 가져옴");
   await expect(page.getByTestId("project-name")).toHaveValue("Figma landing");
   await expect(page.getByTestId("layer-panel")).toContainText("Imported headline");
+  await expect(page.getByTestId("layer-panel")).toContainText("Hero image");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
   const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
@@ -388,9 +405,23 @@ test("file panel reviews and imports an external Figma JSON file", async ({ page
   const frame = filePayload.file.pages[0].children[0];
   expect(frame).toMatchObject({ name: "Hero", kind: "frame" });
   expect(frame.children.map((node: { name: string }) => node.name)).toEqual([
-    "Imported card",
+    "Hero image",
     "Imported headline"
   ]);
+  expect(frame.children[0]).toMatchObject({
+    kind: "image",
+    content: {
+      type: "image",
+      asset_id: "figma-asset-figma-image-hero",
+      natural_width: 12,
+      natural_height: 8,
+      fit_mode: "fill"
+    }
+  });
+  const assetResponse = await page.request.get("http://127.0.0.1:4317/assets/figma-asset-figma-image-hero");
+  expect(assetResponse.ok()).toBeTruthy();
+  expect(assetResponse.headers()["content-type"]).toContain("image/png");
+  expect((await assetResponse.body()).equals(image.buffer)).toBeTruthy();
 });
 
 test("file panel exports a shared library archive and imports reusable components and tokens", async ({ page }) => {

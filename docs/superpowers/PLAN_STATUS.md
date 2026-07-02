@@ -15,6 +15,12 @@ Use this order when entering the repo:
 3. Read this file before treating any individual plan as active work.
 4. Open the specific plan only for implementation details or historical context.
 
+## Current Active Plan
+
+| Plan | Status | Evidence |
+| --- | --- | --- |
+| `2026-07-01-figma-image-asset-import.md` | Blocked | PR #199 remains open. The three P2 review findings are addressed through code/test commit `c09d0c0` with regression tests, and review threads have replies. The plan stays active because GitHub reports `mergeable_state: blocked`; `restore-drill` and `retention` pass but `Vercel` fails with `Deployment rate limited - retry in 24 hours`; full PR-head local/e2e verification is not trusted while `git status --short --branch` exits `134`; and merge plus post-merge cleanup are not complete. |
+
 ## Completed Plans
 
 | Plan | Status | Evidence |
@@ -107,10 +113,6 @@ Use this order when entering the repo:
 | `2026-06-26-penpot-grid-empty-cell-merge-menu.md` | Completed | Added the first Penpot-like selected-grid empty-cell context menu. Selected grid frames render per-cell hit zones, right-click opens a cell menu, and `셀 병합 영역 만들기` appends a deterministic named `grid_areas` entry through `set_node_layout`, preserving existing undo/redo, persistence, and collaboration command semantics. Multi-cell merge/split menus, baseline alignment, and deeper resizing semantics remain later maturity gaps. Verified with RED/GREEN Playwright CLI coverage, Playwright API-log interaction proof, `pnpm --filter @layo/web typecheck`, `pnpm typecheck`, `pnpm run check:penpot-maturity`, `pnpm --filter @layo/web build`, `pnpm test`, `pnpm test:e2e`, and `git diff --check`. |
 | `2026-06-26-penpot-grid-multicell-merge-split.md` | Completed | Added Penpot-like selected-grid multi-cell area merge and split menus. Ctrl/Command-click cell ranges show `grid-cell-selection-range`, right-clicking the range creates a spanned named `grid_areas` entry through `set_node_layout`, and right-clicking an existing named area exposes `병합 영역 분리` to remove it. Baseline alignment and deeper resizing semantics remain later layout maturity gaps. Verified with RED/GREEN focused Playwright CLI, Playwright API-log interaction proof, `pnpm --filter @layo/web typecheck`, `pnpm typecheck`, `pnpm run check:penpot-maturity`, `pnpm --filter @layo/web build`, `pnpm test`, `pnpm test:e2e`, and `git diff --check`. |
 
-## Current Active Plan
-
-| Plan | Status | Evidence |
-| --- | --- | --- |
 | `2026-06-27-dev-handoff-panel.md` | Completed | Added a visible Inspector `개발` tab backed by the existing `/files/:fileId/export/code` HTTP export. The panel shows selected-layer id/name/kind, geometry/fill specs, generated CSS, generated HTML, and exported structure snippets, and the existing code action now switches to that tab. Web API helpers expose typed code export data for UI use. Remaining developer-handoff gaps are copy controls, SVG/asset downloads, richer ready-for-dev annotations, webhooks/API integration stories, and repo component mappings. Verified with RED/GREEN web API helper coverage, RED/GREEN Playwright CLI coverage, focused web tests, typecheck, and the Penpot maturity gate. |
 | `2026-06-27-shared-library-archive.md` | Completed | Added package-style `.layo-library.zip` export/review/import for reusable components, tokens, and component image assets. Storage validates archive manifests/assets and remaps conflicting token/component ids, HTTP exposes file-scoped library export/review/import routes, web API helpers cover request shapes, and the Korean file panel can export, review, prefix, and merge a library into the current file. Hosted registry, publish/subscribe, update notifications, and live library sync remain later design-system gaps. Verified with RED/GREEN storage, HTTP, web API, focused Playwright CLI, `pnpm --filter @layo/server test -- src/storage.test.ts src/http.test.ts`, `pnpm --filter @layo/web test -- src/document-api.test.ts`, `pnpm run check:penpot-maturity`, `pnpm typecheck`, `pnpm --filter @layo/web build`, `pnpm test`, `pnpm test:e2e`, and `git diff --check`. |
 | `2026-06-27-project-archive-import-export.md` | Completed | Added Layo project-level ZIP archive export/review/import for `ProjectManifest`, all project documents, and referenced image assets through storage, HTTP, web API helpers, and Korean file-panel controls. Imports create fresh private projects and fresh document ids to avoid overwriting existing work or preserving stale sharing state. Verified with RED/GREEN storage, HTTP, web API, and Playwright CLI coverage plus maturity gates. |

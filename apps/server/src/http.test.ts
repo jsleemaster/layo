@@ -256,6 +256,104 @@ describe("HTTP server", () => {
     });
   });
 
+  test("imports external Figma image assets into local asset storage", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    const server = createHttpServer(storage);
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const pngBytes = Buffer.from(pixelPng, "base64");
+    const figmaPackage = createZipArchive([
+      {
+        path: "figma-file.json",
+        data: Buffer.from(
+          JSON.stringify({
+            name: "Figma image landing",
+            document: {
+              id: "0:0",
+              name: "Document",
+              type: "DOCUMENT",
+              children: [
+                {
+                  id: "1:1",
+                  name: "Page 1",
+                  type: "CANVAS",
+                  children: [
+                    {
+                      id: "2:1",
+                      name: "Hero",
+                      type: "FRAME",
+                      absoluteBoundingBox: { x: 0, y: 0, width: 320, height: 180 },
+                      children: [
+                        {
+                          id: "3:1",
+                          name: "Hero image",
+                          type: "RECTANGLE",
+                          absoluteBoundingBox: { x: 24, y: 26, width: 180, height: 96 },
+                          fills: [
+                            {
+                              type: "IMAGE",
+                              visible: true,
+                              imageRef: "figma-image-hero",
+                              scaleMode: "FILL"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }),
+          "utf8"
+        )
+      },
+      { path: "assets/figma-image-hero.png", data: pngBytes }
+    ]);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: {
+        archiveBase64: figmaPackage.toString("base64"),
+        fileName: "figma-image-package.zip",
+        name: "Imported Figma Image"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.imported).toMatchObject({
+      source: "figma",
+      sourceLabel: "Figma",
+      mappedNodeCount: 2,
+      skippedNodeCount: 0,
+      assetCount: 1
+    });
+    const projects = await storage.listProjects();
+    const persisted = await storage.readFile(projects[0].currentDocumentId);
+    expect(persisted.pages[0].children[0].children[0]).toMatchObject({
+      kind: "image",
+      name: "Hero image",
+      content: {
+        type: "image",
+        asset_id: "figma-asset-figma-image-hero",
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fill"
+      }
+    });
+
+    const importedAsset = await server.inject({
+      method: "GET",
+      url: "/assets/figma-asset-figma-image-hero"
+    });
+    expect(importedAsset.statusCode).toBe(200);
+    expect(importedAsset.headers["content-type"]).toContain("image/png");
+    expect(importedAsset.rawPayload.equals(pngBytes)).toBe(true);
+  });
+
   test("stores and serves image assets", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
