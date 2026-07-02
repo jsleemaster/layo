@@ -1011,8 +1011,9 @@ export function getTopmostNodeIdAtPoint(
   excludedNodeIds = new Set<string>()
 ): string | null {
   for (const page of document.pages) {
-    for (let index = page.children.length - 1; index >= 0; index -= 1) {
-      const found = topmostNodeIdAtPointInTree(page.children[index], point, { x: 0, y: 0 }, excludedNodeIds);
+    const pageChildren = nodesInPaintOrder(page.children);
+    for (let index = pageChildren.length - 1; index >= 0; index -= 1) {
+      const found = topmostNodeIdAtPointInTree(pageChildren[index], point, { x: 0, y: 0 }, excludedNodeIds);
       if (found) {
         return found;
       }
@@ -1020,6 +1021,17 @@ export function getTopmostNodeIdAtPoint(
   }
 
   return null;
+}
+
+function nodesInPaintOrder(nodes: RendererNode[]): RendererNode[] {
+  return nodes
+    .map((node, index) => ({ node, index, zIndex: layoutItemZIndex(node.layout_item) }))
+    .sort((left, right) => left.zIndex - right.zIndex || left.index - right.index)
+    .map((entry) => entry.node);
+}
+
+function layoutItemZIndex(layoutItem: NodeLayoutItem | null | undefined): number {
+  return normalizeLayoutItemZIndex(layoutItem?.z_index) ?? 0;
 }
 
 export function executeEditorCommand(state: EditorState, command: EditorCommand): EditorState {
@@ -4441,6 +4453,7 @@ function restoreNodeLayoutItemForGeometry(node: RendererNode, layoutItem: NodeLa
 function hasLayoutItemMetadata(layoutItem: NodeLayoutItem): boolean {
   return Boolean(
     layoutItem.position ||
+      layoutItem.z_index !== undefined ||
       layoutItem.width_sizing ||
       layoutItem.height_sizing ||
       layoutItem.justify_self ||
@@ -4554,6 +4567,7 @@ function normalizeLayoutSpacingTokens(
 
 function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const position = layoutItemPosition(layoutItem);
+  const zIndex = normalizeLayoutItemZIndex(layoutItem.z_index);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
   const justifySelf = isLayoutJustifySelfAlignment(layoutItem.justify_self) ? layoutItem.justify_self : undefined;
@@ -4569,6 +4583,7 @@ function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const gridArea = normalizeGridAreaName(layoutItem.grid_area);
   return {
     ...(position === "absolute" ? { position } : {}),
+    ...(zIndex !== undefined ? { z_index: zIndex } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
     ...(justifySelf ? { justify_self: justifySelf } : {}),
@@ -4836,6 +4851,11 @@ function normalizeGridPlacement(value: number | undefined): number | undefined {
 function normalizeGridSpan(value: number | undefined): number | undefined {
   const normalized = finiteNumber(value, Number.NaN);
   return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function normalizeLayoutItemZIndex(value: number | undefined): number | undefined {
+  const normalized = finiteNumber(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.round(normalized) : undefined;
 }
 
 function normalizeGridAreaName(value: string | undefined): string | undefined {
@@ -5567,8 +5587,9 @@ function topmostNodeIdAtPointInTree(
     y: parent.y + node.transform.y
   };
 
-  for (let index = node.children.length - 1; index >= 0; index -= 1) {
-    const found = topmostNodeIdAtPointInTree(node.children[index], point, absolute, excludedNodeIds);
+  const children = nodesInPaintOrder(node.children);
+  for (let index = children.length - 1; index >= 0; index -= 1) {
+    const found = topmostNodeIdAtPointInTree(children[index], point, absolute, excludedNodeIds);
     if (found) {
       return found;
     }

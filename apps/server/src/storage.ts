@@ -106,6 +106,7 @@ export interface NodeLayout {
 
 export interface NodeLayoutItem {
   position?: "static" | "absolute";
+  z_index?: number;
   width_sizing?: "fixed" | "fill";
   height_sizing?: "fixed" | "fill";
   justify_self?: "start" | "center" | "end" | "stretch";

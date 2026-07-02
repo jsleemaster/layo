@@ -875,6 +875,10 @@ function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[]
     lines.push(`  align-self: ${node.layout_item.align_self};`);
   }
 
+  if (node.layout_item?.z_index !== undefined) {
+    lines.push(`  z-index: ${node.layout_item.z_index};`);
+  }
+
   lines.push("}");
 
   return [...lines, ...node.children.filter(isNodeExportVisible).flatMap((child) => nodeCss(child, tokenMap))];

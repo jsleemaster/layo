@@ -762,6 +762,18 @@ function normalizedAppLayoutItem(layoutItem: RendererNode["layout_item"]): NodeL
   };
 }
 
+function appLayoutItemZIndex(layoutItem: RendererNode["layout_item"]): number {
+  const zIndex = layoutItem?.z_index;
+  return typeof zIndex === "number" && Number.isFinite(zIndex) ? Math.round(zIndex) : 0;
+}
+
+function orderedAppChildrenForPaint(children: RendererNode[]): RendererNode[] {
+  return children
+    .map((node, index) => ({ node, index, zIndex: appLayoutItemZIndex(node.layout_item) }))
+    .sort((left, right) => left.zIndex - right.zIndex || left.index - right.index)
+    .map((entry) => entry.node);
+}
+
 const KEYBOARD_PAN_STEP = 24;
 const KEYBOARD_PAN_STEP_LARGE = 96;
 const ZOOM_STEP = 0.25;
@@ -3798,7 +3810,7 @@ function renderNode({
           ) : null}
         </>
       ) : null}
-      {node.children.map((child) =>
+      {orderedAppChildrenForPaint(node.children).map((child) =>
         renderNode({
           node: child,
           selectedNodeId,
@@ -6259,6 +6271,23 @@ function Inspector({
       position: event.currentTarget.value as NodeLayoutItem["position"]
     });
   };
+  const updateLayoutItemZIndex = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const rawValue = event.currentTarget.value;
+    if (rawValue.trim() === "") {
+      onLayoutItemChange(selectedNode.id, {
+        ...layoutItem,
+        z_index: undefined
+      } as NodeLayoutItem);
+      return;
+    }
+    const nextValue = Number(rawValue);
+    if (Number.isFinite(nextValue)) {
+      onLayoutItemChange(selectedNode.id, {
+        ...layoutItem,
+        z_index: Math.round(nextValue)
+      } as NodeLayoutItem);
+    }
+  };
   const updateLayoutItemMargin =
     (side: keyof NodeLayoutItem["margin"]) => (event: React.ChangeEvent<HTMLInputElement>) => {
       const nextValue = Number(event.currentTarget.value);
@@ -7434,6 +7463,15 @@ function Inspector({
             <option value="static">흐름</option>
             <option value="absolute">절대</option>
           </select>
+        </label>
+        <label className="stacked-field">
+          Z-index
+          <input
+            data-testid="inspector-layout-item-z-index"
+            type="number"
+            value={optionalNumericInputValue(layoutItem.z_index)}
+            onChange={updateLayoutItemZIndex}
+          />
         </label>
         {selectedParentUsesGrid ? (
           <div className="field-grid">
@@ -12507,7 +12545,7 @@ export function App() {
     });
     collabSessionRef.current = session;
     session.updatePresence({
-      selectedNodeId: editor.selection.nodeId,
+      selectedNodeId: editor?.selection.nodeId ?? null,
       selectedNodeBounds: getSelectedNodeBounds(editor.document, editor.selection.nodeId),
       viewport: editor.viewport,
       updatedAtMs: Date.now()
@@ -14225,11 +14263,11 @@ export function App() {
               }}
             >
               <Layer>
-                {editor?.document.pages[0]?.children.map((node) =>
+                {orderedAppChildrenForPaint(editor?.document.pages[0]?.children ?? []).map((node) =>
                   renderNode({
                     node,
-                    selectedNodeId: editor.selection.nodeId,
-                    selectedNodeIds: editor.selection.nodeIds,
+                    selectedNodeId: editor?.selection.nodeId ?? null,
+                    selectedNodeIds: editor?.selection.nodeIds ?? [],
                     isCanvasPanning: isSpacePanning,
                     dragPreview,
                     onSelect: selectNode,

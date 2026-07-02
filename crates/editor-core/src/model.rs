@@ -416,6 +416,8 @@ pub enum LayoutSelfAlignment {
 pub struct NodeLayoutItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<LayoutItemPosition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_index: Option<i32>,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
     pub width_sizing: LayoutItemSizing,
     #[serde(default = "default_layout_item_sizing", skip_serializing_if = "is_fixed_layout_item_sizing")]
