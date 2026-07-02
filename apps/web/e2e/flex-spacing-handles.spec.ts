@@ -25,7 +25,7 @@ async function createProjectFromEmptyState(page: Page) {
   expect(projectId).not.toBe("");
 }
 
-async function dragCenterBy(page: Page, testId: string, deltaX: number, deltaY: number, modifiers: string[] = []) {
+async function moveCenterBy(page: Page, testId: string, deltaX: number, deltaY: number, modifiers: string[] = []) {
   const target = page.getByTestId(testId).first();
   await expect(target).toBeVisible();
   const box = await target.boundingBox();
@@ -40,10 +40,18 @@ async function dragCenterBy(page: Page, testId: string, deltaX: number, deltaY: 
     await page.keyboard.down(modifier);
   }
   await page.mouse.move(startX + deltaX, startY + deltaY, { steps: 4 });
-  await page.mouse.up();
-  for (const modifier of modifiers.reverse()) {
-    await page.keyboard.up(modifier);
-  }
+
+  return async () => {
+    await page.mouse.up();
+    for (const modifier of [...modifiers].reverse()) {
+      await page.keyboard.up(modifier);
+    }
+  };
+}
+
+async function dragCenterBy(page: Page, testId: string, deltaX: number, deltaY: number, modifiers: string[] = []) {
+  const finishDrag = await moveCenterBy(page, testId, deltaX, deltaY, modifiers);
+  await finishDrag();
 }
 
 test("canvas frame spacing handles drag padding into the Inspector layout values", async ({ page }) => {
@@ -61,7 +69,9 @@ test("canvas frame spacing handles drag padding into the Inspector layout values
   await expect(page.getByTestId("frame-spacing-overlay")).toBeVisible();
   await expect(page.getByTestId("frame-padding-left")).toContainText("24");
 
-  await dragCenterBy(page, "frame-padding-left", 18, 0);
+  const finishPaddingDrag = await moveCenterBy(page, "frame-padding-left", 18, 0);
+  await expect(page.getByTestId("inspector-layout-padding-left")).toHaveValue("42");
+  await finishPaddingDrag();
   await expect(page.getByTestId("inspector-layout-padding-left")).toHaveValue("42");
   await expect(page.getByTestId("inspector-layout-padding-right")).toHaveValue("24");
 });
