@@ -3639,29 +3639,29 @@ function renderNode({
         naturalHeight={node.content.natural_height}
         shadowProps={shadowProps}
       />
-) : node.kind === "text" && node.content.type === "text" ? (
-  isVerticalCanvasTextMode(node.content.writing_mode) ? (
-    <VerticalCanvasText
-      width={node.size.width}
-      height={node.size.height}
-      value={node.content.value}
-      fontSize={node.content.font_size}
-      fontFamily={node.content.font_family}
-      fill={node.style.fill}
-      writingMode={node.content.writing_mode}
-      shadowProps={shadowProps}
-    />
-  ) : (
-    <Text
-      width={node.size.width}
-      height={node.size.height}
-      text={node.content.value}
-      fontSize={node.content.font_size}
-      fontFamily={node.content.font_family}
-      fill={node.style.fill}
-      {...shadowProps}
-    />
-  )
+    ) : node.kind === "text" && node.content.type === "text" ? (
+      isVerticalCanvasTextMode(node.content.writing_mode) ? (
+        <VerticalCanvasText
+          width={node.size.width}
+          height={node.size.height}
+          value={node.content.value}
+          fontSize={node.content.font_size}
+          fontFamily={node.content.font_family}
+          fill={node.style.fill}
+          writingMode={node.content.writing_mode}
+          shadowProps={shadowProps}
+        />
+      ) : (
+        <Text
+          width={node.size.width}
+          height={node.size.height}
+          text={node.content.value}
+          fontSize={node.content.font_size}
+          fontFamily={node.content.font_family}
+          fill={node.style.fill}
+          {...shadowProps}
+        />
+      )
     ) : (
       <Rect
         width={node.size.width}
