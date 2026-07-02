@@ -10579,7 +10579,10 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
       frameSpacingDragClientPointRef.current = { x: event.clientX, y: event.clientY };
-    };
+      updateFrameSpacingDragFromClientPoint(frameSpacingDragSession, { x: event.clientX, y: event.clientY }, {
+        altKey: event.altKey,
+        shiftKey: event.shiftKey
+      });    };
     const stopFrameSpacingDrag = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
