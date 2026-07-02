@@ -20,11 +20,11 @@ Use this order when entering the repo:
 | Plan | Status | Evidence |
 | --- | --- | --- |
 
-| `2026-07-02-penpot-vertical-text-unicode-orientation.md` | In progress | PR #205 narrows the typography/layout maturity gap after PR #204 by replacing ASCII-only mixed vertical canvas orientation with representative Unicode script and punctuation coverage. Full verification is running; deployment remains intentionally deferred for this loop. |
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-02-penpot-vertical-text-unicode-orientation.md` | Completed | PR #205 narrows the typography/layout maturity gap after PR #204 by replacing ASCII-only mixed vertical canvas orientation with representative Unicode script and punctuation coverage. Verified with Full Verification #28571441681, Storage Restore Drill #28571441677, and Storage Backup Retention #28571441686. Deployment remains intentionally deferred for this loop. |
 | `2026-07-02-penpot-text-orientation-controls.md` | Completed | PR #204 closes the next layout maturity gap after PR #203 by adding explicit text-orientation metadata/control/export and mixed/upright/sideways vertical glyph rendering in the Konva canvas. Remaining layout gaps are deeper Unicode punctuation/script orientation fidelity, deeper CSS baseline group semantics, and remaining resizing semantics. |
 | `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Completed | PR #203 closes the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. Layo adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. Remaining layout gaps are glyph-orientation controls, deeper CSS baseline group semantics, and remaining resizing semantics. |
 | `2026-07-01-figma-image-asset-import.md` | Completed | PR #199 merged as `d3c2e93cf3a00a5447c667df1316af390e26b6b5`. Figma JSON package imports preserve packaged rectangle image fills as Layo image nodes backed by local asset storage; unpackaged fills, components, variants, effects, advanced style fidelity, and Penpot ZIP shape mapping remain follow-up import gaps. |
