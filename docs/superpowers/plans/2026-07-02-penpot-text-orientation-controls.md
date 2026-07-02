@@ -27,12 +27,12 @@ PR #203 made `vertical_rl` and `vertical_lr` visible on the canvas, but all glyp
 
 ## Verification
 
-Planned PR verification:
+PR #204 verification:
 
 - Full Verification workflow: Penpot maturity/design rule gates, typecheck, web build, core tests, and full Playwright CLI e2e.
 - Storage Restore Drill workflow.
 - Storage Backup Retention workflow.
-- Direct PR review of the final diff.
+- Direct PR review confirmed the final diff is limited to text-orientation contracts, agent/MCP paths, Inspector/canvas rendering, code export, focused tests, and maturity documentation.
 
 ## Remaining Risks
 
