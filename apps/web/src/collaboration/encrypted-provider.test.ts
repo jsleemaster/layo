@@ -44,7 +44,7 @@ class MockWebSocket {
 
   close() {
     this.readyState = 3;
-    this.emit("close", new CloseEvent("close"));
+    this.emit("close", { type: "close" } as CloseEvent);
   }
 
   emitMessage(data: Uint8Array) {
