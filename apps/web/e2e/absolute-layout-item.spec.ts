@@ -69,6 +69,9 @@ test("absolute auto-layout child stays out of flow after direct canvas drag", as
   await page.getByTestId("inspector-layout-item-position").selectOption("absolute");
   await page.getByTestId("inspector-x").fill("80");
   await page.getByTestId("inspector-y").fill("80");
+  await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("80");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("80");
 
   await dragSelectedLayerBy(page, 32, 24);
   await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
