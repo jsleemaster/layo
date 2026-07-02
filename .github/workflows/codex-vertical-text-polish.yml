@@ -1,0 +1,115 @@
+name: Codex Vertical Text Polish
+
+on:
+  push:
+    branches:
+      - codex/vertical-text-canvas-rendering
+    paths:
+      - .github/workflows/codex-vertical-text-polish.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    if: github.ref == 'refs/heads/codex/vertical-text-canvas-rendering'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/vertical-text-canvas-rendering
+          fetch-depth: 0
+
+      - name: Polish branch files
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const appPath = 'apps/web/src/App.tsx';
+          let app = fs.readFileSync(appPath, 'utf8');
+          const oldRenderBlock = `      />
+) : node.kind === "text" && node.content.type === "text" ? (
+  isVerticalCanvasTextMode(node.content.writing_mode) ? (
+    <VerticalCanvasText
+      width={node.size.width}
+      height={node.size.height}
+      value={node.content.value}
+      fontSize={node.content.font_size}
+      fontFamily={node.content.font_family}
+      fill={node.style.fill}
+      writingMode={node.content.writing_mode}
+      shadowProps={shadowProps}
+    />
+  ) : (
+    <Text
+      width={node.size.width}
+      height={node.size.height}
+      text={node.content.value}
+      fontSize={node.content.font_size}
+      fontFamily={node.content.font_family}
+      fill={node.style.fill}
+      {...shadowProps}
+    />
+  )
+    ) : (`;
+          const newRenderBlock = `      />
+    ) : node.kind === "text" && node.content.type === "text" ? (
+      isVerticalCanvasTextMode(node.content.writing_mode) ? (
+        <VerticalCanvasText
+          width={node.size.width}
+          height={node.size.height}
+          value={node.content.value}
+          fontSize={node.content.font_size}
+          fontFamily={node.content.font_family}
+          fill={node.style.fill}
+          writingMode={node.content.writing_mode}
+          shadowProps={shadowProps}
+        />
+      ) : (
+        <Text
+          width={node.size.width}
+          height={node.size.height}
+          text={node.content.value}
+          fontSize={node.content.font_size}
+          fontFamily={node.content.font_family}
+          fill={node.style.fill}
+          {...shadowProps}
+        />
+      )
+    ) : (`;
+          if (!app.includes(oldRenderBlock)) {
+            throw new Error('Expected vertical text render block was not found');
+          }
+          app = app.replace(oldRenderBlock, newRenderBlock);
+          fs.writeFileSync(appPath, app);
+
+          const statusPath = 'docs/superpowers/PLAN_STATUS.md';
+          let status = fs.readFileSync(statusPath, 'utf8');
+          const staleFigmaActiveRow = '| `2026-07-01-figma-image-asset-import.md` | Blocked | PR #199 remains open. The three P2 review findings are addressed through code/test commit `c09d0c0` with regression tests, and review threads have replies. The plan stays active because GitHub reports `mergeable_state: blocked`; `restore-drill` and `retention` pass but `Vercel` fails with `Deployment rate limited - retry in 24 hours`; full PR-head local/e2e verification is not trusted while `git status --short --branch` exits `134`; and merge plus post-merge cleanup are not complete. |\n';
+          const figmaCompletedRow = '| `2026-07-01-figma-image-asset-import.md` | Completed | PR #199 merged as `d3c2e93cf3a00a5447c667df1316af390e26b6b5`. Figma JSON package imports preserve packaged rectangle image fills as Layo image nodes backed by local asset storage; unpackaged fills, components, variants, effects, advanced style fidelity, and Penpot ZIP shape mapping remain follow-up import gaps. |\n';
+          if (status.includes(staleFigmaActiveRow)) {
+            status = status.replace(staleFigmaActiveRow, '');
+            const completedHeader = '## Completed Plans\n\n| Plan | Status | Evidence |\n| --- | --- | --- |\n';
+            if (!status.includes(figmaCompletedRow)) {
+              status = status.replace(completedHeader, completedHeader + figmaCompletedRow);
+            }
+            fs.writeFileSync(statusPath, status);
+          } else {
+            throw new Error('Expected stale figma active plan row was not found');
+          }
+          NODE
+
+      - name: Commit polish
+        run: |
+          rm -f .github/workflows/codex-vertical-text-polish.yml
+          git config user.name "codex-patch-bot"
+          git config user.email "codex-patch-bot@users.noreply.github.com"
+          git add apps/web/src/App.tsx docs/superpowers/PLAN_STATUS.md .github/workflows/codex-vertical-text-polish.yml
+          if git diff --cached --quiet; then
+            echo "No polish changes to commit"
+            exit 0
+          fi
+          git commit -m "Polish vertical text canvas branch"
+          git push origin HEAD:codex/vertical-text-canvas-rendering
