@@ -24,8 +24,14 @@ Reference: https://help.penpot.app/user-guide/designing/flexible-layouts/
 4. The existing layout model already stores `gap`, `row_gap`, `column_gap`, and `padding`, so the slice should not add schema fields.
 5. New code should only make the existing overlay interactive, add focused drag math, and prove it through Playwright CLI.
 
+## RED/GREEN Evidence
+
+- FALSE GREEN: Full Verification `28587509647` passed because `pnpm test:e2e` explicitly ran only `editor-mvp.spec.ts` and `mcp-stdio.spec.ts`, so the new `flex-spacing-handles.spec.ts` was not included.
+- RED: Full Verification `28587935143` failed in Playwright CLI e2e after adding the new spec to `package.json`'s e2e runner. Dragging `frame-padding-left` left `inspector-layout-padding-left` at `24` instead of `42`; Shift-drag left it at `20` instead of `32`.
+
 ## Files
 
+- Modify: `package.json`
 - Modify: `apps/web/src/App.tsx`
 - Add or modify: `apps/web/src/flex-spacing-drag.ts`
 - Add or modify: `apps/web/src/flex-spacing-drag.test.ts`
@@ -36,7 +42,8 @@ Reference: https://help.penpot.app/user-guide/designing/flexible-layouts/
 ## Task 1: RED browser proof for missing direct spacing handles
 
 - [x] Add a Playwright CLI e2e that selects the landing frame, enables auto layout, sets padding, drags the `frame-padding-left` overlay value, and expects the Inspector padding input to update.
-- [ ] Run Full Verification on `codex/flex-spacing-handles` and record the expected RED failure.
+- [x] Add `apps/web/e2e/flex-spacing-handles.spec.ts` to `pnpm test:e2e` after the first false-green run proved it was not included.
+- [x] Run Full Verification on `codex/flex-spacing-handles` and record the expected RED failure.
 
 ## Task 2: Extract spacing drag math
 
