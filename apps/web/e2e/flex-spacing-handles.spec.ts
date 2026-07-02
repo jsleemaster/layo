@@ -89,3 +89,19 @@ test("canvas frame spacing handles support Shift and Alt padding modifiers", asy
   await expect(page.getByTestId("inspector-layout-padding-bottom")).toHaveValue("28");
   await expect(page.getByTestId("inspector-layout-padding-left")).toHaveValue("40");
 });
+
+test("canvas frame spacing handles drag vertical gap into the Inspector layout values", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("vertical");
+  await page.getByTestId("inspector-layout-gap").fill("12");
+
+  await expect(page.getByTestId("frame-spacing-overlay")).toBeVisible();
+  await expect(page.getByTestId("frame-spacing-vertical").first()).toContainText("12");
+
+  await dragCenterBy(page, "frame-spacing-vertical", 0, 10);
+  await expect(page.getByTestId("inspector-layout-gap")).toHaveValue("22");
+  await expect(page.getByTestId("inspector-layout-row-gap")).toHaveValue("22");
+});
