@@ -1,0 +1,111 @@
+name: Codex Vertical Text Patch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/codex-vertical-text-patch.yml"
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  apply-patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply vertical text canvas rendering patch
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          function read(path) {
+            return fs.readFileSync(path, "utf8");
+          }
+
+          function write(path, content) {
+            fs.writeFileSync(path, content);
+          }
+
+          function replaceOnce(path, search, replacement) {
+            const before = read(path);
+            if (!before.includes(search)) {
+              throw new Error(`${path} did not contain expected snippet`);
+            }
+            const after = before.replace(search, replacement);
+            if (after === before) {
+              throw new Error(`${path} replacement made no change`);
+            }
+            write(path, after);
+          }
+
+          const appHelperAnchor = `function setStageCursor(\n  event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>,\n  cursor: string\n) {\n  const stageContainer = event.target.getStage()?.container();\n  if (stageContainer) {\n    stageContainer.style.cursor = cursor;\n  }\n}\n\nfunction renderNode({`;
+          const appHelperReplacement = `function setStageCursor(\n  event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>,\n  cursor: string\n) {\n  const stageContainer = event.target.getStage()?.container();\n  if (stageContainer) {\n    stageContainer.style.cursor = cursor;\n  }\n}\n\ntype CanvasTextShadowProps = Record<string, number | string>;\n\nfunction isVerticalCanvasTextMode(\n  writingMode: TextWritingMode | undefined\n): writingMode is \"vertical_rl\" | \"vertical_lr\" {\n  return writingMode === \"vertical_rl\" || writingMode === \"vertical_lr\";\n}\n\nfunction verticalCanvasTextGlyphs(value: string, fontSize: number, height: number) {\n  const lineAdvance = Math.max(1, Math.round(fontSize * 1.15));\n  const rowsPerColumn = Math.max(1, Math.floor(Math.max(1, height) / lineAdvance));\n  const glyphs: Array<{ glyph: string; row: number; column: number }> = [];\n  let row = 0;\n  let column = 0;\n\n  for (const glyph of Array.from(value)) {\n    if (glyph === \"\\r\") {\n      continue;\n    }\n    if (glyph === \"\\n\") {\n      column += 1;\n      row = 0;\n      continue;\n    }\n\n    glyphs.push({ glyph, row, column });\n    row += 1;\n\n    if (row >= rowsPerColumn) {\n      column += 1;\n      row = 0;\n    }\n  }\n\n  return { glyphs, lineAdvance };\n}\n\nfunction VerticalCanvasText({\n  value,\n  fontSize,\n  fontFamily,\n  fill,\n  width,\n  height,\n  writingMode,\n  shadowProps\n}: {\n  value: string;\n  fontSize: number;\n  fontFamily: string;\n  fill: string;\n  width: number;\n  height: number;\n  writingMode: \"vertical_rl\" | \"vertical_lr\";\n  shadowProps: CanvasTextShadowProps;\n}) {\n  const columnAdvance = Math.max(1, Math.round(fontSize * 1.05));\n  const { glyphs, lineAdvance } = verticalCanvasTextGlyphs(value, fontSize, height);\n\n  return (\n    <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>\n      {glyphs.map(({ glyph, row, column }, index) => {\n        const x =\n          writingMode === \"vertical_rl\"\n            ? width - columnAdvance * (column + 1)\n            : columnAdvance * column;\n\n        return (\n          <Text\n            key={`${index}-${glyph}`}\n            x={x}\n            y={row * lineAdvance}\n            width={columnAdvance}\n            height={lineAdvance}\n            text={glyph === \" \" ? \"\\u00a0\" : glyph}\n            fontSize={fontSize}\n            fontFamily={fontFamily}\n            fill={fill}\n            align=\"center\"\n            {...shadowProps}\n          />\n        );\n      })}\n    </Group>\n  );\n}\n\nfunction renderNode({`;
+          replaceOnce("apps/web/src/App.tsx", appHelperAnchor, appHelperReplacement);
+
+          const textRenderSnippet = `    ) : node.kind === "text" && node.content.type === "text" ? (\n      <Text\n        width={node.size.width}\n        height={node.size.height}\n        text={node.content.value}\n        fontSize={node.content.font_size}\n        fontFamily={node.content.font_family}\n        fill={node.style.fill}\n        {...shadowProps}\n      />\n    ) : (`;
+          const textRenderReplacement = `    ) : node.kind === "text" && node.content.type === "text" ? (\n      isVerticalCanvasTextMode(node.content.writing_mode) ? (\n        <VerticalCanvasText\n          width={node.size.width}\n          height={node.size.height}\n          value={node.content.value}\n          fontSize={node.content.font_size}\n          fontFamily={node.content.font_family}\n          fill={node.style.fill}\n          writingMode={node.content.writing_mode}\n          shadowProps={shadowProps}\n        />\n      ) : (\n        <Text\n          width={node.size.width}\n          height={node.size.height}\n          text={node.content.value}\n          fontSize={node.content.font_size}\n          fontFamily={node.content.font_family}\n          fill={node.style.fill}\n          {...shadowProps}\n        />\n      )\n    ) : (`;
+          replaceOnce("apps/web/src/App.tsx", textRenderSnippet, textRenderReplacement);
+
+          const e2eAnchor = `test("text inspector persists vertical writing mode into dev handoff", async ({ page }) => {\n  const { documentId } = await createProjectFromEmptyState(page);\n\n  await page.getByRole("button", { name: "헤드라인" }).click();\n  const writingMode = page.getByTestId("inspector-text-writing-mode");\n  await expect(writingMode).toHaveValue("horizontal_tb");\n\n  await writingMode.selectOption("vertical_rl");\n  await expect(writingMode).toHaveValue("vertical_rl");\n\n  await page.getByTestId("inspector-tab-dev").click();\n  await expect(page.getByTestId("dev-panel-css")).toContainText("writing-mode: vertical-rl;");\n  await expect(page.getByTestId("dev-panel-structure")).toContainText('"writingMode": "vertical_rl"');\n\n  const fileResponse = await page.request.get(` + "`" + `http://127.0.0.1:4317/files/${documentId}` + "`" + `);\n  expect(fileResponse.ok()).toBeTruthy();\n  const filePayload = await fileResponse.json();\n  const textNode = filePayload.file.pages[0].children[0].children.find((node: { id: string }) => node.id === "text-1");\n  expect(textNode.content.writing_mode).toBe("vertical_rl");\n});\n`;
+          const e2eReplacement = `${e2eAnchor}\ntest("text inspector renders vertical writing mode visibly on the canvas", async ({ page }) => {\n  await createProjectFromEmptyState(page);\n\n  await page.getByRole("button", { name: "헤드라인" }).click();\n  await page.getByTestId("inspector-text").fill("세로쓰기테스트");\n  await page.getByTestId("inspector-fill").fill("#d946ef");\n  await page.getByTestId("inspector-width").fill("220");\n  await page.getByTestId("inspector-height").fill("180");\n\n  const targetColor = { r: 217, g: 70, b: 239 };\n  await expect\n    .poll(async () => {\n      const bounds = await findCanvasColorBounds(page, targetColor);\n      const width = bounds.right - bounds.left;\n      const height = bounds.bottom - bounds.top;\n      return Math.round((width / Math.max(1, height)) * 10);\n    })\n    .toBeGreaterThan(20);\n\n  await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");\n  await expect(page.getByTestId("inspector-text-writing-mode")).toHaveValue("vertical_rl");\n\n  await expect\n    .poll(async () => {\n      const bounds = await findCanvasColorBounds(page, targetColor);\n      const width = bounds.right - bounds.left;\n      const height = bounds.bottom - bounds.top;\n      return Math.round((height / Math.max(1, width)) * 10);\n    })\n    .toBeGreaterThan(20);\n});\n`;
+          replaceOnce("apps/web/e2e/editor-mvp.spec.ts", e2eAnchor, e2eReplacement);
+
+          const benchmarkPath = "docs/product/penpot-maturity-benchmark.md";
+          let benchmark = read(benchmarkPath);
+          benchmark = benchmark.replace("Last checked: 2026-06-28", "Last checked: 2026-07-02");
+          benchmark = benchmark.replace(
+            "vertical writing-mode baseline metadata/control/export, wrap, fallback gap",
+            "vertical writing-mode baseline metadata/control/export, canvas vertical text rendering for `vertical_rl`/`vertical_lr`, wrap, fallback gap"
+          );
+          benchmark = benchmark.replace(
+            "full visual vertical text rendering, deeper CSS baseline group semantics, and remaining deeper resizing semantics remain immature.",
+            "glyph-orientation controls beyond upright column glyphs, deeper CSS baseline group semantics, and remaining deeper resizing semantics remain immature."
+          );
+          benchmark = benchmark.replace(
+            "full visual vertical text rendering, deeper CSS baseline group semantics, and remaining deeper resizing semantics.",
+            "glyph-orientation controls beyond upright column glyphs, deeper CSS baseline group semantics, and remaining deeper resizing semantics."
+          );
+          benchmark = benchmark.replace(
+            "`2026-07-01-figma-image-asset-import.md` closes the next Figma asset slice:\nFigma ZIP packages containing a REST JSON file plus exported image assets now\nreview as importable, map packaged rectangle image fills to Layo image nodes,\nwrite the referenced image bytes into local asset storage, and expose the same\nflow through HTTP, web API helpers, and the visible file-panel import path.\nComponents, variants, effects, advanced style fidelity, unpackaged image fills,\nand Penpot ZIP shape mapping remain follow-up gaps.\n",
+            "`2026-07-01-figma-image-asset-import.md` closes the next Figma asset slice:\nFigma ZIP packages containing a REST JSON file plus exported image assets now\nreview as importable, map packaged rectangle image fills to Layo image nodes,\nwrite the referenced image bytes into local asset storage, and expose the same\nflow through HTTP, web API helpers, and the visible file-panel import path.\nComponents, variants, effects, advanced style fidelity, unpackaged image fills,\nand Penpot ZIP shape mapping remain follow-up gaps.\n`2026-07-02-penpot-vertical-text-canvas-rendering.md` closes the first visual\nvertical writing-mode canvas gap by adapting Layo's persisted `vertical_rl` and\n`vertical_lr` metadata to clipped upright glyph columns in the Konva canvas.\nCSS export keeps using native `writing-mode`; glyph-orientation controls, deeper\nCSS baseline group semantics, and remaining deeper resizing semantics remain\nfollow-up layout gaps.\n"
+          );
+          write(benchmarkPath, benchmark);
+
+          const plan = `# Penpot Vertical Text Canvas Rendering\n\nDate: 2026-07-02\n\n## Goal\n\nClose the next Penpot maturity loop case for layout: vertical writing mode must\nbe visible on Layo's browser canvas, not only persisted in document metadata or\nexported in developer handoff.\n\n## Penpot Comparison\n\n- Reference: Penpot open-source product class and layout/editor maturity target,\n  ` + "`" + `https://github.com/penpot/penpot` + "`" + `.\n- Reference: Penpot flexible-layout maturity lane,\n  ` + "`" + `https://help.penpot.app/user-guide/designing/flexible-layouts/` + "`" + `.\n- Decision: adapt. Layo keeps its existing local-first ` + "`" + `TextWritingMode` + "`" + ` document\n  field and CSS ` + "`" + `writing-mode` + "`" + ` handoff, but renders vertical writing mode in\n  Konva as clipped upright glyph columns because the canvas renderer is not a\n  CSS layout engine.\n\n## Failure Case\n\n` + "`" + `docs/product/penpot-maturity-benchmark.md` + "`" + ` listed full visual vertical text\nrendering as the first remaining layout maturity gap. The existing Playwright\ncoverage only proved Inspector persistence and Dev Panel handoff;\n` + "`" + `apps/web/src/App.tsx` + "`" + ` still rendered every text node with a plain Konva\n` + "`" + `<Text>` + "`" + ` and ignored ` + "`" + `node.content.writing_mode` + "`" + ` on the canvas.\n\n## Implementation\n\n- Add a canvas helper that recognizes ` + "`" + `vertical_rl` + "`" + ` and ` + "`" + `vertical_lr` + "`" + `.\n- Split text into glyphs, flow them top-to-bottom, and advance columns right-to-left\n  or left-to-right inside the saved node bounds.\n- Clip the vertical glyph group to the node bounds and keep existing fill, font,\n  opacity, selection, drag, resize, and shadow-stack rendering paths.\n- Add Playwright CLI pixel-bound coverage that first proves the same text is\n  horizontal, then switches the Inspector writing mode and proves the visible\n  colored canvas pixels become taller than wide.\n- Update the Penpot maturity benchmark with the landed slice and remaining\n  glyph-orientation/baseline/resizing gaps.\n\n## Verification\n\nPlanned PR verification:\n\n- ` + "`" + `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts -g "text inspector renders vertical writing mode visibly on the canvas" --workers=1 --reporter=line` + "`" + `\n- ` + "`" + `pnpm run check:penpot-maturity` + "`" + `\n- ` + "`" + `pnpm run check:design-rules` + "`" + `\n- ` + "`" + `pnpm typecheck` + "`" + `\n- ` + "`" + `pnpm --filter @layo/web build` + "`" + `\n- ` + "`" + `pnpm test` + "`" + `\n- ` + "`" + `pnpm test:e2e` + "`" + `\n\n## Remaining Risks\n\n- Upright glyph columns are a product-aligned visual baseline, not full\n  typography parity. Glyph orientation controls, punctuation orientation, deeper\n  CSS baseline group semantics, and remaining resizing semantics stay in the\n  benchmark as follow-up layout gaps.\n`;
+          write("docs/superpowers/plans/2026-07-02-penpot-vertical-text-canvas-rendering.md", plan);
+
+          const statusPath = "docs/superpowers/PLAN_STATUS.md";
+          let status = read(statusPath);
+          const statusRow = "| `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Active | Closing the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. The PR adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. |\n";
+          status = status.replace("| --- | --- | --- |\n", `| --- | --- | --- |\n${statusRow}`);
+          write(statusPath, status);
+          NODE
+
+      - name: Remove temporary patch workflow
+        run: rm .github/workflows/codex-vertical-text-patch.yml
+
+      - name: Commit generated patch
+        run: |
+          git config user.name "codex-patch-bot"
+          git config user.email "codex-patch-bot@users.noreply.github.com"
+          git add apps/web/src/App.tsx apps/web/e2e/editor-mvp.spec.ts docs/product/penpot-maturity-benchmark.md docs/superpowers/PLAN_STATUS.md docs/superpowers/plans/2026-07-02-penpot-vertical-text-canvas-rendering.md .github/workflows/codex-vertical-text-patch.yml
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git commit -m "Add vertical text canvas rendering"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
