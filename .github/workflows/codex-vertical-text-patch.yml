@@ -39,38 +39,27 @@ jobs:
           def write(path: str, content: str) -> None:
               Path(path).write_text(content)
 
-          def replace_once(path: str, search: str, replacement: str) -> None:
-              before = read(path)
-              if search not in before:
-                  raise RuntimeError(f"{path} did not contain expected snippet")
-              after = before.replace(search, replacement, 1)
-              if after == before:
-                  raise RuntimeError(f"{path} replacement made no change")
-              write(path, after)
+          def insert_before_once(content: str, marker: str, insertion: str) -> str:
+              if insertion.strip() in content:
+                  return content
+              if marker not in content:
+                  raise RuntimeError(f"missing marker: {marker[:80]}")
+              return content.replace(marker, insertion + "\n" + marker, 1)
 
-          app_helper_anchor = dedent('''\
-          function setStageCursor(
-            event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>,
-            cursor: string
-          ) {
-            const stageContainer = event.target.getStage()?.container();
-            if (stageContainer) {
-              stageContainer.style.cursor = cursor;
-            }
-          }
+          def replace_between_once(content: str, start_marker: str, end_marker: str, replacement: str) -> str:
+              if replacement.strip() in content:
+                  return content
+              start = content.find(start_marker)
+              if start < 0:
+                  raise RuntimeError(f"missing start marker: {start_marker[:80]}")
+              end = content.find(end_marker, start + len(start_marker))
+              if end < 0:
+                  raise RuntimeError(f"missing end marker: {end_marker[:80]}")
+              return content[:start] + replacement + content[end:]
 
-          function renderNode({''')
-          app_helper_replacement = dedent('''\
-          function setStageCursor(
-            event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>,
-            cursor: string
-          ) {
-            const stageContainer = event.target.getStage()?.container();
-            if (stageContainer) {
-              stageContainer.style.cursor = cursor;
-            }
-          }
-
+          app_path = "apps/web/src/App.tsx"
+          app = read(app_path)
+          canvas_text_helpers = dedent('''\
           type CanvasTextShadowProps = Record<string, number | string>;
 
           function isVerticalCanvasTextMode(
@@ -157,23 +146,12 @@ jobs:
               </Group>
             );
           }
+          ''')
+          app = insert_before_once(app, "function renderNode({", canvas_text_helpers)
 
-          function renderNode({''')
-          replace_once("apps/web/src/App.tsx", app_helper_anchor, app_helper_replacement)
-
-          text_render_snippet = dedent('''\
-              ) : node.kind === "text" && node.content.type === "text" ? (
-                <Text
-                  width={node.size.width}
-                  height={node.size.height}
-                  text={node.content.value}
-                  fontSize={node.content.font_size}
-                  fontFamily={node.content.font_family}
-                  fill={node.style.fill}
-                  {...shadowProps}
-                />
-              ) : (''')
-          text_render_replacement = dedent('''\
+          text_branch_start = '    ) : node.kind === "text" && node.content.type === "text" ? (\n'
+          rect_branch_start = '    ) : (\n      <Rect\n'
+          text_branch_replacement = dedent('''\
               ) : node.kind === "text" && node.content.type === "text" ? (
                 isVerticalCanvasTextMode(node.content.writing_mode) ? (
                   <VerticalCanvasText
@@ -197,66 +175,53 @@ jobs:
                     {...shadowProps}
                   />
                 )
-              ) : (''')
-          replace_once("apps/web/src/App.tsx", text_render_snippet, text_render_replacement)
-
-          e2e_anchor = dedent('''\
-          test("text inspector persists vertical writing mode into dev handoff", async ({ page }) => {
-            const { documentId } = await createProjectFromEmptyState(page);
-
-            await page.getByRole("button", { name: "헤드라인" }).click();
-            const writingMode = page.getByTestId("inspector-text-writing-mode");
-            await expect(writingMode).toHaveValue("horizontal_tb");
-
-            await writingMode.selectOption("vertical_rl");
-            await expect(writingMode).toHaveValue("vertical_rl");
-
-            await page.getByTestId("inspector-tab-dev").click();
-            await expect(page.getByTestId("dev-panel-css")).toContainText("writing-mode: vertical-rl;");
-            await expect(page.getByTestId("dev-panel-structure")).toContainText('"writingMode": "vertical_rl"');
-
-            const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-            expect(fileResponse.ok()).toBeTruthy();
-            const filePayload = await fileResponse.json();
-            const textNode = filePayload.file.pages[0].children[0].children.find((node: { id: string }) => node.id === "text-1");
-            expect(textNode.content.writing_mode).toBe("vertical_rl");
-          });
           ''')
-          e2e_replacement = e2e_anchor + dedent('''\
+          app = replace_between_once(app, text_branch_start, rect_branch_start, text_branch_replacement)
+          write(app_path, app)
 
-          test("text inspector renders vertical writing mode visibly on the canvas", async ({ page }) => {
-            await createProjectFromEmptyState(page);
+          e2e_path = "apps/web/e2e/editor-mvp.spec.ts"
+          e2e = read(e2e_path)
+          test_name = 'test("text inspector renders vertical writing mode visibly on the canvas"'
+          if test_name not in e2e:
+              marker = '  expect(textNode.content.writing_mode).toBe("vertical_rl");\n});\n'
+              if marker not in e2e:
+                  raise RuntimeError("missing vertical handoff test insertion marker")
+              vertical_canvas_test = dedent('''\
 
-            await page.getByRole("button", { name: "헤드라인" }).click();
-            await page.getByTestId("inspector-text").fill("세로쓰기테스트");
-            await page.getByTestId("inspector-fill").fill("#d946ef");
-            await page.getByTestId("inspector-width").fill("220");
-            await page.getByTestId("inspector-height").fill("180");
+              test("text inspector renders vertical writing mode visibly on the canvas", async ({ page }) => {
+                await createProjectFromEmptyState(page);
 
-            const targetColor = { r: 217, g: 70, b: 239 };
-            await expect
-              .poll(async () => {
-                const bounds = await findCanvasColorBounds(page, targetColor);
-                const width = bounds.right - bounds.left;
-                const height = bounds.bottom - bounds.top;
-                return Math.round((width / Math.max(1, height)) * 10);
-              })
-              .toBeGreaterThan(20);
+                await page.getByRole("button", { name: "헤드라인" }).click();
+                await page.getByTestId("inspector-text").fill("세로쓰기테스트");
+                await page.getByTestId("inspector-fill").fill("#d946ef");
+                await page.getByTestId("inspector-width").fill("220");
+                await page.getByTestId("inspector-height").fill("180");
 
-            await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");
-            await expect(page.getByTestId("inspector-text-writing-mode")).toHaveValue("vertical_rl");
+                const targetColor = { r: 217, g: 70, b: 239 };
+                await expect
+                  .poll(async () => {
+                    const bounds = await findCanvasColorBounds(page, targetColor);
+                    const width = bounds.right - bounds.left;
+                    const height = bounds.bottom - bounds.top;
+                    return Math.round((width / Math.max(1, height)) * 10);
+                  })
+                  .toBeGreaterThan(20);
 
-            await expect
-              .poll(async () => {
-                const bounds = await findCanvasColorBounds(page, targetColor);
-                const width = bounds.right - bounds.left;
-                const height = bounds.bottom - bounds.top;
-                return Math.round((height / Math.max(1, width)) * 10);
-              })
-              .toBeGreaterThan(20);
-          });
-          ''')
-          replace_once("apps/web/e2e/editor-mvp.spec.ts", e2e_anchor, e2e_replacement)
+                await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");
+                await expect(page.getByTestId("inspector-text-writing-mode")).toHaveValue("vertical_rl");
+
+                await expect
+                  .poll(async () => {
+                    const bounds = await findCanvasColorBounds(page, targetColor);
+                    const width = bounds.right - bounds.left;
+                    const height = bounds.bottom - bounds.top;
+                    return Math.round((height / Math.max(1, width)) * 10);
+                  })
+                  .toBeGreaterThan(20);
+              });
+              ''')
+              e2e = e2e.replace(marker, marker + vertical_canvas_test, 1)
+          write(e2e_path, e2e)
 
           benchmark_path = "docs/product/penpot-maturity-benchmark.md"
           benchmark = read(benchmark_path)
