@@ -42,15 +42,12 @@ coverage only proved Inspector persistence and Dev Panel handoff;
 
 ## Verification
 
-Planned PR verification:
+PR #203 verification:
 
-- `pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts -g "text inspector renders vertical writing mode visibly on the canvas" --workers=1 --reporter=line`
-- `pnpm run check:penpot-maturity`
-- `pnpm run check:design-rules`
-- `pnpm typecheck`
-- `pnpm --filter @layo/web build`
-- `pnpm test`
-- `pnpm test:e2e`
+- Full Verification workflow: Penpot maturity/design rule gates, typecheck, web build, core tests, and full Playwright CLI e2e.
+- Storage Restore Drill workflow.
+- Storage Backup Retention workflow.
+- Direct PR review confirmed the final diff is limited to canvas rendering, Playwright coverage, and maturity documentation.
 
 ## Remaining Risks
 

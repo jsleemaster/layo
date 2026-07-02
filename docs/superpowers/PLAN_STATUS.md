@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Active | Closing the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. The PR adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. |
+| `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Completed | PR #203 closes the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. Layo adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. Remaining layout gaps are glyph-orientation controls, deeper CSS baseline group semantics, and remaining resizing semantics. |
 
 ## Completed Plans
 
