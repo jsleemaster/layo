@@ -3428,11 +3428,10 @@ function verticalCanvasTextGlyphs(value: string, fontSize: number, height: numbe
   let column = 0;
 
   for (const glyph of Array.from(value)) {
-    if (glyph === "") {
+    if (glyph === "\r") {
       continue;
     }
-    if (glyph === "
-") {
+    if (glyph === "\n") {
       column += 1;
       row = 0;
       continue;
@@ -3487,7 +3486,7 @@ function VerticalCanvasText({
             y={row * lineAdvance}
             width={columnAdvance}
             height={lineAdvance}
-            text={glyph === " " ? " " : glyph}
+            text={glyph === " " ? "\u00a0" : glyph}
             fontSize={fontSize}
             fontFamily={fontFamily}
             fill={fill}
