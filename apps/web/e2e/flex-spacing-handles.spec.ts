@@ -94,6 +94,8 @@ test("canvas frame spacing handles drag vertical gap into the Inspector layout v
   await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByTestId("inspector-layout-mode").selectOption("auto");
   await page.getByTestId("inspector-layout-direction").selectOption("vertical");
   await page.getByTestId("inspector-layout-gap").fill("12");
