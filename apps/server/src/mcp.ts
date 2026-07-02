@@ -95,6 +95,7 @@ const nodeLayoutSchema = z.object({
 
 const nodeLayoutItemSchema = z.object({
   position: z.enum(["static", "absolute"]).optional(),
+  z_index: z.number().optional(),
   width_sizing: z.enum(["fixed", "fill"]).optional(),
   height_sizing: z.enum(["fixed", "fill"]).optional(),
   justify_self: z.enum(["start", "center", "end", "stretch"]).optional(),

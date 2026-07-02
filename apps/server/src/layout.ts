@@ -673,6 +673,7 @@ function normalizeLayoutSpacingTokens(
 
 export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutItem {
   const position = layoutItemPosition(layoutItem);
+  const zIndex = normalizeLayoutItemZIndex(layoutItem.z_index);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
   const justifySelf = isLayoutJustifySelfAlignment(layoutItem.justify_self) ? layoutItem.justify_self : undefined;
@@ -688,6 +689,7 @@ export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutI
   const gridArea = normalizeGridAreaName(layoutItem.grid_area);
   return {
     ...(position === "absolute" ? { position } : {}),
+    ...(zIndex !== undefined ? { z_index: zIndex } : {}),
     ...(widthSizing === "fill" ? { width_sizing: widthSizing } : {}),
     ...(heightSizing === "fill" ? { height_sizing: heightSizing } : {}),
     ...(justifySelf ? { justify_self: justifySelf } : {}),
@@ -909,6 +911,11 @@ function normalizeGridPlacement(value: number | undefined): number | undefined {
 function normalizeGridSpan(value: number | undefined): number | undefined {
   const normalized = finiteNumber(value, Number.NaN);
   return Number.isFinite(normalized) ? Math.max(1, Math.round(normalized)) : undefined;
+}
+
+function normalizeLayoutItemZIndex(value: number | undefined): number | undefined {
+  const normalized = finiteNumber(value, Number.NaN);
+  return Number.isFinite(normalized) ? Math.round(normalized) : undefined;
 }
 
 function normalizeGridAreaName(value: string | undefined): string | undefined {
