@@ -1027,10 +1027,23 @@ interface InlineTextEditorOverlay {
   color: string;
 }
 
+type FrameSpacingControl =
+  | { type: "padding"; side: keyof NodeLayout["padding"] }
+  | { type: "gap"; axis: "horizontal" | "vertical" };
+
+interface FrameSpacingDragSession {
+  nodeId: string;
+  control: FrameSpacingControl;
+  startClientPoint: { x: number; y: number };
+  startLayout: NodeLayout;
+  viewportScale: number;
+}
+
 interface FrameSpacingSegment {
   id: string;
   testId: string;
   orientation: "horizontal" | "vertical";
+  control: FrameSpacingControl;
   left: number;
   top: number;
   width?: number;
@@ -2511,25 +2524,25 @@ function createFrameSpacingOverlay(
   const contentCenterY = contentBounds.y + contentBounds.height / 2;
   const segments: FrameSpacingSegment[] = [];
 
-  addFrameSpacingSegment(segments, "padding-left", "frame-padding-left", "horizontal", {
+  addFrameSpacingSegment(segments, "padding-left", "frame-padding-left", "horizontal", { type: "padding", side: "left" }, {
     start: { x: frameBounds.x, y: contentCenterY },
     end: { x: contentBounds.x, y: contentCenterY },
     distance: contentBounds.x - frameBounds.x,
     viewport
   });
-  addFrameSpacingSegment(segments, "padding-right", "frame-padding-right", "horizontal", {
+  addFrameSpacingSegment(segments, "padding-right", "frame-padding-right", "horizontal", { type: "padding", side: "right" }, {
     start: { x: contentBounds.x + contentBounds.width, y: contentCenterY },
     end: { x: frameBounds.x + frameBounds.width, y: contentCenterY },
     distance: frameBounds.x + frameBounds.width - (contentBounds.x + contentBounds.width),
     viewport
   });
-  addFrameSpacingSegment(segments, "padding-top", "frame-padding-top", "vertical", {
+  addFrameSpacingSegment(segments, "padding-top", "frame-padding-top", "vertical", { type: "padding", side: "top" }, {
     start: { x: contentCenterX, y: frameBounds.y },
     end: { x: contentCenterX, y: contentBounds.y },
     distance: contentBounds.y - frameBounds.y,
     viewport
   });
-  addFrameSpacingSegment(segments, "padding-bottom", "frame-padding-bottom", "vertical", {
+  addFrameSpacingSegment(segments, "padding-bottom", "frame-padding-bottom", "vertical", { type: "padding", side: "bottom" }, {
     start: { x: contentCenterX, y: contentBounds.y + contentBounds.height },
     end: { x: contentCenterX, y: frameBounds.y + frameBounds.height },
     distance: frameBounds.y + frameBounds.height - (contentBounds.y + contentBounds.height),
@@ -2920,6 +2933,7 @@ function addFrameSpacingSegment(
   id: string,
   testId: string,
   orientation: "horizontal" | "vertical",
+  control: FrameSpacingControl,
   details: {
     start: { x: number; y: number };
     end: { x: number; y: number };
@@ -2942,6 +2956,7 @@ function addFrameSpacingSegment(
     id,
     testId,
     orientation,
+    control,
     left,
     top,
     width: orientation === "horizontal" ? width : undefined,
@@ -2983,6 +2998,7 @@ function addSiblingSpacingSegments(
         `spacing-vertical-${index}`,
         "frame-spacing-vertical",
         "vertical",
+        { type: "gap", axis: "vertical" },
         {
           start: { x: (overlapStart + overlapEnd) / 2, y: currentBottom },
           end: { x: (overlapStart + overlapEnd) / 2, y: nextTop },
@@ -3006,6 +3022,7 @@ function addSiblingSpacingSegments(
       `spacing-horizontal-${index}`,
       "frame-spacing-horizontal",
       "horizontal",
+      { type: "gap", axis: "horizontal" },
       {
         start: { x: currentRight, y: (overlapStart + overlapEnd) / 2 },
         end: { x: nextLeft, y: (overlapStart + overlapEnd) / 2 },
@@ -7797,6 +7814,7 @@ export function App() {
     useState<ComponentVariantAreaGapSession | null>(null);
   const [componentVariantSourceReorderSession, setComponentVariantSourceReorderSession] =
     useState<ComponentVariantSourceReorderSession | null>(null);
+  const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
@@ -7807,6 +7825,7 @@ export function App() {
   const gridResizeClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridAreaBoundarySessionRef = useRef<GridAreaBoundarySession | null>(null);
   const gridAreaBoundaryClientPointRef = useRef<{ x: number; y: number } | null>(null);
+  const frameSpacingDragClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const componentVariantAreaGapClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const componentVariantSourceReorderClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridTrackDragRef = useRef<GridTrackDragState | null>(null);
@@ -10410,6 +10429,180 @@ export function App() {
         });
     }
   };
+
+  const clampFrameSpacingValue = (value: number) => Math.max(0, Math.round(value));
+
+  const frameSpacingValueDelta = (
+    session: FrameSpacingDragSession,
+    clientPoint: { x: number; y: number }
+  ): number => {
+    const deltaX = (clientPoint.x - session.startClientPoint.x) / session.viewportScale;
+    const deltaY = (clientPoint.y - session.startClientPoint.y) / session.viewportScale;
+
+    if (session.control.type === "gap") {
+      return session.control.axis === "horizontal" ? deltaX : deltaY;
+    }
+
+    switch (session.control.side) {
+      case "left":
+        return deltaX;
+      case "right":
+        return -deltaX;
+      case "top":
+        return deltaY;
+      case "bottom":
+        return -deltaY;
+    }
+
+    return 0;
+  };
+
+  const nextLayoutForFrameSpacingDrag = (
+    session: FrameSpacingDragSession,
+    clientPoint: { x: number; y: number },
+    modifiers: { altKey: boolean; shiftKey: boolean }
+  ): NodeLayout => {
+    const delta = Math.round(frameSpacingValueDelta(session, clientPoint));
+    const layout = session.startLayout;
+
+    if (session.control.type === "gap") {
+      const baseGap =
+        session.control.axis === "vertical" ? layout.row_gap ?? layout.gap : layout.column_gap ?? layout.gap;
+      const nextGap = clampFrameSpacingValue(baseGap + delta);
+      return {
+        ...layout,
+        gap: nextGap,
+        ...(session.control.axis === "vertical" ? { row_gap: nextGap } : { column_gap: nextGap }),
+        spacing_tokens: {
+          ...(layout.spacing_tokens ?? {}),
+          gap: null,
+          ...(session.control.axis === "vertical" ? { row_gap: null } : { column_gap: null })
+        }
+      };
+    }
+
+    const paddingTokenKeyBySide: Record<keyof NodeLayout["padding"], LayoutSpacingTokenKey> = {
+      top: "padding_top",
+      right: "padding_right",
+      bottom: "padding_bottom",
+      left: "padding_left"
+    };
+    const oppositeSideBySide: Record<keyof NodeLayout["padding"], keyof NodeLayout["padding"]> = {
+      top: "bottom",
+      right: "left",
+      bottom: "top",
+      left: "right"
+    };
+    const sides: Array<keyof NodeLayout["padding"]> = modifiers.altKey
+      ? ["top", "right", "bottom", "left"]
+      : modifiers.shiftKey
+        ? [session.control.side, oppositeSideBySide[session.control.side]]
+        : [session.control.side];
+    const nextPadding = { ...layout.padding };
+    const spacingTokens: NonNullable<NodeLayout["spacing_tokens"]> = { ...(layout.spacing_tokens ?? {}) };
+
+    for (const side of sides) {
+      nextPadding[side] = clampFrameSpacingValue(layout.padding[side] + delta);
+      spacingTokens[paddingTokenKeyBySide[side]] = null;
+    }
+
+    return {
+      ...layout,
+      padding: nextPadding,
+      spacing_tokens: spacingTokens
+    };
+  };
+
+  const updateFrameSpacingDragFromClientPoint = (
+    session: FrameSpacingDragSession,
+    clientPoint: { x: number; y: number },
+    modifiers: { altKey: boolean; shiftKey: boolean }
+  ) => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor) {
+      return;
+    }
+
+    const node = findNodeById(currentEditor.document, session.nodeId);
+    if (
+      !node ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      (node.kind !== "frame" && node.kind !== "component")
+    ) {
+      return;
+    }
+
+    updateLayout(session.nodeId, nextLayoutForFrameSpacingDrag(session, clientPoint, modifiers));
+  };
+
+  const startFrameSpacingDrag = (
+    segment: FrameSpacingSegment,
+    event: React.MouseEvent<HTMLElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.button !== 0) {
+      return;
+    }
+    if (!editor || !selectedNode || selectedNode.id !== editor.selection.nodeId) {
+      return;
+    }
+    if (isNodeLocked(selectedNode) || !isNodeVisible(selectedNode)) {
+      return;
+    }
+
+    const layout = normalizedInspectorLayout(selectedNode.layout);
+    if (layout.mode === "none") {
+      return;
+    }
+
+    const nextSession = {
+      nodeId: selectedNode.id,
+      control: segment.control,
+      startClientPoint: { x: event.clientX, y: event.clientY },
+      startLayout: layout,
+      viewportScale: editor.viewport.scale
+    };
+    frameSpacingDragClientPointRef.current = nextSession.startClientPoint;
+    setFrameSpacingDragSession(nextSession);
+    document.body.style.cursor = segment.orientation === "horizontal" ? "ew-resize" : "ns-resize";
+  };
+
+  useEffect(() => {
+    if (!frameSpacingDragSession) {
+      return;
+    }
+
+    const handlePointerMove = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      frameSpacingDragClientPointRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const stopFrameSpacingDrag = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const lastPoint = frameSpacingDragClientPointRef.current;
+      if (lastPoint) {
+        updateFrameSpacingDragFromClientPoint(frameSpacingDragSession, lastPoint, {
+          altKey: event.altKey,
+          shiftKey: event.shiftKey
+        });
+      }
+      frameSpacingDragClientPointRef.current = null;
+      setFrameSpacingDragSession(null);
+      document.body.style.cursor = "";
+    };
+
+    window.addEventListener("mousemove", handlePointerMove, { capture: true });
+    window.addEventListener("mouseup", stopFrameSpacingDrag, { capture: true, once: true });
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove, { capture: true });
+      window.removeEventListener("mouseup", stopFrameSpacingDrag, { capture: true });
+      frameSpacingDragClientPointRef.current = null;
+      document.body.style.cursor = "";
+    };
+  }, [frameSpacingDragSession]);
 
   const layoutForGridResizeAtPoint = (
     state: EditorState,
@@ -14673,7 +14866,7 @@ export function App() {
               </div>
             ) : null}
             {frameSpacingOverlay ? (
-              <div className="frame-spacing-overlay" data-testid="frame-spacing-overlay" aria-hidden="true">
+              <div className="frame-spacing-overlay" data-testid="frame-spacing-overlay">
                 {frameSpacingOverlay.segments.map((segment) => (
                   <div key={segment.id}>
                     <div
@@ -14695,10 +14888,16 @@ export function App() {
                     <div
                       className="frame-spacing-label"
                       data-testid={segment.testId}
+                      role="button"
+                      tabIndex={0}
+                      aria-label="프레임 간격 드래그"
+                      title="프레임 간격 드래그"
                       style={{
                         left: segment.labelLeft,
-                        top: segment.labelTop
+                        top: segment.labelTop,
+                        cursor: segment.orientation === "horizontal" ? "ew-resize" : "ns-resize"
                       }}
+                      onMouseDown={(event) => startFrameSpacingDrag(segment, event)}
                     >
                       {segment.text}
                     </div>

@@ -1117,6 +1117,8 @@ button:disabled {
 }
 
 .frame-spacing-label {
+  pointer-events: auto;
+  user-select: none;
   position: absolute;
   min-width: var(--editor-space-lg);
   transform: translate(-50%, -50%);
