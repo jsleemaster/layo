@@ -3410,6 +3410,34 @@ test("text inspector renders vertical writing mode visibly on the canvas", async
     .toBeGreaterThan(20);
 });
 
+test("mixed vertical text orientation renders Unicode script groups on the canvas", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("AéΩЖ漢한、１€#");
+  await page.getByTestId("inspector-fill").fill("#0ea5e9");
+  await page.getByTestId("inspector-width").fill("260");
+  await page.getByTestId("inspector-height").fill("220");
+  await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");
+
+  const textOrientation = page.getByTestId("inspector-text-orientation");
+  await expect(textOrientation).toHaveValue("mixed");
+
+  await expect
+    .poll(async () => {
+      const bounds = await findCanvasColorBounds(page, { r: 14, g: 165, b: 233 });
+      return (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+    })
+    .toBeGreaterThan(100);
+
+  await textOrientation.selectOption("upright");
+  await expect(textOrientation).toHaveValue("upright");
+  await textOrientation.selectOption("mixed");
+  await expect(textOrientation).toHaveValue("mixed");
+
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-css")).toContainText("writing-mode: vertical-rl;");
+});
 test("text inspector persists vertical text orientation into dev handoff", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
