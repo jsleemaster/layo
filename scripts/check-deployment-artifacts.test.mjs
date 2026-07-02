@@ -76,6 +76,26 @@ test("storage backup retention workflow dry-runs and prunes local backup archive
   assert.doesNotMatch(workflow, /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN/);
 });
 
+test("full verification workflow runs PR-head gates without Vercel deployment secrets", async () => {
+  const workflow = await readText(".github/workflows/full-verification.yml");
+
+  assert.match(workflow, /name: Full Verification/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /pnpm install --frozen-lockfile/);
+  assert.match(workflow, /pnpm exec playwright install --with-deps chromium/);
+  assert.match(workflow, /pnpm run check:penpot-maturity/);
+  assert.match(workflow, /pnpm run check:design-rules/);
+  assert.match(workflow, /pnpm typecheck/);
+  assert.match(workflow, /pnpm --filter @layo\/web build/);
+  assert.match(workflow, /pnpm test/);
+  assert.match(workflow, /pnpm test:e2e/);
+  assert.doesNotMatch(
+    workflow,
+    /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN|vercel build|vercel deploy/
+  );
+});
+
 test("relay Docker artifacts expose team-owned relay configuration", async () => {
   const dockerfile = await readText("apps/collab-relay/Dockerfile");
   const compose = await readText("deploy/collab-relay/docker-compose.yml");

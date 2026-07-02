@@ -1,0 +1,72 @@
+name: Full Verification
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/full-verification.yml"
+      - "apps/**"
+      - "crates/**"
+      - "packages/**"
+      - "scripts/**"
+      - "docs/product/**"
+      - "docs/process/**"
+      - "docs/superpowers/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-verification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Penpot maturity and design rule gates
+        run: |
+          pnpm run check:penpot-maturity
+          pnpm run check:design-rules
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Web build
+        run: pnpm --filter @layo/web build
+
+      - name: Core tests
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: pnpm test
+
+      - name: Playwright CLI e2e
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: pnpm test:e2e
