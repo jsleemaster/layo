@@ -20,6 +20,7 @@ Use this order when entering the repo:
 | Plan | Status | Evidence |
 | --- | --- | --- |
 
+| `2026-07-02-penpot-vertical-text-unicode-orientation.md` | In progress | PR #205 narrows the typography/layout maturity gap after PR #204 by replacing ASCII-only mixed vertical canvas orientation with representative Unicode script and punctuation coverage. Full verification is running; deployment remains intentionally deferred for this loop. |
 ## Completed Plans
 
 | Plan | Status | Evidence |
