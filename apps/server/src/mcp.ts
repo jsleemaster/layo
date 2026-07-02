@@ -98,7 +98,7 @@ const nodeLayoutItemSchema = z.object({
   width_sizing: z.enum(["fixed", "fill"]).optional(),
   height_sizing: z.enum(["fixed", "fill"]).optional(),
   justify_self: z.enum(["start", "center", "end", "stretch"]).optional(),
-  align_self: z.enum(["start", "center", "end", "stretch"]).optional(),
+  align_self: z.enum(["start", "center", "end", "stretch", "baseline"]).optional(),
   min_width: z.number().optional(),
   max_width: z.number().optional(),
   min_height: z.number().optional(),

@@ -7448,6 +7448,7 @@ function Inspector({
                 <option value="center">가운데</option>
                 <option value="end">끝</option>
                 <option value="stretch">늘림</option>
+                <option value="baseline">기준선</option>
               </select>
             </label>
             <label>

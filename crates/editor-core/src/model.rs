@@ -408,6 +408,7 @@ pub enum LayoutSelfAlignment {
     Center,
     End,
     Stretch,
+    Baseline,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
