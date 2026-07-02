@@ -171,8 +171,8 @@ CSS baseline group semantics, and remaining deeper resizing semantics remain
 follow-up layout gaps.
 `2026-07-02-penpot-text-orientation-controls.md` adds explicit
 `text_orientation` metadata/control/export and adapts mixed/upright/sideways
-vertical glyph rendering to Layo's Konva canvas. Deeper Unicode punctuation and
-script-orientation fidelity remains a follow-up typography gap.
+vertical glyph rendering in the Konva canvas. Full UAX #50 table coverage and font-specific vertical substitutions remain follow-up typography gaps.
+`2026-07-02-penpot-vertical-text-unicode-orientation.md` narrows that typography follow-up by extracting canvas glyph orientation into a tested helper, rotating representative Latin extended, Greek, Cyrillic, Arabic/Hebrew, digits, and symbols in `mixed`, keeping CJK scripts and fullwidth/vertical punctuation upright, and adding Playwright e2e coverage for mixed Unicode vertical text through the Inspector and Dev handoff path. Full UAX #50 table coverage and font-specific vertical substitutions remain follow-up layout gaps.
 
 ## Maturity Gates
 
