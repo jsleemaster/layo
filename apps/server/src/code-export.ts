@@ -10,6 +10,7 @@ import type {
   NodeConstraints,
   NodeLayout,
   NodeLayoutItem,
+  TextOrientation,
   TextWritingMode
 } from "./storage";
 import { createActiveDesignTokenReferenceMap, resolveActiveDesignTokens } from "./design-token-io.js";
@@ -70,6 +71,7 @@ export interface CodeStructureNode {
         fontSize: number;
         fontFamily: string;
         writingMode?: TextWritingMode;
+        textOrientation?: TextOrientation;
         typographyToken?: string;
         typographyStyle?: string;
       }
@@ -696,6 +698,9 @@ function contentFor(node: DesignNode): CodeStructureNode["content"] {
     if (node.content.writing_mode && node.content.writing_mode !== "horizontal_tb") {
       content.writingMode = node.content.writing_mode;
     }
+    if (node.content.text_orientation && node.content.text_orientation !== "mixed") {
+      content.textOrientation = node.content.text_orientation;
+    }
     if (node.content.typography_token) {
       content.typographyToken = node.content.typography_token;
     }
@@ -837,6 +842,9 @@ function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[]
     lines.push(`  font-size: ${cssTextFontSizeValue(node, tokenMap)};`);
     if (node.content.writing_mode && node.content.writing_mode !== "horizontal_tb") {
       lines.push(`  writing-mode: ${cssTextWritingMode(node.content.writing_mode)};`);
+    }
+    if (node.content.text_orientation && node.content.text_orientation !== "mixed") {
+      lines.push(`  text-orientation: ${cssTextOrientation(node.content.text_orientation)};`);
     }
     lines.push(`  line-height: ${cssTextLineHeightValue(node, tokenMap)};`);
     lines.push("  white-space: pre-wrap;");
@@ -1107,6 +1115,18 @@ function cssTextWritingMode(value: TextWritingMode): string {
     case "horizontal_tb":
     default:
       return "horizontal-tb";
+  }
+}
+
+function cssTextOrientation(value: TextOrientation): string {
+  switch (value) {
+    case "upright":
+      return "upright";
+    case "sideways":
+      return "sideways";
+    case "mixed":
+    default:
+      return "mixed";
   }
 }
 

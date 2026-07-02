@@ -19,6 +19,7 @@ import type {
   NodeExportPreset,
   NodeLayout,
   NodeLayoutItem,
+  TextOrientation,
   TextWritingMode
 } from "./storage";
 
@@ -28,6 +29,8 @@ export interface AgentNodeSummary {
   kind: DesignNode["kind"];
   path: string[];
   text?: string;
+  writingMode?: TextWritingMode;
+  textOrientation?: TextOrientation;
   componentDefinitionId?: string;
   layout?: NodeLayout;
   layout_item?: NodeLayoutItem;
@@ -127,6 +130,7 @@ export type AgentCommand =
     }
   | { type: "update_text"; nodeId: string; value: string }
   | { type: "set_text_writing_mode"; nodeId: string; writingMode: TextWritingMode }
+  | { type: "set_text_orientation"; nodeId: string; textOrientation: TextOrientation }
   | {
       type: "create_rectangle";
       parentId: string;
@@ -152,6 +156,7 @@ export type AgentCommand =
       fontSize?: number;
       fontFamily?: string;
       writingMode?: TextWritingMode;
+      textOrientation?: TextOrientation;
     }
   | { type: "create_component"; nodeId: string; componentId: string; name: string }
   | {
@@ -234,6 +239,12 @@ const TEXT_WRITING_MODES = new Set<TextWritingMode>(["horizontal_tb", "vertical_
 
 function normalizeTextWritingMode(value: TextWritingMode | undefined): TextWritingMode {
   return value && TEXT_WRITING_MODES.has(value) ? value : "horizontal_tb";
+}
+
+const TEXT_ORIENTATIONS = new Set<TextOrientation>(["mixed", "upright", "sideways"]);
+
+function normalizeTextOrientation(value: TextOrientation | undefined): TextOrientation {
+  return value && TEXT_ORIENTATIONS.has(value) ? value : "mixed";
 }
 
 export function inspectCanvas(document: DesignFile): CanvasInspection {
@@ -573,6 +584,8 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     kind: node.kind,
     path,
     text: node.content.type === "text" ? node.content.value : undefined,
+    writingMode: node.content.type === "text" ? node.content.writing_mode : undefined,
+    textOrientation: node.content.type === "text" ? node.content.text_orientation : undefined,
     componentDefinitionId: node.component_instance?.definition_id,
     layout: node.layout ?? undefined,
     layout_item: node.layout_item ?? undefined,
@@ -1400,6 +1413,14 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       node.content = { ...node.content, writing_mode: normalizeTextWritingMode(command.writingMode) };
       return node.id;
     }
+    case "set_text_orientation": {
+      const node = requireNode(document, command.nodeId);
+      if (node.content.type !== "text") {
+        throw new Error(`node is not text: ${command.nodeId}`);
+      }
+      node.content = { ...node.content, text_orientation: normalizeTextOrientation(command.textOrientation) };
+      return node.id;
+    }
     case "create_rectangle": {
       const node: DesignNode = {
         id: command.id,
@@ -1428,6 +1449,9 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       };
       if (command.writingMode) {
         content.writing_mode = normalizeTextWritingMode(command.writingMode);
+      }
+      if (command.textOrientation) {
+        content.text_orientation = normalizeTextOrientation(command.textOrientation);
       }
       const node: DesignNode = {
         id: command.id,

@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-02-penpot-text-orientation-controls.md` | Active | Next Penpot layout maturity loop after PR #203: add text-orientation controls across document contracts, agent/MCP paths, Inspector, canvas rendering, code export, and Playwright CLI proof. |
 
 ## Completed Plans
 

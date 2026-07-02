@@ -1564,6 +1564,22 @@ describe("editor state commands", () => {
     expect((title?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
   });
 
+  test("sets text orientation with undo support", () => {
+    const oriented = executeEditorCommand(createEditorState(sampleDocument()), {
+      type: "set_text_orientation",
+      nodeId: "text-1",
+      textOrientation: "sideways"
+    });
+    expect(findNodeById(oriented.document, "text-1")?.content).toMatchObject({
+      type: "text",
+      text_orientation: "sideways"
+    });
+    expect(findNodeById(undo(oriented).document, "text-1")?.content).toMatchObject({
+      type: "text",
+      text_orientation: "mixed"
+    });
+  });
+
   test("baseline alignment synthesizes vertical writing mode text baselines", () => {
     const document = sampleDocument();
     const frame = findNodeById(document, "frame-1") as any;

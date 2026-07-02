@@ -804,7 +804,7 @@ describe("code export", () => {
     if (text.content.type !== "text") {
       throw new Error("Expected text fixture");
     }
-    text.content = { ...text.content, writing_mode: "vertical_rl" } as any;
+    text.content = { ...text.content, writing_mode: "vertical_rl", text_orientation: "sideways" } as any;
 
     const result = exportDesignToCode(fixture);
     const button = result.elements.find((element) => element.id === "tds-button-primary");
@@ -815,9 +815,11 @@ describe("code export", () => {
       value: "송금하기",
       fontSize: 18,
       fontFamily: "Arial",
-      writingMode: "vertical_rl"
+      writingMode: "vertical_rl",
+      textOrientation: "sideways"
     });
     expect(result.css).toContain("writing-mode: vertical-rl;");
+    expect(result.css).toContain("text-orientation: sideways;");
   });
 
   test("exports separate element modules that can be imported directly", async () => {

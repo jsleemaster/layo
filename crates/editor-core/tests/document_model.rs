@@ -534,7 +534,8 @@ fn text_writing_mode_round_trips_through_json() {
                 "value": "縦書き",
                 "font_size": 28,
                 "font_family": "Inter",
-                "writing_mode": "vertical_rl"
+                "writing_mode": "vertical_rl",
+                "text_orientation": "sideways"
               },
               "children": []
             }
@@ -548,14 +549,20 @@ fn text_writing_mode_round_trips_through_json() {
     let text = &parsed.pages[0].children[0];
 
     match &text.content {
-        editor_core::NodeContent::Text { writing_mode, .. } => {
+        editor_core::NodeContent::Text {
+            writing_mode,
+            text_orientation,
+            ..
+        } => {
             assert_eq!(writing_mode.as_deref(), Some("vertical_rl"));
+            assert_eq!(text_orientation.as_deref(), Some("sideways"));
         }
         _ => panic!("expected text content"),
     }
 
     let json = serde_json::to_string(&parsed).unwrap();
     assert!(json.contains("\"writing_mode\":\"vertical_rl\""));
+    assert!(json.contains("\"text_orientation\":\"sideways\""));
 }
 
 #[test]
