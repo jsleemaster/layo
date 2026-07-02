@@ -42,6 +42,7 @@ import {
   type TeamManifest
 } from "@layo/collaboration";
 import { apiUrl } from "./api-base";
+import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
 import {
   addCommentReply,
   createCommentThread,
@@ -3465,15 +3466,6 @@ function verticalCanvasTextGlyphs(value: string, fontSize: number, height: numbe
   return { glyphs, lineAdvance };
 }
 
-function isSidewaysVerticalCanvasGlyph(glyph: string, textOrientation: TextOrientation): boolean {
-  if (textOrientation === "sideways") {
-    return glyph !== " ";
-  }
-  if (textOrientation === "upright") {
-    return false;
-  }
-  return /^[\u0021-\u007e]$/.test(glyph);
-}
 
 function VerticalCanvasText({
   value,
