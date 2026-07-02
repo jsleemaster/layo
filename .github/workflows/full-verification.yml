@@ -49,30 +49,32 @@ jobs:
           end_marker = '    ) : (\n      <Rect\n'
           start = app.index(start_marker, render_body_index)
           end = app.index(end_marker, start)
-          replacement = '''    ) : node.kind === "text" && node.content.type === "text" ? (
-      isVerticalCanvasTextMode(node.content.writing_mode) ? (
-        <VerticalCanvasText
-          width={node.size.width}
-          height={node.size.height}
-          value={node.content.value}
-          fontSize={node.content.font_size}
-          fontFamily={node.content.font_family}
-          fill={node.style.fill}
-          writingMode={node.content.writing_mode}
-          shadowProps={shadowProps}
-        />
-      ) : (
-        <Text
-          width={node.size.width}
-          height={node.size.height}
-          text={node.content.value}
-          fontSize={node.content.font_size}
-          fontFamily={node.content.font_family}
-          fill={node.style.fill}
-          {...shadowProps}
-        />
-      )
-'''
+          replacement = "\n".join([
+              '    ) : node.kind === "text" && node.content.type === "text" ? (',
+              '      isVerticalCanvasTextMode(node.content.writing_mode) ? (',
+              '        <VerticalCanvasText',
+              '          width={node.size.width}',
+              '          height={node.size.height}',
+              '          value={node.content.value}',
+              '          fontSize={node.content.font_size}',
+              '          fontFamily={node.content.font_family}',
+              '          fill={node.style.fill}',
+              '          writingMode={node.content.writing_mode}',
+              '          shadowProps={shadowProps}',
+              '        />',
+              '      ) : (',
+              '        <Text',
+              '          width={node.size.width}',
+              '          height={node.size.height}',
+              '          text={node.content.value}',
+              '          fontSize={node.content.font_size}',
+              '          fontFamily={node.content.font_family}',
+              '          fill={node.style.fill}',
+              '          {...shadowProps}',
+              '        />',
+              '      )',
+              ''
+          ])
           app = app[:start] + replacement + app[end:]
           app_path.write_text(app)
 
