@@ -18,7 +18,7 @@ const services = [
   }
 ];
 
-const playwrightArgs = normalizeArgs(process.argv.slice(2));
+const playwrightArgs = withCiRetries(normalizeArgs(process.argv.slice(2)));
 const started = [];
 
 try {
@@ -48,6 +48,13 @@ try {
 
 function normalizeArgs(args) {
   return args[0] === "--" ? args.slice(1) : args;
+}
+
+function withCiRetries(args) {
+  if (process.env.CI !== "true" || args.some((arg) => arg === "--retries" || arg.startsWith("--retries="))) {
+    return args;
+  }
+  return ["--retries=1", ...args];
 }
 
 async function runPlaywright(args) {
