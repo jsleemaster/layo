@@ -62,21 +62,29 @@ test("absolute auto-layout child stays out of flow after direct canvas drag", as
   await page.getByTestId("inspector-x").fill("140");
   await page.getByTestId("inspector-y").fill("160");
 
-  await dragSelectedLayerBy(page, 32, 24);
-  await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
-  await expect(page.getByTestId("inspector-x")).toHaveValue("172");
-  await expect(page.getByTestId("inspector-y")).toHaveValue("184");
-
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
   await page.getByRole("button", { name: "사각형 만들기" }).click();
   await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await page.getByTestId("inspector-layout-item-position").selectOption("absolute");
+  await page.getByTestId("inspector-x").fill("80");
+  await page.getByTestId("inspector-y").fill("80");
 
-  await page.getByRole("button", { name: "헤드라인" }).click();
+  await dragSelectedLayerBy(page, 32, 24);
   await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
-  await expect(page.getByTestId("inspector-x")).toHaveValue("172");
-  await expect(page.getByTestId("inspector-y")).toHaveValue("184");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("112");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("104");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 4" })).toBeVisible();
 
   await page.getByRole("button", { name: "사각형 3" }).click();
+  await expect(page.getByTestId("inspector-layout-item-position")).toHaveValue("absolute");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("112");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("104");
+
+  await page.getByRole("button", { name: "사각형 4" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("20");
   await expect(page.getByTestId("inspector-y")).toHaveValue("20");
 });
