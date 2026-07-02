@@ -21,12 +21,12 @@ jobs:
           fetch-depth: 0
 
       - name: Apply text orientation patch
-        run: node .github/codex/text-orientation-patch.cjs
+        run: node .github/codex/text-orientation-patch-runner.cjs
 
       - name: Restore workflow and commit patch
         run: |
           git checkout origin/main -- .github/workflows/full-verification.yml
-          git rm .github/codex/text-orientation-patch.cjs
+          git rm .github/codex/text-orientation-patch.cjs .github/codex/text-orientation-patch-runner.cjs
           git config user.name "chatgpt-codex-connector"
           git config user.email "chatgpt-codex-connector@users.noreply.github.com"
           git add apps packages crates docs .github/workflows/full-verification.yml
