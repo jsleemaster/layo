@@ -198,16 +198,22 @@ function relayoutSingleLineChildren(
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
   const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
   const baselineOffset =
-    !isVertical && layout.align_items === "baseline"
-      ? Math.max(...flowChildren.map((child, index) => childMetrics[index].crossBefore + nodeBaselineOffset(child)))
+    !isVertical && flowChildren.some((child) => effectiveChildAlignSelf(child, layout) === "baseline")
+      ? Math.max(...flowChildren.map((child, index) =>
+          effectiveChildAlignSelf(child, layout) === "baseline"
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child)
+            : 0
+        ))
       : null;
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
+    const childAlignSelf = effectiveChildAlignSelf(child, layout);
     const crossAxisPosition =
-      baselineOffset === null
-        ? crossAxisOffset(
-            layout.align_items,
+      childAlignSelf === "baseline" && baselineOffset !== null
+        ? crossStartPadding + baselineOffset - nodeBaselineOffset(child)
+        : crossAxisOffset(
+            childAlignSelf,
             crossStartPadding,
             crossEndPadding,
             availableCross,
@@ -215,9 +221,8 @@ function relayoutSingleLineChildren(
             isVertical ? node.size.width : node.size.height,
             metrics.crossBefore,
             metrics.crossAfter
-          )
-        : crossStartPadding + baselineOffset - nodeBaselineOffset(child);
-    if (layout.align_items === "stretch") {
+          );
+    if (childAlignSelf === "stretch") {
       if (isVertical) {
         child.size.width = clampLayoutItemWidth(
           child,
@@ -295,24 +300,29 @@ function relayoutWrappedChildren(
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
     const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
     const baselineOffset =
-      !isVertical && layout.align_items === "baseline"
-        ? Math.max(...line.children.map((entry) => entry.metrics.crossBefore + nodeBaselineOffset(entry.child)))
+      !isVertical && line.children.some((entry) => effectiveChildAlignSelf(entry.child, layout) === "baseline")
+        ? Math.max(...line.children.map((entry) =>
+            effectiveChildAlignSelf(entry.child, layout) === "baseline"
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child)
+              : 0
+          ))
         : null;
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
+      const childAlignSelf = effectiveChildAlignSelf(child, layout);
       const crossAxisPosition =
-        baselineOffset === null
-          ? crossAxisLineOffset(
-              layout.align_items,
+        childAlignSelf === "baseline" && baselineOffset !== null
+          ? crossCursor + baselineOffset - nodeBaselineOffset(child)
+          : crossAxisLineOffset(
+              childAlignSelf,
               crossCursor,
               line.crossSize,
               metrics.crossSize,
               metrics.crossBefore,
               metrics.crossAfter
-            )
-          : crossCursor + baselineOffset - nodeBaselineOffset(child);
-      if (layout.align_items === "stretch") {
+            );
+      if (childAlignSelf === "stretch") {
         if (isVertical) {
           child.size.width = clampLayoutItemWidth(
             child,
@@ -351,6 +361,10 @@ function mainAxisGap(layout: NodeLayout, isVertical: boolean): number {
 
 function crossAxisGap(layout: NodeLayout, isVertical: boolean): number {
   return isVertical ? layout.column_gap ?? layout.gap : layout.row_gap ?? layout.gap;
+}
+
+function effectiveChildAlignSelf(child: DesignNode, layout: NodeLayout): NodeLayout["align_items"] {
+  return normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM).align_self ?? layout.align_items;
 }
 
 function applyFillSizingForSingleLine(
@@ -661,8 +675,8 @@ export function normalizeNodeLayoutItem(layoutItem: NodeLayoutItem): NodeLayoutI
   const position = layoutItemPosition(layoutItem);
   const widthSizing = isLayoutItemSizing(layoutItem.width_sizing) ? layoutItem.width_sizing : "fixed";
   const heightSizing = isLayoutItemSizing(layoutItem.height_sizing) ? layoutItem.height_sizing : "fixed";
-  const justifySelf = isLayoutSelfAlignment(layoutItem.justify_self) ? layoutItem.justify_self : undefined;
-  const alignSelf = isLayoutSelfAlignment(layoutItem.align_self) ? layoutItem.align_self : undefined;
+  const justifySelf = isLayoutJustifySelfAlignment(layoutItem.justify_self) ? layoutItem.justify_self : undefined;
+  const alignSelf = isLayoutAlignSelfAlignment(layoutItem.align_self) ? layoutItem.align_self : undefined;
   const minWidth = normalizeMinSizeLimit(layoutItem.min_width);
   const maxWidth = normalizeMaxSizeLimit(layoutItem.max_width, minWidth);
   const minHeight = normalizeMinSizeLimit(layoutItem.min_height);
@@ -1038,8 +1052,12 @@ function isLayoutJustifyItems(value: string | undefined): value is NonNullable<N
   return value === "start" || value === "center" || value === "end" || value === "stretch";
 }
 
-function isLayoutSelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["justify_self"]> {
+function isLayoutJustifySelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["justify_self"]> {
   return value === "start" || value === "center" || value === "end" || value === "stretch";
+}
+
+function isLayoutAlignSelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["align_self"]> {
+  return value === "start" || value === "center" || value === "end" || value === "stretch" || value === "baseline";
 }
 
 function isLayoutAlignContent(value: string | undefined): value is NonNullable<NodeLayout["align_content"]> {

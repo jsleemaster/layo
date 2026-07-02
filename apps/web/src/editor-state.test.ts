@@ -1564,6 +1564,130 @@ describe("editor state commands", () => {
     expect((title?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
   });
 
+  test("align-self baseline joins horizontal auto layout baseline groups", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 380, height: 140 };
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal",
+      align_items: "start",
+      justify_content: "start",
+      gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const title = findNodeById(document, "text-1") as any;
+    title.size = { width: 120, height: 48 };
+    title.layout_item = { align_self: "baseline", margin: { top: 0, right: 0, bottom: 0, left: 0 } };
+    title.content = {
+      type: "text",
+      value: "Title",
+      font_size: 32,
+      font_family: "Inter"
+    };
+    frame.children.push(
+      {
+        id: "caption-1",
+        kind: "text",
+        name: "Caption",
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 24 },
+        style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+        layout_item: { align_self: "baseline", margin: { top: 0, right: 0, bottom: 0, left: 0 } },
+        content: {
+          type: "text",
+          value: "Caption",
+          font_size: 16,
+          font_family: "Inter"
+        },
+        children: []
+      },
+      {
+        id: "badge-1",
+        kind: "rectangle",
+        name: "Badge",
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 36, height: 36 },
+        style: { fill: "#f97316", stroke: null, stroke_width: 0, opacity: 1 },
+        children: []
+      }
+    );
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "caption-1",
+      patch: { width: 80 }
+    });
+
+    const relaidTitle = findNodeById(relaid.document, "text-1");
+    const caption = findNodeById(relaid.document, "caption-1");
+    const badge = findNodeById(relaid.document, "badge-1");
+    expect(relaidTitle?.layout_item).toMatchObject({ align_self: "baseline" });
+    expect(caption?.layout_item).toMatchObject({ align_self: "baseline" });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
+    expect(badge?.transform).toMatchObject({ x: 240, y: 20 });
+    expect((relaidTitle?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
+  test("align-self baseline joins grid row baseline groups without container baseline", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1") as any;
+    frame.size = { width: 300, height: 180 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 2,
+      align_items: "start",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 20,
+      column_gap: 0,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    } as any;
+    const title = findNodeById(document, "text-1") as any;
+    title.size = { width: 90, height: 48 };
+    title.layout_item = { align_self: "baseline", margin: { top: 0, right: 0, bottom: 0, left: 0 } };
+    title.content = { type: "text", value: "Title", font_size: 32, font_family: "Inter" };
+    frame.children.push(
+      {
+        id: "caption-1",
+        kind: "text",
+        name: "Caption",
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 80, height: 24 },
+        style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+        layout_item: { align_self: "baseline", margin: { top: 0, right: 0, bottom: 0, left: 0 } },
+        content: { type: "text", value: "Caption", font_size: 16, font_family: "Inter" },
+        children: []
+      },
+      {
+        id: "badge-1",
+        kind: "rectangle",
+        name: "Badge",
+        transform: { x: 0, y: 0, rotation: 0 },
+        size: { width: 36, height: 36 },
+        style: { fill: "#f97316", stroke: null, stroke_width: 0, opacity: 1 },
+        children: []
+      }
+    );
+
+    const relaid = executeEditorCommand(createEditorState(document), {
+      type: "update_node_geometry",
+      nodeId: "caption-1",
+      patch: { width: 80 }
+    });
+
+    const relaidTitle = findNodeById(relaid.document, "text-1");
+    const caption = findNodeById(relaid.document, "caption-1");
+    const badge = findNodeById(relaid.document, "badge-1");
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
+    expect(badge?.transform).toMatchObject({ x: 20, y: 100 });
+    expect((relaidTitle?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
   test("sets text orientation with undo support", () => {
     const oriented = executeEditorCommand(createEditorState(sampleDocument()), {
       type: "set_text_orientation",

@@ -1429,6 +1429,21 @@ async function persistNodeLayout(fileId: string, nodeId: string, layout: NodeLay
   }
 }
 
+async function persistNodeLayoutItem(fileId: string, nodeId: string, layoutItem: NodeLayoutItem) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_layout_item", nodeId, layoutItem }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`레이아웃 아이템 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 async function persistNodeStyle(fileId: string, nodeId: string, style: RendererNode["style"]) {
   const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
     method: "POST",
@@ -7448,6 +7463,7 @@ function Inspector({
                 <option value="center">가운데</option>
                 <option value="end">끝</option>
                 <option value="stretch">늘림</option>
+                <option value="baseline">기준선</option>
               </select>
             </label>
             <label>
@@ -10346,10 +10362,14 @@ export function App() {
       layout: persistedLayout
     });
     if (currentProject && persistedLayout) {
-      void persistNodeLayout(currentProject.currentDocumentId, nodeId, persistedLayout).catch((error) => {
-        const message = error instanceof Error ? error.message : "레이아웃을 저장하지 못했습니다";
-        setProjectStatus(message);
-      });
+      void persistNodeLayout(currentProject.currentDocumentId, nodeId, persistedLayout)
+        .then(() => {
+          setCodeExportRevision((current) => current + 1);
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "레이아웃을 저장하지 못했습니다";
+          setProjectStatus(message);
+        });
     }
   };
 
@@ -11215,6 +11235,16 @@ export function App() {
 
   const updateLayoutItem = (nodeId: string, layoutItem: NodeLayoutItem) => {
     dispatch({ type: "set_node_layout_item", nodeId, layoutItem });
+    if (currentProject) {
+      void persistNodeLayoutItem(currentProject.currentDocumentId, nodeId, layoutItem)
+        .then(() => {
+          setCodeExportRevision((current) => current + 1);
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : "레이아웃 아이템을 저장하지 못했습니다";
+          setProjectStatus(message);
+        });
+    }
   };
 
   const updateConstraints = (nodeId: string, constraints: NodeConstraints) => {

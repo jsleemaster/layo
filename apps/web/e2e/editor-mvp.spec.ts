@@ -6161,6 +6161,23 @@ test("inspector grid item self alignment overrides container stretch", async ({ 
   await expect(page.getByTestId("inspector-height")).toHaveValue("40");
 });
 
+test("inspector grid item baseline self alignment appears in dev handoff", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-layout-mode").selectOption("grid");
+  await page.getByTestId("inspector-layout-grid-columns").fill("2");
+  await page.getByTestId("inspector-layout-grid-rows").fill("1");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-layout-item-align-self").selectOption("baseline");
+
+  await expect(page.getByTestId("inspector-layout-item-align-self")).toHaveValue("baseline");
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-css")).toContainText("align-self: baseline;");
+  await expect(page.getByTestId("dev-panel-structure")).toContainText('"align_self": "baseline"');
+});
+
 test("inspector grid baseline aligns mixed text per row", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const agentResponse = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
