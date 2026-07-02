@@ -764,7 +764,7 @@ function normalizedAppLayoutItem(layoutItem: RendererNode["layout_item"]): NodeL
 
 function appLayoutItemZIndex(layoutItem: RendererNode["layout_item"]): number {
   const zIndex = layoutItem?.z_index;
-  return typeof zIndex === "number" const KEYBOARD_PAN_STEP = 24;const KEYBOARD_PAN_STEP = 24; Number.isFinite(zIndex) ? Math.round(zIndex) : 0;
+  return typeof zIndex === "number" && Number.isFinite(zIndex) ? Math.round(zIndex) : 0;
 }
 
 function orderedAppChildrenForPaint(children: RendererNode[]): RendererNode[] {
