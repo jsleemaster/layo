@@ -4155,6 +4155,7 @@ describe("FileStorage", () => {
       { type: "update_geometry", nodeId: "frame-1", width: 260, height: 120 },
       { type: "update_geometry", nodeId: "text-1", width: 40, height: 96 },
       { type: "set_text_writing_mode", nodeId: "text-1", writingMode: "vertical_rl" },
+      { type: "set_text_orientation", nodeId: "text-1", textOrientation: "sideways" },
       {
         type: "create_text",
         parentId: "frame-1",
@@ -4187,7 +4188,8 @@ describe("FileStorage", () => {
   const verticalBaselineFrame = verticalBaselineLayout.preview.pages[0].children[0];
   expect(verticalBaselineFrame.children.find((node) => node.id === "text-1")?.content).toMatchObject({
     type: "text",
-    writing_mode: "vertical_rl"
+    writing_mode: "vertical_rl",
+    text_orientation: "sideways"
   });
   expect(verticalBaselineFrame.children.find((node) => node.id === "text-1")?.transform).toMatchObject({
     x: 20,
@@ -4198,6 +4200,7 @@ describe("FileStorage", () => {
     y: 27
   });
   expect(verticalBaselineLayout.audit.commandTypes).toContain("set_text_writing_mode");
+  expect(verticalBaselineLayout.audit.commandTypes).toContain("set_text_orientation");
 
     const manualGridLayout = await storage.applyAgentCommands("sample-file", {
       dryRun: true,

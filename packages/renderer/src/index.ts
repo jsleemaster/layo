@@ -79,6 +79,7 @@ export interface NodeConstraints {
 
 export type ImageFitMode = "fill" | "fit";
 export type TextWritingMode = "horizontal_tb" | "vertical_rl" | "vertical_lr";
+export type TextOrientation = "mixed" | "upright" | "sideways";
 export type ExportPresetFormat = "png" | "jpeg" | "webp" | "svg" | "pdf";
 
 export interface NodeExportPreset {
@@ -121,6 +122,7 @@ export interface RendererNode {
         font_size: number;
         font_family: string;
         writing_mode?: TextWritingMode;
+        text_orientation?: TextOrientation;
         typography_token?: string | null;
         typography_style?: string | null;
       }

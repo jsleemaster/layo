@@ -465,7 +465,16 @@ export interface CodeStructureNode {
   annotations: CodeHandoffAnnotation[];
   content:
     | { type: "empty" }
-    | { type: "text"; value: string; fontSize: number; fontFamily: string }
+    | {
+        type: "text";
+        value: string;
+        fontSize: number;
+        fontFamily: string;
+        writingMode?: string;
+        textOrientation?: string;
+        typographyToken?: string;
+        typographyStyle?: string;
+      }
     | { type: "image"; assetId: string; fitMode: "fill" | "fit" };
   componentRef?: {
     definitionId: string;

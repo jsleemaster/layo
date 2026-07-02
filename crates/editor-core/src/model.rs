@@ -635,6 +635,8 @@ pub enum NodeContent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_mode: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_orientation: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         typography_token: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         typography_style: Option<String>,
@@ -714,6 +716,7 @@ impl DesignFile {
                             font_size: 28.0,
                             font_family: "Inter".to_string(),
                             writing_mode: None,
+                            text_orientation: None,
                             typography_token: None,
                             typography_style: None,
                         },

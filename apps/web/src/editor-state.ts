@@ -15,6 +15,7 @@ import type {
   NodeLayoutItem,
   RendererDocument,
   RendererNode,
+  TextOrientation,
   TextWritingMode
 } from "@layo/renderer";
 
@@ -235,6 +236,11 @@ export type EditorCommand =
       type: "set_text_writing_mode";
       nodeId: string;
       writingMode: TextWritingMode;
+    }
+  | {
+      type: "set_text_orientation";
+      nodeId: string;
+      textOrientation: TextOrientation;
     }
   | {
       type: "set_text_typography_token";
@@ -2453,6 +2459,29 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           type: "set_text_writing_mode",
           nodeId: command.nodeId,
           writingMode: previousWritingMode
+        },
+        selectedNodeId: command.nodeId
+      };
+    }
+    case "set_text_orientation": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node) || node.content.type !== "text") {
+        return { document, inverse: null };
+      }
+
+      const previousTextOrientation = node.content.text_orientation ?? "mixed";
+      if (previousTextOrientation === command.textOrientation) {
+        return { document, inverse: null };
+      }
+
+      node.content = { ...node.content, text_orientation: command.textOrientation };
+
+      return {
+        document: next,
+        inverse: {
+          type: "set_text_orientation",
+          nodeId: command.nodeId,
+          textOrientation: previousTextOrientation
         },
         selectedNodeId: command.nodeId
       };

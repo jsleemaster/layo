@@ -3410,6 +3410,39 @@ test("text inspector renders vertical writing mode visibly on the canvas", async
     .toBeGreaterThan(20);
 });
 
+test("text inspector persists vertical text orientation into dev handoff", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("AB12");
+  await page.getByTestId("inspector-fill").fill("#22c55e");
+
+  const textOrientation = page.getByTestId("inspector-text-orientation");
+  await expect(textOrientation).toHaveValue("mixed");
+
+  await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");
+  await textOrientation.selectOption("sideways");
+  await expect(textOrientation).toHaveValue("sideways");
+
+  await expect
+    .poll(async () => {
+      const bounds = await findCanvasColorBounds(page, { r: 34, g: 197, b: 94 });
+      return bounds.right - bounds.left + bounds.bottom - bounds.top;
+    })
+    .toBeGreaterThan(20);
+
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-css")).toContainText("text-orientation: sideways;");
+  await expect(page.getByTestId("dev-panel-structure")).toContainText('"textOrientation": "sideways"');
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const textNode = filePayload.file.pages[0].children[0].children.find((node: { id: string }) => node.id === "text-1");
+  expect(textNode.content.writing_mode).toBe("vertical_rl");
+  expect(textNode.content.text_orientation).toBe("sideways");
+});
+
 test("file version history saves and restores a document snapshot", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

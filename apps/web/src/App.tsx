@@ -32,6 +32,7 @@ import {
   type NodeLayoutItem,
   type RendererDocument,
   type RendererNode,
+  type TextOrientation,
   type TextWritingMode
 } from "@layo/renderer";
 import {
@@ -1520,6 +1521,21 @@ async function persistTextWritingMode(fileId: string, nodeId: string, writingMod
 
   if (!response.ok) {
     throw new Error(`텍스트 쓰기 방향 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistTextOrientation(fileId: string, nodeId: string, textOrientation: TextOrientation) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_text_orientation", nodeId, textOrientation }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`텍스트 글자 방향 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -3449,6 +3465,16 @@ function verticalCanvasTextGlyphs(value: string, fontSize: number, height: numbe
   return { glyphs, lineAdvance };
 }
 
+function isSidewaysVerticalCanvasGlyph(glyph: string, textOrientation: TextOrientation): boolean {
+  if (textOrientation === "sideways") {
+    return glyph !== " ";
+  }
+  if (textOrientation === "upright") {
+    return false;
+  }
+  return /^[\u0021-\u007e]$/.test(glyph);
+}
+
 function VerticalCanvasText({
   value,
   fontSize,
@@ -3457,6 +3483,7 @@ function VerticalCanvasText({
   width,
   height,
   writingMode,
+  textOrientation,
   shadowProps
 }: {
   value: string;
@@ -3466,6 +3493,7 @@ function VerticalCanvasText({
   width: number;
   height: number;
   writingMode: "vertical_rl" | "vertical_lr";
+  textOrientation: TextOrientation;
   shadowProps: CanvasTextShadowProps;
 }) {
   const columnAdvance = Math.max(1, Math.round(fontSize * 1.05));
@@ -3479,14 +3507,33 @@ function VerticalCanvasText({
             ? width - columnAdvance * (column + 1)
             : columnAdvance * column;
 
-        return (
+        const y = row * lineAdvance;
+        const renderedGlyph = glyph === " " ? "\u00a0" : glyph;
+        const renderSideways = isSidewaysVerticalCanvasGlyph(glyph, textOrientation);
+
+        return renderSideways ? (
+          <Text
+            key={`${index}-${glyph}`}
+            x={x + columnAdvance}
+            y={y}
+            width={lineAdvance}
+            height={columnAdvance}
+            text={renderedGlyph}
+            fontSize={fontSize}
+            fontFamily={fontFamily}
+            fill={fill}
+            align="center"
+            rotation={90}
+            {...shadowProps}
+          />
+        ) : (
           <Text
             key={`${index}-${glyph}`}
             x={x}
-            y={row * lineAdvance}
+            y={y}
             width={columnAdvance}
             height={lineAdvance}
-            text={glyph === " " ? "\u00a0" : glyph}
+            text={renderedGlyph}
             fontSize={fontSize}
             fontFamily={fontFamily}
             fill={fill}
@@ -3649,6 +3696,7 @@ function renderNode({
           fontFamily={node.content.font_family}
           fill={node.style.fill}
           writingMode={node.content.writing_mode}
+          textOrientation={node.content.text_orientation ?? "mixed"}
           shadowProps={shadowProps}
         />
       ) : (
@@ -5499,6 +5547,7 @@ function Inspector({
   onDeleteStyle,
   onTextChange,
   onTextWritingModeChange,
+  onTextOrientationChange,
   onTextTypographyTokenChange,
   onTextTypographyStyleChange,
   onCreateTypographyStyle,
@@ -5577,6 +5626,7 @@ function Inspector({
   onDeleteStyle: (styleId: string) => void;
   onTextChange: (nodeId: string, value: string) => void;
   onTextWritingModeChange: (nodeId: string, writingMode: TextWritingMode) => void;
+  onTextOrientationChange: (nodeId: string, textOrientation: TextOrientation) => void;
   onTextTypographyTokenChange: (nodeId: string, tokenId: string) => void;
   onTextTypographyStyleChange: (nodeId: string, styleId: string) => void;
   onCreateTypographyStyle: (nodeId: string, style: DesignStyle) => void;
@@ -6792,6 +6842,20 @@ function Inspector({
               <option value="horizontal_tb">가로</option>
               <option value="vertical_rl">세로 오른쪽-왼쪽</option>
               <option value="vertical_lr">세로 왼쪽-오른쪽</option>
+            </select>
+          </label>
+          <label className="stacked-field">
+            글자 방향
+            <select
+              data-testid="inspector-text-orientation"
+              value={selectedNode.content.text_orientation ?? "mixed"}
+              onChange={(event) =>
+                onTextOrientationChange(selectedNode.id, event.currentTarget.value as TextOrientation)
+              }
+            >
+              <option value="mixed">자동 혼합</option>
+              <option value="upright">항상 바로</option>
+              <option value="sideways">가로 눕힘</option>
             </select>
           </label>
           {typographyTokens.length ? (
@@ -9856,6 +9920,22 @@ export function App() {
       })
       .catch((error) => {
         const message = error instanceof Error ? error.message : "텍스트 쓰기 방향을 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const updateTextOrientation = (nodeId: string, textOrientation: TextOrientation) => {
+    dispatch({ type: "set_text_orientation", nodeId, textOrientation });
+    if (!currentProject) {
+      return;
+    }
+
+    void persistTextOrientation(currentProject.currentDocumentId, nodeId, textOrientation)
+      .then(() => {
+        setCodeExportRevision((current) => current + 1);
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "텍스트 글자 방향을 저장하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -14650,6 +14730,7 @@ export function App() {
         onDeleteStyle={deleteStyle}
         onTextChange={updateTextNode}
         onTextWritingModeChange={updateTextWritingMode}
+        onTextOrientationChange={updateTextOrientation}
         onTextTypographyTokenChange={updateTextTypographyToken}
         onTextTypographyStyleChange={updateTextTypographyStyle}
         onCreateTypographyStyle={createTypographyStyle}

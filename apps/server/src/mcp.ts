@@ -1869,13 +1869,32 @@ export function createMcpServer(storage = new FileStorage()) {
         fill: z.string().default("#111827"),
         fontSize: z.number().default(24),
         fontFamily: z.string().default("Inter"),
-        writingMode: z.enum(["horizontal_tb", "vertical_rl", "vertical_lr"]).optional()
+        writingMode: z.enum(["horizontal_tb", "vertical_rl", "vertical_lr"]).optional(),
+        textOrientation: z.enum(["mixed", "upright", "sideways"]).optional()
       }
     },
-    async ({ fileId, parentId, id, name, value, x, y, width, height, fill, fontSize, fontFamily, writingMode }) => {
+    async ({
+      fileId,
+      parentId,
+      id,
+      name,
+      value,
+      x,
+      y,
+      width,
+      height,
+      fill,
+      fontSize,
+      fontFamily,
+      writingMode,
+      textOrientation
+    }) => {
       const content: DesignNode["content"] = { type: "text", value, font_size: fontSize, font_family: fontFamily };
       if (writingMode) {
         content.writing_mode = writingMode;
+      }
+      if (textOrientation) {
+        content.text_orientation = textOrientation;
       }
       const node: DesignNode = {
         id,
