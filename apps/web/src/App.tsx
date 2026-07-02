@@ -10476,7 +10476,8 @@ export function App() {
         spacing_tokens: {
           ...(layout.spacing_tokens ?? {}),
           gap: null,
-          ...(session.control.axis === "vertical" ? { row_gap: null } : { column_gap: null })
+          row_gap: null,
+          column_gap: null
         }
       };
     }
