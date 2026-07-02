@@ -31,6 +31,8 @@ Reference: https://help.penpot.app/user-guide/designing/flexible-layouts/
 - GREEN: Full Verification `28589375521` passed after implementing interactive frame spacing labels for padding and gap controls in `App.tsx`, with pointer targets enabled in `styles.css`.
 - FAILURE LOOP: Full Verification `28589856915` failed because the new gap e2e expected a `frame-spacing-vertical` handle on the default landing frame without adding a second child; the overlay correctly had no sibling-spacing handle for that fixture.
 - GREEN AFTER FAILURE LOOP: Full Verification `28590357552` passed after fixing the gap e2e fixture to add a rectangle child before verifying vertical sibling gap dragging.
+- SELF-REVIEW FOLLOW-UP: `b7a2c4d` clears all gap spacing-token bindings when a gap handle drag turns token-bound spacing into manual spacing.
+- PENPOT LIVE-FEEDBACK FOLLOW-UP: `f12c301` updates spacing values during `mousemove`, and the focused e2e now asserts the Inspector value changes before `mouseup`.
 
 ## Files
 
@@ -71,8 +73,8 @@ Reference: https://help.penpot.app/user-guide/designing/flexible-layouts/
 - [x] Update the Penpot maturity benchmark to mark direct flex spacing handles as landed while keeping deeper resizing semantics explicit.
 - [x] Update `PLAN_STATUS.md` with RED/GREEN evidence.
 - [x] Run Full Verification on the branch.
-- [ ] Run Storage Restore Drill and Storage Backup Retention on the PR branch.
-- [ ] Open, self-review, and merge the PR when checks pass; run post-merge cleanup.
+- [x] Run Storage Restore Drill and Storage Backup Retention on the PR branch.
+- [x] Open and self-review the PR, including the gap-token cleanup and live-feedback follow-up. Post-merge cleanup runs after the PR merge rather than inside this feature branch.
 
 ## Current Environment Note
 
