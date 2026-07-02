@@ -5648,7 +5648,7 @@ function nodeGeometryInTree(
   };
 
   if (node.id === nodeId) {
-    if (normalizedFlowLayout(parentLayout)) {
+    if (normalizedFlowLayout(parentLayout) && layoutItemPosition(node.layout_item) === "static") {
       return null;
     }
 
