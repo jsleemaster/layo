@@ -12545,7 +12545,7 @@ export function App() {
     });
     collabSessionRef.current = session;
     session.updatePresence({
-      selectedNodeId: editor.selection.nodeId,
+      selectedNodeId: editor?.selection.nodeId ?? null,
       selectedNodeBounds: getSelectedNodeBounds(editor.document, editor.selection.nodeId),
       viewport: editor.viewport,
       updatedAtMs: Date.now()
@@ -14266,8 +14266,8 @@ export function App() {
                 {orderedAppChildrenForPaint(editor?.document.pages[0]?.children ?? []).map((node) =>
                   renderNode({
                     node,
-                    selectedNodeId: editor.selection.nodeId,
-                    selectedNodeIds: editor.selection.nodeIds,
+                    selectedNodeId: editor?.selection.nodeId ?? null,
+                    selectedNodeIds: editor?.selection.nodeIds ?? [],
                     isCanvasPanning: isSpacePanning,
                     dragPreview,
                     onSelect: selectNode,
