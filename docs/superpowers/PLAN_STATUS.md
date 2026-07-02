@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-02-penpot-vertical-text-canvas-rendering.md` | Active | Closing the layout maturity gap where vertical writing mode was persisted/exported but not visibly rendered on the browser canvas. The PR adapts `vertical_rl`/`vertical_lr` to clipped upright glyph columns in Konva and adds Playwright CLI pixel-bound coverage. |
 | `2026-07-01-figma-image-asset-import.md` | Blocked | PR #199 remains open. The three P2 review findings are addressed through code/test commit `c09d0c0` with regression tests, and review threads have replies. The plan stays active because GitHub reports `mergeable_state: blocked`; `restore-drill` and `retention` pass but `Vercel` fails with `Deployment rate limited - retry in 24 hours`; full PR-head local/e2e verification is not trusted while `git status --short --branch` exits `134`; and merge plus post-merge cleanup are not complete. |
 
 ## Completed Plans

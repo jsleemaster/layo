@@ -3412,6 +3412,94 @@ function setStageCursor(
   }
 }
 
+type CanvasTextShadowProps = Record<string, number | string>;
+
+function isVerticalCanvasTextMode(
+  writingMode: TextWritingMode | undefined
+): writingMode is "vertical_rl" | "vertical_lr" {
+  return writingMode === "vertical_rl" || writingMode === "vertical_lr";
+}
+
+function verticalCanvasTextGlyphs(value: string, fontSize: number, height: number) {
+  const lineAdvance = Math.max(1, Math.round(fontSize * 1.15));
+  const rowsPerColumn = Math.max(1, Math.floor(Math.max(1, height) / lineAdvance));
+  const glyphs: Array<{ glyph: string; row: number; column: number }> = [];
+  let row = 0;
+  let column = 0;
+
+  for (const glyph of Array.from(value)) {
+    if (glyph === "") {
+      continue;
+    }
+    if (glyph === "
+") {
+      column += 1;
+      row = 0;
+      continue;
+    }
+
+    glyphs.push({ glyph, row, column });
+    row += 1;
+
+    if (row >= rowsPerColumn) {
+      column += 1;
+      row = 0;
+    }
+  }
+
+  return { glyphs, lineAdvance };
+}
+
+function VerticalCanvasText({
+  value,
+  fontSize,
+  fontFamily,
+  fill,
+  width,
+  height,
+  writingMode,
+  shadowProps
+}: {
+  value: string;
+  fontSize: number;
+  fontFamily: string;
+  fill: string;
+  width: number;
+  height: number;
+  writingMode: "vertical_rl" | "vertical_lr";
+  shadowProps: CanvasTextShadowProps;
+}) {
+  const columnAdvance = Math.max(1, Math.round(fontSize * 1.05));
+  const { glyphs, lineAdvance } = verticalCanvasTextGlyphs(value, fontSize, height);
+
+  return (
+    <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
+      {glyphs.map(({ glyph, row, column }, index) => {
+        const x =
+          writingMode === "vertical_rl"
+            ? width - columnAdvance * (column + 1)
+            : columnAdvance * column;
+
+        return (
+          <Text
+            key={`${index}-${glyph}`}
+            x={x}
+            y={row * lineAdvance}
+            width={columnAdvance}
+            height={lineAdvance}
+            text={glyph === " " ? " " : glyph}
+            fontSize={fontSize}
+            fontFamily={fontFamily}
+            fill={fill}
+            align="center"
+            {...shadowProps}
+          />
+        );
+      })}
+    </Group>
+  );
+}
+
 function renderNode({
   node,
   selectedNodeId,
@@ -3552,16 +3640,29 @@ function renderNode({
         naturalHeight={node.content.natural_height}
         shadowProps={shadowProps}
       />
-    ) : node.kind === "text" && node.content.type === "text" ? (
-      <Text
-        width={node.size.width}
-        height={node.size.height}
-        text={node.content.value}
-        fontSize={node.content.font_size}
-        fontFamily={node.content.font_family}
-        fill={node.style.fill}
-        {...shadowProps}
-      />
+) : node.kind === "text" && node.content.type === "text" ? (
+  isVerticalCanvasTextMode(node.content.writing_mode) ? (
+    <VerticalCanvasText
+      width={node.size.width}
+      height={node.size.height}
+      value={node.content.value}
+      fontSize={node.content.font_size}
+      fontFamily={node.content.font_family}
+      fill={node.style.fill}
+      writingMode={node.content.writing_mode}
+      shadowProps={shadowProps}
+    />
+  ) : (
+    <Text
+      width={node.size.width}
+      height={node.size.height}
+      text={node.content.value}
+      fontSize={node.content.font_size}
+      fontFamily={node.content.font_family}
+      fill={node.style.fill}
+      {...shadowProps}
+    />
+  )
     ) : (
       <Rect
         width={node.size.width}

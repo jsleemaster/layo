@@ -3378,6 +3378,38 @@ test("text inspector persists vertical writing mode into dev handoff", async ({ 
   expect(textNode.content.writing_mode).toBe("vertical_rl");
 });
 
+test("text inspector renders vertical writing mode visibly on the canvas", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("세로쓰기테스트");
+  await page.getByTestId("inspector-fill").fill("#d946ef");
+  await page.getByTestId("inspector-width").fill("220");
+  await page.getByTestId("inspector-height").fill("180");
+
+  const targetColor = { r: 217, g: 70, b: 239 };
+  await expect
+    .poll(async () => {
+      const bounds = await findCanvasColorBounds(page, targetColor);
+      const width = bounds.right - bounds.left;
+      const height = bounds.bottom - bounds.top;
+      return Math.round((width / Math.max(1, height)) * 10);
+    })
+    .toBeGreaterThan(20);
+
+  await page.getByTestId("inspector-text-writing-mode").selectOption("vertical_rl");
+  await expect(page.getByTestId("inspector-text-writing-mode")).toHaveValue("vertical_rl");
+
+  await expect
+    .poll(async () => {
+      const bounds = await findCanvasColorBounds(page, targetColor);
+      const width = bounds.right - bounds.left;
+      const height = bounds.bottom - bounds.top;
+      return Math.round((height / Math.max(1, width)) * 10);
+    })
+    .toBeGreaterThan(20);
+});
+
 test("file version history saves and restores a document snapshot", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
