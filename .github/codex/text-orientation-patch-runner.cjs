@@ -1,5 +1,6 @@
 const fs = require("fs");
-const vm = require("vm");
+const Module = require("module");
+const path = require("path");
 
 const scriptPath = ".github/codex/text-orientation-patch.cjs";
 let script = fs.readFileSync(scriptPath, "utf8");
@@ -20,4 +21,7 @@ if (!updateBlockRegex.test(script)) {
 }
 
 script = script.replace(updateBlockRegex, updateBlock);
-vm.runInThisContext(script, { filename: scriptPath });
+const moduleRunner = new Module(path.resolve(scriptPath), module.parent);
+moduleRunner.filename = path.resolve(scriptPath);
+moduleRunner.paths = Module._nodeModulePaths(process.cwd());
+moduleRunner._compile(script, moduleRunner.filename);
