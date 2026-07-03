@@ -29,7 +29,15 @@ The Playwright CLI flow:
 
 ## Verification
 
-Pending. Run the focused Playwright CLI proof first, then Full Verification. If the focused proof fails, keep that exact failed canvas-resize case as the next goal in the Penpot maturity loop.
+- GREEN Full Verification #28640571010:
+  - `pnpm run check:penpot-maturity`
+  - `pnpm run check:design-rules`
+  - `pnpm typecheck`
+  - `pnpm --filter @layo/web build`
+  - `pnpm test`
+  - `pnpm test:e2e` with `flex-fill-direct-parent-resize.spec.ts` included
+
+The direct Playwright CLI interaction selected the parent frame, dragged `resize-handle-bottom-right` by `60px`, and verified the parent, fill child, and fixed sibling geometry through the Inspector.
 
 ## Remaining Gaps
 
