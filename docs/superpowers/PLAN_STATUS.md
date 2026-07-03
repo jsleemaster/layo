@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-03-penpot-flex-fill-height-resize.md` | Active | Prove Penpot-like height fill child recomputation when a vertical auto-layout parent height changes. Deployment is intentionally deferred. |
 
 ## Completed Plans
 
