@@ -11,18 +11,34 @@ Close the next focused resizing-semantics evidence gap for Penpot-like flex layo
 - Decision: Adapt. Layo keeps its local-first `layout_item.height_sizing = "fill"` contract and proves the browser editor recomputes fill height after parent resizing.
 - Maturity gate: Layout maturity.
 
-## Implementation Plan
+## Implementation
 
-1. Add focused Playwright CLI coverage for a vertical auto-layout frame with padding, gap, one height-fill child, and one fixed child.
-2. Resize the parent height through the live editor Inspector.
-3. Verify the fill child remains `fill`, recalculates from `130` to `190`, and the fixed sibling moves from `y=160` to `y=220` while staying `80` high.
-4. If the proof fails, fix the smallest layout-state path that prevents height recomputation.
-5. Record the final verification and remaining gaps.
+No production code change was needed in this loop. The existing normalized auto-layout solver already recalculates height-fill children when a fixed-height vertical parent changes.
+
+This proof adds `apps/web/e2e/flex-fill-height-resize.spec.ts` and includes it in `pnpm test:e2e`. The Playwright CLI flow:
+
+- creates a project,
+- sets the landing frame to vertical auto layout with height `260`, padding `20`, and gap `10`,
+- sets the headline child to `layout_item.height_sizing = "fill"`,
+- adds a fixed rectangle sibling with height `80`,
+- verifies the fill child is `130` high and the fixed sibling is at `y=160`,
+- resizes the parent frame height to `320`,
+- verifies the fill child remains `fill` and becomes `190` high,
+- verifies the fixed sibling stays `80` high and moves to `y=220`.
 
 ## Verification
 
-Pending.
+- GREEN Full Verification #28639404299:
+  - `pnpm run check:penpot-maturity`
+  - `pnpm run check:design-rules`
+  - `pnpm typecheck`
+  - `pnpm --filter @layo/web build`
+  - `pnpm test`
+  - `pnpm test:e2e` with the new `flex-fill-height-resize.spec.ts` included
 
 ## Remaining Gaps
 
-Pending verification.
+- Deeper direct-resize and constraint edge cases beyond Inspector-driven parent width/height resize proofs.
+- Full Unicode vertical-orientation table fidelity and font-specific vertical glyph substitutions.
+- Last-baseline groups, orthogonal writing-mode baseline groups, and font-specific baseline metrics.
+- Deployment remains intentionally deferred for this loop per current priority.

@@ -19,12 +19,12 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-03-penpot-flex-fill-height-resize.md` | Active | Prove Penpot-like height fill child recomputation when a vertical auto-layout parent height changes. Deployment is intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-03-penpot-flex-fill-height-resize.md` | Completed | Proves Penpot-like height fill child recomputation after a fixed-height vertical auto-layout parent resize: the fill child remains `fill`, changes from 130 to 190 high, and the fixed sibling stays 80 high while moving from y=160 to y=220. GREEN Full Verification #28639404299 passed. Deployment remains intentionally deferred. |
 | `2026-07-02-penpot-flex-fill-resize.md` | Completed | Proves Penpot-like fill child width recomputation after a fixed-width auto-layout parent resize: the fill child remains `fill`, changes from 230 to 290 wide, and the fixed sibling stays 80 wide while moving from x=260 to x=320. GREEN Full Verification #28638419563 passed. Deployment remains intentionally deferred. |
 | `2026-07-02-penpot-grid-absolute-layout-item-drag.md` | Completed | Closes the remaining grid absolute-positioning proof gap by adding Playwright CLI evidence that an absolute child inside a grid frame exposes selection geometry, drags directly on the canvas, stays out of grid flow, and does not block a new static child from auto-placing at the grid flow origin. GREEN Full Verification #28597550413 passed with 154 Playwright CLI e2e tests. Deployment remains intentionally deferred. |
 | `2026-07-02-penpot-absolute-layout-item-drag.md` | Completed | Adapts Penpot flexible-layout absolute positioning by allowing selected absolute auto-layout children to expose selection geometry, drag directly on the canvas, and remain out of the auto-layout flow. RED Full Verification #28593647957 exposed an invalid text fixture, RED #28594202807 reproduced the product gap with a rectangle absolute child missing resize-handle geometry, and GREEN Full Verification #28596128509 passed with 153 Playwright CLI e2e tests. Storage Restore Drill #28596640216 and Storage Backup Retention #28596640320 passed. Deployment remains intentionally deferred. |
