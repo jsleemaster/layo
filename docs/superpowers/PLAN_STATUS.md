@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-02-penpot-flex-fill-resize.md` | Active | Prove Penpot-like fill child width recomputation when an auto-layout parent width changes. Deployment is intentionally deferred. |
 
 ## Completed Plans
 
