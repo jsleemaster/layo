@@ -11,18 +11,34 @@ Close the next focused resizing-semantics evidence gap for Penpot-like flex layo
 - Decision: Adapt. Layo keeps its local-first `layout_item.width_sizing = "fill"` contract and proves the browser editor recomputes fill size after parent resizing.
 - Maturity gate: Layout maturity.
 
-## Implementation Plan
+## Implementation
 
-1. Add focused Playwright CLI coverage for a horizontal auto-layout frame with padding, gap, one fill child, and one fixed child.
-2. Resize the parent width through the live editor Inspector.
-3. Verify the fill child remains `fill`, recalculates from `230` to `290`, and the fixed sibling moves from `x=260` to `x=320` while staying `80` wide.
-4. If the proof fails, fix the smallest layout-state path that prevents recomputation.
-5. Record the final verification and remaining gaps.
+No production code change was needed in this loop. The existing normalized auto-layout solver already recalculates fill-sized children when a fixed-size parent changes.
+
+This proof adds `apps/web/e2e/flex-fill-resize.spec.ts` and includes it in `pnpm test:e2e`. The Playwright CLI flow:
+
+- creates a project,
+- sets the landing frame to horizontal auto layout with width `360`, padding `20`, and gap `10`,
+- sets the headline child to `layout_item.width_sizing = "fill"`,
+- adds a fixed rectangle sibling with width `80`,
+- verifies the fill child is `230` wide and the fixed sibling is at `x=260`,
+- resizes the parent frame width to `420`,
+- verifies the fill child remains `fill` and becomes `290` wide,
+- verifies the fixed sibling stays `80` wide and moves to `x=320`.
 
 ## Verification
 
-Pending.
+- GREEN Full Verification #28638419563:
+  - `pnpm run check:penpot-maturity`
+  - `pnpm run check:design-rules`
+  - `pnpm typecheck`
+  - `pnpm --filter @layo/web build`
+  - `pnpm test`
+  - `pnpm test:e2e` with the new `flex-fill-resize.spec.ts` included
 
 ## Remaining Gaps
 
-Pending verification.
+- Deeper direct-resize and constraint edge cases beyond this parent-width Inspector resize proof.
+- Full Unicode vertical-orientation table fidelity and font-specific vertical glyph substitutions.
+- Last-baseline groups, orthogonal writing-mode baseline groups, and font-specific baseline metrics.
+- Deployment remains intentionally deferred for this loop per current priority.
