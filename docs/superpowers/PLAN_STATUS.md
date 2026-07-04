@@ -1,4 +1,5 @@
-# Superpowers## Current Active Plan
+| `2026-07-04-penpot-flex-fill-direct-parent-height-resize.md` | Completed | Proves Penpot-like direct canvas parent height resize recomputes a vertical fill child: after dragging the parent bottom-right handle vertically by 60px, the parent becomes 320 high, the fill child remains `fill` and changes from 130 to 190 high, and the fixed sibling stays 80 high while moving from y=160 to y=220. GREEN Full Verification #28699572692 passed. Deployment remains intentionally deferred. |
+| `2026-07-03-penpot-flex-fill-direct-parent-resize.md` | Completed |# Superpowers## Current Active Plan
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
