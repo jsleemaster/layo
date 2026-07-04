@@ -64,6 +64,18 @@ interface PenpotMappingState {
   usedAssets: Map<string, PenpotPackageAsset>;
 }
 
+interface PenpotSolidFillPaint {
+  color: string;
+  opacity: number;
+}
+
+interface RgbaColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
 const ASSET_MEDIA_TYPES = new Map<string, string>([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
