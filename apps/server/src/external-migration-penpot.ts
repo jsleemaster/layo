@@ -803,10 +803,42 @@ function roundOpacity(value: number): number {
   return Math.round(clampOpacity(value) * 1000) / 1000;
 }
 
+function penpotSolidStrokePaint(shape: JsonRecord): PenpotSolidFillPaint | null {
+  const strokeRecords = recordsFor(valueFor(shape, "strokes"));
+  const strokes = (strokeRecords.length > 0 ? strokeRecords : [shape]).flatMap((stroke) => {
+    const solidColor = colorValue(valueFor(stroke, "strokeColor", "stroke-color", "color"));
+    const gradientPaint = solidColor ? null : penpotGradientStrokePaint(stroke);
+    const color = solidColor ?? gradientPaint?.color;
+    if (!color) {
+      return [];
+    }
+    const strokeOpacity = clampOpacity(finiteNumber(valueFor(stroke, "strokeOpacity", "stroke-opacity", "opacity"), 1));
+    return [
+      {
+        color,
+        opacity: roundOpacity((gradientPaint?.opacity ?? 1) * strokeOpacity)
+      }
+    ];
+  });
+
+  if (strokes.length === 0) {
+    return null;
+  }
+
+  let composite: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
+  // Penpot stores strokes front-to-back, so composite the back paint first.
+  for (const stroke of [...strokes].reverse()) {
+    composite = compositeRgba(hexToRgba(stroke.color, stroke.opacity), composite);
+  }
+
+  return {
+    color: rgbaToHex(composite),
+    opacity: roundOpacity(composite.a)
+  };
+}
+
 function penpotStrokeColor(shape: JsonRecord): string | null {
-  const strokeRecord = firstRecord(valueFor(shape, "strokes"));
-  const source = strokeRecord ?? shape;
-  return colorValue(valueFor(source, "strokeColor", "stroke-color", "color")) ?? penpotGradientStrokePaint(source)?.color ?? null;
+  return penpotSolidStrokePaint(shape)?.color ?? null;
 }
 
 function firstRecord(value: unknown): JsonRecord | null {
