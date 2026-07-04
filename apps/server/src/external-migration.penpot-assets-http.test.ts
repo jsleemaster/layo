@@ -638,4 +638,3 @@ describe("Penpot external image asset migration HTTP routes", () => {
       style: { fill: expectedMultiFillColor, opacity: 1 }
     });
   });
-});
