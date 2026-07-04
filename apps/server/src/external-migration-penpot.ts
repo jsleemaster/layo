@@ -342,8 +342,15 @@ function mapPenpotShape(
     rotation: finiteNumber(valueFor(shape.json, "rotation"), 0)
   };
   const mapsAsImage = Boolean(imageAsset) && shape.type !== "frame";
-  const fill = mapsAsImage ? "#f3f4f6" : penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
+  const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
+  const fill = mapsAsImage
+    ? "#f3f4f6"
+    : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
+  const opacity = finiteNumber(
+    valueFor(shape.json, "opacity"),
+    solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+  );
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
 
@@ -360,7 +367,7 @@ function mapPenpotShape(
       fill,
       stroke,
       stroke_width: stroke ? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "strokes")) ?? {}, "strokeWidth", "stroke-width", "width"), 1) : 0,
-      opacity: finiteNumber(valueFor(shape.json, "opacity"), finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1))
+      opacity
     },
     content: mapsAsImage && imageAsset
       ? imageContentForAsset(imageAsset, "fill")
