@@ -185,6 +185,21 @@ function createPenpotFillImageExportArchive(): Buffer {
           height: 72,
           fills: [
             {
+              "fill-color-gradient": {
+                type: "linear",
+                "start-x": 0,
+                "start-y": 0,
+                "end-x": 1,
+                "end-y": 0,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "fill-opacity": 0.4
+            },
+            {
               "fill-image": {
                 id: fillMediaId,
                 name: "hero-fill.png",
@@ -192,7 +207,7 @@ function createPenpotFillImageExportArchive(): Buffer {
                 height: 1,
                 mtype: "image/png"
               },
-              "fill-opacity": 1
+              "fill-opacity": 0.75
             }
           ]
         }),
@@ -427,7 +442,7 @@ test("file panel imports a Penpot ZIP image asset into local asset storage", asy
   expect(await assetResponse.body()).toEqual(pngImage);
 });
 
-test("file panel imports a Penpot rectangle fill-image paint into local asset storage", async ({ page }, testInfo) => {
+test("file panel imports a Penpot mixed fill-image stack into local asset storage", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("fill-images.penpot");
   await writeFile(penpotZipPath, createPenpotFillImageExportArchive());
@@ -459,6 +474,7 @@ test("file panel imports a Penpot rectangle fill-image paint into local asset st
     id: `penpot-${fillRectId}`,
     kind: "image",
     name: "Hero fill",
+    style: { opacity: 0.75 },
     content: {
       type: "image",
       asset_id: expectedFillAssetId,
