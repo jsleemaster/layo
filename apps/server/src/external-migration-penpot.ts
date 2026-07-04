@@ -714,11 +714,11 @@ function penpotGradientFillPaint(fill: JsonRecord): PenpotSolidFillPaint | null 
 function interpolateGradientStops(stops: Array<RgbaColor & { offset: number }>, offset: number): RgbaColor {
   const targetOffset = clampOpacity(offset);
   const endIndex = stops.findIndex((stop) => targetOffset <= stop.offset);
-  if (endIndex <= 0) {
-    return stops[0];
-  }
   if (endIndex < 0) {
     return stops[stops.length - 1];
+  }
+  if (endIndex === 0) {
+    return stops[0];
   }
 
   const start = stops[endIndex - 1];
