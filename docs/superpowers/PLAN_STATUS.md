@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Continue the next Penpot maturity loop from the current benchmark gaps. |
+| `2026-07-05-penpot-solid-multi-fill-flattening.md` | Active | RED coverage added for Penpot solid multi-fill paint stacks flattening into Layo single-fill style. RED Full Verification pending. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
