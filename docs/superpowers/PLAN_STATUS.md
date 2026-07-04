@@ -1,4 +1,9 @@
-# Superpowers Plan Status
+# Superpowers## Current Active Plan
+
+| Plan | Status | Evidence |
+| --- | --- | --- |
+| `2026-07-04-penpot-flex-fill-direct-parent-height-resize.md` | Active | Proves the next Penpot-like direct canvas vertical parent resize case: drag the parent bottom-right handle by 60px vertically and verify a fill-height child remains `fill`, changes from 130 to 190 high, and moves the fixed sibling from y=160 to y=220. Full Verification pending. Deployment remains intentionally deferred. |
+Status
 
 Last audited: 2026-07-04
 
