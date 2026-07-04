@@ -10,9 +10,13 @@ const fillRectId = "55555555-5555-5555-5555-555555555555";
 const mediaId = "66666666-6666-6666-6666-666666666666";
 const storageObjectId = "77777777-7777-7777-7777-777777777777";
 const fillMediaId = "88888888-8888-8888-8888-888888888888";
-const fillStorageObjectId = "99999999-9999-9999-9999-999999999999";
+const fillStorageObjectId = \"99999999-9999-9999-9999-999999999999\";
+const frameBackgroundMediaId = \"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\";
+const frameBackgroundStorageObjectId = \"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\";
+const foregroundRectId = \"cccccccc-cccc-cccc-cccc-cccccccccccc\";
 const expectedAssetId = `penpot-asset-${mediaId}`;
 const expectedFillAssetId = `penpot-asset-${fillMediaId}`;
+const expectedFrameBackgroundAssetId = `penpot-asset-${frameBackgroundMediaId}`;
 const pngImage = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64"
@@ -205,7 +209,106 @@ function createPenpotFillImageExportArchive(): Buffer {
   ]);
 }
 
-describe("Penpot external image asset migration", () => {
+function createPenpotFrameFillImageExportArchive(): Buffer {
+  return createZipArchive([
+    {
+      path: \"manifest.json\",
+      data: Buffer.from(
+        JSON.stringify({
+          type: \"penpot/export-files\",
+          version: 1,
+          generatedBy: \"penpot/test\",
+          files: [{ id: fileId, name: \"Penpot Frame Background Board\", features: [] }]
+        }),
+        \"utf8\"
+      )
+    },
+    {
+      path: `files/${fileId}.json`,
+      data: Buffer.from(JSON.stringify({ id: fileId, name: \"Penpot Frame Background Board\" }), \"utf8\")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: Buffer.from(JSON.stringify({ id: pageId, name: \"Frame backgrounds\", index: 0, objects: {} }), \"utf8\")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameId,
+          name: \"Hero frame\",
+          type: \"frame\",
+          x: 40,
+          y: 64,
+          width: 240,
+          height: 160,
+          fills: [
+            {
+              \"fill-image\": {
+                id: frameBackgroundMediaId,
+                name: \"frame-bg.png\",
+                width: 1,
+                height: 1,
+                mtype: \"image/png\"
+              },
+              \"fill-opacity\": 1
+            }
+          ],
+          shapes: [foregroundRectId]
+        }),
+        \"utf8\"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${foregroundRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: foregroundRectId,
+          name: \"Foreground card\",
+          type: \"rect\",
+          x: 80,
+          y: 104,
+          width: 80,
+          height: 48,
+          fills: [{ fillColor: \"#10b981\", fillOpacity: 1 }]
+        }),
+        \"utf8\"
+      )
+    },
+    {
+      path: `files/${fileId}/media/${frameBackgroundMediaId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameBackgroundMediaId,
+          name: \"frame-bg.png\",
+          width: 1,
+          height: 1,
+          mtype: \"image/png\",
+          mediaId: frameBackgroundStorageObjectId
+        }),
+        \"utf8\"
+      )
+    },
+    {
+      path: `objects/${frameBackgroundStorageObjectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameBackgroundStorageObjectId,
+          size: pngImage.length,
+          contentType: \"image/png\",
+          bucket: \"file-media\"
+        }),
+        \"utf8\"
+      )
+    },
+    {
+      path: `objects/${frameBackgroundStorageObjectId}.png`,
+      data: pngImage
+    }
+  ]);
+}
+
+describe(\"Penpot external image asset migration\", () => {
   test("reviews Penpot v3 ZIP exports with packaged image assets as importable", () => {
     const review = reviewExternalMigrationArchive(createPenpotImageExportArchive(), { fileName: "images.penpot" });
 
@@ -314,6 +417,59 @@ describe("Penpot external image asset migration", () => {
         natural_height: 1,
         fit_mode: "fill"
       }
+    });
+  });
+
+  test(\"imports Penpot frame fill-image paints without dropping child layers\", () => {
+    const imported = importExternalMigrationArchive(createPenpotFrameFillImageExportArchive(), {
+      fileName: \"frame-backgrounds.penpot\",
+      fileId: \"penpot-frame-background-imported-file\"
+    });
+
+    expect(imported).toMatchObject({
+      source: \"penpot\",
+      sourceLabel: \"Penpot\",
+      mappedNodeCount: 3,
+      skippedNodeCount: 0
+    });
+    expect(imported.importedAssets).toHaveLength(1);
+    expect(imported.importedAssets[0].metadata).toMatchObject({
+      assetId: expectedFrameBackgroundAssetId,
+      name: \"frame-bg.png\",
+      mimeType: \"image/png\",
+      byteLength: pngImage.length,
+      url: `/assets/${expectedFrameBackgroundAssetId}`
+    });
+
+    const frame = imported.file.pages[0].children[0];
+    expect(frame).toMatchObject({
+      id: `penpot-${frameId}`,
+      kind: \"frame\",
+      name: \"Hero frame\"
+    });
+    expect(frame.children).toHaveLength(2);
+    expect(frame.children[0]).toMatchObject({
+      id: `penpot-${frameId}-fill-image`,
+      kind: \"image\",
+      name: \"Hero frame background\",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 240, height: 160 },
+      style: { fill: \"#f3f4f6\", stroke: null, stroke_width: 0 },
+      content: {
+        type: \"image\",
+        asset_id: expectedFrameBackgroundAssetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: \"fill\"
+      }
+    });
+    expect(frame.children[1]).toMatchObject({
+      id: `penpot-${foregroundRectId}`,
+      kind: \"rectangle\",
+      name: \"Foreground card\",
+      transform: { x: 40, y: 40, rotation: 0 },
+      size: { width: 80, height: 48 },
+      style: { fill: \"#10b981\" }
     });
   });
 });
