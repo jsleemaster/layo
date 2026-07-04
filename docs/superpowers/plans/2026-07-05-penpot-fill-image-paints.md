@@ -45,11 +45,11 @@ Add failing coverage before implementation:
 - File-panel Playwright e2e: uploading the `.penpot` archive must show the
   imported layer and serve the asset bytes from `/assets/{assetId}`.
 
-Expected current failure: Layo only resolves image assets from `type: "image"`
-shape metadata, so the filled rectangle imports as a plain rectangle with empty
-content and no used asset.
+RED outcome: Full Verification #28717101423 failed in Core tests because the
+new fill-image fixture imported with `importedAssets` length 0 and HTTP
+`assetCount` 0.
 
-## GREEN Implementation Target
+## GREEN Implementation
 
 - Extract the first fill-image media id from Penpot fill records, supporting
   both kebab-case `fill-image` and camelCase `fillImage` JSON keys.
@@ -60,10 +60,14 @@ content and no used asset.
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI import proof: pending through
-  `apps/web/e2e/external-migration-penpot-assets.spec.ts`.
+- RED Full Verification #28717101423: failed as expected in Core tests on
+  missing fill-image imported assets.
+- GREEN Full Verification #28717206611: passed Penpot maturity/design gates,
+  typecheck, web build, Core tests, and Playwright CLI e2e in 7m51s.
+- Direct Playwright CLI import proof: covered by
+  `apps/web/e2e/external-migration-penpot-assets.spec.ts`, which uploads the
+  `.penpot` fixture, verifies the `Hero fill` layer, reads the persisted image
+  node, and fetches `/assets/{assetId}` bytes.
 
 ## Remaining Follow-Ups
 
