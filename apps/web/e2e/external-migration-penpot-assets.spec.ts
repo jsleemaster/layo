@@ -408,6 +408,7 @@ test("file panel imports a Penpot rectangle fill-image paint into local asset st
   expect(assetResponse.ok()).toBeTruthy();
   expect(assetResponse.headers()["content-type"]).toBe("image/png");
   expect(await assetResponse.body()).toEqual(pngImage);
+});
 
 test("file panel imports a Penpot frame fill-image background without dropping children", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
