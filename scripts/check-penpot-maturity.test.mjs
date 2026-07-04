@@ -25,6 +25,17 @@ test("agent guide points future workers at the Penpot maturity loop", async () =
   assert.match(guide, /Penpot-comparable team-product maturity/);
 });
 
+test("plan status keeps one canonical markdown document", async () => {
+  const status = await readText("docs/superpowers/PLAN_STATUS.md");
+
+  assert.equal(status.startsWith("# Superpowers Plan Status\n\n"), true);
+  assert.equal(status.match(/^# Superpowers Plan Status$/gm)?.length ?? 0, 1);
+  assert.equal(status.match(/^## Current Active Plan$/gm)?.length ?? 0, 1);
+  assert.equal(status.match(/^## Completed Plans$/gm)?.length ?? 0, 1);
+  assert.ok(status.indexOf("## Current Active Plan") < status.indexOf("## Completed Plans"));
+  assert.doesNotMatch(status, /\| .* \|# Superpowers Plan Status/m);
+});
+
 test("active top-level docs no longer frame Layo as a small personal editor", async () => {
   const docs = {
     "README.md": await readText("README.md"),
