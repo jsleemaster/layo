@@ -697,20 +697,33 @@ function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
 }
 
 function penpotGradientFillPaint(fill: JsonRecord): PenpotSolidFillPaint | null {
-  const gradient = asRecord(valueFor(fill, "fillColorGradient", "fill-color-gradient", "gradient"));
+  return penpotGradientPaint(fill, ["fillColorGradient", "fill-color-gradient", "gradient"]);
+}
+
+function penpotGradientStrokePaint(stroke: JsonRecord): PenpotSolidFillPaint | null {
+  return penpotGradientPaint(stroke, ["strokeColorGradient", "stroke-color-gradient", "gradient"]);
+}
+
+function penpotGradientPaint(record: JsonRecord, gradientKeys: string[]): PenpotSolidFillPaint | null {
+  const gradient = asRecord(valueFor(record, ...gradientKeys));
   if (!gradient) {
     return null;
   }
 
   const stops = recordsFor(valueFor(gradient, "stops"))
     .flatMap((stop) => {
-      const color = colorValue(valueFor(stop, "color", "fillColor", "fill-color"));
+      const color = colorValue(valueFor(stop, "color", "fillColor", "fill-color", "strokeColor", "stroke-color"));
       if (!color) {
         return [];
       }
       return [
         {
-          ...hexToRgba(color, clampOpacity(finiteNumber(valueFor(stop, "opacity", "fillOpacity", "fill-opacity"), 1))),
+          ...hexToRgba(
+            color,
+            clampOpacity(
+              finiteNumber(valueFor(stop, "opacity", "fillOpacity", "fill-opacity", "strokeOpacity", "stroke-opacity"), 1)
+            )
+          ),
           offset: clampOpacity(finiteNumber(valueFor(stop, "offset"), 0))
         }
       ];
@@ -792,7 +805,8 @@ function roundOpacity(value: number): number {
 
 function penpotStrokeColor(shape: JsonRecord): string | null {
   const strokeRecord = firstRecord(valueFor(shape, "strokes"));
-  return colorValue(valueFor(strokeRecord ?? shape, "strokeColor", "stroke-color", "color"));
+  const source = strokeRecord ?? shape;
+  return colorValue(valueFor(source, "strokeColor", "stroke-color", "color")) ?? penpotGradientStrokePaint(source)?.color ?? null;
 }
 
 function firstRecord(value: unknown): JsonRecord | null {
