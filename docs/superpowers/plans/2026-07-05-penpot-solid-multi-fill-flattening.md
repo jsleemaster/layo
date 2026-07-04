@@ -37,6 +37,7 @@ Expected current failure: Layo reads only the first fill record, so the rectangl
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification #28719300875: after fixing the test syntax setup, Core tests failed for the intended gap because the imported rectangle persisted `#ff0000` with opacity `0.5` instead of flattened `#800080` with opacity `1`.
+- GREEN Full Verification #28719395620: passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e after solid fill stack flattening.
+- Direct Playwright CLI e2e proof: included in #28719395620 through the root `test:e2e` run for `apps/web/e2e/external-migration-penpot-assets.spec.ts`; the file-panel import path persisted `Layered fill card` with flattened `#800080` and opacity `1`.
+- Deployment: intentionally deferred for this loop.
