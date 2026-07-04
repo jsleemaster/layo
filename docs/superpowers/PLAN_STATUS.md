@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-frame-fill-image-background.md` | Active | RED coverage added for Penpot frame `fill-image` backgrounds preserving child layers. RED Full Verification pending. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
