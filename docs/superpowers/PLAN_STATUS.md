@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active implementation plan is open after the Penpot mixed fill-image stack slice. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-stroke-gradient-flattening.md` | Active | RED coverage pending for flattening simple Penpot `stroke-color-gradient` records into deterministic Layo stroke colors. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
