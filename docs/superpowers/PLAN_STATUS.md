@@ -19,12 +19,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Continue the next Penpot maturity loop from the current benchmark gaps. |
+| _None_ | None | No active implementation plan is open in this branch after the Penpot solid multi-fill slice. Start the next Penpot gap from `docs/product/penpot-maturity-benchmark.md` and `docs/process/penpot-maturity-loop.md`. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-solid-multi-fill-flattening.md` | Completed | Adapts Penpot solid-color `fills` stacks by flattening front-to-back paint order into one deterministic Layo `style.fill` and opacity. RED Full Verification #28719300875 failed because Layo imported only `#ff0000` at opacity 0.5 instead of `#800080` at opacity 1; GREEN Full Verification #28719395620 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-e2e-script-coverage-guard.md` | Completed | Failure-learning loop for missed root e2e spec wiring after PR #224. Adds a root `pnpm test` guard that fails when non-collaboration `apps/web/e2e/*.spec.ts` files are absent from `test:e2e`, wires external migration and layout-item specs into Playwright CLI e2e, and fixes the external migration asset spec structure. RED Full Verification #28718600049 failed on the missing spec list; GREEN Full Verification #28718647800 passed with the newly wired e2e files. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-frame-fill-image-background.md` | Completed | Adapts Penpot packaged frame `fill-image` backgrounds by preserving frame hierarchy and adding a deterministic background image child before foreground layers. RED Full Verification #28717852745 failed on mappedNodeCount 2 and HTTP assetCount 0; GREEN Full Verification #28717969048 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Repair run #28717920390 caught escaped quote syntax from the remote update path and was fixed before final GREEN. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-fill-image-paints.md` | Completed | Adopts Penpot packaged rectangle `fill-image` paints as Layo image nodes backed by local asset storage while preserving the existing image-shape path. RED Full Verification #28717101423 failed on importedAssets length 0 and HTTP assetCount 0; GREEN Full Verification #28717206611 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |

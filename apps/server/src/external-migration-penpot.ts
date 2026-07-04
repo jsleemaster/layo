@@ -64,6 +64,18 @@ interface PenpotMappingState {
   usedAssets: Map<string, PenpotPackageAsset>;
 }
 
+interface PenpotSolidFillPaint {
+  color: string;
+  opacity: number;
+}
+
+interface RgbaColor {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
 const ASSET_MEDIA_TYPES = new Map<string, string>([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
@@ -330,8 +342,15 @@ function mapPenpotShape(
     rotation: finiteNumber(valueFor(shape.json, "rotation"), 0)
   };
   const mapsAsImage = Boolean(imageAsset) && shape.type !== "frame";
-  const fill = mapsAsImage ? "#f3f4f6" : penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
+  const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
+  const fill = mapsAsImage
+    ? "#f3f4f6"
+    : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
+  const opacity = finiteNumber(
+    valueFor(shape.json, "opacity"),
+    solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+  );
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
 
@@ -348,7 +367,7 @@ function mapPenpotShape(
       fill,
       stroke,
       stroke_width: stroke ? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "strokes")) ?? {}, "strokeWidth", "stroke-width", "width"), 1) : 0,
-      opacity: finiteNumber(valueFor(shape.json, "opacity"), finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1))
+      opacity
     },
     content: mapsAsImage && imageAsset
       ? imageContentForAsset(imageAsset, "fill")
@@ -623,8 +642,78 @@ function boundsForShape(shape: JsonRecord): PenpotBounds {
 }
 
 function penpotFillColor(shape: JsonRecord): string | null {
-  const fillRecord = firstRecord(valueFor(shape, "fills"));
-  return colorValue(valueFor(fillRecord ?? shape, "fillColor", "fill-color", "color"));
+  return penpotSolidFillPaint(shape)?.color ?? colorValue(valueFor(shape, "fillColor", "fill-color", "color"));
+}
+
+function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
+  const fillRecords = recordsFor(valueFor(shape, "fills"));
+  const fills = (fillRecords.length > 0 ? fillRecords : [shape]).flatMap((fill) => {
+    const color = colorValue(valueFor(fill, "fillColor", "fill-color", "color"));
+    if (!color) {
+      return [];
+    }
+    return [
+      {
+        color,
+        opacity: clampOpacity(finiteNumber(valueFor(fill, "fillOpacity", "fill-opacity", "opacity"), 1))
+      }
+    ];
+  });
+
+  if (fills.length === 0) {
+    return null;
+  }
+
+  let composite: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
+  // Penpot stores fills front-to-back, so composite the back paint first.
+  for (const fill of [...fills].reverse()) {
+    composite = compositeRgba(hexToRgba(fill.color, fill.opacity), composite);
+  }
+
+  return {
+    color: rgbaToHex(composite),
+    opacity: roundOpacity(composite.a)
+  };
+}
+
+function hexToRgba(color: string, opacity: number): RgbaColor {
+  return {
+    r: Number.parseInt(color.slice(1, 3), 16),
+    g: Number.parseInt(color.slice(3, 5), 16),
+    b: Number.parseInt(color.slice(5, 7), 16),
+    a: opacity
+  };
+}
+
+function compositeRgba(source: RgbaColor, destination: RgbaColor): RgbaColor {
+  const sourceAlpha = clampOpacity(source.a);
+  const destinationAlpha = clampOpacity(destination.a);
+  const alpha = sourceAlpha + destinationAlpha * (1 - sourceAlpha);
+  if (alpha === 0) {
+    return { r: 0, g: 0, b: 0, a: 0 };
+  }
+  return {
+    r: (source.r * sourceAlpha + destination.r * destinationAlpha * (1 - sourceAlpha)) / alpha,
+    g: (source.g * sourceAlpha + destination.g * destinationAlpha * (1 - sourceAlpha)) / alpha,
+    b: (source.b * sourceAlpha + destination.b * destinationAlpha * (1 - sourceAlpha)) / alpha,
+    a: alpha
+  };
+}
+
+function rgbaToHex(color: RgbaColor): string {
+  return `#${colorChannelToHex(color.r)}${colorChannelToHex(color.g)}${colorChannelToHex(color.b)}`;
+}
+
+function colorChannelToHex(value: number): string {
+  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+}
+
+function clampOpacity(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundOpacity(value: number): number {
+  return Math.round(clampOpacity(value) * 1000) / 1000;
 }
 
 function penpotStrokeColor(shape: JsonRecord): string | null {
@@ -633,10 +722,14 @@ function penpotStrokeColor(shape: JsonRecord): string | null {
 }
 
 function firstRecord(value: unknown): JsonRecord | null {
+  return recordsFor(value)[0] ?? null;
+}
+
+function recordsFor(value: unknown): JsonRecord[] {
   if (Array.isArray(value)) {
-    return value.find(isRecord) ?? null;
+    return value.filter(isRecord);
   }
-  return isRecord(value) ? value : null;
+  return isRecord(value) ? [value] : [];
 }
 
 function colorValue(value: unknown): string | null {
