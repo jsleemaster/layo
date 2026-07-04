@@ -5144,7 +5144,7 @@ function mainAxisChildPosition(
 function flexLineBreakMainSize(child: RendererNode, currentMainSize: number, isVertical: boolean): number {
   const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
   const sizing = isVertical ? layoutItem.height_sizing : layoutItem.width_sizing;
-  if (sizing !== \"fill\") {
+  if (sizing !== "fill") {
     return currentMainSize;
   }
   return (isVertical ? layoutItem.min_height : layoutItem.min_width) ?? 0;
