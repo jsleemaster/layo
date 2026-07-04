@@ -409,6 +409,7 @@ pub enum LayoutSelfAlignment {
     End,
     Stretch,
     Baseline,
+    LastBaseline,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -483,6 +484,7 @@ pub enum LayoutAlignItems {
     End,
     Stretch,
     Baseline,
+    LastBaseline,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]

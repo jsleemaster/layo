@@ -137,6 +137,29 @@ describe("code export", () => {
     expect(button?.structure.children[0].layout_item).toMatchObject({ align_self: "baseline" });
   });
 
+  test("exports last-baseline align-self layout item CSS", () => {
+    const fixture = tossFixture() as any;
+    fixture.pages[0].children[0].layout = {
+      mode: "auto",
+      direction: "horizontal",
+      align_items: "last_baseline",
+      justify_content: "start",
+      gap: 8,
+      padding: { top: 0, right: 0, bottom: 0, left: 0 }
+    };
+    fixture.pages[0].children[0].children[0].layout_item = {
+      align_self: "last_baseline",
+      margin: { top: 0, right: 0, bottom: 0, left: 0 }
+    };
+
+    const result = exportDesignToCode(fixture);
+
+    expect(result.css).toContain(".node-tds-button-label {");
+    expect(result.css).toContain("align-self: last baseline;");
+    const button = result.elements.find((element) => element.id === "tds-button-primary");
+    expect(button?.structure.children[0].layout_item).toMatchObject({ align_self: "last_baseline" });
+  });
+
   test("exports effect shadows as CSS and implementation metadata", () => {
     const fixture = tossFixture() as any;
     fixture.pages[0].children[0].style.effect_shadow = "0 18px 36px rgba(15, 23, 42, 0.32)";

@@ -137,23 +137,40 @@ function relayoutGridChildren(node: DesignNode, layout: NodeLayout, flowChildren
   }
 
   const rowBaselines = new Map<number, number>();
+  const rowLastBaselines = new Map<number, number>();
+  const rowLastBaselineCrossSizes = new Map<number, number>();
   for (const entry of entries) {
     if (entry.alignSelf === "baseline") {
-      const baseline = entry.margin.top + nodeBaselineOffset(entry.child);
+      const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "first");
       rowBaselines.set(entry.row, Math.max(rowBaselines.get(entry.row) ?? 0, baseline));
+    } else if (entry.alignSelf === "last_baseline") {
+      const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "last");
+      const crossSize = entry.margin.top + entry.child.size.height + entry.margin.bottom;
+      rowLastBaselines.set(entry.row, Math.max(rowLastBaselines.get(entry.row) ?? 0, baseline));
+      rowLastBaselineCrossSizes.set(entry.row, Math.max(rowLastBaselineCrossSizes.get(entry.row) ?? 0, crossSize));
     }
   }
 
   for (const entry of entries) {
     const { child, justifySelf, alignSelf, row, column, margin, innerWidth, innerHeight } = entry;
-    const rowBaseline = alignSelf === "baseline" ? rowBaselines.get(row) : undefined;
+    const baselinePreference = baselinePreferenceForAlignment(alignSelf);
+    const rowBaseline =
+      alignSelf === "baseline"
+        ? rowBaselines.get(row)
+        : alignSelf === "last_baseline"
+          ? rowLastBaselines.get(row)
+          : undefined;
+    const baselineCrossStart =
+      alignSelf === "last_baseline"
+        ? Math.max(0, innerHeight - (rowLastBaselineCrossSizes.get(row) ?? innerHeight))
+        : 0;
     child.transform = {
       ...child.transform,
       x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifySelf, innerWidth, child.size.width),
       y:
         rowBaseline === undefined
           ? layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
-          : layout.padding.top + rowStarts[row] + rowBaseline - nodeBaselineOffset(child)
+          : layout.padding.top + rowStarts[row] + baselineCrossStart + rowBaseline - nodeBaselineOffset(child, baselinePreference)
     };
   }
 }
@@ -197,21 +214,43 @@ function relayoutSingleLineChildren(
   const remainingMain = Math.max(0, availableMain - totalChildMain);
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
   const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
-  const baselineOffset =
-    !isVertical && flowChildren.some((child) => effectiveChildAlignSelf(child, layout) === "baseline")
+  const baselineAlignments = flowChildren.map((child) => effectiveChildAlignSelf(child, layout));
+  const firstBaselineOffset =
+    !isVertical && baselineAlignments.some((alignment) => alignment === "baseline")
       ? Math.max(...flowChildren.map((child, index) =>
-          effectiveChildAlignSelf(child, layout) === "baseline"
-            ? childMetrics[index].crossBefore + nodeBaselineOffset(child)
+          baselineAlignments[index] === "baseline"
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, "first")
             : 0
         ))
       : null;
+  const lastBaselineOffset =
+    !isVertical && baselineAlignments.some((alignment) => alignment === "last_baseline")
+      ? Math.max(...flowChildren.map((child, index) =>
+          baselineAlignments[index] === "last_baseline"
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, "last")
+            : 0
+        ))
+      : null;
+  const lastBaselineCrossSize =
+    lastBaselineOffset === null
+      ? 0
+      : flowChildren.reduce((maximum, _child, index) =>
+          baselineAlignments[index] === "last_baseline"
+            ? Math.max(maximum, childMetrics[index].crossBefore + childMetrics[index].crossSize + childMetrics[index].crossAfter)
+            : maximum,
+          0
+        );
+  const lastBaselineCrossStart = crossStartPadding + Math.max(0, availableCross - lastBaselineCrossSize);
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
     const childAlignSelf = effectiveChildAlignSelf(child, layout);
+    const childBaselineOffset =
+      childAlignSelf === "baseline" ? firstBaselineOffset : childAlignSelf === "last_baseline" ? lastBaselineOffset : null;
+    const childBaselineCrossStart = childAlignSelf === "last_baseline" ? lastBaselineCrossStart : crossStartPadding;
     const crossAxisPosition =
-      childAlignSelf === "baseline" && baselineOffset !== null
-        ? crossStartPadding + baselineOffset - nodeBaselineOffset(child)
+      childBaselineOffset !== null
+        ? childBaselineCrossStart + childBaselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
         : crossAxisOffset(
             childAlignSelf,
             crossStartPadding,
@@ -299,21 +338,43 @@ function relayoutWrappedChildren(
     const remainingMain = Math.max(0, availableMain - line.mainSize);
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
     const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
-    const baselineOffset =
-      !isVertical && line.children.some((entry) => effectiveChildAlignSelf(entry.child, layout) === "baseline")
-        ? Math.max(...line.children.map((entry) =>
-            effectiveChildAlignSelf(entry.child, layout) === "baseline"
-              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child)
+    const lineBaselineAlignments = line.children.map((entry) => effectiveChildAlignSelf(entry.child, layout));
+    const firstBaselineOffset =
+      !isVertical && lineBaselineAlignments.some((alignment) => alignment === "baseline")
+        ? Math.max(...line.children.map((entry, index) =>
+            lineBaselineAlignments[index] === "baseline"
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, "first")
               : 0
           ))
         : null;
+    const lastBaselineOffset =
+      !isVertical && lineBaselineAlignments.some((alignment) => alignment === "last_baseline")
+        ? Math.max(...line.children.map((entry, index) =>
+            lineBaselineAlignments[index] === "last_baseline"
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, "last")
+              : 0
+          ))
+        : null;
+    const lastBaselineCrossSize =
+      lastBaselineOffset === null
+        ? 0
+        : line.children.reduce((maximum, entry, index) =>
+            lineBaselineAlignments[index] === "last_baseline"
+              ? Math.max(maximum, entry.metrics.crossBefore + entry.metrics.crossSize + entry.metrics.crossAfter)
+              : maximum,
+            0
+          );
+    const lastBaselineCrossStart = crossCursor + Math.max(0, line.crossSize - lastBaselineCrossSize);
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
       const childAlignSelf = effectiveChildAlignSelf(child, layout);
+      const childBaselineOffset =
+        childAlignSelf === "baseline" ? firstBaselineOffset : childAlignSelf === "last_baseline" ? lastBaselineOffset : null;
+      const childBaselineCrossStart = childAlignSelf === "last_baseline" ? lastBaselineCrossStart : crossCursor;
       const crossAxisPosition =
-        childAlignSelf === "baseline" && baselineOffset !== null
-          ? crossCursor + baselineOffset - nodeBaselineOffset(child)
+        childBaselineOffset !== null
+          ? childBaselineCrossStart + childBaselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
           : crossAxisLineOffset(
               childAlignSelf,
               crossCursor,
@@ -1050,7 +1111,7 @@ function isLayoutWrap(value: string | undefined): value is NonNullable<NodeLayou
 }
 
 function isLayoutAlignItems(value: string): value is NodeLayout["align_items"] {
-  return ["start", "center", "end", "stretch", "baseline"].includes(value);
+  return ["start", "center", "end", "stretch", "baseline", "last_baseline"].includes(value);
 }
 
 function isLayoutJustifyContent(value: string): value is NodeLayout["justify_content"] {
@@ -1066,7 +1127,14 @@ function isLayoutJustifySelfAlignment(value: string | undefined): value is NonNu
 }
 
 function isLayoutAlignSelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["align_self"]> {
-  return value === "start" || value === "center" || value === "end" || value === "stretch" || value === "baseline";
+  return (
+    value === "start" ||
+    value === "center" ||
+    value === "end" ||
+    value === "stretch" ||
+    value === "baseline" ||
+    value === "last_baseline"
+  );
 }
 
 function isLayoutAlignContent(value: string | undefined): value is NonNullable<NodeLayout["align_content"]> {
@@ -1164,12 +1232,32 @@ function crossAxisLineOffset(
   return lineCrossStart + crossBefore;
 }
 
-function nodeBaselineOffset(node: DesignNode): number {
+type BaselinePreference = "first" | "last";
+
+function isBaselineAlignment(alignItems: NodeLayout["align_items"]): boolean {
+  return alignItems === "baseline" || alignItems === "last_baseline";
+}
+
+function baselinePreferenceForAlignment(alignItems: NodeLayout["align_items"]): BaselinePreference {
+  return alignItems === "last_baseline" ? "last" : "first";
+}
+
+function nodeBaselineOffset(node: DesignNode, preference: BaselinePreference = "first"): number {
   if (node.content.type === "text") {
     if (isVerticalTextWritingMode(node.content.writing_mode)) {
-      return Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));
+      const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));
+      if (preference === "last") {
+        const descent = Math.max(0, node.size.width - firstBaseline);
+        return Math.max(0, Math.min(node.size.height, node.size.height - descent));
+      }
+      return firstBaseline;
     }
-    return Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
+    const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
+    if (preference === "last") {
+      const descent = Math.max(0, node.content.font_size - firstBaseline);
+      return Math.max(0, Math.min(node.size.height, node.size.height - descent));
+    }
+    return firstBaseline;
   }
   return node.size.height;
 }

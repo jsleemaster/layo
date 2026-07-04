@@ -798,6 +798,10 @@ function pushUnique<T>(values: T[], value: T): void {
   }
 }
 
+function cssBoxAlignmentValue(value: string): string {
+  return value === "last_baseline" ? "last baseline" : value;
+}
+
 function renderNode(node: DesignNode, depth: number): string {
   const indent = "  ".repeat(depth);
   const className = classNameFor(node.id);
@@ -872,7 +876,7 @@ function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[]
   }
 
   if (node.layout_item?.align_self) {
-    lines.push(`  align-self: ${node.layout_item.align_self};`);
+    lines.push(`  align-self: ${cssBoxAlignmentValue(node.layout_item.align_self)};`);
   }
 
   if (node.layout_item?.z_index !== undefined) {
