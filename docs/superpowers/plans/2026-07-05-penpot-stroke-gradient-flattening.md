@@ -19,7 +19,7 @@ Decision:
 
 ## RED Case
 
-Add failing coverage before implementation:
+Added failing coverage before implementation:
 
 - Server mapper: a Penpot rectangle whose stroke record has `stroke-color-gradient` from red to blue and width 4 must import with Layo `style.stroke` `#800080` and `stroke_width` 4 instead of `stroke: null`.
 - HTTP route: the same archive must review/import without assets and persist the flattened stroke through `FileStorage`.
@@ -27,15 +27,27 @@ Add failing coverage before implementation:
 
 Expected current failure: Layo reads only `strokeColor`, `stroke-color`, or `color`, so a gradient stroke imports without a stroke.
 
-## GREEN Implementation Target
+## GREEN Implementation
 
-- Reuse the existing gradient-stop midpoint interpolation helper already used by fill gradients.
-- Extend `penpotStrokeColor` to read `strokeColorGradient`, `stroke-color-gradient`, or `gradient` from the first stroke record or shape fallback.
-- Preserve existing solid stroke color and stroke width behavior.
+- Reused the existing gradient-stop midpoint interpolation path by extracting a shared `penpotGradientPaint` helper.
+- Kept fill gradients on `fillColorGradient` / `fill-color-gradient` / `gradient`.
+- Extended `penpotStrokeColor` to read `strokeColorGradient`, `stroke-color-gradient`, or `gradient` from the first stroke record or shape fallback.
+- Preserved existing solid stroke color and stroke width behavior.
+
+## Failure Learning Note
+
+The first RED CI run stopped before the domain assertions because the focused Playwright spec was added as a new file without registering it in `package.json#test:e2e`.
+
+Root cause: the branch split a focused browser test into its own file but skipped the repo's existing e2e script coverage contract.
+
+Durable guard: `scripts/check-e2e-script-coverage.test.mjs` already caught the miss. The branch registers `apps/web/e2e/external-migration-penpot-stroke-gradient.spec.ts` in `package.json#test:e2e`, so the same miss remains covered by the existing root `pnpm test` gate. No new memory note was added because the project already has an automated rule for this exact process failure.
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification #28722244025: failed at `scripts/check-e2e-script-coverage.test.mjs` because the new Playwright spec was not listed in `package.json#test:e2e`.
+- RED Full Verification #28722292528: reached the intended stroke-gradient assertions and failed with `style.stroke: null` and `stroke_width: 0` instead of `#800080` and `4`.
+- GREEN Full Verification #28722346733: passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e.
+- Storage Restore Drill #28722346756: passed.
+- Storage Backup Retention #28722346750: passed.
+- Direct Playwright CLI e2e proof: #28722346733 uploaded `stroke-gradients.penpot` through the file panel, clicked `외부 디자인 가져오기`, verified the `Gradient stroke card` layer, and asserted the persisted file style as `fill: #ffffff`, `stroke: #800080`, `stroke_width: 4`, and `opacity: 1`.
 - Deployment: intentionally deferred for this loop.
