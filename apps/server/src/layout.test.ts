@@ -4,6 +4,90 @@ import { sampleDocument } from "./sample-document";
 import type { DesignFile } from "./storage";
 
 describe("server layout", () => {
+  test("vertical writing-mode baseline synthesis uses border edge in horizontal auto layout", () => {
+    const document = structuredClone(sampleDocument) as DesignFile;
+    const frame = document.pages[0].children[0] as any;
+    frame.size = { width: 360, height: 160 };
+    frame.layout = {
+      mode: "auto",
+      direction: "horizontal",
+      align_items: "baseline",
+      justify_content: "start",
+      gap: 10,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const title = frame.children[0];
+    title.size = { width: 40, height: 96 };
+    title.content = {
+      type: "text",
+      value: "縦書き",
+      font_size: 32,
+      font_family: "Inter",
+      writing_mode: "vertical_rl"
+    };
+    frame.children.push({
+      id: "caption-1",
+      kind: "text",
+      name: "캡션",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 24 },
+      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "text", value: "Caption", font_size: 16, font_family: "Inter" },
+      children: []
+    });
+
+    relayoutDesignFile(document);
+
+    const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");
+    expect(title.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 70, y: 103 });
+    expect(title.transform.y + 96).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
+  test("grid layout baseline synthesizes vertical writing-mode border-edge baselines", () => {
+    const document = structuredClone(sampleDocument) as DesignFile;
+    const frame = document.pages[0].children[0] as any;
+    frame.size = { width: 300, height: 140 };
+    frame.layout = {
+      mode: "grid",
+      direction: "horizontal",
+      grid_columns: 2,
+      grid_rows: 1,
+      align_items: "baseline",
+      justify_content: "start",
+      gap: 0,
+      row_gap: 0,
+      column_gap: 0,
+      padding: { top: 20, right: 20, bottom: 20, left: 20 }
+    };
+    const title = frame.children[0];
+    title.size = { width: 40, height: 96 };
+    title.content = {
+      type: "text",
+      value: "縦書き",
+      font_size: 32,
+      font_family: "Inter",
+      writing_mode: "vertical_rl"
+    };
+    frame.children.push({
+      id: "caption-1",
+      kind: "text",
+      name: "캡션",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 80, height: 24 },
+      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "text", value: "Caption", font_size: 16, font_family: "Inter" },
+      children: []
+    });
+
+    relayoutDesignFile(document);
+
+    const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");
+    expect(title.transform).toMatchObject({ x: 20, y: 20 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 103 });
+    expect(title.transform.y + 96).toBe((caption?.transform.y ?? 0) + 13);
+  });
+
   test("last-baseline alignment matches final text baselines in horizontal auto layout", () => {
     const document = structuredClone(sampleDocument) as DesignFile;
     const frame = document.pages[0].children[0] as any;
