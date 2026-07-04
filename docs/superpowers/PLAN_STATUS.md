@@ -1,4 +1,9 @@
-# Superpowers Plan Status
+## Completed Plans
+
+| Plan | Status | Evidence |
+| --- | --- | --- |
+| `2026-07-05-penpot-zip-image-assets.md` | Completed | Adopts Penpot v3 ZIP media/object packaging for image shapes: packaged `image` shapes review/import as Layo image nodes backed by local asset storage, with HTTP persistence and file-panel Playwright proof. RED Full Verification #28715641813 failed on skipped image/assetCount 0; GREEN Full Verification #28715730038 passed. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-basic-zip-import.md` | Completed | Starts the Penpot ZIP write path for packaged pages, frames, rectangles, and text through storage-independent review, HTTP/server import, web API helpers, and the visible file-panel flow. RED Full Verification #28714372031 failed on blocked Penpot import; GREEN Full Verification #28714926928 and follow-up #28715160138 passed. Deployment remains intentionally deferred. |# Superpowers Plan Status
 
 Last audited: 2026-07-05
 
