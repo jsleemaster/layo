@@ -1,4 +1,5 @@
 import { readZipArchive } from "./file-archive.js";
+import { importPenpotZipEntries, reviewPenpotZipEntries } from "./external-migration-penpot.js";
 import type { DesignFile, DesignNode, ImageFitMode, StoredAsset } from "./storage.js";
 
 export type ExternalMigrationSource = "penpot" | "figma" | "unknown";
@@ -142,9 +143,23 @@ export function importExternalMigrationArchive(
     } catch (error) {
       throw inputValidationError(`ZIP archive could not be inspected: ${messageFromError(error)}`);
     }
+
+    const penpotReview = reviewPenpotZipEntries(entries, { fileName, sourceHint });
+    if (penpotReview?.canImport) {
+      return importPenpotZipEntries(entries, {
+        fileId: options.fileId,
+        fileName,
+        name: options.name
+      });
+    }
+
     const figmaPackage = readFigmaPackage(entries);
     if (!figmaPackage) {
-      throw inputValidationError("Only Figma REST JSON exports are importable in this migration slice.");
+      throw inputValidationError(
+        penpotReview
+          ? "Penpot ZIP export does not contain importable pages."
+          : "Only Figma REST JSON or Penpot ZIP exports are importable in this migration slice."
+      );
     }
 
     const source = detectSource({
@@ -225,16 +240,20 @@ function reviewZipArchive(
       const parsed = data ? parseJsonBuffer(data) : undefined;
       return parsed === undefined ? [] : [{ path: entry.path, json: parsed, summary: summarizeJsonDocument(entry.path, parsed) }];
     });
-  const documentCandidates = parsedDocuments.map((entry) => entry.summary);
+  const fallbackDocumentCandidates = parsedDocuments.map((entry) => entry.summary);
   const figmaDocument = parsedDocuments.find((entry) => isFigmaJson(entry.json));
-  const source = detectSource({
-    fileName: options.fileName,
-    sourceHint: options.sourceHint,
-    entries: summaries,
-    json: figmaDocument?.json,
-    documentCandidates
-  });
-  const canImport = source === "figma" && (figmaDocument?.summary.pageCount ?? 0) > 0;
+  const penpotReview = reviewPenpotZipEntries(entries, { fileName: options.fileName, sourceHint: options.sourceHint });
+  const documentCandidates = penpotReview?.documentCandidates ?? fallbackDocumentCandidates;
+  const source = penpotReview
+    ? "penpot"
+    : detectSource({
+        fileName: options.fileName,
+        sourceHint: options.sourceHint,
+        entries: summaries,
+        json: figmaDocument?.json,
+        documentCandidates
+      });
+  const canImport = penpotReview?.canImport ?? (source === "figma" && (figmaDocument?.summary.pageCount ?? 0) > 0);
 
   return baseReview({
     source,
@@ -243,7 +262,7 @@ function reviewZipArchive(
     entries: summaries,
     assetCandidates,
     documentCandidates,
-    warnings,
+    warnings: penpotReview ? [...warnings, ...penpotReview.warnings] : warnings,
     blockedBy: canImport ? [] : blockedByForSource(source, "zip"),
     canImport
   });
@@ -698,9 +717,9 @@ function nextStepsForSource(source: ExternalMigrationSource, archiveKind: Extern
   }
   if (source === "penpot") {
     return [
-      "Use Penpot .penpot or ZIP export as the migration input.",
-      "Map Penpot pages, shapes, text, assets, components, and tokens into Layo document primitives.",
-      "Keep this preflight as the no-write review gate before enabling import."
+      "Import basic Penpot pages, frames, rectangles, and text through the external migration flow.",
+      "Map Penpot assets, components, variants, tokens, and advanced geometry into Layo document primitives.",
+      "Keep this preflight as the no-write review gate before persisting imported files."
     ];
   }
   return archiveKind === "binary"
