@@ -23,6 +23,12 @@ child as too wide to share a row with an 80px fixed sibling, even though the
 correct recomputed fill width is 230px and both children still fit in the same
 row.
 
+A review follow-up exposed a second wrapped-fill case: once line breaking uses a
+fill child's minimum contribution, the later fill-sizing pass must reserve that
+same contribution before distributing remaining row width. Otherwise two fill
+children in a 150px row with a 10px gap and one `min_width: 100` child can be
+kept on one line but overflow after sizing.
+
 ## RED Evidence
 
 - Full Verification #28709960636 failed first because the new unit fixture used
@@ -32,6 +38,11 @@ row.
   `apps/web/src/flex-wrap-fill-resize.test.ts`: expected the fill child width to
   be 230 after direct parent resize, but it stayed 320 because wrapped line
   construction used the stale fill width.
+- Review thread `PRRT_kwDOS7_P9M6OWK0I` identified that the fill-sizing pass did
+  not honor the same minimum contribution used by wrapped line construction.
+  Test-only Full Verification #28711061186 reproduced it: the new two-fill
+  regression expected the first fill child to grow from its 100px minimum to
+  120px, but it stayed 100px.
 
 ## Implementation
 
@@ -42,8 +53,10 @@ row.
   canvas resizing verifies the live editor behavior.
 - Updated web and server layout line construction to measure fill main-axis
   children by their minimum line-break contribution, not their stale current
-  rendered size. The existing fill sizing pass still computes the final width
-  after the line is chosen.
+  rendered size.
+- Updated web and server fill sizing so wrapped and single-line fill passes
+  reserve each fill child's minimum line-break contribution first, then evenly
+  distribute only the remaining grow space.
 
 ## Verification
 
@@ -51,6 +64,12 @@ row.
   received 320 in `apps/web/src/flex-wrap-fill-resize.test.ts`.
 - GREEN Full Verification #28710162544: passed maturity/design gates,
   typecheck, web build, core tests, and Playwright CLI e2e.
+- RED Full Verification #28711061186: review follow-up core tests failed with
+  expected 120 vs received 100 for the first fill child in the 150px two-fill
+  min-contribution case.
+- GREEN Full Verification #28711121006: passed maturity/design gates,
+  typecheck, web build, core tests, and Playwright CLI e2e after the fill-sizing
+  pass reserved minimum contributions before distributing grow space.
 
 ## Direct UI Proof
 
@@ -64,10 +83,16 @@ fixed sibling, then drags the selected parent bottom-right resize handle from
 - fixed sibling stays on the same row at `y = 20` and moves from `x = 320` to
   `x = 260`.
 
+The same Playwright CLI file now also creates a 150px wrapped row with a 10px
+gap and two fill children, sets the first child to `min_width = 100`, and verifies
+through the visible Inspector that the first fill child is `x = 0`, width 120,
+while the second fill child is `x = 130`, width 20.
+
 ## Remaining Risks
 
-This closes one wrapped direct-resize fill edge case. Deeper layout risks still
-include full Unicode vertical-orientation table fidelity, font-specific vertical
-glyph substitutions, last-baseline groups, orthogonal writing-mode baseline
-groups, font-specific baseline metrics, and other direct-resize/constraint edge
-cases not covered by this proof.
+This closes the wrapped direct-resize fill edge case and the reviewed wrapped
+fill min-contribution distribution edge case. Deeper layout risks still include
+full Unicode vertical-orientation table fidelity, font-specific vertical glyph
+substitutions, last-baseline groups, orthogonal writing-mode baseline groups,
+font-specific baseline metrics, and other direct-resize/constraint edge cases
+not covered by this proof.
