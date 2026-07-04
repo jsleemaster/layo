@@ -560,4 +560,3 @@ describe("Penpot external image asset migration", () => {
       style: { fill: expectedMultiFillColor, opacity: 1 }
     });
   });
-});
