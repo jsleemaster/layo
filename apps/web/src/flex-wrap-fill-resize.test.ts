@@ -41,11 +41,12 @@ function sampleDocument(): RendererDocument {
                   type: "text",
                   value: "Layo",
                   font_size: 28,
-                  font_family: "Inter",
-                  font_weight: 700,
-                  line_height: 1.2
+                  font_family: "Inter"
                 },
-                layout_item: { width_sizing: "fill" },
+                layout_item: {
+                  width_sizing: "fill",
+                  margin: { top: 0, right: 0, bottom: 0, left: 0 }
+                },
                 children: []
               },
               {
