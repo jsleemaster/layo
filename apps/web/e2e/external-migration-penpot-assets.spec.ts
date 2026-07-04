@@ -16,10 +16,10 @@ const fillRectId = "55555555-5555-5555-5555-555555555555";
 const mediaId = "66666666-6666-6666-6666-666666666666";
 const storageObjectId = "77777777-7777-7777-7777-777777777777";
 const fillMediaId = "88888888-8888-8888-8888-888888888888";
-const fillStorageObjectId = \"99999999-9999-9999-9999-999999999999\";
-const frameBackgroundMediaId = \"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\";
-const frameBackgroundStorageObjectId = \"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\";
-const foregroundRectId = \"cccccccc-cccc-cccc-cccc-cccccccccccc\";
+const fillStorageObjectId = "99999999-9999-9999-9999-999999999999";
+const frameBackgroundMediaId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const frameBackgroundStorageObjectId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const foregroundRectId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const expectedAssetId = `penpot-asset-${mediaId}`;
 const expectedFillAssetId = `penpot-asset-${fillMediaId}`;
 const expectedFrameBackgroundAssetId = `penpot-asset-${frameBackgroundMediaId}`;
@@ -226,50 +226,50 @@ function createPenpotFillImageExportArchive(): Buffer {
 function createPenpotFrameFillImageExportArchive(): Buffer {
   return createZipArchive([
     {
-      path: \"manifest.json\",
+      path: "manifest.json",
       data: Buffer.from(
         JSON.stringify({
-          type: \"penpot/export-files\",
+          type: "penpot/export-files",
           version: 1,
-          files: [{ id: fileId, name: \"Penpot Frame Background Board\", features: [] }]
+          files: [{ id: fileId, name: "Penpot Frame Background Board", features: [] }]
         }),
-        \"utf8\"
+        "utf8"
       )
     },
     {
       path: `files/${fileId}.json`,
-      data: Buffer.from(JSON.stringify({ id: fileId, name: \"Penpot Frame Background Board\" }), \"utf8\")
+      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Frame Background Board" }), "utf8")
     },
     {
       path: `files/${fileId}/pages/${pageId}.json`,
-      data: Buffer.from(JSON.stringify({ id: pageId, name: \"Frame backgrounds\", index: 0, objects: {} }), \"utf8\")
+      data: Buffer.from(JSON.stringify({ id: pageId, name: "Frame backgrounds", index: 0, objects: {} }), "utf8")
     },
     {
       path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
       data: Buffer.from(
         JSON.stringify({
           id: frameId,
-          name: \"Hero frame\",
-          type: \"frame\",
+          name: "Hero frame",
+          type: "frame",
           x: 40,
           y: 64,
           width: 240,
           height: 160,
           fills: [
             {
-              \"fill-image\": {
+              "fill-image": {
                 id: frameBackgroundMediaId,
-                name: \"frame-bg.png\",
+                name: "frame-bg.png",
                 width: 1,
                 height: 1,
-                mtype: \"image/png\"
+                mtype: "image/png"
               },
-              \"fill-opacity\": 1
+              "fill-opacity": 1
             }
           ],
           shapes: [foregroundRectId]
         }),
-        \"utf8\"
+        "utf8"
       )
     },
     {
@@ -277,15 +277,15 @@ function createPenpotFrameFillImageExportArchive(): Buffer {
       data: Buffer.from(
         JSON.stringify({
           id: foregroundRectId,
-          name: \"Foreground card\",
-          type: \"rect\",
+          name: "Foreground card",
+          type: "rect",
           x: 80,
           y: 104,
           width: 80,
           height: 48,
-          fills: [{ fillColor: \"#10b981\", fillOpacity: 1 }]
+          fills: [{ fillColor: "#10b981", fillOpacity: 1 }]
         }),
-        \"utf8\"
+        "utf8"
       )
     },
     {
@@ -293,20 +293,20 @@ function createPenpotFrameFillImageExportArchive(): Buffer {
       data: Buffer.from(
         JSON.stringify({
           id: frameBackgroundMediaId,
-          name: \"frame-bg.png\",
+          name: "frame-bg.png",
           width: 1,
           height: 1,
-          mtype: \"image/png\",
+          mtype: "image/png",
           mediaId: frameBackgroundStorageObjectId
         }),
-        \"utf8\"
+        "utf8"
       )
     },
     {
       path: `objects/${frameBackgroundStorageObjectId}.json`,
       data: Buffer.from(
-        JSON.stringify({ id: frameBackgroundStorageObjectId, size: pngImage.length, contentType: \"image/png\", bucket: \"file-media\" }),
-        \"utf8\"
+        JSON.stringify({ id: frameBackgroundStorageObjectId, size: pngImage.length, contentType: "image/png", bucket: "file-media" }),
+        "utf8"
       )
     },
     {
@@ -316,7 +316,7 @@ function createPenpotFrameFillImageExportArchive(): Buffer {
   ]);
 }
 
-test(\"file panel imports a Penpot ZIP image asset into local asset storage\", async ({ page }, testInfo) => {
+test("file panel imports a Penpot ZIP image asset into local asset storage", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("images.penpot");
   await writeFile(penpotZipPath, createPenpotImageExportArchive());
@@ -409,25 +409,25 @@ test("file panel imports a Penpot rectangle fill-image paint into local asset st
   expect(assetResponse.headers()["content-type"]).toBe("image/png");
   expect(await assetResponse.body()).toEqual(pngImage);
 
-test(\"file panel imports a Penpot frame fill-image background without dropping children\", async ({ page }, testInfo) => {
+test("file panel imports a Penpot frame fill-image background without dropping children", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
-  const penpotZipPath = testInfo.outputPath(\"frame-backgrounds.penpot\");
+  const penpotZipPath = testInfo.outputPath("frame-backgrounds.penpot");
   await writeFile(penpotZipPath, createPenpotFrameFillImageExportArchive());
 
-  await page.getByTestId(\"external-migration-upload\").setInputFiles(penpotZipPath);
-  const review = page.getByTestId(\"external-migration-review\");
-  await expect(review).toContainText(\"Penpot\");
-  await expect(review).toContainText(\"가져오기 가능\");
-  await expect(page.getByTestId(\"external-migration-status\")).toContainText(\"외부 디자인 검토됨\");
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  const review = page.getByTestId("external-migration-review");
+  await expect(review).toContainText("Penpot");
+  await expect(review).toContainText("가져오기 가능");
+  await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
 
-  await page.getByRole(\"button\", { name: \"외부 디자인 가져오기\" }).click();
-  await expect(page.getByTestId(\"external-migration-status\")).toContainText(\"Penpot Frame Background Board 가져옴\");
-  await expect(page.getByTestId(\"project-status\")).toContainText(\"Penpot Frame Background Board 가져옴\");
-  await expect(page.getByTestId(\"project-name\")).toHaveValue(\"Penpot Frame Background Board\");
-  await expect(page.getByTestId(\"layer-panel\")).toContainText(\"Hero frame background\");
-  await expect(page.getByTestId(\"layer-panel\")).toContainText(\"Foreground card\");
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("external-migration-status")).toContainText("Penpot Frame Background Board 가져옴");
+  await expect(page.getByTestId("project-status")).toContainText("Penpot Frame Background Board 가져옴");
+  await expect(page.getByTestId("project-name")).toHaveValue("Penpot Frame Background Board");
+  await expect(page.getByTestId("layer-panel")).toContainText("Hero frame background");
+  await expect(page.getByTestId("layer-panel")).toContainText("Foreground card");
 
-  const importedProjectId = await page.getByTestId(\"project-switcher\").inputValue();
+  const importedProjectId = await page.getByTestId("project-switcher").inputValue();
   const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
   expect(projectResponse.ok()).toBeTruthy();
   const projectPayload = await projectResponse.json();
@@ -437,25 +437,25 @@ test(\"file panel imports a Penpot frame fill-image background without dropping 
   expect(fileResponse.ok()).toBeTruthy();
   const filePayload = await fileResponse.json();
   const frame = filePayload.file.pages[0].children[0];
-  expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: \"frame\", name: \"Hero frame\" });
+  expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Hero frame" });
   expect(frame.children).toHaveLength(2);
   const background = frame.children[0];
   expect(background).toMatchObject({
     id: `penpot-${frameId}-fill-image`,
-    kind: \"image\",
-    name: \"Hero frame background\",
+    kind: "image",
+    name: "Hero frame background",
     content: {
-      type: \"image\",
+      type: "image",
       asset_id: expectedFrameBackgroundAssetId,
       natural_width: 1,
       natural_height: 1,
-      fit_mode: \"fill\"
+      fit_mode: "fill"
     }
   });
-  expect(frame.children[1]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: \"rectangle\", name: \"Foreground card\" });
+  expect(frame.children[1]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: "rectangle", name: "Foreground card" });
 
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFrameBackgroundAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();
-  expect(assetResponse.headers()[\"content-type\"]).toBe(\"image/png\");
+  expect(assetResponse.headers()["content-type"]).toBe("image/png");
   expect(await assetResponse.body()).toEqual(pngImage);
 });
