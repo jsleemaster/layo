@@ -5185,12 +5185,9 @@ function baselinePreferenceForAlignment(alignItems: NodeLayout["align_items"]): 
 function nodeBaselineOffset(node: RendererNode, preference: BaselinePreference = "first"): number {
   if (node.content.type === "text") {
     if (isVerticalTextWritingMode(node.content.writing_mode)) {
-      const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));
-      if (preference === "last") {
-        const descent = Math.max(0, node.size.width - firstBaseline);
-        return Math.max(0, Math.min(node.size.height, node.size.height - descent));
-      }
-      return firstBaseline;
+      // Horizontal flex/grid baseline groups synthesize orthogonal vertical text
+      // from the block-end border edge.
+      return node.size.height;
     }
     const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
     if (preference === "last") {

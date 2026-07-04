@@ -328,6 +328,58 @@ test("inspector exposes last-baseline layout alignment controls", async ({ page 
   await expect(alignItems).toHaveValue("last_baseline");
 });
 
+test("baseline alignment visibly synthesizes vertical writing mode text to the row border edge", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const response = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        { type: "update_geometry", nodeId: "frame-1", width: 360, height: 160 },
+        { type: "update_geometry", nodeId: "text-1", width: 40, height: 96 },
+        { type: "update_text", nodeId: "text-1", value: "縦書き" },
+        { type: "set_text_writing_mode", nodeId: "text-1", writingMode: "vertical_rl" },
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "horizontal",
+            align_items: "baseline",
+            justify_content: "start",
+            gap: 10,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        },
+        {
+          type: "create_text",
+          parentId: "frame-1",
+          id: "caption-1",
+          name: "캡션",
+          value: "Caption",
+          width: 80,
+          height: 24,
+          fontSize: 16,
+          fontFamily: "Inter"
+        }
+      ]
+    }
+  });
+  expect(response.ok()).toBeTruthy();
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const frame = filePayload.file.pages[0].children[0];
+  const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");
+  expect(caption.transform).toMatchObject({ x: 70, y: 103 });
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByText("캡션").click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("70");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("103");
+});
+
 test("file panel exports a Layo archive and reviews it before import", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
