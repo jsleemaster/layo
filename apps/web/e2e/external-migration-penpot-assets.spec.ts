@@ -21,7 +21,9 @@ const frameBackgroundMediaId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const frameBackgroundStorageObjectId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const foregroundRectId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const multiFillRectId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+const gradientFillRectId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
 const expectedMultiFillColor = "#800080";
+const expectedGradientFillColor = "#800080";
 const expectedAssetId = `penpot-asset-${mediaId}`;
 const expectedFillAssetId = `penpot-asset-${fillMediaId}`;
 const expectedFrameBackgroundAssetId = `penpot-asset-${frameBackgroundMediaId}`;
@@ -556,5 +558,114 @@ test("file panel imports a Penpot solid fill stack as a flattened visible color"
     kind: "rectangle",
     name: "Layered fill card",
     style: { fill: expectedMultiFillColor, opacity: 1 }
+  });
+});
+
+function createPenpotGradientFillExportArchive(): Buffer {
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: Buffer.from(
+        JSON.stringify({
+          type: "penpot/export-files",
+          version: 1,
+          files: [{ id: fileId, name: "Penpot Gradient Fill Board", features: [] }]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}.json`,
+      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Gradient Fill Board" }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: Buffer.from(JSON.stringify({ id: pageId, name: "Gradient fills", index: 0, objects: {} }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameId,
+          name: "Gradient fill frame",
+          type: "frame",
+          x: 40,
+          y: 64,
+          width: 240,
+          height: 160,
+          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+          shapes: [gradientFillRectId]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${gradientFillRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: gradientFillRectId,
+          name: "Gradient card",
+          type: "rect",
+          x: 64,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [
+            {
+              "fill-color-gradient": {
+                type: "linear",
+                "start-x": 0,
+                "start-y": 0,
+                "end-x": 1,
+                "end-y": 0,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "fill-opacity": 1
+            }
+          ]
+        }),
+        "utf8"
+      )
+    }
+  ]);
+}
+
+test("file panel imports a Penpot gradient fill as a flattened visible color", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const penpotZipPath = testInfo.outputPath("gradient-fills.penpot");
+  await writeFile(penpotZipPath, createPenpotGradientFillExportArchive());
+
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  const review = page.getByTestId("external-migration-review");
+  await expect(review).toContainText("Penpot");
+  await expect(review).toContainText("가져오기 가능");
+  await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
+
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("external-migration-status")).toContainText("Penpot Gradient Fill Board 가져옴");
+  await expect(page.getByTestId("project-status")).toContainText("Penpot Gradient Fill Board 가져옴");
+  await expect(page.getByTestId("project-name")).toHaveValue("Penpot Gradient Fill Board");
+  await expect(page.getByTestId("layer-panel")).toContainText("Gradient card");
+
+  const importedProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const projectPayload = await projectResponse.json();
+  const fileResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}`
+  );
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const frame = filePayload.file.pages[0].children[0];
+  const gradientFill = frame.children[0];
+  expect(gradientFill).toMatchObject({
+    id: `penpot-${gradientFillRectId}`,
+    kind: "rectangle",
+    name: "Gradient card",
+    style: { fill: expectedGradientFillColor, opacity: 1 }
   });
 });
