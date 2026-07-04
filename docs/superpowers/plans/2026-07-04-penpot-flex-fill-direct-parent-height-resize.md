@@ -29,7 +29,15 @@ The Playwright CLI flow:
 
 ## Verification
 
-Pending remote Full Verification for `codex/direct-vertical-fill-resize-proof`.
+- GREEN Full Verification #28699572692:
+  - `pnpm run check:penpot-maturity`
+  - `pnpm run check:design-rules`
+  - `pnpm typecheck`
+  - `pnpm --filter @layo/web build`
+  - `pnpm test`
+  - `pnpm test:e2e` with `flex-fill-direct-parent-height-resize.spec.ts` included
+
+The direct Playwright CLI interaction selected the parent frame, dragged `resize-handle-bottom-right` by `60px` vertically, and verified the parent, fill child, and fixed sibling geometry through the Inspector.
 
 ## Remaining Gaps
 
