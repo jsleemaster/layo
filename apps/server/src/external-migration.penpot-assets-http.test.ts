@@ -20,6 +20,8 @@ const fillStorageObjectId = "99999999-9999-9999-9999-999999999999";
 const frameBackgroundMediaId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const frameBackgroundStorageObjectId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const foregroundRectId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+const multiFillRectId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+const expectedMultiFillColor = "#800080";
 const expectedAssetId = `penpot-asset-${mediaId}`;
 const expectedFillAssetId = `penpot-asset-${fillMediaId}`;
 const expectedFrameBackgroundAssetId = `penpot-asset-${frameBackgroundMediaId}`;
@@ -303,6 +305,66 @@ function createPenpotFrameFillImageExportArchive(): Buffer {
   ]);
 }
 
+function createPenpotSolidMultiFillExportArchive(): Buffer {
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: Buffer.from(
+        JSON.stringify({
+          type: "penpot/export-files",
+          version: 1,
+          files: [{ id: fileId, name: "Penpot Multi Fill Board", features: [] }]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}.json`,
+      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Multi Fill Board" }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: Buffer.from(JSON.stringify({ id: pageId, name: "Multi fills", index: 0, objects: {} }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameId,
+          name: "Multi fill frame",
+          type: "frame",
+          x: 40,
+          y: 64,
+          width: 240,
+          height: 160,
+          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+          shapes: [multiFillRectId]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${multiFillRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: multiFillRectId,
+          name: "Layered fill card",
+          type: "rect",
+          x: 64,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [
+            { "fill-color": "#ff0000", "fill-opacity": 0.5 },
+            { "fill-color": "#0000ff", "fill-opacity": 1 }
+          ]
+        }),
+        "utf8"
+      )
+    }
+  ]);
+}
+
 describe("Penpot external image asset migration HTTP routes", () => {
   test("reviews imports and persists Penpot image assets into local storage", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
@@ -516,5 +578,64 @@ describe("Penpot external image asset migration HTTP routes", () => {
       url: `/assets/${expectedFrameBackgroundAssetId}`
     });
     expect(asset.data).toEqual(pngImage);
+  });
+});
+
+  test("reviews imports and persists flattened Penpot solid fill stacks", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    const server = createHttpServer(storage);
+    const archive = createPenpotSolidMultiFillExportArchive();
+
+    const review = await server.inject({
+      method: "POST",
+      url: "/migrations/external/review",
+      payload: {
+        archiveBase64: archive.toString("base64"),
+        fileName: "multi-fills.penpot"
+      }
+    });
+
+    expect(review.statusCode).toBe(200);
+    expect(review.json().review).toMatchObject({
+      source: "penpot",
+      sourceLabel: "Penpot",
+      archiveKind: "zip",
+      canImport: true,
+      blockedBy: [],
+      assetCount: 0,
+      documentCandidateCount: 2
+    });
+
+    const imported = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: {
+        archiveBase64: archive.toString("base64"),
+        fileName: "multi-fills.penpot"
+      }
+    });
+
+    expect(imported.statusCode).toBe(200);
+    expect(imported.json().imported).toMatchObject({
+      source: "penpot",
+      sourceLabel: "Penpot",
+      assetCount: 0,
+      mappedNodeCount: 2,
+      skippedNodeCount: 0,
+      project: { name: "Penpot Multi Fill Board" },
+      file: { name: "Penpot Multi Fill Board", pages: [{ name: "Multi fills" }] }
+    });
+
+    const projects = await storage.listProjects();
+    const persisted = await storage.readFile(projects[0].currentDocumentId);
+    const frame = persisted.pages[0].children[0];
+    expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Multi fill frame" });
+    expect(frame.children[0]).toMatchObject({
+      id: `penpot-${multiFillRectId}`,
+      kind: "rectangle",
+      name: "Layered fill card",
+      style: { fill: expectedMultiFillColor, opacity: 1 }
+    });
   });
 });
