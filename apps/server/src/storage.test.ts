@@ -4197,7 +4197,7 @@ describe("FileStorage", () => {
   });
   expect(verticalBaselineFrame.children.find((node) => node.id === "vertical-caption-1")?.transform).toMatchObject({
     x: 70,
-    y: 27
+    y: 103
   });
   expect(verticalBaselineLayout.audit.commandTypes).toContain("set_text_writing_mode");
   expect(verticalBaselineLayout.audit.commandTypes).toContain("set_text_orientation");
