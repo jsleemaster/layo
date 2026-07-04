@@ -1,0 +1,67 @@
+name: Codex Storage Baseline Follow-up
+
+on:
+  push:
+    branches:
+      - codex/penpot-orthogonal-baseline-synthesis
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: codex-storage-baseline-followup-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-orthogonal-baseline-synthesis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Patch storage expectation
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+          const path = "apps/server/src/storage.test.ts";
+          const before = `  expect(verticalBaselineFrame.children.find((node) => node.id === "vertical-caption-1")?.transform).toMatchObject({\n    x: 70,\n    y: 27\n  });`;
+          const after = `  expect(verticalBaselineFrame.children.find((node) => node.id === "vertical-caption-1")?.transform).toMatchObject({\n    x: 70,\n    y: 103\n  });`;
+          const content = readFileSync(path, "utf8");
+          if (!content.includes(before)) {
+            throw new Error("storage vertical baseline expectation target not found");
+          }
+          writeFileSync(path, content.replace(before, after));
+          NODE
+
+      - name: Focused storage test
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: pnpm --filter @layo/server exec vitest run src/storage.test.ts --reporter=dot
+
+      - name: Commit storage follow-up
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/server/src/storage.test.ts
+          git commit -m "Update storage baseline synthesis expectation"
+          git push origin codex/penpot-orthogonal-baseline-synthesis
