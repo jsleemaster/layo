@@ -35,12 +35,15 @@ Full Verification run `28714372031` failed on the new focused Penpot tests befor
 - Review returned `canImport: false`, `blockedBy: ["mapping_not_implemented"]`, and too many document candidates.
 - Import threw `Only Figma REST JSON exports are importable in this migration slice.`
 
-## GREEN Evidence To Collect
+## GREEN Evidence
 
-- Focused server Penpot ZIP migration tests pass.
-- HTTP review/import test proves Penpot ZIP creates a fresh project and persists mapped frame/rectangle/text nodes.
-- Playwright CLI file-panel test uploads a `.penpot` ZIP, sees `Penpot` and `가져오기 가능`, imports it, and verifies layer panel plus persisted file payload.
-- Penpot maturity/design gates, typecheck, web build, core tests, and full Playwright CLI e2e pass in PR Full Verification.
+Full Verification run `28714926928` passed in 7m36s on PR #220:
+
+- Penpot maturity and design rule gates passed.
+- Typecheck passed.
+- Web build passed.
+- Core tests passed, including focused Penpot ZIP mapper coverage and HTTP review/import persistence coverage.
+- Playwright CLI e2e passed, including the file-panel `.penpot` upload, review, import, layer-panel, and persisted file-payload proof.
 
 ## Follow-Up Gaps
 
