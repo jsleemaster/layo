@@ -306,10 +306,17 @@ function mapPenpotShape(
     return null;
   }
 
-  const imageAsset = shape.type === "image" ? imageAssetForShape(shape, state) : undefined;
+  const imageMediaId = imageMediaIdForShape(shape);
+  const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   if (shape.type === "image" && !imageAsset) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot image shape ${shape.name} because its packaged asset was not found.`);
+    return null;
+  }
+
+  if (shape.type === "rect" && imageMediaId && !imageAsset) {
+    state.skippedNodeCount += 1;
+    state.warnings.push(`Skipped Penpot fill-image shape ${shape.name} because its packaged asset was not found.`);
     return null;
   }
 
@@ -467,10 +474,17 @@ function findPenpotStorageObject(
   return null;
 }
 
-function imageAssetForShape(shape: PenpotShape, state: PenpotMappingState): PenpotPackageAsset | undefined {
-  const metadata = asRecord(valueFor(shape.json, "metadata"));
-  const mediaId = stringValue(valueFor(metadata ?? {}, "id"));
-  return mediaId ? state.assetsById.get(mediaId) : undefined;
+function imageMediaIdForShape(shape: PenpotShape): string | undefined {
+  if (shape.type === "image") {
+    const metadata = asRecord(valueFor(shape.json, "metadata"));
+    return stringValue(valueFor(metadata ?? {}, "id"));
+  }
+  if (shape.type !== "rect") {
+    return undefined;
+  }
+  const fillRecord = firstRecord(valueFor(shape.json, "fills"));
+  const fillImage = asRecord(valueFor(fillRecord ?? {}, "fillImage", "fill-image"));
+  return stringValue(valueFor(fillImage ?? {}, "id"));
 }
 
 function imageContentForAsset(
