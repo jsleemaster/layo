@@ -19,6 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-fill-image-paints.md` | Active | RED coverage added for Penpot rectangle `fill-image` paints importing as Layo image nodes backed by packaged local assets. RED Full Verification pending. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
