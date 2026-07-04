@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | None | No active implementation plan is open in this branch after the Penpot solid multi-fill slice. Start the next Penpot gap from `docs/product/penpot-maturity-benchmark.md` and `docs/process/penpot-maturity-loop.md`. |
+| `2026-07-05-penpot-gradient-fill-flattening.md` | Active | RED coverage pending for adapting Penpot `fill-color-gradient` records into deterministic Layo single-fill midpoint color and opacity. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
