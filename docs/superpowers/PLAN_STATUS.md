@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | Latest active Penpot import/export slice moved to completed plans. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-solid-multi-stroke-flattening.md` | Active | RED coverage pending for flattening simple same-width Penpot solid `strokes` stacks into deterministic Layo stroke colors. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
