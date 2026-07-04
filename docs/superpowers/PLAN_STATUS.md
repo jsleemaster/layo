@@ -19,12 +19,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-05-e2e-script-coverage-guard.md` | Active | Failure-learning loop for missed Playwright spec wiring. RED guard added to fail when non-collaboration `apps/web/e2e/*.spec.ts` files are absent from root `test:e2e`. Deployment remains intentionally deferred. |
+| _None_ | Idle | No active plan. Continue the next Penpot maturity loop from the current benchmark gaps. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-e2e-script-coverage-guard.md` | Completed | Failure-learning loop for missed root e2e spec wiring after PR #224. Adds a root `pnpm test` guard that fails when non-collaboration `apps/web/e2e/*.spec.ts` files are absent from `test:e2e`, wires external migration and layout-item specs into Playwright CLI e2e, and fixes the external migration asset spec structure. RED Full Verification #28718600049 failed on the missing spec list; GREEN Full Verification #28718647800 passed with the newly wired e2e files. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-frame-fill-image-background.md` | Completed | Adapts Penpot packaged frame `fill-image` backgrounds by preserving frame hierarchy and adding a deterministic background image child before foreground layers. RED Full Verification #28717852745 failed on mappedNodeCount 2 and HTTP assetCount 0; GREEN Full Verification #28717969048 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Repair run #28717920390 caught escaped quote syntax from the remote update path and was fixed before final GREEN. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-fill-image-paints.md` | Completed | Adopts Penpot packaged rectangle `fill-image` paints as Layo image nodes backed by local asset storage while preserving the existing image-shape path. RED Full Verification #28717101423 failed on importedAssets length 0 and HTTP assetCount 0; GREEN Full Verification #28717206611 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-plan-status-structure-guard.md` | Completed | Restores `PLAN_STATUS.md` as a single canonical Markdown document and adds `check:penpot-maturity` coverage that fails if the routing source of truth is prefixed by duplicate table fragments, has duplicate completed-plan headings, or concatenates table rows with the title. RED Full Verification #28716410739 failed at the new plan-status structure assertion; GREEN Full Verification #28716443097 passed after the document repair and guard. Deployment remains intentionally deferred. |
