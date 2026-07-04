@@ -33,8 +33,8 @@ describe("server layout", () => {
     relayoutDesignFile(document);
 
     const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");
-    expect(title.transform).toMatchObject({ x: 20, y: 20 });
-    expect(caption?.transform).toMatchObject({ x: 150, y: 65 });
+    expect(title.transform).toMatchObject({ x: 20, y: 48 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 93 });
     expect(title.transform.y + 66).toBe((caption?.transform.y ?? 0) + 21);
   });
 
@@ -71,8 +71,8 @@ describe("server layout", () => {
     relayoutDesignFile(document);
 
     const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");
-    expect(title.transform).toMatchObject({ x: 20, y: 20 });
-    expect(caption?.transform).toMatchObject({ x: 150, y: 65 });
+    expect(title.transform).toMatchObject({ x: 20, y: 48 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 93 });
     expect(title.transform.y + 66).toBe((caption?.transform.y ?? 0) + 21);
   });
 });

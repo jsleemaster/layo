@@ -1507,7 +1507,7 @@ describe("editor state commands", () => {
     const caption = findNodeById(relaid.document, "caption-1");
     const label = findNodeById(relaid.document, "label-1");
     const subtitle = findNodeById(relaid.document, "subtitle-1");
-    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
     expect(label?.transform).toMatchObject({ x: 20, y: 113 });
     expect(subtitle?.transform).toMatchObject({ x: 150, y: 100 });
@@ -1559,7 +1559,7 @@ describe("editor state commands", () => {
 
     const title = findNodeById(relaid.document, "text-1");
     const caption = findNodeById(relaid.document, "caption-1");
-    expect(title?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(title?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
     expect((title?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
   });
@@ -1608,8 +1608,8 @@ describe("editor state commands", () => {
 
     const title = findNodeById(relaid.document, "text-1");
     const caption = findNodeById(relaid.document, "caption-1");
-    expect(title?.transform).toMatchObject({ x: 20, y: 20 });
-    expect(caption?.transform).toMatchObject({ x: 150, y: 65 });
+    expect(title?.transform).toMatchObject({ x: 20, y: 48 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 93 });
     expect((title?.transform.y ?? 0) + 66).toBe((caption?.transform.y ?? 0) + 21);
   });
 
@@ -1661,8 +1661,8 @@ describe("editor state commands", () => {
 
     const relaidTitle = findNodeById(relaid.document, "text-1");
     const caption = findNodeById(relaid.document, "caption-1");
-    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
-    expect(caption?.transform).toMatchObject({ x: 150, y: 65 });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });
+    expect(caption?.transform).toMatchObject({ x: 150, y: 93 });
     expect((relaidTitle?.transform.y ?? 0) + 66).toBe((caption?.transform.y ?? 0) + 21);
   });
 
@@ -1726,7 +1726,7 @@ describe("editor state commands", () => {
     const badge = findNodeById(relaid.document, "badge-1");
     expect(relaidTitle?.layout_item).toMatchObject({ align_self: "baseline" });
     expect(caption?.layout_item).toMatchObject({ align_self: "baseline" });
-    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
     expect(badge?.transform).toMatchObject({ x: 240, y: 20 });
     expect((relaidTitle?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
@@ -1784,7 +1784,7 @@ describe("editor state commands", () => {
     const relaidTitle = findNodeById(relaid.document, "text-1");
     const caption = findNodeById(relaid.document, "caption-1");
     const badge = findNodeById(relaid.document, "badge-1");
-    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 150, y: 33 });
     expect(badge?.transform).toMatchObject({ x: 20, y: 100 });
     expect((relaidTitle?.transform.y ?? 0) + 26).toBe((caption?.transform.y ?? 0) + 13);
@@ -1851,7 +1851,7 @@ describe("editor state commands", () => {
 
     const title = findNodeById(relaid.document, "text-1");
     const caption = findNodeById(relaid.document, "caption-1");
-    expect(title?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(title?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 70, y: 27 });
     expect((title?.transform.y ?? 0) + 20).toBe((caption?.transform.y ?? 0) + 13);
   });
@@ -1986,7 +1986,7 @@ describe("editor state commands", () => {
     const caption = findNodeById(relaid.document, "caption-1");
     const label = findNodeById(relaid.document, "label-1");
     const subtitle = findNodeById(relaid.document, "subtitle-1");
-    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });
+    expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });
     expect(caption?.transform).toMatchObject({ x: 120, y: 33 });
     expect(label?.transform).toMatchObject({ x: 20, y: 93 });
     expect(subtitle?.transform).toMatchObject({ x: 110, y: 80 });

@@ -3732,13 +3732,16 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
 
   const rowBaselines = new Map<number, number>();
   const rowLastBaselines = new Map<number, number>();
+  const rowLastBaselineCrossSizes = new Map<number, number>();
   for (const entry of entries) {
     if (entry.alignSelf === "baseline") {
       const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "first");
       rowBaselines.set(entry.row, Math.max(rowBaselines.get(entry.row) ?? 0, baseline));
     } else if (entry.alignSelf === "last_baseline") {
       const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "last");
+      const crossSize = entry.margin.top + entry.child.size.height + entry.margin.bottom;
       rowLastBaselines.set(entry.row, Math.max(rowLastBaselines.get(entry.row) ?? 0, baseline));
+      rowLastBaselineCrossSizes.set(entry.row, Math.max(rowLastBaselineCrossSizes.get(entry.row) ?? 0, crossSize));
     }
   }
 
@@ -3751,13 +3754,17 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
         : alignSelf === "last_baseline"
           ? rowLastBaselines.get(row)
           : undefined;
+    const baselineCrossStart =
+      alignSelf === "last_baseline"
+        ? Math.max(0, innerHeight - (rowLastBaselineCrossSizes.get(row) ?? innerHeight))
+        : 0;
     child.transform = {
       ...child.transform,
       x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifySelf, innerWidth, child.size.width),
       y:
         rowBaseline === undefined
           ? layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
-          : layout.padding.top + rowStarts[row] + rowBaseline - nodeBaselineOffset(child, baselinePreference)
+          : layout.padding.top + rowStarts[row] + baselineCrossStart + rowBaseline - nodeBaselineOffset(child, baselinePreference)
     };
   }
 }
@@ -4038,22 +4045,43 @@ function relayoutSingleLineChildren(
   const remainingMain = Math.max(0, availableMain - totalChildMain);
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
   const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
-  const baselineOffset =
-    !isVertical && flowChildren.some((child) => isBaselineAlignment(effectiveChildAlignSelf(child, layout)))
-      ? Math.max(...flowChildren.map((child, index) => {
-          const alignment = effectiveChildAlignSelf(child, layout);
-          return isBaselineAlignment(alignment)
-            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, baselinePreferenceForAlignment(alignment))
-            : 0;
-        }))
+  const baselineAlignments = flowChildren.map((child) => effectiveChildAlignSelf(child, layout));
+  const firstBaselineOffset =
+    !isVertical && baselineAlignments.some((alignment) => alignment === "baseline")
+      ? Math.max(...flowChildren.map((child, index) =>
+          baselineAlignments[index] === "baseline"
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, "first")
+            : 0
+        ))
       : null;
+  const lastBaselineOffset =
+    !isVertical && baselineAlignments.some((alignment) => alignment === "last_baseline")
+      ? Math.max(...flowChildren.map((child, index) =>
+          baselineAlignments[index] === "last_baseline"
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, "last")
+            : 0
+        ))
+      : null;
+  const lastBaselineCrossSize =
+    lastBaselineOffset === null
+      ? 0
+      : flowChildren.reduce((maximum, _child, index) =>
+          baselineAlignments[index] === "last_baseline"
+            ? Math.max(maximum, childMetrics[index].crossBefore + childMetrics[index].crossSize + childMetrics[index].crossAfter)
+            : maximum,
+          0
+        );
+  const lastBaselineCrossStart = crossStartPadding + Math.max(0, availableCross - lastBaselineCrossSize);
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
     const childAlignSelf = effectiveChildAlignSelf(child, layout);
+    const childBaselineOffset =
+      childAlignSelf === "baseline" ? firstBaselineOffset : childAlignSelf === "last_baseline" ? lastBaselineOffset : null;
+    const childBaselineCrossStart = childAlignSelf === "last_baseline" ? lastBaselineCrossStart : crossStartPadding;
     const crossAxisPosition =
-      isBaselineAlignment(childAlignSelf) && baselineOffset !== null
-        ? crossStartPadding + baselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
+      childBaselineOffset !== null
+        ? childBaselineCrossStart + childBaselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
         : crossAxisOffset(
             childAlignSelf,
             crossStartPadding,
@@ -4141,22 +4169,43 @@ function relayoutWrappedChildren(
     const remainingMain = Math.max(0, availableMain - line.mainSize);
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
     const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
-    const baselineOffset =
-      !isVertical && line.children.some((entry) => isBaselineAlignment(effectiveChildAlignSelf(entry.child, layout)))
-        ? Math.max(...line.children.map((entry) => {
-            const alignment = effectiveChildAlignSelf(entry.child, layout);
-            return isBaselineAlignment(alignment)
-              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, baselinePreferenceForAlignment(alignment))
-              : 0;
-          }))
+    const lineBaselineAlignments = line.children.map((entry) => effectiveChildAlignSelf(entry.child, layout));
+    const firstBaselineOffset =
+      !isVertical && lineBaselineAlignments.some((alignment) => alignment === "baseline")
+        ? Math.max(...line.children.map((entry, index) =>
+            lineBaselineAlignments[index] === "baseline"
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, "first")
+              : 0
+          ))
         : null;
+    const lastBaselineOffset =
+      !isVertical && lineBaselineAlignments.some((alignment) => alignment === "last_baseline")
+        ? Math.max(...line.children.map((entry, index) =>
+            lineBaselineAlignments[index] === "last_baseline"
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, "last")
+              : 0
+          ))
+        : null;
+    const lastBaselineCrossSize =
+      lastBaselineOffset === null
+        ? 0
+        : line.children.reduce((maximum, entry, index) =>
+            lineBaselineAlignments[index] === "last_baseline"
+              ? Math.max(maximum, entry.metrics.crossBefore + entry.metrics.crossSize + entry.metrics.crossAfter)
+              : maximum,
+            0
+          );
+    const lastBaselineCrossStart = crossCursor + Math.max(0, line.crossSize - lastBaselineCrossSize);
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
       const childAlignSelf = effectiveChildAlignSelf(child, layout);
+      const childBaselineOffset =
+        childAlignSelf === "baseline" ? firstBaselineOffset : childAlignSelf === "last_baseline" ? lastBaselineOffset : null;
+      const childBaselineCrossStart = childAlignSelf === "last_baseline" ? lastBaselineCrossStart : crossCursor;
       const crossAxisPosition =
-        isBaselineAlignment(childAlignSelf) && baselineOffset !== null
-          ? crossCursor + baselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
+        childBaselineOffset !== null
+          ? childBaselineCrossStart + childBaselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
           : crossAxisLineOffset(
               childAlignSelf,
               crossCursor,
