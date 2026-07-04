@@ -35,7 +35,9 @@ Expected current failure: `penpotStrokeColor` reads only the first stroke record
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification #28722912062 failed as expected in Core tests because Penpot solid stroke stacks imported as the first stroke color `#ff0000` instead of the expected flattened `#800080`; Playwright e2e skipped behind the failed core gate.
+- GREEN Full Verification #28722958842 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e for implementation commit `bffa1331a8da503ad61d8297863f9d76b56ea6b1`.
+- Storage Restore Drill #28722958828 passed for the same GREEN implementation head.
+- Storage Backup Retention #28722958821 passed for the same GREEN implementation head.
+- Direct Playwright CLI e2e proof: Full Verification #28722958842 ran root `pnpm test:e2e`, including `apps/web/e2e/external-migration-penpot-stroke-stack.spec.ts` registered in `package.json`, and proved the visible file-panel import persists `Layered stroke card` with stroke `#800080` and width 4.
 - Deployment: intentionally deferred for this loop.
