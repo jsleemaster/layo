@@ -56,8 +56,8 @@ A Penpot ZIP with one frame and one image shape should:
 
 ## Evidence
 
-- RED: pending GitHub Actions run after tests are opened on the PR.
-- GREEN: pending after implementation.
+- RED Full Verification #28715641813 failed at Core tests after the RED-only commit: Penpot image shape was skipped, producing `mappedNodeCount: 1`, `skippedNodeCount: 1`, and `assetCount: 0` instead of the expected image-node plus asset persistence.
+- GREEN Full Verification #28715730038 passed in 7m30s after implementation: maturity/design gates, typecheck, web build, core tests, and Playwright CLI e2e all passed. The e2e proof uploads the `.penpot` ZIP through the file panel, clicks `외부 디자인 가져오기`, verifies `Hero image` in the layer panel, inspects the persisted image node, and fetches `/assets/{assetId}` as `image/png`.
 
 ## Remaining Follow-up Gaps
 
