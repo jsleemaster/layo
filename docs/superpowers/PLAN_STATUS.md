@@ -19,12 +19,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active implementation plan is open after the Penpot mixed fill-image stack slice. Deployment remains intentionally deferred. |
+| _None_ | Idle | Latest active Penpot import/export slice moved to completed plans. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-stroke-gradient-flattening.md` | Completed | Adapts Penpot `stroke-color-gradient` stop vectors by flattening midpoint color into deterministic Layo `style.stroke` while preserving stroke width. Initial RED Full Verification #28722244025 caught missing e2e script registration; RED Full Verification #28722292528 failed with `stroke: null` and `stroke_width: 0`; GREEN Full Verification #28722346733, Storage Restore Drill #28722346756, and Storage Backup Retention #28722346750 passed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-mixed-fill-image-stack.md` | Completed | Adapts Penpot mixed color/gradient plus packaged `fill-image` stacks by scanning every `fills` record for importable image metadata before color/gradient fallback. RED Full Verification #28721329168 failed on importedAssets length 0 and HTTP assetCount 0; final Full Verification #28721565316, Storage Restore Drill #28721565313, and Storage Backup Retention #28721565300 passed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-gradient-fill-flattening.md` | Completed | Adapts Penpot `fill-color-gradient` stop vectors by flattening midpoint color into deterministic Layo `style.fill` and opacity. RED Full Verification #28719962150 failed because `Gradient card` imported as default `#e5e7eb` instead of `#800080`; GREEN Full Verification #28720033921, documentation cleanup #28720378844, and final Full Verification #28720605595 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-solid-multi-fill-flattening.md` | Completed | Adapts Penpot solid-color `fills` stacks by flattening front-to-back paint order into one deterministic Layo `style.fill` and opacity. RED Full Verification #28719300875 failed because Layo imported only `#ff0000` at opacity 0.5 instead of `#800080` at opacity 1; GREEN Full Verification #28719395620 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
