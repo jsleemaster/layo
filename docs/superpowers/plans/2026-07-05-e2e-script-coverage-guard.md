@@ -35,6 +35,8 @@ Expected RED failure on main-derived branch:
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification `#28718600049` failed as expected in Core tests with missing root `test:e2e` entries for `external-migration-penpot-assets.spec.ts`, `external-migration-penpot.spec.ts`, and `layout-item-z-index.spec.ts`.
+- GREEN Full Verification `#28718647800` passed in 7m24s with Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e.
+- Direct Playwright CLI e2e proof passed through root `pnpm test:e2e`, which now includes the external migration asset, external migration, and layout-item z-index specs.
+- Storage Backup Retention `#28718647806` passed.
+- Storage Restore Drill `#28718647933` passed.
