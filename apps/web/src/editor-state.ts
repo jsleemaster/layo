@@ -4227,11 +4227,12 @@ function applyFillSizingForSingleLine(
     const fixedMainTotal = flowChildren.reduce((total, child, index) => {
       const metrics = childMetrics[index];
       const base = metrics.mainBefore + metrics.mainAfter;
-      return total + base + (layoutItemMainSizing(child, isVertical) === "fill" ? 0 : metrics.mainSize);
+      return total + base + (layoutItemMainSizing(child, isVertical) === "fill" ? flexLineBreakMainSize(child, metrics.mainSize, isVertical) : metrics.mainSize);
     }, 0);
     const remainingMain = Math.max(0, availableMain - fixedMainTotal - mainGap * Math.max(0, flowChildren.length - 1));
-    const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
+    const filledMainGrowSize = clampSize(remainingMain / fillMainChildren.length);
     for (const child of fillMainChildren) {
+      const filledMainSize = filledMainGrowSize + flexLineBreakMainSize(child, 0, isVertical);
       if (isVertical) {
         child.size.height = clampLayoutItemHeight(child, filledMainSize);
       } else {
@@ -4275,11 +4276,12 @@ function applyFillSizingForWrappedLines(
     if (mainAxisIsFixed && fillMainChildren.length > 0) {
       const fixedMainTotal = line.children.reduce((total, entry) => {
         const base = entry.metrics.mainBefore + entry.metrics.mainAfter;
-        return total + base + (layoutItemMainSizing(entry.child, isVertical) === "fill" ? 0 : entry.metrics.mainSize);
+        return total + base + (layoutItemMainSizing(entry.child, isVertical) === "fill" ? flexLineBreakMainSize(entry.child, entry.metrics.mainSize, isVertical) : entry.metrics.mainSize);
       }, 0);
       const remainingMain = Math.max(0, availableMain - fixedMainTotal - mainAxisGap(layout, isVertical) * Math.max(0, line.children.length - 1));
-      const filledMainSize = clampSize(remainingMain / fillMainChildren.length);
+      const filledMainGrowSize = clampSize(remainingMain / fillMainChildren.length);
       for (const entry of fillMainChildren) {
+        const filledMainSize = filledMainGrowSize + flexLineBreakMainSize(entry.child, 0, isVertical);
         if (isVertical) {
           entry.child.size.height = clampLayoutItemHeight(entry.child, filledMainSize);
         } else {
