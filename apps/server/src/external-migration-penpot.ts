@@ -318,7 +318,8 @@ function mapPenpotShape(
     return null;
   }
 
-  const imageMediaId = imageMediaIdForShape(shape);
+  const fillImageRecord = penpotFillImageRecordForShape(shape);
+  const imageMediaId = imageMediaIdForShape(shape, fillImageRecord);
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   if (shape.type === "image" && !imageAsset) {
     state.skippedNodeCount += 1;
@@ -347,9 +348,14 @@ function mapPenpotShape(
     ? "#f3f4f6"
     : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
+  const fillImageOpacity = fillImageRecord
+    ? finiteNumber(valueFor(fillImageRecord, "fillOpacity", "fill-opacity", "opacity"), 1)
+    : undefined;
   const opacity = finiteNumber(
     valueFor(shape.json, "opacity"),
-    solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+    mapsAsImage && fillImageOpacity !== undefined
+      ? fillImageOpacity
+      : solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
   );
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
@@ -504,7 +510,19 @@ function findPenpotStorageObject(
   return null;
 }
 
-function imageMediaIdForShape(shape: PenpotShape): string | undefined {
+function penpotFillImageRecordForShape(shape: PenpotShape): JsonRecord | null {
+  if (shape.type !== "rect" && shape.type !== "frame") {
+    return null;
+  }
+  return recordsFor(valueFor(shape.json, "fills")).find((fillRecord) =>
+    Boolean(asRecord(valueFor(fillRecord, "fillImage", "fill-image")))
+  ) ?? null;
+}
+
+function imageMediaIdForShape(
+  shape: PenpotShape,
+  fillImageRecord: JsonRecord | null = penpotFillImageRecordForShape(shape)
+): string | undefined {
   if (shape.type === "image") {
     const metadata = asRecord(valueFor(shape.json, "metadata"));
     return stringValue(valueFor(metadata ?? {}, "id"));
@@ -512,13 +530,12 @@ function imageMediaIdForShape(shape: PenpotShape): string | undefined {
   if (shape.type !== "rect" && shape.type !== "frame") {
     return undefined;
   }
-  const fillRecord = firstRecord(valueFor(shape.json, "fills"));
-  const fillImage = asRecord(valueFor(fillRecord ?? {}, "fillImage", "fill-image"));
+  const fillImage = asRecord(valueFor(fillImageRecord ?? {}, "fillImage", "fill-image"));
   return stringValue(valueFor(fillImage ?? {}, "id"));
 }
 
 function frameFillImageNode(shape: PenpotShape, asset: PenpotPackageAsset): DesignNode {
-  const fillRecord = firstRecord(valueFor(shape.json, "fills"));
+  const fillRecord = penpotFillImageRecordForShape(shape);
   return {
     id: penpotStorageId(`${shape.id}-fill-image`, `${shape.type}-fill-image`),
     kind: "image",

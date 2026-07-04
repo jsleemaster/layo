@@ -172,6 +172,21 @@ function createPenpotFillImageExportArchive(): Buffer {
           height: 72,
           fills: [
             {
+              "fill-color-gradient": {
+                type: "linear",
+                "start-x": 0,
+                "start-y": 0,
+                "end-x": 1,
+                "end-y": 0,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "fill-opacity": 0.4
+            },
+            {
               "fill-image": {
                 id: fillMediaId,
                 name: "hero-fill.png",
@@ -179,7 +194,7 @@ function createPenpotFillImageExportArchive(): Buffer {
                 height: 1,
                 mtype: "image/png"
               },
-              "fill-opacity": 1
+              "fill-opacity": 0.75
             }
           ]
         }),
@@ -445,7 +460,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
     expect(asset.data).toEqual(pngImage);
   });
 
-  test("reviews imports and persists Penpot fill-image paint assets into local storage", async () => {
+  test("reviews imports and persists Penpot mixed fill-image stack assets into local storage", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
     const server = createHttpServer(storage);
@@ -500,6 +515,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
       id: `penpot-${fillRectId}`,
       kind: "image",
       name: "Hero fill",
+      style: { opacity: 0.75 },
       content: {
         type: "image",
         asset_id: expectedFillAssetId,
