@@ -1,0 +1,66 @@
+name: Codex Test Scope Fix
+
+on:
+  push:
+    branches:
+      - codex/penpot-last-baseline-layout
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-last-baseline-layout
+          fetch-depth: 0
+      - name: Restore first-baseline expectations
+        run: |
+          node <<'NODE'
+          const { readFileSync, rmSync, writeFileSync } = require('node:fs');
+          const path = 'apps/web/src/editor-state.test.ts';
+          let source = readFileSync(path, 'utf8');
+          const testNames = [
+            'grid layout baseline aligns mixed text per row',
+            'baseline alignment matches mixed text baselines in horizontal auto layout',
+            'align-self baseline joins horizontal auto layout baseline groups',
+            'align-self baseline joins grid row baseline groups without container baseline',
+            'baseline alignment synthesizes vertical writing mode text baselines',
+            'baseline alignment applies per wrapped horizontal flex line'
+          ];
+          function patchTestBlock(content, name) {
+            const marker = `test("${name}"`;
+            const start = content.indexOf(marker);
+            if (start === -1) throw new Error(`Missing test block: ${name}`);
+            const next = content.indexOf('\n  test("', start + marker.length);
+            const end = next === -1 ? content.length : next;
+            const before = content.slice(start, end);
+            const after = before
+              .split('expect(title?.transform).toMatchObject({ x: 20, y: 48 });')
+              .join('expect(title?.transform).toMatchObject({ x: 20, y: 20 });')
+              .split('expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 48 });')
+              .join('expect(relaidTitle?.transform).toMatchObject({ x: 20, y: 20 });');
+            if (before === after) throw new Error(`No expectation restored for ${name}`);
+            return content.slice(0, start) + after + content.slice(end);
+          }
+          for (const name of testNames) {
+            source = patchTestBlock(source, name);
+          }
+          writeFileSync(path, source, 'utf8');
+          rmSync('.github/workflows/codex-test-scope-fix.yml', { force: true });
+          NODE
+      - name: Commit patched files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 1
+          fi
+          git commit -m "Restore first-baseline regression expectations"
+          git push origin HEAD:codex/penpot-last-baseline-layout
