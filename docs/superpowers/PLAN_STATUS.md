@@ -1,9 +1,4 @@
-## Completed Plans
-
-| Plan | Status | Evidence |
-| --- | --- | --- |
-| `2026-07-05-penpot-zip-image-assets.md` | Completed | Adopts Penpot v3 ZIP media/object packaging for image shapes: packaged `image` shapes review/import as Layo image nodes backed by local asset storage, with HTTP persistence and file-panel Playwright proof. RED Full Verification #28715641813 failed on skipped image/assetCount 0; GREEN Full Verification #28715730038 passed. Deployment remains intentionally deferred. |
-| `2026-07-05-penpot-basic-zip-import.md` | Completed | Starts the Penpot ZIP write path for packaged pages, frames, rectangles, and text through storage-independent review, HTTP/server import, web API helpers, and the visible file-panel flow. RED Full Verification #28714372031 failed on blocked Penpot import; GREEN Full Verification #28714926928 and follow-up #28715160138 passed. Deployment remains intentionally deferred. |# Superpowers Plan Status
+# Superpowers Plan Status
 
 Last audited: 2026-07-05
 
@@ -29,6 +24,9 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-plan-status-structure-guard.md` | Completed | Restores `PLAN_STATUS.md` as a single canonical Markdown document and adds `check:penpot-maturity` coverage that fails if the routing source of truth is prefixed by duplicate table fragments, has duplicate completed-plan headings, or concatenates table rows with the title. RED Full Verification #28716410739 failed at the new plan-status structure assertion; GREEN pending. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-zip-image-assets.md` | Completed | Adopts Penpot v3 ZIP media/object packaging for image shapes: packaged `image` shapes review/import as Layo image nodes backed by local asset storage, with HTTP persistence and file-panel Playwright proof. RED Full Verification #28715641813 failed on skipped image/assetCount 0; GREEN Full Verification #28715730038 and final #28716073728 passed. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-basic-zip-import.md` | Completed | Starts the Penpot ZIP write path for packaged pages, frames, rectangles, and text through storage-independent review, HTTP/server import, web API helpers, and the visible file-panel flow. RED Full Verification #28714372031 failed on blocked Penpot import; GREEN Full Verification #28714926928 and follow-up #28715160138 passed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-orthogonal-baseline-synthesis.md` | Completed | Adapts CSS/Penpot baseline synthesis for orthogonal vertical writing-mode text in horizontal auto-layout and grid row baseline groups, replacing the old width/2 heuristic with block-end border-edge synthesis. RED focused web/server tests failed against y=27; GREEN focused tests and Playwright CLI prove y=103. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-last-baseline-layout.md` | Completed | Adapts Penpot/CSS last-baseline alignment into Layo's snake_case document model as `last_baseline`, with renderer/server/Rust/MCP contracts, web and server relayout solvers, Inspector controls, CSS code-export mapping, unit coverage, and Playwright e2e coverage. Deployment remains intentionally deferred. |
 | `2026-07-04-penpot-flex-fill-wrap-direct-parent-resize.md` | Completed | Proves a Penpot-like wrapped horizontal auto-layout direct parent resize edge case: after dragging the selected parent from 420 to 360 wide, the fill child remains `fill`, recomputes from 290 to 230 wide, and the fixed sibling stays on the same row while moving from x=320 to x=260. RED Full Verification #28710000500 reproduced stale 320px fill width; review follow-up RED #28711061186 reproduced missing fill min-contribution distribution; GREEN Full Verification #28711121006 passed after web/server/unit/e2e coverage. Deployment remains intentionally deferred. |
