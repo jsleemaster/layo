@@ -63,10 +63,10 @@ foreground child.
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI import proof: pending through
-  `apps/web/e2e/external-migration-penpot-assets.spec.ts`.
+- RED Full Verification `#28717852745` failed as expected on `mappedNodeCount` 2 instead of 3 and HTTP `assetCount` 0.
+- Repair Full Verification `#28717920390` failed at TypeScript parse after the remote update path introduced escaped quote literals; the branch repairs that failure before GREEN.
+- GREEN Full Verification `#28717969048` passed in 7m23s with Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e.
+- Direct Playwright CLI import proof passed through `apps/web/e2e/external-migration-penpot-assets.spec.ts`, including the layer panel and `/assets/{assetId}` byte checks.
 
 ## Remaining Follow-Ups
 
