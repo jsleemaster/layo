@@ -16,8 +16,10 @@ const frameBackgroundStorageObjectId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 const foregroundRectId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 const multiFillRectId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
 const gradientFillRectId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+const strokeGradientRectId = "f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0";
 const expectedMultiFillColor = "#800080";
 const expectedGradientFillColor = "#800080";
+const expectedStrokeGradientColor = "#800080";
 const expectedAssetId = `penpot-asset-${mediaId}`;
 const expectedFillAssetId = `penpot-asset-${fillMediaId}`;
 const expectedFrameBackgroundAssetId = `penpot-asset-${frameBackgroundMediaId}`;
@@ -673,5 +675,105 @@ test("flattens Penpot gradient fills into a single Layo fill", () => {
     kind: "rectangle",
     name: "Gradient card",
     style: { fill: expectedGradientFillColor, opacity: 1 }
+  });
+});
+
+function createPenpotStrokeGradientExportArchive(): Buffer {
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: Buffer.from(
+        JSON.stringify({
+          type: "penpot/export-files",
+          version: 1,
+          generatedBy: "penpot/test",
+          files: [{ id: fileId, name: "Penpot Stroke Gradient Board", features: [] }]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}.json`,
+      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Stroke Gradient Board" }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: Buffer.from(JSON.stringify({ id: pageId, name: "Stroke gradients", index: 0, objects: {} }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameId,
+          name: "Stroke gradient frame",
+          type: "frame",
+          x: 40,
+          y: 64,
+          width: 240,
+          height: 160,
+          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+          shapes: [strokeGradientRectId]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${strokeGradientRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: strokeGradientRectId,
+          name: "Gradient stroke card",
+          type: "rect",
+          x: 64,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
+          strokes: [
+            {
+              "stroke-color-gradient": {
+                type: "linear",
+                "start-x": 0,
+                "start-y": 0,
+                "end-x": 1,
+                "end-y": 0,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "stroke-opacity": 1,
+              "stroke-width": 4
+            }
+          ]
+        }),
+        "utf8"
+      )
+    }
+  ]);
+}
+
+test("flattens Penpot stroke gradients into a single Layo stroke", () => {
+  const imported = importExternalMigrationArchive(createPenpotStrokeGradientExportArchive(), {
+    fileName: "stroke-gradients.penpot",
+    fileId: "penpot-stroke-gradient-imported-file"
+  });
+
+  expect(imported).toMatchObject({
+    source: "penpot",
+    sourceLabel: "Penpot",
+    mappedNodeCount: 2,
+    skippedNodeCount: 0
+  });
+  expect(imported.importedAssets).toHaveLength(0);
+
+  const frame = imported.file.pages[0].children[0];
+  expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Stroke gradient frame" });
+  expect(frame.children[0]).toMatchObject({
+    id: `penpot-${strokeGradientRectId}`,
+    kind: "rectangle",
+    name: "Gradient stroke card",
+    style: { fill: "#ffffff", stroke: expectedStrokeGradientColor, stroke_width: 4, opacity: 1 }
   });
 });
