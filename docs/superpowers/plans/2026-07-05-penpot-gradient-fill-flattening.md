@@ -37,7 +37,7 @@ Expected current failure: Layo ignores `fill-color-gradient`, so the rectangle i
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification #28719962150: failed in Core tests because `Gradient card` imported as the default `#e5e7eb` fill instead of the expected flattened midpoint `#800080` fill.
+- GREEN Full Verification #28720033921: passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e.
+- Direct Playwright CLI e2e proof: covered by #28720033921 through `apps/web/e2e/external-migration-penpot-assets.spec.ts`; the file-panel import persisted `Gradient card` as `#800080` with opacity `1`.
 - Deployment: intentionally deferred for this loop.
