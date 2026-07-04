@@ -648,14 +648,17 @@ function penpotFillColor(shape: JsonRecord): string | null {
 function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
   const fillRecords = recordsFor(valueFor(shape, "fills"));
   const fills = (fillRecords.length > 0 ? fillRecords : [shape]).flatMap((fill) => {
-    const color = colorValue(valueFor(fill, "fillColor", "fill-color", "color"));
+    const solidColor = colorValue(valueFor(fill, "fillColor", "fill-color", "color"));
+    const gradientPaint = solidColor ? null : penpotGradientFillPaint(fill);
+    const color = solidColor ?? gradientPaint?.color;
     if (!color) {
       return [];
     }
+    const fillOpacity = clampOpacity(finiteNumber(valueFor(fill, "fillOpacity", "fill-opacity", "opacity"), 1));
     return [
       {
         color,
-        opacity: clampOpacity(finiteNumber(valueFor(fill, "fillOpacity", "fill-opacity", "opacity"), 1))
+        opacity: roundOpacity((gradientPaint?.opacity ?? 1) * fillOpacity)
       }
     ];
   });
@@ -673,6 +676,60 @@ function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
   return {
     color: rgbaToHex(composite),
     opacity: roundOpacity(composite.a)
+  };
+}
+
+function penpotGradientFillPaint(fill: JsonRecord): PenpotSolidFillPaint | null {
+  const gradient = asRecord(valueFor(fill, "fillColorGradient", "fill-color-gradient", "gradient"));
+  if (!gradient) {
+    return null;
+  }
+
+  const stops = recordsFor(valueFor(gradient, "stops"))
+    .flatMap((stop) => {
+      const color = colorValue(valueFor(stop, "color", "fillColor", "fill-color"));
+      if (!color) {
+        return [];
+      }
+      return [
+        {
+          ...hexToRgba(color, clampOpacity(finiteNumber(valueFor(stop, "opacity", "fillOpacity", "fill-opacity"), 1))),
+          offset: clampOpacity(finiteNumber(valueFor(stop, "offset"), 0))
+        }
+      ];
+    })
+    .sort((left, right) => left.offset - right.offset);
+
+  if (stops.length === 0) {
+    return null;
+  }
+
+  const midpoint = interpolateGradientStops(stops, 0.5);
+  return {
+    color: rgbaToHex(midpoint),
+    opacity: roundOpacity(midpoint.a)
+  };
+}
+
+function interpolateGradientStops(stops: Array<RgbaColor & { offset: number }>, offset: number): RgbaColor {
+  const targetOffset = clampOpacity(offset);
+  const endIndex = stops.findIndex((stop) => targetOffset <= stop.offset);
+  if (endIndex <= 0) {
+    return stops[0];
+  }
+  if (endIndex < 0) {
+    return stops[stops.length - 1];
+  }
+
+  const start = stops[endIndex - 1];
+  const end = stops[endIndex];
+  const span = end.offset - start.offset;
+  const progress = span === 0 ? 0 : clampOpacity((targetOffset - start.offset) / span);
+  return {
+    r: start.r + (end.r - start.r) * progress,
+    g: start.g + (end.g - start.g) * progress,
+    b: start.b + (end.b - start.b) * progress,
+    a: start.a + (end.a - start.a) * progress
   };
 }
 
