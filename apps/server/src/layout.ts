@@ -538,7 +538,7 @@ function buildFlexLines(
 
   for (const child of children) {
     const metrics = childLayoutMetrics(child, isVertical, isReverse);
-    const itemMainSize = metrics.mainBefore + metrics.mainSize + metrics.mainAfter;
+    const itemMainSize = metrics.mainBefore + flexLineBreakMainSize(child, metrics.mainSize, isVertical) + metrics.mainAfter;
     const itemCrossSize = metrics.crossBefore + metrics.crossSize + metrics.crossAfter;
     const nextMainSize = currentLine
       ? currentLine.mainSize + gap + itemMainSize
@@ -1199,6 +1199,15 @@ function mainAxisChildPosition(
     return parentMainSize - cursor - metrics.mainBefore - childMainSize;
   }
   return cursor + metrics.mainBefore;
+}
+
+function flexLineBreakMainSize(child: DesignNode, currentMainSize: number, isVertical: boolean): number {
+  const layoutItem = normalizeNodeLayoutItem(child.layout_item ?? DEFAULT_LAYOUT_ITEM);
+  const sizing = isVertical ? layoutItem.height_sizing : layoutItem.width_sizing;
+  if (sizing !== \"fill\") {
+    return currentMainSize;
+  }
+  return (isVertical ? layoutItem.min_height : layoutItem.min_width) ?? 0;
 }
 
 function childLayoutMetrics(child: DesignNode, isVertical: boolean, isReverse = false) {
