@@ -320,12 +320,16 @@ function mapPenpotShape(
     return null;
   }
 
+  if (shape.type === "frame" && imageMediaId && !imageAsset) {
+    state.warnings.push(`Skipped Penpot frame fill-image on ${shape.name} because its packaged asset was not found.`);
+  }
+
   const transform = {
     x: roundGeometry(shape.bounds.x - (parentBounds?.x ?? 0)),
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, "rotation"), 0)
   };
-  const mapsAsImage = Boolean(imageAsset);
+  const mapsAsImage = Boolean(imageAsset) && shape.type !== "frame";
   const fill = mapsAsImage ? "#f3f4f6" : penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
@@ -346,7 +350,7 @@ function mapPenpotShape(
       stroke_width: stroke ? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "strokes")) ?? {}, "strokeWidth", "stroke-width", "width"), 1) : 0,
       opacity: finiteNumber(valueFor(shape.json, "opacity"), finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1))
     },
-    content: imageAsset
+    content: mapsAsImage && imageAsset
       ? imageContentForAsset(imageAsset, "fill")
       : shape.type === "text"
       ? {
@@ -359,14 +363,14 @@ function mapPenpotShape(
     children: []
   };
 
-  if (imageAsset) {
+  if (imageAsset && shape.type !== "frame") {
     state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
   }
 
   if (shape.type === "frame") {
     const nextVisiting = new Set(visiting);
     nextVisiting.add(shape.id);
-    mapped.children = shape.childIds.flatMap((childId) => {
+    const mappedChildren = shape.childIds.flatMap((childId) => {
       const child = shapesById.get(childId);
       if (!child) {
         state.skippedNodeCount += 1;
@@ -376,6 +380,13 @@ function mapPenpotShape(
       const mappedChild = mapPenpotShape(child, shape.bounds, shapesById, state, nextVisiting);
       return mappedChild ? [mappedChild] : [];
     });
+    if (imageAsset) {
+      mapped.children = [frameFillImageNode(shape, imageAsset), ...mappedChildren];
+      state.mappedNodeCount += 1;
+      state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
+    } else {
+      mapped.children = mappedChildren;
+    }
   }
 
   return mapped;
@@ -479,12 +490,34 @@ function imageMediaIdForShape(shape: PenpotShape): string | undefined {
     const metadata = asRecord(valueFor(shape.json, "metadata"));
     return stringValue(valueFor(metadata ?? {}, "id"));
   }
-  if (shape.type !== "rect") {
+  if (shape.type !== "rect" && shape.type !== "frame") {
     return undefined;
   }
   const fillRecord = firstRecord(valueFor(shape.json, "fills"));
   const fillImage = asRecord(valueFor(fillRecord ?? {}, "fillImage", "fill-image"));
   return stringValue(valueFor(fillImage ?? {}, "id"));
+}
+
+function frameFillImageNode(shape: PenpotShape, asset: PenpotPackageAsset): DesignNode {
+  const fillRecord = firstRecord(valueFor(shape.json, "fills"));
+  return {
+    id: penpotStorageId(`${shape.id}-fill-image`, `${shape.type}-fill-image`),
+    kind: "image",
+    name: `${shape.name} background`,
+    transform: { x: 0, y: 0, rotation: 0 },
+    size: {
+      width: roundGeometry(Math.max(1, shape.bounds.width)),
+      height: roundGeometry(Math.max(1, shape.bounds.height))
+    },
+    style: {
+      fill: "#f3f4f6",
+      stroke: null,
+      stroke_width: 0,
+      opacity: finiteNumber(valueFor(fillRecord ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+    },
+    content: imageContentForAsset(asset, "fill"),
+    children: []
+  };
 }
 
 function imageContentForAsset(
