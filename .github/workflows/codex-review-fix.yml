@@ -20,6 +20,13 @@ jobs:
       - name: Apply review fixes
         run: |
           curl -fsSL https://raw.githubusercontent.com/jsleemaster/layo/956bcfa5dce9d73a87272df520902a8b0d0f4d95/.github/codex/review-fix.mjs -o /tmp/review-fix.mjs
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = '/tmp/review-fix.mjs';
+          let source = readFileSync(path, 'utf8');
+          source = source.replace('`${path} optional title y`, 1);', '`${path} optional title y`, path.includes("editor-state") ? 1 : 0);');
+          writeFileSync(path, source, 'utf8');
+          NODE
           node /tmp/review-fix.mjs
       - name: Commit patched files
         run: |
