@@ -35,7 +35,8 @@ Expected current failure: Layo reads only the first fill record when deciding im
 
 ## Verification Log
 
-- RED Full Verification: pending.
-- GREEN Full Verification: pending.
-- Direct Playwright CLI e2e proof: pending.
+- RED Full Verification #28721329168 failed as expected in Core tests: the mapper imported `0` assets and the HTTP import returned `assetCount: 0` when a Penpot `fill-image` record appeared after a gradient fill.
+- GREEN implementation commit `bff700a9` now scans the full Penpot `fills` collection for `fill-image` metadata and uses that record for image opacity.
+- Final Full Verification: pending after documentation cleanup.
+- Direct Playwright CLI e2e proof: pending final Full Verification.
 - Deployment: intentionally deferred for this loop.
