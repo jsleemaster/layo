@@ -166,6 +166,21 @@ function createPenpotFillImageExportArchive(): Buffer {
           height: 72,
           fills: [
             {
+              "fill-color-gradient": {
+                type: "linear",
+                "start-x": 0,
+                "start-y": 0,
+                "end-x": 1,
+                "end-y": 0,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "fill-opacity": 0.4
+            },
+            {
               "fill-image": {
                 id: fillMediaId,
                 name: "hero-fill.png",
@@ -173,7 +188,7 @@ function createPenpotFillImageExportArchive(): Buffer {
                 height: 1,
                 mtype: "image/png"
               },
-              "fill-opacity": 1
+              "fill-opacity": 0.75
             }
           ]
         }),
@@ -440,7 +455,7 @@ describe("Penpot external image asset migration", () => {
     });
   });
 
-  test("imports Penpot rectangle fill-image paints as Layo image nodes backed by packaged assets", () => {
+  test("imports Penpot mixed fill-image stacks as Layo image nodes backed by packaged assets", () => {
     const imported = importExternalMigrationArchive(createPenpotFillImageExportArchive(), {
       fileName: "fill-images.penpot",
       fileId: "penpot-fill-image-imported-file"
@@ -474,7 +489,7 @@ describe("Penpot external image asset migration", () => {
       name: "Hero fill",
       transform: { x: 24, y: 24, rotation: 0 },
       size: { width: 96, height: 72 },
-      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.75 },
       content: {
         type: "image",
         asset_id: expectedFillAssetId,
