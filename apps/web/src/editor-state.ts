@@ -3731,23 +3731,33 @@ function relayoutGridChildren(node: RendererNode, layout: NodeLayout, flowChildr
   }
 
   const rowBaselines = new Map<number, number>();
+  const rowLastBaselines = new Map<number, number>();
   for (const entry of entries) {
     if (entry.alignSelf === "baseline") {
-      const baseline = entry.margin.top + nodeBaselineOffset(entry.child);
+      const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "first");
       rowBaselines.set(entry.row, Math.max(rowBaselines.get(entry.row) ?? 0, baseline));
+    } else if (entry.alignSelf === "last_baseline") {
+      const baseline = entry.margin.top + nodeBaselineOffset(entry.child, "last");
+      rowLastBaselines.set(entry.row, Math.max(rowLastBaselines.get(entry.row) ?? 0, baseline));
     }
   }
 
   for (const entry of entries) {
     const { child, justifySelf, alignSelf, row, column, margin, innerWidth, innerHeight } = entry;
-    const rowBaseline = alignSelf === "baseline" ? rowBaselines.get(row) : undefined;
+    const baselinePreference = baselinePreferenceForAlignment(alignSelf);
+    const rowBaseline =
+      alignSelf === "baseline"
+        ? rowBaselines.get(row)
+        : alignSelf === "last_baseline"
+          ? rowLastBaselines.get(row)
+          : undefined;
     child.transform = {
       ...child.transform,
       x: layout.padding.left + columnStarts[column] + margin.left + gridAxisOffset(justifySelf, innerWidth, child.size.width),
       y:
         rowBaseline === undefined
           ? layout.padding.top + rowStarts[row] + margin.top + gridAxisOffset(alignSelf, innerHeight, child.size.height)
-          : layout.padding.top + rowStarts[row] + rowBaseline - nodeBaselineOffset(child)
+          : layout.padding.top + rowStarts[row] + rowBaseline - nodeBaselineOffset(child, baselinePreference)
     };
   }
 }
@@ -4029,20 +4039,21 @@ function relayoutSingleLineChildren(
   let cursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, childCount);
   const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, childCount);
   const baselineOffset =
-    !isVertical && flowChildren.some((child) => effectiveChildAlignSelf(child, layout) === "baseline")
-      ? Math.max(...flowChildren.map((child, index) =>
-          effectiveChildAlignSelf(child, layout) === "baseline"
-            ? childMetrics[index].crossBefore + nodeBaselineOffset(child)
-            : 0
-        ))
+    !isVertical && flowChildren.some((child) => isBaselineAlignment(effectiveChildAlignSelf(child, layout)))
+      ? Math.max(...flowChildren.map((child, index) => {
+          const alignment = effectiveChildAlignSelf(child, layout);
+          return isBaselineAlignment(alignment)
+            ? childMetrics[index].crossBefore + nodeBaselineOffset(child, baselinePreferenceForAlignment(alignment))
+            : 0;
+        }))
       : null;
 
   flowChildren.forEach((child, index) => {
     const metrics = childMetrics[index];
     const childAlignSelf = effectiveChildAlignSelf(child, layout);
     const crossAxisPosition =
-      childAlignSelf === "baseline" && baselineOffset !== null
-        ? crossStartPadding + baselineOffset - nodeBaselineOffset(child)
+      isBaselineAlignment(childAlignSelf) && baselineOffset !== null
+        ? crossStartPadding + baselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
         : crossAxisOffset(
             childAlignSelf,
             crossStartPadding,
@@ -4131,20 +4142,21 @@ function relayoutWrappedChildren(
     let mainCursor = mainStartPadding + justifyStartOffset(layout.justify_content, remainingMain, line.children.length);
     const distributedGap = mainGap + justifyGapOffset(layout.justify_content, remainingMain, line.children.length);
     const baselineOffset =
-      !isVertical && line.children.some((entry) => effectiveChildAlignSelf(entry.child, layout) === "baseline")
-        ? Math.max(...line.children.map((entry) =>
-            effectiveChildAlignSelf(entry.child, layout) === "baseline"
-              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child)
-              : 0
-          ))
+      !isVertical && line.children.some((entry) => isBaselineAlignment(effectiveChildAlignSelf(entry.child, layout)))
+        ? Math.max(...line.children.map((entry) => {
+            const alignment = effectiveChildAlignSelf(entry.child, layout);
+            return isBaselineAlignment(alignment)
+              ? entry.metrics.crossBefore + nodeBaselineOffset(entry.child, baselinePreferenceForAlignment(alignment))
+              : 0;
+          }))
         : null;
 
     for (const entry of line.children) {
       const { child, metrics } = entry;
       const childAlignSelf = effectiveChildAlignSelf(child, layout);
       const crossAxisPosition =
-        childAlignSelf === "baseline" && baselineOffset !== null
-          ? crossCursor + baselineOffset - nodeBaselineOffset(child)
+        isBaselineAlignment(childAlignSelf) && baselineOffset !== null
+          ? crossCursor + baselineOffset - nodeBaselineOffset(child, baselinePreferenceForAlignment(childAlignSelf))
           : crossAxisLineOffset(
               childAlignSelf,
               crossCursor,
@@ -4990,7 +5002,7 @@ function isLayoutWrap(value: string | undefined): value is NonNullable<NodeLayou
 }
 
 function isLayoutAlignItems(value: string): value is NodeLayout["align_items"] {
-  return ["start", "center", "end", "stretch", "baseline"].includes(value);
+  return ["start", "center", "end", "stretch", "baseline", "last_baseline"].includes(value);
 }
 
 function isLayoutJustifyContent(value: string): value is NodeLayout["justify_content"] {
@@ -5006,7 +5018,14 @@ function isLayoutJustifySelfAlignment(value: string | undefined): value is NonNu
 }
 
 function isLayoutAlignSelfAlignment(value: string | undefined): value is NonNullable<NodeLayoutItem["align_self"]> {
-  return value === "start" || value === "center" || value === "end" || value === "stretch" || value === "baseline";
+  return (
+    value === "start" ||
+    value === "center" ||
+    value === "end" ||
+    value === "stretch" ||
+    value === "baseline" ||
+    value === "last_baseline"
+  );
 }
 
 function isLayoutAlignContent(value: string | undefined): value is NonNullable<NodeLayout["align_content"]> {
@@ -5104,12 +5123,32 @@ function crossAxisLineOffset(
   return lineCrossStart + crossBefore;
 }
 
-function nodeBaselineOffset(node: RendererNode): number {
+type BaselinePreference = "first" | "last";
+
+function isBaselineAlignment(alignItems: NodeLayout["align_items"]): boolean {
+  return alignItems === "baseline" || alignItems === "last_baseline";
+}
+
+function baselinePreferenceForAlignment(alignItems: NodeLayout["align_items"]): BaselinePreference {
+  return alignItems === "last_baseline" ? "last" : "first";
+}
+
+function nodeBaselineOffset(node: RendererNode, preference: BaselinePreference = "first"): number {
   if (node.content.type === "text") {
     if (isVerticalTextWritingMode(node.content.writing_mode)) {
-      return Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));
+      const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));
+      if (preference === "last") {
+        const descent = Math.max(0, node.size.width - firstBaseline);
+        return Math.max(0, Math.min(node.size.height, node.size.height - descent));
+      }
+      return firstBaseline;
     }
-    return Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
+    const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.content.font_size * 0.8)));
+    if (preference === "last") {
+      const descent = Math.max(0, node.content.font_size - firstBaseline);
+      return Math.max(0, Math.min(node.size.height, node.size.height - descent));
+    }
+    return firstBaseline;
   }
   return node.size.height;
 }

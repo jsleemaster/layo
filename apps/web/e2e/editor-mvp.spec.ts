@@ -293,6 +293,41 @@ test("creates, reopens, and team-links a saved project", async ({ page }) => {
   expect((await projectResponse.json()).project.sharing).toMatchObject({ mode: "team" });
 });
 
+test("inspector exposes last-baseline layout alignment controls", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const response = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
+    data: {
+      dryRun: false,
+      commands: [
+        {
+          type: "set_layout",
+          nodeId: "frame-1",
+          layout: {
+            mode: "auto",
+            direction: "horizontal",
+            align_items: "last_baseline",
+            justify_content: "start",
+            gap: 10,
+            padding: { top: 20, right: 20, bottom: 20, left: 20 }
+          }
+        }
+      ]
+    }
+  });
+  expect(response.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByText("랜딩 프레임").click();
+  const alignItems = page.getByTestId("inspector-layout-align-items");
+  await expect(alignItems).toHaveValue("last_baseline");
+  await expect(alignItems.locator("option", { hasText: "마지막 기준선" })).toHaveValue("last_baseline");
+  await alignItems.selectOption("baseline");
+  await expect(alignItems).toHaveValue("baseline");
+  await alignItems.selectOption("last_baseline");
+  await expect(alignItems).toHaveValue("last_baseline");
+});
+
 test("file panel exports a Layo archive and reviews it before import", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

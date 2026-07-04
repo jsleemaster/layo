@@ -32,7 +32,7 @@ export interface NodeLayout {
   mode: "none" | "auto" | "grid";
   direction: "horizontal" | "horizontal_reverse" | "vertical" | "vertical_reverse";
   wrap?: "nowrap" | "wrap";
-  align_items: "start" | "center" | "end" | "stretch" | "baseline";
+  align_items: "start" | "center" | "end" | "stretch" | "baseline" | "last_baseline";
   justify_content: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
   justify_items?: "start" | "center" | "end" | "stretch";
   align_content?: "start" | "center" | "end" | "space_between" | "space_around" | "space_evenly";
@@ -60,7 +60,7 @@ export interface NodeLayoutItem {
   width_sizing?: "fixed" | "fill";
   height_sizing?: "fixed" | "fill";
   justify_self?: "start" | "center" | "end" | "stretch";
-  align_self?: "start" | "center" | "end" | "stretch" | "baseline";
+  align_self?: "start" | "center" | "end" | "stretch" | "baseline" | "last_baseline";
   min_width?: number;
   max_width?: number;
   min_height?: number;
