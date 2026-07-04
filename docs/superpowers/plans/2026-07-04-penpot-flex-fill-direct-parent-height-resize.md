@@ -13,7 +13,7 @@ Close the next direct resizing-semantics evidence gap for Penpot-like flex layou
 
 ## Implementation
 
-This loop starts as a verification-first slice. The initial change adds `apps/web/e2e/flex-fill-direct-parent-height-resize.spec.ts`, which is included by the existing Playwright e2e glob.
+This loop starts as a verification-first slice. The change adds `apps/web/e2e/flex-fill-direct-parent-height-resize.spec.ts` and wires it into the root `pnpm test:e2e` explicit Playwright file list.
 
 The Playwright CLI flow:
 
