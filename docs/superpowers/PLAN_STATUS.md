@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Continue the next Penpot maturity loop from the current benchmark gaps. |
+| `2026-07-05-e2e-script-coverage-guard.md` | Active | Failure-learning loop for missed Playwright spec wiring. RED guard added to fail when non-collaboration `apps/web/e2e/*.spec.ts` files are absent from root `test:e2e`. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
