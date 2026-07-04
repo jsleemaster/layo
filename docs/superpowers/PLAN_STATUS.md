@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-02
+Last audited: 2026-07-04
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -24,6 +24,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-03-penpot-flex-fill-direct-parent-resize.md` | Completed | Proves Penpot-like direct canvas parent resize recomputes a horizontal fill child: after dragging the parent bottom-right handle by 60px, the parent becomes 420 wide, the fill child remains `fill` and changes from 230 to 290 wide, and the fixed sibling stays 80 wide while moving from x=260 to x=320. GREEN PR Full Verification #28641301279 passed. Deployment remains intentionally deferred. |
 | `2026-07-03-penpot-flex-fill-height-resize.md` | Completed | Proves Penpot-like height fill child recomputation after a fixed-height vertical auto-layout parent resize: the fill child remains `fill`, changes from 130 to 190 high, and the fixed sibling stays 80 high while moving from y=160 to y=220. GREEN Full Verification #28639404299 passed. Deployment remains intentionally deferred. |
 | `2026-07-02-penpot-flex-fill-resize.md` | Completed | Proves Penpot-like fill child width recomputation after a fixed-width auto-layout parent resize: the fill child remains `fill`, changes from 230 to 290 wide, and the fixed sibling stays 80 wide while moving from x=260 to x=320. GREEN Full Verification #28638419563 passed. Deployment remains intentionally deferred. |
 | `2026-07-02-penpot-grid-absolute-layout-item-drag.md` | Completed | Closes the remaining grid absolute-positioning proof gap by adding Playwright CLI evidence that an absolute child inside a grid frame exposes selection geometry, drags directly on the canvas, stays out of grid flow, and does not block a new static child from auto-placing at the grid flow origin. GREEN Full Verification #28597550413 passed with 154 Playwright CLI e2e tests. Deployment remains intentionally deferred. |
