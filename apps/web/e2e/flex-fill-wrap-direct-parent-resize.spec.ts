@@ -96,3 +96,49 @@ test("wrapped fill auto-layout child stays on the same row after direct parent r
   await expect(page.getByTestId("inspector-y")).toHaveValue("20");
   await expect(page.getByTestId("inspector-width")).toHaveValue("80");
 });
+
+test("wrapped fill items preserve minimum width before sharing the remaining row width", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-width").fill("150");
+  await page.getByTestId("inspector-height").fill("100");
+  await page.getByTestId("inspector-layout-mode").selectOption("auto");
+  await page.getByTestId("inspector-layout-direction").selectOption("horizontal");
+  await page.getByTestId("inspector-layout-wrap").selectOption("wrap");
+  await page.getByTestId("inspector-layout-align-content").selectOption("start");
+  await page.getByTestId("inspector-layout-align-items").selectOption("start");
+  await page.getByTestId("inspector-layout-justify-content").selectOption("start");
+  await page.getByTestId("inspector-layout-gap").fill("10");
+  await page.getByTestId("inspector-layout-padding-top").fill("0");
+  await page.getByTestId("inspector-layout-padding-right").fill("0");
+  await page.getByTestId("inspector-layout-padding-bottom").fill("0");
+  await page.getByTestId("inspector-layout-padding-left").fill("0");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-width").fill("120");
+  await page.getByTestId("inspector-height").fill("40");
+  await page.getByTestId("inspector-layout-item-width-sizing").selectOption("fill");
+  await page.getByTestId("inspector-layout-item-min-width").fill("100");
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await page.getByTestId("inspector-width").fill("120");
+  await page.getByTestId("inspector-height").fill("40");
+  await page.getByTestId("inspector-layout-item-width-sizing").selectOption("fill");
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-layout-item-width-sizing")).toHaveValue("fill");
+  await expect(page.getByTestId("inspector-layout-item-min-width")).toHaveValue("100");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("0");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("0");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("120");
+
+  await page.getByRole("button", { name: "사각형 3" }).click();
+  await expect(page.getByTestId("inspector-layout-item-width-sizing")).toHaveValue("fill");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("130");
+  await expect(page.getByTestId("inspector-y")).toHaveValue("0");
+  await expect(page.getByTestId("inspector-width")).toHaveValue("20");
+});

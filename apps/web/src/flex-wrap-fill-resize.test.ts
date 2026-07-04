@@ -67,6 +67,71 @@ function sampleDocument(): RendererDocument {
   };
 }
 
+function sampleMultiFillDocument(): RendererDocument {
+  return {
+    id: "sample-file",
+    name: "샘플 파일",
+    pages: [
+      {
+        id: "page-1",
+        name: "페이지 1",
+        children: [
+          {
+            id: "frame-2",
+            kind: "frame",
+            name: "두 fill 프레임",
+            transform: { x: 0, y: 0, rotation: 0 },
+            size: { width: 150, height: 100 },
+            style: { fill: "#ffffff", stroke: "#d1d5db", stroke_width: 1, opacity: 1 },
+            content: { type: "empty" },
+            layout: {
+              mode: "auto",
+              direction: "horizontal",
+              wrap: "wrap",
+              align_content: "start",
+              align_items: "start",
+              justify_content: "start",
+              gap: 10,
+              padding: { top: 0, right: 0, bottom: 0, left: 0 }
+            },
+            children: [
+              {
+                id: "fill-a",
+                kind: "rectangle",
+                name: "최소 fill",
+                transform: { x: 0, y: 0, rotation: 0 },
+                size: { width: 120, height: 40 },
+                style: { fill: "#bae6fd", stroke: null, stroke_width: 0, opacity: 1 },
+                content: { type: "empty" },
+                layout_item: {
+                  width_sizing: "fill",
+                  min_width: 100,
+                  margin: { top: 0, right: 0, bottom: 0, left: 0 }
+                },
+                children: []
+              },
+              {
+                id: "fill-b",
+                kind: "rectangle",
+                name: "보조 fill",
+                transform: { x: 0, y: 0, rotation: 0 },
+                size: { width: 120, height: 40 },
+                style: { fill: "#c7d2fe", stroke: null, stroke_width: 0, opacity: 1 },
+                content: { type: "empty" },
+                layout_item: {
+                  width_sizing: "fill",
+                  margin: { top: 0, right: 0, bottom: 0, left: 0 }
+                },
+                children: []
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+}
+
 test("wrapped fill child stays on the same row after direct parent resize recomputes fill width", () => {
   const initial = executeEditorCommand(createEditorState(sampleDocument()), {
     type: "update_node_geometry",
@@ -93,4 +158,21 @@ test("wrapped fill child stays on the same row after direct parent resize recomp
     x: 260,
     y: 20
   });
+});
+
+test("wrapped fill children preserve minimum contributions before distributing remaining width", () => {
+  const state = executeEditorCommand(createEditorState(sampleMultiFillDocument()), {
+    type: "update_node_geometry",
+    nodeId: "frame-2",
+    patch: { width: 150 }
+  });
+
+  const fillA = findNodeById(state.document, "fill-a");
+  const fillB = findNodeById(state.document, "fill-b");
+
+  expect(fillA?.size.width).toBe(120);
+  expect(fillB?.size.width).toBe(20);
+  expect(fillA?.transform).toMatchObject({ x: 0, y: 0 });
+  expect(fillB?.transform).toMatchObject({ x: 130, y: 0 });
+  expect((fillA?.size.width ?? 0) + (fillB?.size.width ?? 0) + 10).toBe(150);
 });
