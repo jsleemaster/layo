@@ -25,11 +25,14 @@ Adapt the CSS `last baseline` concept into Layo's snake_case document model as `
 
 Automated review found that the initial slice modeled last-baseline grouping but missed CSS's end fallback for `last baseline`, and also missed regenerated Rust TypeScript binding files for the new enum values. The follow-up keeps first and last baseline groups separate, shifts last-baseline groups to the cross-end fallback when extra cross-axis space exists, updates generated bindings, and changes the geometry regression tests to fail on the original start-anchored behavior.
 
+A follow-up test-scope correction restored the older first-baseline regression expectations to the CSS start fallback, leaving only the new `last_baseline` tests on the end fallback path.
+
 ## Review Resolution
 
 - `last_baseline` now keeps first-baseline and last-baseline sharing groups separate.
 - Last-baseline auto-layout and grid groups use the CSS end fallback when the available cross-axis space is larger than the baseline group.
 - `LayoutAlignItems` and `LayoutSelfAlignment` ts-rs binding artifacts include `last_baseline`.
+- Existing first-baseline tests remain pinned to start fallback behavior, so the new coverage does not weaken older baseline semantics.
 
 ## Status
 
