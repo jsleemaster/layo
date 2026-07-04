@@ -19,7 +19,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active implementation plan is open after the Penpot gradient fill slice. Start the next Penpot gap from `docs/product/penpot-maturity-benchmark.md` and `docs/process/penpot-maturity-loop.md`. |
+| `2026-07-05-penpot-mixed-fill-image-stack.md` | Active | RED coverage pending for preserving packaged `fill-image` assets when they appear later in a Penpot mixed fill stack behind color or gradient fills. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
