@@ -18,7 +18,7 @@ jobs:
           ref: codex/penpot-last-baseline-layout
           fetch-depth: 0
       - name: Apply last-baseline patch
-        run: node .github/codex/last-baseline-patch.mjs
+        run: node .github/codex/run-last-baseline-patch.mjs
       - name: Commit patched files
         run: |
           git config user.name "github-actions[bot]"
