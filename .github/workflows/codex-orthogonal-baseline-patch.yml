@@ -1,0 +1,217 @@
+name: Codex Orthogonal Baseline Patch
+
+on:
+  push:
+    branches:
+      - codex/penpot-orthogonal-baseline-synthesis
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-orthogonal-baseline-synthesis
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Patch RED tests
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from "node:fs";
+
+          function read(path) {
+            return readFileSync(path, "utf8");
+          }
+
+          function write(path, content) {
+            writeFileSync(path, content);
+          }
+
+          function replaceOnce(content, before, after, label) {
+            if (!content.includes(before)) {
+              throw new Error(`Missing patch target: ${label}`);
+            }
+            return content.replace(before, after);
+          }
+
+          const webStateTestPath = "apps/web/src/editor-state.test.ts";
+          let webStateTest = read(webStateTestPath);
+          webStateTest = replaceOnce(
+            webStateTest,
+            `    expect(caption?.transform).toMatchObject({ x: 70, y: 27 });\n    expect((title?.transform.y ?? 0) + 20).toBe((caption?.transform.y ?? 0) + 13);`,
+            `    expect(caption?.transform).toMatchObject({ x: 70, y: 103 });\n    expect((title?.transform.y ?? 0) + 96).toBe((caption?.transform.y ?? 0) + 13);`,
+            "web vertical writing baseline expectation"
+          );
+          if (!webStateTest.includes("grid baseline alignment synthesizes vertical writing mode border-edge baselines")) {
+            const gridWebTest = `  test("grid baseline alignment synthesizes vertical writing mode border-edge baselines", () => {\n    const document = sampleDocument();\n    const frame = findNodeById(document, "frame-1") as any;\n    frame.size = { width: 300, height: 140 };\n    frame.layout = {\n      mode: "grid",\n      direction: "horizontal",\n      grid_columns: 2,\n      grid_rows: 1,\n      align_items: "baseline",\n      justify_content: "start",\n      gap: 0,\n      row_gap: 0,\n      column_gap: 0,\n      padding: { top: 20, right: 20, bottom: 20, left: 20 }\n    } as any;\n    const text = findNodeById(document, "text-1") as any;\n    text.size = { width: 40, height: 96 };\n    text.content = {\n      type: "text",\n      value: "縦書き",\n      font_size: 32,\n      font_family: "Inter",\n      writing_mode: "vertical_rl"\n    };\n    frame.children.push({\n      id: "caption-1",\n      kind: "text",\n      name: "캡션",\n      transform: { x: 0, y: 0, rotation: 0 },\n      size: { width: 80, height: 24 },\n      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },\n      content: {\n        type: "text",\n        value: "Caption",\n        font_size: 16,\n        font_family: "Inter"\n      },\n      children: []\n    });\n\n    const relaid = executeEditorCommand(createEditorState(document), {\n      type: "update_node_geometry",\n      nodeId: "caption-1",\n      patch: { width: 80 }\n    });\n\n    const title = findNodeById(relaid.document, "text-1");\n    const caption = findNodeById(relaid.document, "caption-1");\n    expect(title?.transform).toMatchObject({ x: 20, y: 20 });\n    expect(caption?.transform).toMatchObject({ x: 150, y: 103 });\n    expect((title?.transform.y ?? 0) + 96).toBe((caption?.transform.y ?? 0) + 13);\n  });\n\n`;
+            webStateTest = replaceOnce(
+              webStateTest,
+              `  test("baseline alignment preserves reverse row order", () => {`,
+              gridWebTest + `  test("baseline alignment preserves reverse row order", () => {`,
+              "web grid vertical writing baseline test insertion"
+            );
+          }
+          write(webStateTestPath, webStateTest);
+
+          const serverLayoutTestPath = "apps/server/src/layout.test.ts";
+          let serverLayoutTest = read(serverLayoutTestPath);
+          if (!serverLayoutTest.includes("vertical writing-mode baseline synthesis uses border edge in horizontal auto layout")) {
+            const serverTests = `  test("vertical writing-mode baseline synthesis uses border edge in horizontal auto layout", () => {\n    const document = structuredClone(sampleDocument) as DesignFile;\n    const frame = document.pages[0].children[0] as any;\n    frame.size = { width: 360, height: 160 };\n    frame.layout = {\n      mode: "auto",\n      direction: "horizontal",\n      align_items: "baseline",\n      justify_content: "start",\n      gap: 10,\n      padding: { top: 20, right: 20, bottom: 20, left: 20 }\n    };\n    const title = frame.children[0];\n    title.size = { width: 40, height: 96 };\n    title.content = {\n      type: "text",\n      value: "縦書き",\n      font_size: 32,\n      font_family: "Inter",\n      writing_mode: "vertical_rl"\n    };\n    frame.children.push({\n      id: "caption-1",\n      kind: "text",\n      name: "캡션",\n      transform: { x: 0, y: 0, rotation: 0 },\n      size: { width: 80, height: 24 },\n      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },\n      content: { type: "text", value: "Caption", font_size: 16, font_family: "Inter" },\n      children: []\n    });\n\n    relayoutDesignFile(document);\n\n    const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");\n    expect(title.transform).toMatchObject({ x: 20, y: 20 });\n    expect(caption?.transform).toMatchObject({ x: 70, y: 103 });\n    expect(title.transform.y + 96).toBe((caption?.transform.y ?? 0) + 13);\n  });\n\n  test("grid layout baseline synthesizes vertical writing-mode border-edge baselines", () => {\n    const document = structuredClone(sampleDocument) as DesignFile;\n    const frame = document.pages[0].children[0] as any;\n    frame.size = { width: 300, height: 140 };\n    frame.layout = {\n      mode: "grid",\n      direction: "horizontal",\n      grid_columns: 2,\n      grid_rows: 1,\n      align_items: "baseline",\n      justify_content: "start",\n      gap: 0,\n      row_gap: 0,\n      column_gap: 0,\n      padding: { top: 20, right: 20, bottom: 20, left: 20 }\n    };\n    const title = frame.children[0];\n    title.size = { width: 40, height: 96 };\n    title.content = {\n      type: "text",\n      value: "縦書き",\n      font_size: 32,\n      font_family: "Inter",\n      writing_mode: "vertical_rl"\n    };\n    frame.children.push({\n      id: "caption-1",\n      kind: "text",\n      name: "캡션",\n      transform: { x: 0, y: 0, rotation: 0 },\n      size: { width: 80, height: 24 },\n      style: { fill: "#374151", stroke: null, stroke_width: 0, opacity: 1 },\n      content: { type: "text", value: "Caption", font_size: 16, font_family: "Inter" },\n      children: []\n    });\n\n    relayoutDesignFile(document);\n\n    const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");\n    expect(title.transform).toMatchObject({ x: 20, y: 20 });\n    expect(caption?.transform).toMatchObject({ x: 150, y: 103 });\n    expect(title.transform.y + 96).toBe((caption?.transform.y ?? 0) + 13);\n  });\n\n`;
+            serverLayoutTest = replaceOnce(
+              serverLayoutTest,
+              `  test("last-baseline alignment matches final text baselines in horizontal auto layout", () => {`,
+              serverTests + `  test("last-baseline alignment matches final text baselines in horizontal auto layout", () => {`,
+              "server vertical writing baseline tests insertion"
+            );
+          }
+          write(serverLayoutTestPath, serverLayoutTest);
+
+          const e2ePath = "apps/web/e2e/editor-mvp.spec.ts";
+          let e2e = read(e2ePath);
+          if (!e2e.includes("baseline alignment visibly synthesizes vertical writing mode text to the row border edge")) {
+            const e2eTest = `test("baseline alignment visibly synthesizes vertical writing mode text to the row border edge", async ({ page }) => {\n  const { documentId } = await createProjectFromEmptyState(page);\n  const response = await page.request.post(` + "`" + `http://127.0.0.1:4317/files/${documentId}/agent/commands` + "`" + `, {\n    data: {\n      dryRun: false,\n      commands: [\n        { type: "update_geometry", nodeId: "frame-1", width: 360, height: 160 },\n        { type: "update_geometry", nodeId: "text-1", width: 40, height: 96 },\n        { type: "update_text", nodeId: "text-1", value: "縦書き" },\n        { type: "set_text_writing_mode", nodeId: "text-1", writingMode: "vertical_rl" },\n        {\n          type: "set_layout",\n          nodeId: "frame-1",\n          layout: {\n            mode: "auto",\n            direction: "horizontal",\n            align_items: "baseline",\n            justify_content: "start",\n            gap: 10,\n            padding: { top: 20, right: 20, bottom: 20, left: 20 }\n          }\n        },\n        {\n          type: "create_text",\n          parentId: "frame-1",\n          id: "caption-1",\n          name: "캡션",\n          value: "Caption",\n          width: 80,\n          height: 24,\n          fontSize: 16,\n          fontFamily: "Inter"\n        }\n      ]\n    }\n  });\n  expect(response.ok()).toBeTruthy();\n\n  const fileResponse = await page.request.get(` + "`" + `http://127.0.0.1:4317/files/${documentId}` + "`" + `);\n  expect(fileResponse.ok()).toBeTruthy();\n  const filePayload = await fileResponse.json();\n  const frame = filePayload.file.pages[0].children[0];\n  const caption = frame.children.find((node: { id: string }) => node.id === "caption-1");\n  expect(caption.transform).toMatchObject({ x: 70, y: 103 });\n\n  await page.reload();\n  await openFilePanel(page);\n  await page.getByTestId("layer-panel").getByText("캡션").click();\n  await expect(page.getByTestId("inspector-x")).toHaveValue("70");\n  await expect(page.getByTestId("inspector-y")).toHaveValue("103");\n});\n\n`;
+            e2e = replaceOnce(
+              e2e,
+              `test("file panel exports a Layo archive and reviews it before import", async ({ page }) => {`,
+              e2eTest + `test("file panel exports a Layo archive and reviews it before import", async ({ page }) => {`,
+              "Playwright vertical writing baseline proof insertion"
+            );
+          }
+          write(e2ePath, e2e);
+          NODE
+
+      - name: RED focused tests
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: |
+          set +e
+          pnpm --filter @layo/web exec vitest run src/editor-state.test.ts --reporter=dot
+          web_status=$?
+          pnpm --filter @layo/server exec vitest run src/layout.test.ts --reporter=dot
+          server_status=$?
+          set -e
+          if [ "$web_status" -eq 0 ] || [ "$server_status" -eq 0 ]; then
+            echo "Expected both focused suites to fail before implementation. web=$web_status server=$server_status"
+            exit 1
+          fi
+          echo "RED confirmed: focused web and server layout tests fail before implementation."
+
+      - name: Patch implementation and docs
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+          function read(path) {
+            return readFileSync(path, "utf8");
+          }
+
+          function write(path, content) {
+            writeFileSync(path, content);
+          }
+
+          function replaceOnce(content, before, after, label) {
+            if (!content.includes(before)) {
+              throw new Error(`Missing patch target: ${label}`);
+            }
+            return content.replace(before, after);
+          }
+
+          const verticalBaselineBefore = `    if (isVerticalTextWritingMode(node.content.writing_mode)) {\n      const firstBaseline = Math.max(0, Math.min(node.size.height, Math.round(node.size.width / 2)));\n      if (preference === "last") {\n        const descent = Math.max(0, node.size.width - firstBaseline);\n        return Math.max(0, Math.min(node.size.height, node.size.height - descent));\n      }\n      return firstBaseline;\n    }`;
+          const verticalBaselineAfter = `    if (isVerticalTextWritingMode(node.content.writing_mode)) {\n      // Horizontal flex/grid baseline groups synthesize orthogonal vertical text\n      // from the block-end border edge.\n      return node.size.height;\n    }`;
+          for (const path of ["apps/web/src/editor-state.ts", "apps/server/src/layout.ts"]) {
+            write(path, replaceOnce(read(path), verticalBaselineBefore, verticalBaselineAfter, `${path} vertical baseline synthesis`));
+          }
+
+          mkdirSync("docs/superpowers/plans", { recursive: true });
+          write("docs/superpowers/plans/2026-07-05-penpot-orthogonal-baseline-synthesis.md", `# Penpot Orthogonal Baseline Synthesis\n\n## Goal\n\nClose the Penpot/CSS baseline-alignment gap where vertical writing-mode text in a horizontal auto-layout row or grid row used a width/2 centerline heuristic instead of the synthesized border-edge baseline expected for orthogonal baseline groups.\n\n## Reference\n\n- Penpot flexible layouts: https://help.penpot.app/user-guide/designing/flexible-layouts/\n- CSS Box Alignment Level 3 synthesized baselines: https://www.w3.org/TR/css-align-3/#baseline-values\n- CSS Writing Modes Level 4 text baselines: https://www.w3.org/TR/css-writing-modes-4/#text-baselines\n\n## Decision\n\nAdapt the CSS synthesized-baseline rule for Layo's current horizontal flex/grid baseline groups. When a `vertical_rl` or `vertical_lr` text node participates in a horizontal row baseline group, Layo now synthesizes the baseline from the block-end border edge by using the node height. This deliberately does not claim full font-specific baseline metrics or every axis-specific orthogonal case; those remain benchmark risks.\n\n## Minimal Change Ladder\n\n- Existing primitives reused: saved text `writing_mode`, existing auto-layout/grid baseline grouping, existing HTTP agent commands, existing Inspector coordinate readouts, and the existing Playwright CLI service runner.\n- New code required: one shared solver rule in the web and server layout engines replacing the old width/2 vertical-text baseline heuristic for horizontal row baseline groups.\n- Validation preserved: focused web/server geometry tests, Playwright CLI browser proof, Penpot benchmark update, and Full Verification as the PR merge gate.\n\n## RED Evidence\n\nFocused web and server layout tests were patched first and failed against the old implementation because the caption stayed at y=27, aligned to the old 20px vertical-text center heuristic, instead of y=103, aligned to the vertical text block-end border edge at 96px.\n\n## Verification Plan\n\n- Web state tests cover horizontal auto-layout and grid row baseline geometry with a vertical writing-mode title and horizontal caption.\n- Server layout tests cover the same geometry through the storage-side relayout engine.\n- Playwright e2e uses HTTP agent commands to create the document state, then verifies the visible browser Inspector reports caption x=70 and y=103 after selecting the layer.\n- Full Verification remains the merge gate.\n\n## Status\n\nImplemented through the Penpot maturity loop after deployment was explicitly deferred.\n`);
+
+          const planStatusPath = "docs/superpowers/PLAN_STATUS.md";
+          let planStatus = read(planStatusPath);
+          if (!planStatus.includes("2026-07-05-penpot-orthogonal-baseline-synthesis.md")) {
+            planStatus = replaceOnce(
+              planStatus,
+              `| --- | --- | --- |\n| \`2026-07-05-penpot-last-baseline-layout.md\``,
+              `| --- | --- | --- |\n| \`2026-07-05-penpot-orthogonal-baseline-synthesis.md\` | Completed | Adapts CSS/Penpot baseline synthesis for orthogonal vertical writing-mode text in horizontal auto-layout and grid row baseline groups, replacing the old width/2 heuristic with block-end border-edge synthesis. RED focused web/server tests failed against y=27; GREEN focused tests and Playwright CLI prove y=103. Deployment remains intentionally deferred. |\n| \`2026-07-05-penpot-last-baseline-layout.md\``,
+              "PLAN_STATUS completed row"
+            );
+          }
+          write(planStatusPath, planStatus);
+
+          const benchmarkPath = "docs/product/penpot-maturity-benchmark.md";
+          let benchmark = read(benchmarkPath);
+          benchmark = replaceOnce(
+            benchmark,
+            "auto-layout and grid row `last_baseline` groups with Inspector, MCP/HTTP, persistence, and CSS `last baseline` code-export handoff, per-item layout `z_index`",
+            "auto-layout and grid row `last_baseline` groups with Inspector, MCP/HTTP, persistence, and CSS `last baseline` code-export handoff, horizontal auto-layout and grid row orthogonal vertical writing-mode baseline synthesis from the block-end border edge, per-item layout `z_index`",
+            "benchmark layout posture evidence"
+          );
+          benchmark = benchmark.replaceAll(
+            "full Unicode vertical-orientation table fidelity and font-specific vertical glyph substitutions, orthogonal writing-mode baseline groups, and font-specific baseline metrics",
+            "full Unicode vertical-orientation table fidelity and font-specific vertical glyph substitutions, remaining orthogonal writing-mode baseline cases outside horizontal row/grid groups, and font-specific baseline metrics"
+          );
+          benchmark = benchmark.replaceAll(
+            "orthogonal writing-mode baseline groups, and font-specific baseline metrics",
+            "remaining orthogonal writing-mode baseline cases outside horizontal row/grid groups and font-specific baseline metrics"
+          );
+          benchmark = replaceOnce(
+            benchmark,
+            "CSS export keeps using native `writing-mode`; glyph-orientation controls, last-baseline groups,\northogonal writing-mode baseline groups, font-specific baseline metrics, plus remaining deeper resizing semantics remain\nfollow-up layout gaps.",
+            "CSS export keeps using native `writing-mode`; full Unicode orientation fidelity, font-specific vertical substitutions, remaining orthogonal baseline cases outside horizontal row/grid groups, font-specific baseline metrics, plus remaining deeper resizing semantics remain follow-up layout gaps.",
+            "benchmark vertical text follow-up narrowing"
+          );
+          if (!benchmark.includes("2026-07-05-penpot-orthogonal-baseline-synthesis.md")) {
+            benchmark = replaceOnce(
+              benchmark,
+              "`2026-07-04-penpot-flex-fill-wrap-direct-parent-resize.md` extends the direct browser canvas evidence into wrapped horizontal auto layout: dragging the selected parent frame from 420 to 360 wide keeps the child in `fill`, recomputes it from 290 to 230 wide before line breaking, and keeps the fixed sibling on the same row while moving from x=320 to x=260. A review follow-up now also proves wrapped fill minimum-contribution distribution: in a 150px row with a 10px gap, one `min_width: 100` fill child sizes to 120px and the second fill child sizes to 20px without overflowing the row.\n",
+              "`2026-07-04-penpot-flex-fill-wrap-direct-parent-resize.md` extends the direct browser canvas evidence into wrapped horizontal auto layout: dragging the selected parent frame from 420 to 360 wide keeps the child in `fill`, recomputes it from 290 to 230 wide before line breaking, and keeps the fixed sibling on the same row while moving from x=320 to x=260. A review follow-up now also proves wrapped fill minimum-contribution distribution: in a 150px row with a 10px gap, one `min_width: 100` fill child sizes to 120px and the second fill child sizes to 20px without overflowing the row.\n`2026-07-05-penpot-orthogonal-baseline-synthesis.md` adapts CSS/Penpot horizontal row baseline synthesis for vertical writing-mode text in horizontal auto-layout and grid rows: vertical text now contributes its block-end border edge instead of the old width/2 center heuristic, with web/server geometry tests and Playwright CLI Inspector proof for the caption y=103 alignment. Remaining baseline gaps are axis-specific orthogonal cases outside horizontal rows and font-specific metrics.\n",
+              "benchmark recent layout evidence insertion"
+            );
+          }
+          benchmark = benchmark.replaceAll(
+            "auto-layout and grid row `last_baseline` groups with Inspector, MCP/HTTP, persistence, and CSS `last baseline` code-export handoff, per-item layout `z_index`",
+            "auto-layout and grid row `last_baseline` groups with Inspector, MCP/HTTP, persistence, and CSS `last baseline` code-export handoff, horizontal auto-layout and grid row orthogonal vertical writing-mode baseline synthesis from the block-end border edge, per-item layout `z_index`"
+          );
+          write(benchmarkPath, benchmark);
+          NODE
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: GREEN focused tests
+        env:
+          NODE_OPTIONS: --conditions=development
+        run: |
+          pnpm --filter @layo/web exec vitest run src/editor-state.test.ts --reporter=dot
+          pnpm --filter @layo/server exec vitest run src/layout.test.ts --reporter=dot
+          pnpm exec playwright test apps/web/e2e/editor-mvp.spec.ts --grep "baseline alignment visibly synthesizes vertical writing mode text to the row border edge" --reporter=line
+          pnpm run check:penpot-maturity
+
+      - name: Commit final patch
+        run: |
+          rm .github/workflows/codex-orthogonal-baseline-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/editor-state.ts apps/server/src/layout.ts apps/web/src/editor-state.test.ts apps/server/src/layout.test.ts apps/web/e2e/editor-mvp.spec.ts docs/product/penpot-maturity-benchmark.md docs/superpowers/PLAN_STATUS.md docs/superpowers/plans/2026-07-05-penpot-orthogonal-baseline-synthesis.md .github/workflows/codex-orthogonal-baseline-patch.yml
+          git commit -m "Add Penpot orthogonal baseline synthesis"
+          git push origin codex/penpot-orthogonal-baseline-synthesis
