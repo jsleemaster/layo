@@ -320,8 +320,14 @@ function mapPenpotShape(
 
   const fillImageRecord = penpotFillImageRecordForShape(shape);
   const strokeImageRecord = penpotStrokeImageRecordForShape(shape);
-  const imageMediaId = imageMediaIdForShape(shape, fillImageRecord, strokeImageRecord);
+  const fillImageMediaId = imageMediaIdForPaintRecord(fillImageRecord, 'fillImage', 'fill-image');
+  const strokeImageMediaId = imageMediaIdForPaintRecord(strokeImageRecord, 'strokeImage', 'stroke-image');
+  const imageMediaId = shape.type === 'image'
+    ? imageMediaIdForShape(shape, fillImageRecord, strokeImageRecord)
+    : fillImageMediaId ?? strokeImageMediaId;
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
+  const fillImageAsset = fillImageMediaId ? state.assetsById.get(fillImageMediaId) : undefined;
+  const strokeImageAsset = strokeImageMediaId ? state.assetsById.get(strokeImageMediaId) : undefined;
   if (shape.type === 'image' && !imageAsset) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot image shape ${shape.name} because its packaged asset was not found.`);
@@ -329,15 +335,19 @@ function mapPenpotShape(
   }
 
   if (shape.type === 'rect' && imageMediaId && !imageAsset) {
-    const imageKind = fillImageRecord ? 'fill-image' : 'stroke-image';
+    const imageKind = fillImageMediaId ? 'fill-image' : 'stroke-image';
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot ${imageKind} shape ${shape.name} because its packaged asset was not found.`);
     return null;
   }
 
-  if (shape.type === 'frame' && imageMediaId && !imageAsset) {
-    const imageKind = fillImageRecord ? 'fill-image' : 'stroke-image';
-    state.warnings.push(`Skipped Penpot frame ${imageKind} on ${shape.name} because its packaged asset was not found.`);
+  if (shape.type === 'frame') {
+    if (fillImageMediaId && !fillImageAsset) {
+      state.warnings.push(`Skipped Penpot frame fill-image on ${shape.name} because its packaged asset was not found.`);
+    }
+    if (strokeImageMediaId && !strokeImageAsset) {
+      state.warnings.push(`Skipped Penpot frame stroke-image on ${shape.name} because its packaged asset was not found.`);
+    }
   }
 
   const transform = {
@@ -409,13 +419,21 @@ function mapPenpotShape(
       const mappedChild = mapPenpotShape(child, shape.bounds, shapesById, state, nextVisiting);
       return mappedChild ? [mappedChild] : [];
     });
-    if (imageAsset) {
-      const frameImageNode = fillImageRecord
-        ? frameFillImageNode(shape, imageAsset, fillImageRecord)
-        : frameStrokeImageNode(shape, imageAsset, strokeImageRecord);
-      mapped.children = [frameImageNode, ...mappedChildren];
-      state.mappedNodeCount += 1;
-      state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
+    const frameImageNodes: DesignNode[] = [];
+    if (fillImageAsset && fillImageRecord) {
+      frameImageNodes.push(frameFillImageNode(shape, fillImageAsset, fillImageRecord));
+    }
+    if (strokeImageAsset && strokeImageRecord) {
+      frameImageNodes.push(frameStrokeImageNode(shape, strokeImageAsset, strokeImageRecord));
+    }
+    if (frameImageNodes.length > 0) {
+      mapped.children = [...frameImageNodes, ...mappedChildren];
+      state.mappedNodeCount += frameImageNodes.length;
+      for (const asset of [fillImageAsset, strokeImageAsset]) {
+        if (asset) {
+          state.usedAssets.set(asset.metadata.assetId, asset);
+        }
+      }
     } else {
       mapped.children = mappedChildren;
     }
@@ -535,6 +553,11 @@ function penpotStrokeImageRecordForShape(shape: PenpotShape): JsonRecord | null 
   ) ?? null;
 }
 
+function imageMediaIdForPaintRecord(record: JsonRecord | null, ...imageKeys: string[]): string | undefined {
+  const image = asRecord(valueFor(record ?? {}, ...imageKeys));
+  return stringValue(valueFor(image ?? {}, 'id'));
+}
+
 function imageMediaIdForShape(
   shape: PenpotShape,
   fillImageRecord: JsonRecord | null = penpotFillImageRecordForShape(shape),
@@ -547,9 +570,8 @@ function imageMediaIdForShape(
   if (shape.type !== 'rect' && shape.type !== 'frame') {
     return undefined;
   }
-  const fillImage = asRecord(valueFor(fillImageRecord ?? {}, 'fillImage', 'fill-image'));
-  const strokeImage = asRecord(valueFor(strokeImageRecord ?? {}, 'strokeImage', 'stroke-image'));
-  return stringValue(valueFor(fillImage ?? {}, 'id')) ?? stringValue(valueFor(strokeImage ?? {}, 'id'));
+  return imageMediaIdForPaintRecord(fillImageRecord, 'fillImage', 'fill-image')
+    ?? imageMediaIdForPaintRecord(strokeImageRecord, 'strokeImage', 'stroke-image');
 }
 
 function frameFillImageNode(
