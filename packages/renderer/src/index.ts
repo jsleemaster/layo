@@ -78,8 +78,31 @@ export interface NodeConstraints {
   vertical: "top" | "bottom" | "top_bottom" | "center" | "scale";
 }
 
+export interface NodeClipPoint {
+  x: number;
+  y: number;
+}
+
+export interface NodeClipBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NodeClipSource {
+  origin: "penpot";
+  shapeId: string;
+  name: string;
+  shapeType: string;
+  bounds: NodeClipBounds;
+  opacity?: number;
+  points?: NodeClipPoint[];
+}
+
 export interface NodeClip {
   type: "bounds";
+  source?: NodeClipSource;
 }
 
 export type ImageFitMode = "fill" | "fit";
