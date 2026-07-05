@@ -78,6 +78,9 @@ export function exportDesignToCode(document: DesignFile, options: CodeExportOpti
   if (clipsByNodeId.size > 0) {
     result.css = enrichCssClipPaths(result.css, clipsByNodeId);
   }
+  if (paintSourcesByNodeId.size > 0) {
+    result.css = enrichCssPaintSources(result.css, paintSourcesByNodeId);
+  }
 
   for (const element of result.elements) {
     if (clipsByNodeId.size > 0) {
@@ -86,6 +89,7 @@ export function exportDesignToCode(document: DesignFile, options: CodeExportOpti
     }
     if (paintSourcesByNodeId.size > 0) {
       enrichStructurePaintSources(element.structure as PaintStructureNode, paintSourcesByNodeId);
+      element.css = enrichCssPaintSources(element.css, paintSourcesByNodeId);
     }
     refreshElementJsModule(element);
   }
@@ -165,6 +169,18 @@ function enrichCssClipPaths(css: string, clipsByNodeId: Map<string, NodeClip>): 
   return enriched;
 }
 
+function enrichCssPaintSources(css: string, paintSourcesByNodeId: Map<string, NodePaintSource[]>): string {
+  let enriched = css;
+  for (const [nodeId, paintSources] of paintSourcesByNodeId.entries()) {
+    const gradient = cssFillGradientForPaintSources(paintSources);
+    if (!gradient) {
+      continue;
+    }
+    enriched = addBackgroundImageToCssBlock(enriched, classNameFor(nodeId), gradient);
+  }
+  return enriched;
+}
+
 function addClipPathToCssBlock(css: string, className: string, polygon: string): string {
   const selector = `.${className} {`;
   const blockStart = css.indexOf(selector);
@@ -191,6 +207,90 @@ function addClipPathToCssBlock(css: string, className: string, polygon: string):
   return `${css.slice(0, blockEnd)}\n${clipPathLine.trimEnd()}${css.slice(blockEnd)}`;
 }
 
+function addBackgroundImageToCssBlock(css: string, className: string, backgroundImage: string): string {
+  const selector = `.${className} {`;
+  const blockStart = css.indexOf(selector);
+  if (blockStart < 0) {
+    return css;
+  }
+  const blockEnd = css.indexOf("\n}", blockStart);
+  if (blockEnd < 0) {
+    return css;
+  }
+  const block = css.slice(blockStart, blockEnd);
+  if (block.includes("background-image:") || !block.includes("background-color:")) {
+    return css;
+  }
+
+  const backgroundColorIndex = blockStart + block.indexOf("background-color:");
+  const lineEnd = css.indexOf("\n", backgroundColorIndex);
+  if (lineEnd < 0 || lineEnd > blockEnd) {
+    return css;
+  }
+
+  return `${css.slice(0, lineEnd + 1)}  background-image: ${backgroundImage};\n${css.slice(lineEnd + 1)}`;
+}
+
+function cssFillGradientForPaintSources(paintSources: NodePaintSource[]): string | null {
+  const gradientSource = paintSources
+    .filter((source) => source.kind === "fill" && source.paintType === "gradient" && source.gradient)
+    .sort((left, right) => left.index - right.index)[0];
+  return gradientSource?.gradient ? cssGradientFor(gradientSource.gradient) : null;
+}
+
+function cssGradientFor(gradient: NodePaintGradient): string | null {
+  if (!gradient.stops || gradient.stops.length < 2) {
+    return null;
+  }
+  const stops = [...gradient.stops]
+    .sort((left, right) => left.offset - right.offset)
+    .map((stop) => `${cssColorForStop(stop)} ${formatPercent(stop.offset * 100)}`)
+    .join(", ");
+  const type = gradient.type?.replace(/^:/, "").toLowerCase();
+  if (type?.includes("radial")) {
+    return `radial-gradient(circle, ${stops})`;
+  }
+  return `linear-gradient(${cssLinearGradientAngleFor(gradient)}, ${stops})`;
+}
+
+function cssLinearGradientAngleFor(gradient: NodePaintGradient): string {
+  const start = gradient.start;
+  const end = gradient.end;
+  if (!start || !end) {
+    return "90deg";
+  }
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) {
+    return "90deg";
+  }
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI + 90;
+  return `${formatDecimal((angle + 360) % 360)}deg`;
+}
+
+function cssColorForStop(stop: NodePaintStop): string {
+  if (stop.opacity >= 1) {
+    return stop.color;
+  }
+  const rgb = rgbForHex(stop.color);
+  if (!rgb) {
+    return stop.color;
+  }
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${formatDecimal(stop.opacity)})`;
+}
+
+function rgbForHex(color: string): { r: number; g: number; b: number } | null {
+  const match = color.match(/^#([0-9a-fA-F]{6})$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    r: Number.parseInt(match[1].slice(0, 2), 16),
+    g: Number.parseInt(match[1].slice(2, 4), 16),
+    b: Number.parseInt(match[1].slice(4, 6), 16)
+  };
+}
+
 function cssClipPathPolygonFor(clip: NodeClip): string | null {
   const source = clip.source;
   const points = source?.points;
@@ -211,6 +311,11 @@ function cssClipPathPolygonFor(clip: NodeClip): string | null {
 function formatPercent(value: number): string {
   const rounded = Math.round(value * 1000) / 1000;
   return `${Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}%`;
+}
+
+function formatDecimal(value: number): string {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function refreshElementJsModule(element: CodeExportResult["elements"][number]): void {
