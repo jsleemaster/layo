@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `_None_` | Idle | PR #231 completed the solid multi-stroke flattening loop and was squash-merged as `ca7e91fac6d934ca2c6bce6df563111630d1b542`. Deployment remains intentionally deferred. Create the next goal from the next Penpot benchmark gap or failed verification case. |
+| `2026-07-05-penpot-different-width-stroke-stack.md` | Active | RED coverage pending for adapting Penpot solid `strokes` stacks with different `stroke-width` values into Layo's single `style.stroke_width` by preserving the widest stroke width. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
