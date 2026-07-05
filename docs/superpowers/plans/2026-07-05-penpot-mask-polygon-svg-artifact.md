@@ -43,7 +43,9 @@ Local RED execution is unavailable in this Codex session because local shell com
 
 ## Verification
 
-Pending CI verification.
+- Full Verification #28739510986 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 7m49s.
+- Core tests included the focused `apps/web/src/node-artifacts-clip.test.ts` regression for both bounds fallback and Penpot polygon source SVG clipPath output.
+- Local shell verification remains unavailable in this Codex session because local commands such as `python3`, `perl`, `git status`, `git branch`, `git worktree list`, and `sleep` exit with code 134 before producing useful output.
 
 ## Remaining Divergence
 
