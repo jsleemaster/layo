@@ -358,6 +358,7 @@ function mapPenpotShape(
     && shape.type !== 'text'
     && shape.type !== 'image'
     && shape.type !== 'svg-raw'
+    && shape.type !== 'path'
   ) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped unsupported Penpot shape type ${shape.type} (${shape.name}).`);
@@ -374,7 +375,13 @@ function mapPenpotShape(
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   const fillImageAsset = fillImageMediaId ? state.assetsById.get(fillImageMediaId) : undefined;
   const strokeImageAsset = strokeImageMediaId ? state.assetsById.get(strokeImageMediaId) : undefined;
+  const pathAsset = shape.type === 'path' ? pathAssetForShape(shape) : undefined;
   const svgRawAsset = shape.type === 'svg-raw' ? svgRawAssetForShape(shape, shapesById) : undefined;
+  if (shape.type === 'path' && !pathAsset) {
+    state.skippedNodeCount += 1;
+    state.warnings.push(`Skipped Penpot path shape ${shape.name} because its path content was not readable.`);
+    return null;
+  }
   if (shape.type === 'svg-raw' && !svgRawAsset) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot svg-raw shape ${shape.name} because its SVG content was not readable.`);
@@ -408,7 +415,7 @@ function mapPenpotShape(
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const renderedImageAsset = svgRawAsset ?? imageAsset;
+  const renderedImageAsset = pathAsset ?? svgRawAsset ?? imageAsset;
   const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
   const fill = mapsAsImage
@@ -626,6 +633,87 @@ function imageMediaIdForShape(
   }
   return imageMediaIdForPaintRecord(fillImageRecord, 'fillImage', 'fill-image')
     ?? imageMediaIdForPaintRecord(strokeImageRecord, 'strokeImage', 'stroke-image');
+}
+
+function pathAssetForShape(shape: PenpotShape): PenpotPackageAsset | undefined {
+  const markup = pathSvgMarkupForShape(shape);
+  if (!markup) {
+    return undefined;
+  }
+
+  const data = Buffer.from(markup, 'utf8');
+  const assetId = penpotAssetStorageId(`${shape.id}-path-svg`);
+  const shapeName = shape.name.trim() || 'Path';
+  const name = shapeName.toLowerCase().endsWith('.svg') ? shapeName : `${shapeName}.svg`;
+  return {
+    mediaId: `${shape.id}-path-svg`,
+    storageObjectId: `${shape.id}-path-svg`,
+    path: `paths/${assetId}.svg`,
+    naturalWidth: positiveNumber(shape.bounds.width),
+    naturalHeight: positiveNumber(shape.bounds.height),
+    metadata: {
+      assetId,
+      name,
+      mimeType: 'image/svg+xml',
+      byteLength: data.length,
+      url: `/assets/${assetId}`
+    },
+    data
+  };
+}
+
+function pathSvgMarkupForShape(shape: PenpotShape): string | undefined {
+  const d = pathDataForShape(shape);
+  if (!d) {
+    return undefined;
+  }
+
+  const width = roundGeometry(Math.max(1, shape.bounds.width));
+  const height = roundGeometry(Math.max(1, shape.bounds.height));
+  const svgAttrs = new Map<string, string>([
+    ['xmlns', 'http://www.w3.org/2000/svg'],
+    ['width', String(width)],
+    ['height', String(height)],
+    ['viewBox', `0 0 ${width} ${height}`]
+  ]);
+  const pathAttrs = new Map<string, string>([['d', d]]);
+  const fillPaint = penpotSolidFillPaint(shape.json);
+  const fillColor = fillPaint?.color ?? penpotFillColor(shape.json);
+  pathAttrs.set('fill', fillColor ?? 'none');
+
+  const strokeColor = penpotStrokeColor(shape.json);
+  if (strokeColor) {
+    pathAttrs.set('stroke', strokeColor);
+    pathAttrs.set('stroke-width', String(penpotStrokeWidth(shape.json)));
+  }
+
+  const opacity = roundOpacity(finiteNumber(valueFor(shape.json, 'opacity'), 1) * (fillPaint?.opacity ?? 1));
+  if (opacity < 1) {
+    pathAttrs.set('opacity', String(opacity));
+  }
+
+  return `<svg${serializeSvgAttributes(svgAttrs)}><path${serializeSvgAttributes(pathAttrs)}/></svg>`;
+}
+
+function pathDataForShape(shape: PenpotShape): string | undefined {
+  const direct = stringValue(valueFor(shape.json, 'content', 'path', 'pathData', 'path-data', 'd'))?.trim();
+  if (direct && looksLikeSvgPathData(direct)) {
+    return direct;
+  }
+
+  const content = asRecord(valueFor(shape.json, 'content'));
+  const recordValue = content
+    ? stringValue(valueFor(content, 'd', 'path', 'pathData', 'path-data'))?.trim()
+    : undefined;
+  if (recordValue && looksLikeSvgPathData(recordValue)) {
+    return recordValue;
+  }
+
+  return undefined;
+}
+
+function looksLikeSvgPathData(value: string): boolean {
+  return /[Mm]/.test(value) && /^[MmZzLlHhVvCcSsQqTtAa0-9,\.\-\s]+$/.test(value);
 }
 
 function svgRawAssetForShape(shape: PenpotShape, shapesById: Map<string, PenpotShape>): PenpotPackageAsset | undefined {
