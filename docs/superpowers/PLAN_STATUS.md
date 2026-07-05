@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-stroke-image-assets.md`; deployment remains intentionally deferred. |
+| `2026-07-05-penpot-frame-stroke-image-assets.md` | Active | Penpot maturity-loop slice for packaged frame `stroke-image` asset preservation. RED coverage is being added on `codex/penpot-frame-stroke-image-assets`; deployment remains intentionally deferred. |
 
 ## Completed Plans
 
