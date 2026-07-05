@@ -884,11 +884,15 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
   ];
 }
 
-function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
   const pdfY = pageHeight - y - height;
-  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q", ...pdfStrokeCommands(node, pageHeight, x, y)];
+  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q"];
+}
+
+function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  return [...pdfFillCommands(node, pageHeight, x, y), ...pdfStrokeCommands(node, pageHeight, x, y)];
 }
 
 function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
