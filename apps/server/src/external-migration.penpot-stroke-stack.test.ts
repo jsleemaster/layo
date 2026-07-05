@@ -14,8 +14,11 @@ const pageId = "22222222-2222-2222-2222-222222222222";
 const frameId = "33333333-3333-3333-3333-333333333333";
 const strokeStackRectId = "12121212-1212-1212-1212-121212121212";
 const differentWidthStrokeRectId = "13131313-1313-1313-1313-131313131313";
+const mixedGradientStrokeRectId = "14141414-1414-1414-1414-141414141414";
 const expectedStrokeStackColor = "#800080";
 const expectedDifferentWidthStrokeWidth = 8;
+const expectedMixedGradientStrokeColor = "#804040";
+const expectedMixedGradientStrokeWidth = 6;
 
 afterEach(async () => {
   if (tempRoot) {
@@ -54,10 +57,10 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           type: "frame",
           x: 40,
           y: 64,
-          width: 320,
+          width: 440,
           height: 160,
           fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
-          shapes: [strokeStackRectId, differentWidthStrokeRectId]
+          shapes: [strokeStackRectId, differentWidthStrokeRectId, mixedGradientStrokeRectId]
         }),
         "utf8"
       )
@@ -101,6 +104,35 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
         }),
         "utf8"
       )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${mixedGradientStrokeRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: mixedGradientStrokeRectId,
+          name: "Mixed gradient stroke card",
+          type: "rect",
+          x: 304,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
+          strokes: [
+            { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": expectedMixedGradientStrokeWidth },
+            {
+              "stroke-color-gradient": {
+                stops: [
+                  { color: "#00ff00", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "stroke-opacity": 1,
+              "stroke-width": expectedMixedGradientStrokeWidth
+            }
+          ]
+        }),
+        "utf8"
+      )
     }
   ]);
 }
@@ -126,7 +158,7 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
   expect(imported).toMatchObject({
     source: "penpot",
     sourceLabel: "Penpot",
-    mappedNodeCount: 3,
+    mappedNodeCount: 4,
     skippedNodeCount: 0
   });
   expect(imported.importedAssets).toHaveLength(0);
@@ -146,6 +178,17 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
       fill: "#ffffff",
       stroke: expectedStrokeStackColor,
       stroke_width: expectedDifferentWidthStrokeWidth,
+      opacity: 1
+    }
+  });
+  expect(frame.children[2]).toMatchObject({
+    id: `penpot-${mixedGradientStrokeRectId}`,
+    kind: "rectangle",
+    name: "Mixed gradient stroke card",
+    style: {
+      fill: "#ffffff",
+      stroke: expectedMixedGradientStrokeColor,
+      stroke_width: expectedMixedGradientStrokeWidth,
       opacity: 1
     }
   });
@@ -191,7 +234,7 @@ test("reviews imports and persists flattened Penpot solid stroke stacks", async 
     source: "penpot",
     sourceLabel: "Penpot",
     assetCount: 0,
-    mappedNodeCount: 3,
+    mappedNodeCount: 4,
     skippedNodeCount: 0,
     project: { name: "Penpot Multi Stroke Board" },
     file: { name: "Penpot Multi Stroke Board", pages: [{ name: "Multi strokes" }] }
@@ -215,6 +258,17 @@ test("reviews imports and persists flattened Penpot solid stroke stacks", async 
       fill: "#ffffff",
       stroke: expectedStrokeStackColor,
       stroke_width: expectedDifferentWidthStrokeWidth,
+      opacity: 1
+    }
+  });
+  expect(frame.children[2]).toMatchObject({
+    id: `penpot-${mixedGradientStrokeRectId}`,
+    kind: "rectangle",
+    name: "Mixed gradient stroke card",
+    style: {
+      fill: "#ffffff",
+      stroke: expectedMixedGradientStrokeColor,
+      stroke_width: expectedMixedGradientStrokeWidth,
       opacity: 1
     }
   });

@@ -42,12 +42,21 @@ solid stroke stack slice:
 - The server unit fixture, HTTP persistence assertion, and Playwright CLI import
   flow now cover the `Wide layered stroke card` case.
 
+`2026-07-05-penpot-mixed-gradient-stroke-stack.md` closes the mixed solid and
+gradient stroke stack slice:
+
+- Full Verification #28724576060 passed after the server fixture, HTTP
+  persistence assertion, and Playwright CLI import flow added a `Mixed gradient
+  stroke card` whose front solid red stroke composites over a back
+  `stroke-color-gradient` midpoint.
+- The existing importer path flattened that stack to `style.stroke: #804040` and
+  `stroke_width: 6`, so no importer code change was needed.
+
 ## Remaining Import Gaps
 
 These Penpot import/export maturity gaps remain open:
 
 - stroke images and image-backed stroke records
-- mixed solid and gradient stroke stacks beyond midpoint flattening
 - exact gradient angle/radius fidelity
 - exact paint compositing for blend modes and masks
 - stroke alignment, caps, joins, dashes, and independent per-paint stroke bands
