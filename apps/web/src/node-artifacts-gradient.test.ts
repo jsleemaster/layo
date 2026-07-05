@@ -38,6 +38,54 @@ const penpotGradientCard: RendererNode = {
   children: []
 };
 
+const penpotStrokeGradientCard: RendererNode = {
+  id: "penpot-stroke-gradient-artifact-card",
+  kind: "rectangle",
+  name: "Penpot stroke gradient artifact card",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  style: {
+    fill: "#ffffff",
+    stroke: "#008000",
+    stroke_width: 4,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "stroke",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "linear",
+          start: { x: 0, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#00ff00", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
+const penpotDualGradientCard: RendererNode = {
+  ...penpotGradientCard,
+  id: "penpot-dual-gradient-artifact-card",
+  name: "Penpot dual gradient artifact card",
+  style: {
+    ...penpotGradientCard.style,
+    stroke: "#008000",
+    stroke_width: 4,
+    paint_sources: [...(penpotGradientCard.style.paint_sources ?? []), ...(penpotStrokeGradientCard.style.paint_sources ?? [])]
+  }
+};
+
 const opaquePenpotGradientCard: RendererNode = {
   ...penpotGradientCard,
   id: "penpot-gradient-pdf-artifact-card",
@@ -76,13 +124,41 @@ describe("Penpot gradient selected-layer SVG artifacts", () => {
     const svg = svgForNode(penpotGradientCard);
 
     expect(svg).toContain('<defs>');
-    expect(svg).toContain('<linearGradient id="layo-gradient-penpot-gradient-artifact-card-0" x1="0%" y1="0%" x2="100%" y2="0%">');
+    expect(svg).toContain('<linearGradient id="layo-gradient-penpot-gradient-artifact-card-fill-0" x1="0%" y1="0%" x2="100%" y2="0%">');
     expect(svg).toContain('<stop offset="0%" stop-color="#ff0000" />');
     expect(svg).toContain('<stop offset="100%" stop-color="#0000ff" stop-opacity="0.5" />');
     expect(svg).toContain('</linearGradient>');
-    expect(svg).toContain('fill="url(#layo-gradient-penpot-gradient-artifact-card-0)"');
+    expect(svg).toContain('fill="url(#layo-gradient-penpot-gradient-artifact-card-fill-0)"');
     expect(svg).toContain('data-fallback-fill="#800080"');
     expect(svg).toContain('stroke="#111827"');
+  });
+
+  test("renders preserved Penpot stroke gradients as SVG paint servers", () => {
+    const svg = svgForNode(penpotStrokeGradientCard);
+
+    expect(svg).toContain('<defs>');
+    expect(svg).toContain(
+      '<linearGradient id="layo-gradient-penpot-stroke-gradient-artifact-card-stroke-0" x1="0%" y1="50%" x2="100%" y2="50%">'
+    );
+    expect(svg).toContain('<stop offset="0%" stop-color="#ff0000" />');
+    expect(svg).toContain('<stop offset="100%" stop-color="#00ff00" />');
+    expect(svg).toContain('fill="#ffffff"');
+    expect(svg).toContain('stroke="url(#layo-gradient-penpot-stroke-gradient-artifact-card-stroke-0)"');
+    expect(svg).toContain('data-fallback-stroke="#008000"');
+    expect(svg).toContain('stroke-width="4"');
+  });
+
+  test("uses distinct SVG paint server ids when Penpot fill and stroke gradients share an index", () => {
+    const svg = svgForNode(penpotDualGradientCard);
+
+    expect(svg).toContain('<linearGradient id="layo-gradient-penpot-dual-gradient-artifact-card-fill-0" x1="0%" y1="0%" x2="100%" y2="0%">');
+    expect(svg).toContain(
+      '<linearGradient id="layo-gradient-penpot-dual-gradient-artifact-card-stroke-0" x1="0%" y1="50%" x2="100%" y2="50%">'
+    );
+    expect(svg).toContain('fill="url(#layo-gradient-penpot-dual-gradient-artifact-card-fill-0)"');
+    expect(svg).toContain('stroke="url(#layo-gradient-penpot-dual-gradient-artifact-card-stroke-0)"');
+    expect(svg.match(/id="layo-gradient-penpot-dual-gradient-artifact-card-fill-0"/g) ?? []).toHaveLength(1);
+    expect(svg.match(/id="layo-gradient-penpot-dual-gradient-artifact-card-stroke-0"/g) ?? []).toHaveLength(1);
   });
 });
 
