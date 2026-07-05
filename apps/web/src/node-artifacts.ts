@@ -340,7 +340,7 @@ function svgGradientIdForNode(node: RendererNode, source: NodePaintSource) {
 }
 
 function gradientCoordinatePercent(value: number | undefined) {
-  return `${formatNumber((Number.isFinite(value) ? value ?? 0 : 0) * 100)}%`;
+  return `${formatNumber((typeof value === "number" && Number.isFinite(value) ? value : 0) * 100)}%`;
 }
 
 function gradientStopPercent(value: number) {
@@ -355,8 +355,11 @@ function svgFillGradientForNode(node: RendererNode): SvgFillGradient | null {
   const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
   for (const source of paintSources) {
     const gradient = source.gradient;
-    const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
-    const stops = gradient?.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
+    if (!gradient) {
+      continue;
+    }
+    const type = gradient.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+    const stops = gradient.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
     if (source.kind === "fill" && source.paintType === "gradient" && type.includes("linear") && stops.length >= 2) {
       return { source, gradient, stops };
     }
@@ -1055,7 +1058,7 @@ function encodePdfPart(part: PdfPart) {
 }
 
 function concatPdfParts(parts: Uint8Array[]) {
-  const length = parts.reduce((total, part) => part.length + total, 0);
+  const length = parts.reduce((total, part) => total + part.length, 0);
   const output = new Uint8Array(length);
   let offset = 0;
   for (const part of parts) {
