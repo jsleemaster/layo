@@ -915,6 +915,37 @@ function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   ].filter(Boolean);
 }
 
+function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
+  if (!entry.shadingName) {
+    return pdfStrokeCommands(entry.node, entry.pageHeight, entry.x, entry.y);
+  }
+
+  const width = Math.max(1, Math.round(entry.node.size.width));
+  const height = Math.max(1, Math.round(entry.node.size.height));
+  const strokeWidth = Math.max(0, entry.node.style.stroke_width);
+  if (strokeWidth <= 0) {
+    return [];
+  }
+
+  const inset = Math.min(strokeWidth, width / 2, height / 2);
+  const innerWidth = Math.max(0, width - inset * 2);
+  const innerHeight = Math.max(0, height - inset * 2);
+  const pdfY = entry.pageHeight - entry.y - height;
+  const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
+  return [
+    "q",
+    `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    innerWidth > 0 && innerHeight > 0
+      ? `${formatNumber(entry.x + inset)} ${formatNumber(pdfY + inset)} ${formatNumber(innerWidth)} ${formatNumber(innerHeight)} re`
+      : "",
+    innerWidth > 0 && innerHeight > 0 ? "W*" : "W",
+    "n",
+    graphicsState,
+    `/${entry.shadingName} sh`,
+    "Q"
+  ].filter(Boolean);
+}
+
 function pdfTextCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   if (node.content.type !== "text") {
     return [];
