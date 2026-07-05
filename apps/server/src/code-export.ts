@@ -31,25 +31,71 @@ export interface NodeClip {
   source?: NodeClipSource;
 }
 
+export interface NodePaintStop {
+  color: string;
+  opacity: number;
+  offset: number;
+}
+
+export interface NodePaintGradient {
+  type?: string;
+  start?: { x: number; y: number };
+  end?: { x: number; y: number };
+  width?: number;
+  stops: NodePaintStop[];
+}
+
+export interface NodePaintSource {
+  origin: "penpot";
+  kind: "fill" | "stroke";
+  paintType: "solid" | "gradient" | "image";
+  index: number;
+  color?: string;
+  opacity?: number;
+  blendMode?: string;
+  imageId?: string;
+  gradient?: NodePaintGradient;
+}
+
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
+type PaintSourceDesignNode = DesignNode & {
+  style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
+};
 type ClipStructureNode = CodeStructureNode & { clip?: NodeClip; children: ClipStructureNode[] };
+type PaintStructureNode = CodeStructureNode & {
+  style: CodeStructureNode["style"] & { paintSources?: NodePaintSource[] };
+  children: PaintStructureNode[];
+};
 
 export function exportDesignToCode(document: DesignFile, options: CodeExportOptions = {}): CodeExportResult {
   const result = exportBaseDesignToCode(document, options);
   const clipsByNodeId = clippedNodesById(document);
-  if (clipsByNodeId.size === 0) {
+  const paintSourcesByNodeId = paintSourcesByNodeIdForDocument(document);
+  if (clipsByNodeId.size === 0 && paintSourcesByNodeId.size === 0) {
     return result;
   }
 
-  result.css = enrichCssClipPaths(result.css, clipsByNodeId);
+  if (clipsByNodeId.size > 0) {
+    result.css = enrichCssClipPaths(result.css, clipsByNodeId);
+  }
 
   for (const element of result.elements) {
-    enrichStructureClipSources(element.structure as ClipStructureNode, clipsByNodeId);
-    element.css = enrichCssClipPaths(element.css, clipsByNodeId);
+    if (clipsByNodeId.size > 0) {
+      enrichStructureClipSources(element.structure as ClipStructureNode, clipsByNodeId);
+      element.css = enrichCssClipPaths(element.css, clipsByNodeId);
+    }
+    if (paintSourcesByNodeId.size > 0) {
+      enrichStructurePaintSources(element.structure as PaintStructureNode, paintSourcesByNodeId);
+    }
     refreshElementJsModule(element);
   }
   for (const component of result.implementationSpec.components) {
-    enrichStructureClipSources(component.structure as ClipStructureNode, clipsByNodeId);
+    if (clipsByNodeId.size > 0) {
+      enrichStructureClipSources(component.structure as ClipStructureNode, clipsByNodeId);
+    }
+    if (paintSourcesByNodeId.size > 0) {
+      enrichStructurePaintSources(component.structure as PaintStructureNode, paintSourcesByNodeId);
+    }
   }
 
   return result;
@@ -76,6 +122,34 @@ function enrichStructureClipSources(structure: ClipStructureNode, clipsByNodeId:
 
   for (const child of structure.children) {
     enrichStructureClipSources(child, clipsByNodeId);
+  }
+}
+
+function enrichStructurePaintSources(
+  structure: PaintStructureNode,
+  paintSourcesByNodeId: Map<string, NodePaintSource[]>
+): void {
+  const paintSources = paintSourcesByNodeId.get(structure.id);
+  if (paintSources && paintSources.length > 0) {
+    structure.style.paintSources = paintSources.map((source) => structuredClone(source));
+    if (!structure.annotations.some((annotation) => annotation.id === `${structure.id}-paint-source`)) {
+      const gradientCount = paintSources.filter((source) => source.paintType === "gradient").length;
+      structure.annotations.push({
+        id: `${structure.id}-paint-source`,
+        label: "Penpot paint",
+        value: `${paintSources.length} paint source(s) preserved`,
+        detail:
+          gradientCount > 0
+            ? `${gradientCount} gradient source(s) keep stops and geometry while Layo uses flattened paint for rendering`
+            : "Original Penpot paint source metadata is available for migration handoff",
+        kind: "style",
+        sourceNodeIds: [structure.id]
+      });
+    }
+  }
+
+  for (const child of structure.children) {
+    enrichStructurePaintSources(child, paintSourcesByNodeId);
   }
 }
 
@@ -168,6 +242,16 @@ function clippedNodesById(document: DesignFile): Map<string, NodeClip> {
   return clipsByNodeId;
 }
 
+function paintSourcesByNodeIdForDocument(document: DesignFile): Map<string, NodePaintSource[]> {
+  const paintSourcesByNodeId = new Map<string, NodePaintSource[]>();
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectPaintSourceNodes(node, paintSourcesByNodeId);
+    }
+  }
+  return paintSourcesByNodeId;
+}
+
 function collectClippedNodes(node: DesignNode, clipsByNodeId: Map<string, NodeClip>): void {
   const clip = nodeClip(node);
   if (clip) {
@@ -178,9 +262,24 @@ function collectClippedNodes(node: DesignNode, clipsByNodeId: Map<string, NodeCl
   }
 }
 
+function collectPaintSourceNodes(node: DesignNode, paintSourcesByNodeId: Map<string, NodePaintSource[]>): void {
+  const paintSources = nodePaintSources(node);
+  if (paintSources.length > 0) {
+    paintSourcesByNodeId.set(node.id, paintSources);
+  }
+  for (const child of node.children) {
+    collectPaintSourceNodes(child, paintSourcesByNodeId);
+  }
+}
+
 function nodeClip(node: DesignNode): NodeClip | undefined {
   const clip = (node as ClippedDesignNode).clip;
   return clip?.type === "bounds" ? cloneNodeClip(clip) : undefined;
+}
+
+function nodePaintSources(node: DesignNode): NodePaintSource[] {
+  const paintSources = (node as PaintSourceDesignNode).style.paint_sources;
+  return Array.isArray(paintSources) ? paintSources.map((source) => structuredClone(source)) : [];
 }
 
 function cloneNodeClip(clip: NodeClip): NodeClip {
