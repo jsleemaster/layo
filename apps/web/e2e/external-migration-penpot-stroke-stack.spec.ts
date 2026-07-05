@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
 
 test.beforeEach(async () => {
@@ -210,3 +210,65 @@ test("file panel imports a Penpot solid stroke stack as a flattened visible stro
     }
   });
 });
+
+test("dev panel PNG raster artifact keeps mixed Penpot stroke stacks on the flattened fallback", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const penpotZipPath = testInfo.outputPath("mixed-stroke-stack-raster.penpot");
+  await writeFile(penpotZipPath, createPenpotSolidMultiStrokeExportArchive());
+
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  await expect(page.getByTestId("external-migration-review")).toContainText("가져오기 가능");
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("layer-panel")).toContainText("Mixed gradient stroke card");
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "Mixed gradient stroke card" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(`penpot-${mixedGradientStrokeRectId}.png`);
+  const downloadPath = await download.path();
+  if (!downloadPath) {
+    throw new Error("mixed stroke stack raster png download path missing");
+  }
+  const png = await readFile(downloadPath);
+  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const leftStroke = await imagePixel(page, png, "image/png", 8, Math.floor(height / 2));
+  const rightStroke = await imagePixel(page, png, "image/png", width - 9, Math.floor(height / 2));
+
+  expect(Math.abs(leftStroke.r - rightStroke.r)).toBeLessThan(12);
+  expect(Math.abs(leftStroke.g - rightStroke.g)).toBeLessThan(12);
+  expect(Math.abs(leftStroke.b - rightStroke.b)).toBeLessThan(12);
+  expect(leftStroke.r).toBeGreaterThan(leftStroke.b + 40);
+  expect(rightStroke.b).not.toBeGreaterThan(rightStroke.r + 40);
+  expect(leftStroke.a).toBeGreaterThan(200);
+  expect(rightStroke.a).toBeGreaterThan(200);
+});
+
+async function imagePixel(page: Page, image: Buffer, mimeType: "image/png", x: number, y: number) {
+  return page.evaluate(
+    async ({ base64, mime, sampleX, sampleY }) =>
+      new Promise<{ r: number; g: number; b: number; a: number; width: number; height: number }>((resolve, reject) => {
+        const element = new Image();
+        element.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = element.naturalWidth;
+          canvas.height = element.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            reject(new Error("pixel canvas context missing"));
+            return;
+          }
+          context.drawImage(element, 0, 0);
+          const [r, g, b, a] = context.getImageData(sampleX, sampleY, 1, 1).data;
+          resolve({ r, g, b, a, width: canvas.width, height: canvas.height });
+        };
+        element.onerror = () => reject(new Error(`Could not decode ${mime}`));
+        element.src = `data:${mime};base64,${base64}`;
+      }),
+    { base64: image.toString("base64"), mime: mimeType, sampleX: x, sampleY: y }
+  );
+}
