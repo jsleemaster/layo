@@ -1215,7 +1215,7 @@ function encodePdfPart(part: PdfPart) {
 }
 
 function concatPdfParts(parts: Uint8Array[]) {
-  const length = parts.reduce((total, part) => total.length + part.length, 0);
+  const length = parts.reduce((total, part) => total + part.length, 0);
   const output = new Uint8Array(length);
   let offset = 0;
   for (const part of parts) {
