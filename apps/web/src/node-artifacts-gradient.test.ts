@@ -177,4 +177,18 @@ describe("Penpot gradient selected-layer PDF artifacts", () => {
     expect(pdf).toContain("0.067 0.094 0.153 RG");
     expect(pdf).not.toContain(["0.502 0 0.502 rg", "0 0 120 60 re", "f"].join("\n"));
   });
+
+  test("renders preserved Penpot stroke gradients as axial shading resources", () => {
+    const pdf = pdfTextForNode(penpotStrokeGradientCard);
+
+    expect(pdf).toContain('/Shading << /Sh1');
+    expect(pdf).toContain('/ShadingType 2');
+    expect(pdf).toContain('/ColorSpace /DeviceRGB');
+    expect(pdf).toContain('/Coords [0 30 120 30]');
+    expect(pdf).toContain('/FunctionType 2');
+    expect(pdf).toContain('/C0 [1 0 0]');
+    expect(pdf).toContain('/C1 [0 1 0]');
+    expect(pdf).toContain(["q", "0 0 120 60 re", "4 4 112 52 re", "W*", "n", "/Sh1 sh", "Q"].join("\n"));
+    expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\n"));
+  });
 });

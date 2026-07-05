@@ -82,7 +82,24 @@ interface PdfGradientFillEntry {
   graphicsStateId?: number;
 }
 
-type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientFillEntry;
+interface PdfGradientStrokeEntry {
+  type: "gradientStroke";
+  node: RendererNode;
+  source: NodePaintSource;
+  gradient: NodePaintGradient;
+  stops: NodePaintStop[];
+  x: number;
+  y: number;
+  pageHeight: number;
+  shadingName?: string;
+  shadingId?: number;
+  graphicsStateName?: string;
+  graphicsStateId?: number;
+}
+
+type PdfGradientPaintEntry = PdfGradientFillEntry | PdfGradientStrokeEntry;
+
+type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientPaintEntry;
 
 interface ArtifactBounds {
   minX: number;
@@ -762,6 +779,14 @@ function pdfFillGradientForNode(node: RendererNode): FillGradient | null {
   return fillGradient;
 }
 
+function pdfStrokeGradientForNode(node: RendererNode): FillGradient | null {
+  const strokeGradient = strokeGradientForNode(node);
+  if (!node.style.stroke || node.style.stroke_width <= 0 || !strokeGradient || !pdfGradientStops(strokeGradient.stops)) {
+    return null;
+  }
+  return strokeGradient;
+}
+
 function pdfGradientFunction(stops: PdfGradientStop[]) {
   if (stops.length === 2) {
     return `<< /FunctionType 2 /Domain [0 1] /C0 ${pdfColorArray(stops[0].rgb)} /C1 ${pdfColorArray(stops[1].rgb)} /N 1 >>`;
@@ -783,7 +808,7 @@ function gradientCoordinateUnit(value: number | undefined, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function pdfGradientCoords(entry: PdfGradientFillEntry) {
+function pdfGradientCoords(entry: PdfGradientPaintEntry) {
   const width = Math.max(1, Math.round(entry.node.size.width));
   const height = Math.max(1, Math.round(entry.node.size.height));
   const start = entry.gradient.start ?? { x: 0, y: 0 };
@@ -795,7 +820,7 @@ function pdfGradientCoords(entry: PdfGradientFillEntry) {
   return [x1, y1, x2, y2].map(formatNumber).join(" ");
 }
 
-function pdfGradientShadingObject(entry: PdfGradientFillEntry) {
+function pdfGradientShadingObject(entry: PdfGradientPaintEntry) {
   const stops = pdfGradientStops(entry.stops) ?? [
     { offset: 0, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] },
     { offset: 1, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] }
@@ -805,7 +830,7 @@ function pdfGradientShadingObject(entry: PdfGradientFillEntry) {
   )} /Extend [true true] >>`;
 }
 
-function pdfGradientFillOpacity(entry: PdfGradientFillEntry) {
+function pdfGradientFillOpacity(entry: PdfGradientPaintEntry) {
   const opacity = typeof entry.source.opacity === "number" && Number.isFinite(entry.source.opacity) ? clampUnit(entry.source.opacity) : 1;
   return opacity < 1 ? opacity : null;
 }
@@ -859,14 +884,18 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
   ];
 }
 
-function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
   const pdfY = pageHeight - y - height;
-  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q", ...pdfStrokeCommands(node, pageHeight, x, y)];
+  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q"];
 }
 
-function pdfGradientFillCommands(entry: PdfGradientFillEntry) {
+function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  return [...pdfFillCommands(node, pageHeight, x, y), ...pdfStrokeCommands(node, pageHeight, x, y)];
+}
+
+function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   if (!entry.shadingName) {
     return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
   }
@@ -879,6 +908,37 @@ function pdfGradientFillCommands(entry: PdfGradientFillEntry) {
     "q",
     `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
     "W",
+    "n",
+    graphicsState,
+    `/${entry.shadingName} sh`,
+    "Q"
+  ].filter(Boolean);
+}
+
+function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
+  if (!entry.shadingName) {
+    return pdfStrokeCommands(entry.node, entry.pageHeight, entry.x, entry.y);
+  }
+
+  const width = Math.max(1, Math.round(entry.node.size.width));
+  const height = Math.max(1, Math.round(entry.node.size.height));
+  const strokeWidth = Math.max(0, entry.node.style.stroke_width);
+  if (strokeWidth <= 0) {
+    return [];
+  }
+
+  const inset = Math.min(strokeWidth, width / 2, height / 2);
+  const innerWidth = Math.max(0, width - inset * 2);
+  const innerHeight = Math.max(0, height - inset * 2);
+  const pdfY = entry.pageHeight - entry.y - height;
+  const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
+  return [
+    "q",
+    `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    innerWidth > 0 && innerHeight > 0
+      ? `${formatNumber(entry.x + inset)} ${formatNumber(pdfY + inset)} ${formatNumber(innerWidth)} ${formatNumber(innerHeight)} re`
+      : "",
+    innerWidth > 0 && innerHeight > 0 ? "W*" : "W",
     "n",
     graphicsState,
     `/${entry.shadingName} sh`,
@@ -1169,14 +1229,21 @@ function collectPdfEntries(
     entries.push({ type: "image", node, asset: imageAsset, x, y, pageHeight });
   } else if (node.kind !== "group") {
     const fillGradient = pdfFillGradientForNode(node);
+    const strokeGradient = pdfStrokeGradientForNode(node);
+
     if (fillGradient) {
       entries.push({ type: "gradientFill", node, ...fillGradient, x, y, pageHeight });
+    } else {
+      entries.push({ type: "commands", commands: pdfFillCommands(node, pageHeight, x, y) });
+    }
+
+    if (strokeGradient) {
+      entries.push({ type: "gradientStroke", node, ...strokeGradient, x, y, pageHeight });
+    } else {
       const strokeCommands = pdfStrokeCommands(node, pageHeight, x, y);
       if (strokeCommands.length > 0) {
         entries.push({ type: "commands", commands: strokeCommands });
       }
-    } else {
-      entries.push({ type: "commands", commands: pdfRectCommands(node, pageHeight, x, y) });
     }
   }
 
@@ -1221,6 +1288,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
       }
       if (entry.type === "gradientFill") {
         return pdfGradientFillCommands(entry);
+      }
+      if (entry.type === "gradientStroke") {
+        return pdfGradientStrokeCommands(entry);
       }
       return pdfImageCommands(entry);
     }),
@@ -1361,7 +1431,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
-  const gradientEntries = entries.filter((entry): entry is PdfGradientFillEntry => entry.type === "gradientFill");
+  const gradientEntries = entries.filter((entry): entry is PdfGradientPaintEntry => entry.type === "gradientFill" || entry.type === "gradientStroke");
   gradientEntries.forEach((entry, index) => {
     entry.shadingName = `Sh${index + 1}`;
     entry.shadingId = addPdfObject(objects, pdfGradientShadingObject(entry));
