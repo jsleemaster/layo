@@ -77,12 +77,12 @@ function createPenpotMaskedGroupExportArchive(): Buffer {
       data: Buffer.from(
         JSON.stringify({
           id: rectId,
-          name: "Masked content card",
+          name: "Oversized masked content card",
           type: "rect",
           x: 56,
           y: 80,
-          width: 64,
-          height: 40,
+          width: 220,
+          height: 140,
           opacity: 0.9,
           fills: [{ fillColor: "#38bdf8", fillOpacity: 0.7 }],
           strokes: [{ strokeColor: "#0f172a", strokeOpacity: 1, strokeWidth: 2 }]
@@ -93,7 +93,7 @@ function createPenpotMaskedGroupExportArchive(): Buffer {
   ]);
 }
 
-test("file panel imports a Penpot masked group as a Layo group container", async ({ page }, testInfo) => {
+test("file panel imports a Penpot masked group as a clipped Layo group container", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("masked-group.penpot");
   await writeFile(penpotZipPath, createPenpotMaskedGroupExportArchive());
@@ -108,7 +108,7 @@ test("file panel imports a Penpot masked group as a Layo group container", async
   await expect(page.getByTestId("external-migration-status")).toContainText("Penpot Masked Group Board 가져옴");
   await expect(page.getByTestId("project-status")).toContainText("Penpot Masked Group Board 가져옴");
   await expect(page.getByTestId("layer-panel")).toContainText("Masked artwork");
-  await expect(page.getByTestId("layer-panel")).toContainText("Masked content card");
+  await expect(page.getByTestId("layer-panel")).toContainText("Oversized masked content card");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
   const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
@@ -124,6 +124,7 @@ test("file panel imports a Penpot masked group as a Layo group container", async
     id: `penpot-${groupId}`,
     kind: "group",
     name: "Masked artwork",
+    clip: { type: "bounds" },
     transform: { x: 40, y: 64, rotation: 0 },
     size: { width: 160, height: 96 }
   });
@@ -131,9 +132,9 @@ test("file panel imports a Penpot masked group as a Layo group container", async
   expect(group.children[0]).toMatchObject({
     id: `penpot-${rectId}`,
     kind: "rectangle",
-    name: "Masked content card",
+    name: "Oversized masked content card",
     transform: { x: 16, y: 16, rotation: 0 },
-    size: { width: 64, height: 40 },
+    size: { width: 220, height: 140 },
     style: { fill: "#38bdf8", stroke: "#0f172a", stroke_width: 2, opacity: 0.9 }
   });
 });

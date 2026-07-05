@@ -78,6 +78,10 @@ export interface NodeConstraints {
   vertical: "top" | "bottom" | "top_bottom" | "center" | "scale";
 }
 
+export interface NodeClip {
+  type: "bounds";
+}
+
 export type ImageFitMode = "fill" | "fit";
 export type TextWritingMode = "horizontal_tb" | "vertical_rl" | "vertical_lr";
 export type TextOrientation = "mixed" | "upright" | "sideways";
@@ -98,6 +102,7 @@ export interface RendererNode {
   layout?: NodeLayout | null;
   layout_item?: NodeLayoutItem | null;
   constraints?: NodeConstraints | null;
+  clip?: NodeClip | null;
   export_presets?: NodeExportPreset[];
   locked?: boolean;
   visible?: boolean;

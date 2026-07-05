@@ -69,6 +69,15 @@ export interface ExternalMigrationImportResult {
 }
 
 type JsonRecord = Record<string, unknown>;
+type NodeClip = { type: "bounds" };
+type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
+
+interface PenpotMaskedGroupClipCandidate {
+  nodeId: string;
+  name: string;
+  clippedWarning: string;
+  unclippedWarning: string;
+}
 
 interface FigmaBounds {
   x: number;
@@ -146,11 +155,12 @@ export function importExternalMigrationArchive(
 
     const penpotReview = reviewPenpotZipEntries(entries, { fileName, sourceHint });
     if (penpotReview?.canImport) {
-      return importPenpotZipEntries(entries, {
+      const imported = importPenpotZipEntries(entries, {
         fileId: options.fileId,
         fileName,
         name: options.name
       });
+      return adaptPenpotMaskedGroupClipping(imported, entries);
     }
 
     const figmaPackage = readFigmaPackage(entries);
@@ -199,6 +209,91 @@ export function importExternalMigrationArchive(
     fileId: options.fileId,
     name: options.name ?? stringValue((parsedJson as JsonRecord).name) ?? fileName
   });
+}
+
+function adaptPenpotMaskedGroupClipping(
+  imported: ExternalMigrationImportResult,
+  entries: Map<string, Buffer>
+): ExternalMigrationImportResult {
+  const candidates = penpotMaskedGroupClipCandidates(entries);
+  if (candidates.length === 0) {
+    return imported;
+  }
+
+  const warnings = imported.warnings.filter(
+    (warning) => !candidates.some((candidate) => warning === candidate.unclippedWarning)
+  );
+  for (const candidate of candidates) {
+    const node = findDesignNodeById(imported.file, candidate.nodeId);
+    if (!node) {
+      continue;
+    }
+    (node as ClippedDesignNode).clip = { type: "bounds" };
+    if (!warnings.includes(candidate.clippedWarning)) {
+      warnings.push(candidate.clippedWarning);
+    }
+  }
+
+  return { ...imported, warnings };
+}
+
+function penpotMaskedGroupClipCandidates(entries: Map<string, Buffer>): PenpotMaskedGroupClipCandidate[] {
+  const candidates: PenpotMaskedGroupClipCandidate[] = [];
+  for (const [entryPath, data] of entries.entries()) {
+    const match = entryPath.match(/^files\/[^/]+\/pages\/[^/]+\/([^/]+)\.json$/);
+    if (!match) {
+      continue;
+    }
+    const shape = parseJsonBuffer(data);
+    if (!isRecord(shape) || stringValue(shape.type)?.toLowerCase() !== "group") {
+      continue;
+    }
+    if (shape.maskedGroup !== true && shape["masked-group"] !== true) {
+      continue;
+    }
+    const sourceId = stringValue(shape.id) ?? match[1];
+    const name = stringValue(shape.name) ?? sourceId;
+    candidates.push({
+      nodeId: `penpot-${storageIdSegment(sourceId)}`,
+      name,
+      clippedWarning: penpotClippedMaskWarning(name),
+      unclippedWarning: penpotUnclippedMaskWarning(name)
+    });
+  }
+  return candidates;
+}
+
+function penpotClippedMaskWarning(name: string): string {
+  return `Imported Penpot masked group ${name} with Layo bounds clipping; complex mask shapes are not preserved.`;
+}
+
+function penpotUnclippedMaskWarning(name: string): string {
+  return `Imported Penpot masked group ${name} as an unclipped Layo group; mask clipping is not preserved.`;
+}
+
+function findDesignNodeById(document: DesignFile, nodeId: string): DesignNode | null {
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      const found = findDesignNodeInTree(node, nodeId);
+      if (found) {
+        return found;
+      }
+    }
+  }
+  return null;
+}
+
+function findDesignNodeInTree(node: DesignNode, nodeId: string): DesignNode | null {
+  if (node.id === nodeId) {
+    return node;
+  }
+  for (const child of node.children) {
+    const found = findDesignNodeInTree(child, nodeId);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
 }
 
 function reviewZipArchive(
