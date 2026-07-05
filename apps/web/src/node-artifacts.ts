@@ -1289,6 +1289,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
       if (entry.type === "gradientFill") {
         return pdfGradientFillCommands(entry);
       }
+      if (entry.type === "gradientStroke") {
+        return pdfGradientStrokeCommands(entry);
+      }
       return pdfImageCommands(entry);
     }),
     ""
