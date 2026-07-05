@@ -43,6 +43,7 @@ export function exportDesignToCode(document: DesignFile, options: CodeExportOpti
 
   for (const element of result.elements) {
     enrichStructureClipSources(element.structure as ClipStructureNode, clipsByNodeId);
+    refreshElementJsModule(element);
   }
   for (const component of result.implementationSpec.components) {
     enrichStructureClipSources(component.structure as ClipStructureNode, clipsByNodeId);
@@ -67,6 +68,25 @@ function enrichStructureClipSources(structure: ClipStructureNode, clipsByNodeId:
   for (const child of structure.children) {
     enrichStructureClipSources(child, clipsByNodeId);
   }
+}
+
+function refreshElementJsModule(element: CodeExportResult["elements"][number]): void {
+  element.jsModule = [
+    `export default ${JSON.stringify(
+      {
+        id: element.id,
+        name: element.name,
+        className: element.className,
+        html: element.html,
+        css: element.css,
+        structure: element.structure,
+        implementation: element.implementation
+      },
+      null,
+      2
+    )};`,
+    ""
+  ].join("\n");
 }
 
 function clippedNodesById(document: DesignFile): Map<string, NodeClip> {
