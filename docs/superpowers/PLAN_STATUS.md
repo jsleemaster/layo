@@ -28,12 +28,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-05-penpot-stroke-image-assets.md` | Active | RED coverage added for packaged Penpot rect `stroke-image` records. Expected failure: review sees the packaged media, but import drops the image-backed stroke asset and persists a plain rectangle instead of a Layo image node. Deployment remains intentionally deferred. |
+| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-stroke-image-assets.md`; deployment remains intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-stroke-image-assets.md` | Completed | Adapts packaged Penpot rect `stroke-image` records by preserving the referenced image as a Layo image node in local asset storage. RED Full Verification #28725171703 failed on `importedAssets` length 0 and HTTP `assetCount: 0`; GREEN Full Verification #28725424332 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e with the new spec included at `[158/172]`. Storage Restore Drill #28725424329 and Storage Backup Retention #28725424333 passed for the same head. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-mixed-gradient-stroke-stack.md` | Completed | Adds server, HTTP persistence, and Playwright CLI coverage for a Penpot stroke stack mixing a front solid red stroke with a back `stroke-color-gradient` record. Full Verification #28724576060 passed, confirming the existing importer flattens the stack to `style.stroke: #804040` with `stroke_width: 6`; no importer code change was needed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-different-width-stroke-stack.md` | Completed | Adapts Penpot solid `strokes` stacks with different `stroke-width` values by preserving the widest valid stroke width as Layo's single `style.stroke_width` while keeping the existing flattened stroke color path. RED Full Verification #28723902377 failed on `stroke_width: 2` instead of 8; GREEN Full Verification #28724082389 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-solid-multi-stroke-flattening.md` | Completed | Adapts Penpot same-width solid `strokes` stacks by flattening front-to-back paint order into one deterministic Layo `style.stroke` color and opacity. RED Full Verification #28722912062 failed on `#ff0000` instead of `#800080`; GREEN Full Verification #28722958842 passed after implementation; final docs/head Full Verification #28723174583, Storage Restore Drill #28723174585, and Storage Backup Retention #28723174586 passed. PR #231 was squash-merged as `ca7e91fac6d934ca2c6bce6df563111630d1b542`. Deployment remains intentionally deferred. |
