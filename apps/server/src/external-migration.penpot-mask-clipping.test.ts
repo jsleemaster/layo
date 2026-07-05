@@ -137,5 +137,10 @@ test("imports Penpot masked groups with bounds clipping metadata for agents and 
   expect(rootElement?.structure.annotations.find((annotation) => annotation.kind === "clip")).toMatchObject({
     detail: "Penpot mask source Masked artwork preserves 4 point(s); CSS uses bounds clipping fallback"
   });
+  expect(rootElement?.jsModule).toContain('"source": {');
+  expect(rootElement?.jsModule).toContain(`"shapeId": "${groupId}"`);
+  expect(rootElement?.jsModule).toContain(
+    "Penpot mask source Masked artwork preserves 4 point(s); CSS uses bounds clipping fallback"
+  );
   expect(rootElement?.css).toContain("overflow: hidden;");
 });
