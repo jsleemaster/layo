@@ -1,5 +1,5 @@
 import { unzlibSync, zlibSync } from "fflate";
-import type { RendererNode } from "@layo/renderer";
+import type { NodePaintGradient, NodePaintSource, NodePaintStop, RendererNode } from "@layo/renderer";
 
 export interface NodeArtifactAsset {
   assetId: string;
@@ -74,6 +74,12 @@ interface ArtifactBounds {
   minY: number;
   maxX: number;
   maxY: number;
+}
+
+interface SvgFillGradient {
+  source: NodePaintSource;
+  gradient: NodePaintGradient;
+  stops: NodePaintStop[];
 }
 
 function formatNumber(value: number) {
@@ -317,12 +323,87 @@ function exportBoundsForNode(node: RendererNode): ArtifactBounds {
   };
 }
 
+function safeSvgIdSuffix(value: string) {
+  return value.replace(/[^A-Za-z0-9_-]/g, "-");
+}
+
 function shadowFilterIdForNode(node: RendererNode) {
-  return `layo-shadow-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  return `layo-shadow-${safeSvgIdSuffix(node.id)}`;
 }
 
 function svgShadowFilterAttribute(node: RendererNode) {
   return shadowLayersForNode(node).length > 0 && node.kind !== "group" ? ` filter="url(#${shadowFilterIdForNode(node)})"` : "";
+}
+
+function svgGradientIdForNode(node: RendererNode, source: NodePaintSource) {
+  return `layo-gradient-${safeSvgIdSuffix(node.id)}-${source.index}`;
+}
+
+function gradientCoordinatePercent(value: number | undefined) {
+  return `${formatNumber((Number.isFinite(value) ? value ?? 0 : 0) * 100)}%`;
+}
+
+function gradientStopPercent(value: number) {
+  return `${formatNumber(clampUnit(value) * 100)}%`;
+}
+
+function svgFillGradientForNode(node: RendererNode): SvgFillGradient | null {
+  if (node.kind === "group" || node.content.type === "text") {
+    return null;
+  }
+
+  const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
+  for (const source of paintSources) {
+    const gradient = source.gradient;
+    const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+    const stops = gradient?.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
+    if (source.kind === "fill" && source.paintType === "gradient" && type.includes("linear") && stops.length >= 2) {
+      return { source, gradient, stops };
+    }
+  }
+
+  return null;
+}
+
+function svgGradientStopLine(source: NodePaintSource, stop: NodePaintStop) {
+  const opacity = clampUnit(stop.opacity * (source.opacity ?? 1));
+  const opacityAttribute = opacity < 1 ? ` stop-opacity="${formatNumber(opacity)}"` : "";
+  return `<stop offset="${gradientStopPercent(stop.offset)}" stop-color="${escapeSvgText(stop.color)}"${opacityAttribute} />`;
+}
+
+function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
+  const fillGradient = svgFillGradientForNode(node);
+  if (!fillGradient) {
+    return [];
+  }
+
+  const start = fillGradient.gradient.start ?? { x: 0, y: 0 };
+  const end = fillGradient.gradient.end ?? { x: 1, y: 0 };
+  return [
+    indent(
+      `<linearGradient id="${svgGradientIdForNode(node, fillGradient.source)}" x1="${gradientCoordinatePercent(
+        start.x
+      )}" y1="${gradientCoordinatePercent(start.y)}" x2="${gradientCoordinatePercent(end.x)}" y2="${gradientCoordinatePercent(end.y)}">`,
+      depth
+    ),
+    ...[...fillGradient.stops]
+      .sort((left, right) => left.offset - right.offset)
+      .map((stop) => indent(svgGradientStopLine(fillGradient.source, stop), depth + 1)),
+    indent("</linearGradient>", depth)
+  ];
+}
+
+function svgGradientLinesForTree(node: RendererNode, depth: number): string[] {
+  return [...svgGradientLinesForNode(node, depth), ...node.children.flatMap((child) => svgGradientLinesForTree(child, depth))];
+}
+
+function svgFillAttributeForNode(node: RendererNode) {
+  const fill = escapeSvgText(node.style.fill);
+  const fillGradient = svgFillGradientForNode(node);
+  if (!fillGradient) {
+    return `fill="${fill}"`;
+  }
+  return `fill="url(#${svgGradientIdForNode(node, fillGradient.source)})" data-fallback-fill="${fill}"`;
 }
 
 function clipSourceOpacityForNode(node: RendererNode) {
@@ -335,11 +416,11 @@ function nodeClipUsesAlphaMask(node: RendererNode) {
 }
 
 function clipPathIdForNode(node: RendererNode) {
-  return `layo-clip-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  return `layo-clip-${safeSvgIdSuffix(node.id)}`;
 }
 
 function maskIdForNode(node: RendererNode) {
-  return `layo-mask-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  return `layo-mask-${safeSvgIdSuffix(node.id)}`;
 }
 
 function svgClipReferenceAttribute(node: RendererNode) {
@@ -432,7 +513,11 @@ function svgShadowFilterLinesForTree(node: RendererNode, depth: number): string[
 }
 
 function svgDefsForNode(node: RendererNode, depth: number): string[] {
-  const defLines = [...svgShadowFilterLinesForTree(node, depth + 1), ...svgClipPathLinesForTree(node, depth + 1)];
+  const defLines = [
+    ...svgGradientLinesForTree(node, depth + 1),
+    ...svgShadowFilterLinesForTree(node, depth + 1),
+    ...svgClipPathLinesForTree(node, depth + 1)
+  ];
   return defLines.length > 0 ? [indent("<defs>", depth), ...defLines, indent("</defs>", depth)] : [];
 }
 
@@ -463,6 +548,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
   const fill = escapeSvgText(node.style.fill);
+  const fillAttribute = svgFillAttributeForNode(node);
   const opacity = svgOpacityAttribute(node.style.opacity);
   const filter = svgShadowFilterAttribute(node);
 
@@ -483,7 +569,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
-  return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" fill="${fill}" stroke="${
+  return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} stroke="${
     node.style.stroke ? escapeSvgText(node.style.stroke) : "none"
   }" stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
 }
@@ -969,7 +1055,7 @@ function encodePdfPart(part: PdfPart) {
 }
 
 function concatPdfParts(parts: Uint8Array[]) {
-  const length = parts.reduce((total, part) => total + part.length, 0);
+  const length = parts.reduce((total, part) => part.length + total, 0);
   const output = new Uint8Array(length);
   let offset = 0;
   for (const part of parts) {
