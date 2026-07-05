@@ -26,4 +26,6 @@ Decision: adapt. Keep the existing deterministic bounds/polygon fallback for opa
 
 ## Verification
 
-Pending GitHub Full Verification on the branch. Local shell verification remains unavailable in this Codex session because local commands exit 134.
+Full Verification #28741884857 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 7m38s on branch head `3aaea0d43b5c08cc0dbcfe285a96e1e9ced9d750`.
+
+Local shell verification remains unavailable in this Codex session because local commands exit 134.
