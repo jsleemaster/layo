@@ -1011,7 +1011,24 @@ function dimensionsForImage(data: Buffer, mediaType: string): { width: number; h
     const height = data.readUInt32BE(20);
     return width > 0 && height > 0 ? { width, height } : null;
   }
+
+  const textHeader = data.subarray(0, 512).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  if (mediaType === 'image/svg+xml' && textHeader.startsWith('<svg')) {
+    const width = numberAttribute(textHeader, 'width');
+    const height = numberAttribute(textHeader, 'height');
+    return width && height ? { width, height } : null;
+  }
+
   return null;
+}
+
+function numberAttribute(text: string, attributeName: 'width' | 'height'): number | null {
+  const match = text.match(new RegExp(`${attributeName}=["']([0-9.]+)`));
+  if (!match) {
+    return null;
+  }
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function escapeRegExp(value: string): string {
