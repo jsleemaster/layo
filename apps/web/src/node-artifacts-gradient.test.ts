@@ -33,7 +33,7 @@ const penpotGradientCard: RendererNode = {
         }
       }
     ]
-  } as RendererNode["style"] & { paint_sources: unknown[] },
+  },
   content: { type: "empty" },
   children: []
 };
