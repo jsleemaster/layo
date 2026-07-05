@@ -38,6 +38,43 @@ const penpotGradientCard: RendererNode = {
   children: []
 };
 
+
+const penpotRadialGradientCard: RendererNode = {
+  id: "penpot-radial-gradient-artifact-card",
+  kind: "rectangle",
+  name: "Penpot radial gradient artifact card",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  style: {
+    fill: "#800080",
+    stroke: "#111827",
+    stroke_width: 2,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
 const penpotStrokeGradientCard: RendererNode = {
   id: "penpot-stroke-gradient-artifact-card",
   kind: "rectangle",
@@ -131,6 +168,19 @@ describe("Penpot gradient selected-layer SVG artifacts", () => {
     expect(svg).toContain('fill="url(#layo-gradient-penpot-gradient-artifact-card-fill-0)"');
     expect(svg).toContain('data-fallback-fill="#800080"');
     expect(svg).toContain('stroke="#111827"');
+  });
+
+  test("renders preserved Penpot radial fill gradients as SVG paint servers", () => {
+    const svg = svgForNode(penpotRadialGradientCard);
+
+    expect(svg).toContain("<defs>");
+    expect(svg).toContain("<radialGradient id=\"layo-gradient-penpot-radial-gradient-artifact-card-fill-0\" cx=\"50%\" cy=\"50%\" r=\"50%\">");
+    expect(svg).toContain("<stop offset=\"0%\" stop-color=\"#ff0000\" />");
+    expect(svg).toContain("<stop offset=\"100%\" stop-color=\"#0000ff\" />");
+    expect(svg).toContain("</radialGradient>");
+    expect(svg).toContain("fill=\"url(#layo-gradient-penpot-radial-gradient-artifact-card-fill-0)\"");
+    expect(svg).toContain("data-fallback-fill=\"#800080\"");
+    expect(svg).toContain("stroke=\"#111827\"");
   });
 
   test("renders preserved Penpot stroke gradients as SVG paint servers", () => {
