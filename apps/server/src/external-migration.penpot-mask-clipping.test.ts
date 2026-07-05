@@ -23,6 +23,9 @@ const maskSource = {
   opacity: 0.72,
   points: maskPoints
 };
+const maskPolygonClipPath = "clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);";
+const maskPolygonAnnotation =
+  "Penpot mask source Masked artwork preserves 4 point(s); CSS uses polygon clip-path with bounds clipping fallback";
 const clippedMaskWarning =
   "Imported Penpot masked group Masked artwork with Layo bounds clipping; complex mask shapes are not preserved.";
 
@@ -89,7 +92,7 @@ function createPenpotClippedMaskedGroupArchive(): Buffer {
   ]);
 }
 
-test("imports Penpot masked groups with bounds clipping metadata for agents and handoff", () => {
+test("imports Penpot masked groups with polygon clipping metadata for agents and handoff", () => {
   const imported = importExternalMigrationArchive(createPenpotClippedMaskedGroupArchive(), {
     fileName: "masked-group-clipping.penpot",
     fileId: "penpot-masked-group-clipping-imported-file"
@@ -135,12 +138,14 @@ test("imports Penpot masked groups with bounds clipping metadata for agents and 
     clip: { type: "bounds", source: maskSource }
   });
   expect(rootElement?.structure.annotations.find((annotation) => annotation.kind === "clip")).toMatchObject({
-    detail: "Penpot mask source Masked artwork preserves 4 point(s); CSS uses bounds clipping fallback"
+    value: "Polygon clip-path clipping",
+    detail: maskPolygonAnnotation
   });
+  expect(exported.css).toContain(maskPolygonClipPath);
+  expect(rootElement?.css).toContain("overflow: hidden;");
+  expect(rootElement?.css).toContain(maskPolygonClipPath);
   expect(rootElement?.jsModule).toContain('"source": {');
   expect(rootElement?.jsModule).toContain(`"shapeId": "${groupId}"`);
-  expect(rootElement?.jsModule).toContain(
-    "Penpot mask source Masked artwork preserves 4 point(s); CSS uses bounds clipping fallback"
-  );
-  expect(rootElement?.css).toContain("overflow: hidden;");
+  expect(rootElement?.jsModule).toContain(maskPolygonAnnotation);
+  expect(rootElement?.jsModule).toContain(maskPolygonClipPath);
 });
