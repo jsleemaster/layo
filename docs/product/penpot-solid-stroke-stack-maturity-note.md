@@ -66,11 +66,26 @@ gradient stroke stack slice:
   passed for the same head.
 - This is asset preservation, not exact Penpot stroke-band rendering fidelity.
 
+`2026-07-05-penpot-frame-stroke-image-assets.md` closes the packaged frame
+`stroke-image` asset preservation slice:
+
+- RED Full Verification #28726006772 failed because the importer kept the frame
+  and foreground child but dropped the frame-level image-backed stroke asset,
+  leaving `mappedNodeCount: 2` and HTTP import `assetCount: 0`.
+- GREEN Full Verification #28726205968 passed after frame `stroke-image` records
+  mapped through the existing local asset path as deterministic frame image
+  children before foreground layers.
+- The GREEN Playwright CLI suite included the new frame stroke-image import spec
+  at `[157/173]` and finished with `173 passed (5.5m)`.
+- Storage Restore Drill #28726205973 and Storage Backup Retention #28726205979
+  passed for the same head.
+- This is asset preservation, not exact Penpot stroke-band rendering fidelity.
+
 ## Remaining Import Gaps
 
 These Penpot import/export maturity gaps remain open:
 
-- exact image-backed stroke-band rendering, frame stroke-image backgrounds, and mixed image stroke stacks
+- exact image-backed stroke-band rendering and mixed image stroke stacks
 - exact gradient angle/radius fidelity
 - exact paint compositing for blend modes and masks
 - stroke alignment, caps, joins, dashes, and independent per-paint stroke bands
