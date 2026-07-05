@@ -21,8 +21,25 @@ const pngImage = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64"
 );
+const svgImage = Buffer.from('<svg width="17" height="23" xmlns="http://www.w3.org/2000/svg"><rect width="17" height="23"/></svg>', "utf8");
 
-function createPenpotFrameStrokeImageExportArchive(): Buffer {
+interface FrameStrokeImageArchiveOptions {
+  imageData?: Buffer;
+  mediaName?: string;
+  mediaType?: string;
+  objectExtension?: string;
+  includeMediaDimensions?: boolean;
+}
+
+function createPenpotFrameStrokeImageExportArchive(options: FrameStrokeImageArchiveOptions = {}): Buffer {
+  const imageData = options.imageData ?? pngImage;
+  const mediaName = options.mediaName ?? "frame-border-texture.png";
+  const mediaType = options.mediaType ?? "image/png";
+  const objectExtension = options.objectExtension ?? ".png";
+  const includeMediaDimensions = options.includeMediaDimensions ?? true;
+  const strokeImageMetadata = includeMediaDimensions ? { width: 1, height: 1 } : {};
+  const mediaDimensions = includeMediaDimensions ? { width: 1, height: 1 } : {};
+
   return createZipArchive([
     {
       path: "manifest.json",
@@ -60,10 +77,9 @@ function createPenpotFrameStrokeImageExportArchive(): Buffer {
             {
               "stroke-image": {
                 id: frameStrokeImageMediaId,
-                name: "frame-border-texture.png",
-                width: 1,
-                height: 1,
-                mtype: "image/png"
+                name: mediaName,
+                ...strokeImageMetadata,
+                mtype: mediaType
               },
               "stroke-opacity": 0.55,
               "stroke-width": 14,
@@ -96,10 +112,9 @@ function createPenpotFrameStrokeImageExportArchive(): Buffer {
       data: Buffer.from(
         JSON.stringify({
           id: frameStrokeImageMediaId,
-          name: "frame-border-texture.png",
-          width: 1,
-          height: 1,
-          mtype: "image/png",
+          name: mediaName,
+          ...mediaDimensions,
+          mtype: mediaType,
           mediaId: frameStrokeImageStorageObjectId
         }),
         "utf8"
@@ -110,16 +125,16 @@ function createPenpotFrameStrokeImageExportArchive(): Buffer {
       data: Buffer.from(
         JSON.stringify({
           id: frameStrokeImageStorageObjectId,
-          size: pngImage.length,
-          contentType: "image/png",
+          size: imageData.length,
+          contentType: mediaType,
           bucket: "file-media"
         }),
         "utf8"
       )
     },
     {
-      path: `objects/${frameStrokeImageStorageObjectId}.png`,
-      data: pngImage
+      path: `objects/${frameStrokeImageStorageObjectId}${objectExtension}`,
+      data: imageData
     }
   ]);
 }
@@ -187,6 +202,42 @@ test("imports Penpot frame stroke-image records as packaged background image ass
     kind: "rectangle",
     name: "Foreground card",
     style: { fill: "#dbeafe", stroke: null, stroke_width: 0, opacity: 1 }
+  });
+});
+
+test("infers Penpot frame stroke-image natural dimensions from packaged SVG bytes", () => {
+  const archive = createPenpotFrameStrokeImageExportArchive({
+    imageData: svgImage,
+    mediaName: "frame-border-texture.svg",
+    mediaType: "image/svg+xml",
+    objectExtension: ".svg",
+    includeMediaDimensions: false
+  });
+
+  const imported = importExternalMigrationArchive(archive, {
+    fileName: "frame-stroke-images.penpot",
+    fileId: "penpot-frame-stroke-image-svg-imported-file"
+  });
+
+  expect(imported.importedAssets[0]?.metadata).toMatchObject({
+    assetId: expectedFrameStrokeImageAssetId,
+    name: "frame-border-texture.svg",
+    mimeType: "image/svg+xml",
+    byteLength: svgImage.length,
+    url: `/assets/${expectedFrameStrokeImageAssetId}`
+  });
+
+  const frame = imported.file.pages[0].children[0];
+  expect(frame.children[0]).toMatchObject({
+    id: expectedFrameStrokeImageNodeId,
+    kind: "image",
+    content: {
+      type: "image",
+      asset_id: expectedFrameStrokeImageAssetId,
+      natural_width: 17,
+      natural_height: 23,
+      fit_mode: "fill"
+    }
   });
 });
 
