@@ -68,7 +68,7 @@ interface PdfImageEntry {
 }
 
 interface PdfGradientFillEntry {
-  type: \"gradientFill\";
+  type: "gradientFill";
   node: RendererNode;
   source: NodePaintSource;
   gradient: NodePaintGradient;
@@ -83,7 +83,7 @@ interface PdfGradientFillEntry {
 }
 
 interface PdfGradientStrokeEntry {
-  type: \"gradientStroke\";
+  type: "gradientStroke";
   node: RendererNode;
   source: NodePaintSource;
   gradient: NodePaintGradient;
