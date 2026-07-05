@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
 
 test.beforeEach(async () => {
