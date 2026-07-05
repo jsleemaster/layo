@@ -779,6 +779,14 @@ function pdfFillGradientForNode(node: RendererNode): FillGradient | null {
   return fillGradient;
 }
 
+function pdfStrokeGradientForNode(node: RendererNode): FillGradient | null {
+  const strokeGradient = strokeGradientForNode(node);
+  if (!node.style.stroke || node.style.stroke_width <= 0 || !strokeGradient || !pdfGradientStops(strokeGradient.stops)) {
+    return null;
+  }
+  return strokeGradient;
+}
+
 function pdfGradientFunction(stops: PdfGradientStop[]) {
   if (stops.length === 2) {
     return `<< /FunctionType 2 /Domain [0 1] /C0 ${pdfColorArray(stops[0].rgb)} /C1 ${pdfColorArray(stops[1].rgb)} /N 1 >>`;
