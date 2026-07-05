@@ -68,7 +68,7 @@ interface PdfImageEntry {
 }
 
 interface PdfGradientFillEntry {
-  type: \"gradientFill\";
+  type: "gradientFill";
   node: RendererNode;
   source: NodePaintSource;
   gradient: NodePaintGradient;
@@ -1386,7 +1386,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
-  const gradientEntries = entries.filter((entry): entry is PdfGradientPaintEntry => entry.type === "gradientFill");
+  const gradientEntries = entries.filter((entry): entry is PdfGradientPaintEntry => entry.type === "gradientFill" || entry.type === "gradientStroke");
   gradientEntries.forEach((entry, index) => {
     entry.shadingName = `Sh${index + 1}`;
     entry.shadingId = addPdfObject(objects, pdfGradientShadingObject(entry));
