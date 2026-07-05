@@ -13,7 +13,8 @@ const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
 const groupId = "33333333-3333-3333-3333-333333333333";
 const rectId = "44444444-4444-4444-4444-444444444444";
-const maskedGroupWarning = "Imported Penpot masked group Masked artwork as an unclipped Layo group; mask clipping is not preserved.";
+const maskedGroupWarning =
+  "Imported Penpot masked group Masked artwork with Layo bounds clipping; complex mask shapes are not preserved.";
 
 function createPenpotMaskedGroupExportArchive(): Buffer {
   return createZipArchive([
@@ -83,7 +84,7 @@ afterEach(async () => {
   }
 });
 
-test("imports Penpot masked groups as group containers with children", () => {
+test("imports Penpot masked groups as clipped group containers with children", () => {
   const archive = createPenpotMaskedGroupExportArchive();
 
   const review = reviewExternalMigrationArchive(archive, { fileName: "masked-group.penpot" });
@@ -116,6 +117,7 @@ test("imports Penpot masked groups as group containers with children", () => {
     id: `penpot-${groupId}`,
     kind: "group",
     name: "Masked artwork",
+    clip: { type: "bounds" },
     transform: { x: 40, y: 64, rotation: 0 },
     size: { width: 160, height: 96 },
     style: { fill: "#ffffff", stroke: null, stroke_width: 0, opacity: 1 }
@@ -131,7 +133,7 @@ test("imports Penpot masked groups as group containers with children", () => {
   });
 });
 
-test("persists Penpot masked group containers through HTTP", async () => {
+test("persists Penpot clipped masked group containers through HTTP", async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const storage = new FileStorage(tempRoot);
   const server = createHttpServer(storage);
@@ -164,7 +166,8 @@ test("persists Penpot masked group containers through HTTP", async () => {
   expect(group).toMatchObject({
     id: `penpot-${groupId}`,
     kind: "group",
-    name: "Masked artwork"
+    name: "Masked artwork",
+    clip: { type: "bounds" }
   });
   expect(group.children).toHaveLength(1);
   expect(group.children[0]).toMatchObject({
