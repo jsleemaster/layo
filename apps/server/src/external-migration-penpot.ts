@@ -359,6 +359,7 @@ function mapPenpotShape(
     && shape.type !== 'image'
     && shape.type !== 'svg-raw'
     && shape.type !== 'path'
+    && shape.type !== 'group'
   ) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped unsupported Penpot shape type ${shape.type} (${shape.name}).`);
@@ -401,13 +402,17 @@ function mapPenpotShape(
     return null;
   }
 
-  if (shape.type === 'frame') {
+  if (shape.type === 'frame' || shape.type === 'group') {
     if (fillImageMediaId && !fillImageAsset) {
       state.warnings.push(`Skipped Penpot frame fill-image on ${shape.name} because its packaged asset was not found.`);
     }
     if (strokeImageMediaId && !strokeImageAsset) {
       state.warnings.push(`Skipped Penpot frame stroke-image on ${shape.name} because its packaged asset was not found.`);
     }
+  }
+
+  if (isPenpotMaskedGroup(shape)) {
+    state.warnings.push("Imported Penpot masked group " + shape.name + " as an unclipped Layo group; mask clipping is not preserved.");
   }
 
   const transform = {
@@ -437,7 +442,7 @@ function mapPenpotShape(
 
   const mapped: DesignNode = {
     id: nodeId,
-    kind: mapsAsImage ? 'image' : shape.type === 'frame' ? 'frame' : shape.type === 'text' ? 'text' : 'rectangle',
+    kind: mapsAsImage ? 'image' : shape.type === 'frame' ? 'frame' : shape.type === 'group' ? 'group' : shape.type === 'text' ? 'text' : 'rectangle',
     name: shape.name,
     transform,
     size: {
@@ -467,7 +472,7 @@ function mapPenpotShape(
     state.usedAssets.set(renderedImageAsset.metadata.assetId, renderedImageAsset);
   }
 
-  if (shape.type === 'frame') {
+  if (shape.type === 'frame' || shape.type === 'group') {
     const nextVisiting = new Set(visiting);
     nextVisiting.add(shape.id);
     const mappedChildren = shape.childIds.flatMap((childId) => {
@@ -959,6 +964,10 @@ function imageContentForAsset(
   return content;
 }
 
+function isPenpotMaskedGroup(shape: PenpotShape): boolean {
+  return shape.type === 'group' && valueFor(shape.json, 'maskedGroup', 'masked-group') === true;
+}
+
 function rootShapeIds(pageJson: JsonRecord, shapesById: Map<string, PenpotShape>): string[] {
   const explicitRoots = arrayIds(valueFor(pageJson, 'rootShapes', 'root-shapes', 'children'))
     .filter((shapeId) => shapesById.has(shapeId));
@@ -1265,7 +1274,7 @@ function defaultFillForPenpotType(type: string): string {
   if (type === 'text') {
     return '#111827';
   }
-  if (type === 'frame') {
+  if (type === 'frame' || type === 'group') {
     return '#ffffff';
   }
   return '#e5e7eb';
