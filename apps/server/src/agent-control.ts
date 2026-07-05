@@ -37,10 +37,40 @@ export interface NodeClip {
   source?: NodeClipSource;
 }
 
+export interface NodePaintStop {
+  color: string;
+  opacity: number;
+  offset: number;
+}
+
+export interface NodePaintGradient {
+  type?: string;
+  start?: { x: number; y: number };
+  end?: { x: number; y: number };
+  width?: number;
+  stops: NodePaintStop[];
+}
+
+export interface NodePaintSource {
+  origin: "penpot";
+  kind: "fill" | "stroke";
+  paintType: "solid" | "gradient" | "image";
+  index: number;
+  color?: string;
+  opacity?: number;
+  blendMode?: string;
+  imageId?: string;
+  gradient?: NodePaintGradient;
+}
+
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
+type PaintSourceDesignNode = DesignNode & {
+  style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
+};
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
+  paintSources?: NodePaintSource[];
 }
 
 export interface CanvasInspection extends Omit<BaseCanvasInspection, "nodes"> {
@@ -111,6 +141,7 @@ function summarizeNodes(document: DesignFile): AgentNodeSummary[] {
 }
 
 function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummary[]) {
+  const paintSources = nodePaintSources(node);
   nodes.push({
     id: node.id,
     name: node.name,
@@ -125,6 +156,7 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     constraints: node.constraints ?? undefined,
     exportPresets: node.export_presets ? node.export_presets.map((preset) => ({ ...preset })) : undefined,
     clip: nodeClip(node),
+    paintSources: paintSources.length > 0 ? paintSources : undefined,
     bounds: {
       x: node.transform.x,
       y: node.transform.y,
@@ -141,6 +173,11 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
 function nodeClip(node: DesignNode): NodeClip | undefined {
   const clip = (node as ClippedDesignNode).clip;
   return clip?.type === "bounds" ? cloneNodeClip(clip) : undefined;
+}
+
+function nodePaintSources(node: DesignNode): NodePaintSource[] {
+  const paintSources = (node as PaintSourceDesignNode).style.paint_sources;
+  return Array.isArray(paintSources) ? paintSources.map((source) => structuredClone(source)) : [];
 }
 
 function cloneNodeClip(clip: NodeClip): NodeClip {
