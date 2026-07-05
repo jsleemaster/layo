@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | Latest Penpot different-width stroke stack slice is recorded under Completed Plans. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-mixed-gradient-stroke-stack.md` | Active | Coverage probe pending for adapting mixed solid plus `stroke-color-gradient` Penpot stroke stacks into Layo's flattened single `style.stroke`. If verification fails, the failed assertion becomes the next implementation goal. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
