@@ -38,6 +38,12 @@ export interface CodeExportResult {
   indexModule: string;
 }
 
+export interface NodeClip {
+  type: "bounds";
+}
+
+type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
+
 export interface CodeStructureNode {
   id: string;
   name: string;
@@ -56,12 +62,12 @@ export interface CodeStructureNode {
     fillStyle?: string;
     stroke: string | null;
     strokeWidth: number;
-	    opacity: number;
-	    effectShadow?: string;
-	    effectShadows?: string[];
-	    effectShadowToken?: string;
-	    effectShadowStyle?: string;
-	  };
+    opacity: number;
+    effectShadow?: string;
+    effectShadows?: string[];
+    effectShadowToken?: string;
+    effectShadowStyle?: string;
+  };
   annotations: CodeHandoffAnnotation[];
   content:
     | { type: "empty" }
@@ -95,6 +101,7 @@ export interface CodeStructureNode {
   layout?: NodeLayout;
   layout_item?: NodeLayoutItem;
   constraints?: NodeConstraints;
+  clip?: NodeClip;
   children: CodeStructureNode[];
 }
 
@@ -103,7 +110,7 @@ export interface CodeHandoffAnnotation {
   label: string;
   value: string;
   detail?: string;
-  kind: "identity" | "geometry" | "style" | "content" | "layout" | "component" | "asset";
+  kind: "identity" | "geometry" | "style" | "content" | "layout" | "component" | "asset" | "clip";
   sourceNodeIds: string[];
 }
 
@@ -406,6 +413,7 @@ function structureFor(
   const repoMapping = repoMappingForNode(node, mappingByComponentId, componentById, componentIdBySourceNodeId);
   const effectShadow = resolvedEffectShadow(node);
   const effectShadows = effectShadowStack(node);
+  const clip = nodeClip(node);
   const base: CodeStructureNode = {
     id: node.id,
     name: node.name,
@@ -473,6 +481,9 @@ function structureFor(
   if (node.constraints) {
     base.constraints = node.constraints;
   }
+  if (clip) {
+    base.clip = clip;
+  }
 
   return base;
 }
@@ -510,6 +521,11 @@ function handoffAnnotationsFor(node: DesignNode, tokenMap: Map<string, DesignTok
   const layoutAnnotation = layoutAnnotationFor(node);
   if (layoutAnnotation) {
     annotations.push(layoutAnnotation);
+  }
+
+  const clipAnnotation = clipAnnotationFor(node);
+  if (clipAnnotation) {
+    annotations.push(clipAnnotation);
   }
 
   const componentAnnotation = componentAnnotationFor(node);
@@ -624,6 +640,21 @@ function layoutAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
   };
 }
 
+function clipAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
+  if (!nodeClip(node)) {
+    return null;
+  }
+
+  return {
+    id: `${node.id}-clip`,
+    label: "클리핑",
+    value: "Bounds clipping",
+    detail: "children are clipped to the layer bounds",
+    kind: "clip",
+    sourceNodeIds: [node.id]
+  };
+}
+
 function layoutSpacingTokenDetail(layout: NodeLayout | null | undefined): string | undefined {
   if (!layout?.spacing_tokens) {
     return undefined;
@@ -685,6 +716,11 @@ function assetAnnotationFor(node: DesignNode): CodeHandoffAnnotation | null {
 
 function isNodeExportVisible(node: DesignNode): boolean {
   return node.visible !== false;
+}
+
+function nodeClip(node: DesignNode): NodeClip | undefined {
+  const clip = (node as ClippedDesignNode).clip;
+  return clip?.type === "bounds" ? { type: "bounds" } : undefined;
 }
 
 function contentFor(node: DesignNode): CodeStructureNode["content"] {
@@ -838,6 +874,9 @@ function nodeCss(node: DesignNode, tokenMap: Map<string, DesignToken>): string[]
   const effectShadow = cssEffectShadowValue(node, tokenMap);
   if (effectShadow) {
     lines.push(`  box-shadow: ${effectShadow};`);
+  }
+  if (nodeClip(node)) {
+    lines.push("  overflow: hidden;");
   }
 
   if (node.kind === "text" && node.content.type === "text") {
