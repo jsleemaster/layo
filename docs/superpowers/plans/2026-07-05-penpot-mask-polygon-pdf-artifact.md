@@ -35,6 +35,8 @@ After `2026-07-05-penpot-mask-polygon-svg-artifact.md`, selected-layer SVG artif
 
 ## Verification
 
-Pending final Full Verification for this branch.
+Full Verification #28740500230 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 6m8s on head `b2ab07f1c75f5573c4d4820d063c5f254fc03b77`.
+
+The focused regression is `apps/web/src/node-artifacts-clip.test.ts`, covering both bounds PDF clipping scopes and Penpot polygon PDF clipping paths.
 
 Local shell verification remains unavailable in this Codex session because commands such as `git status`, `git branch`, `git worktree list`, `python3`, `perl`, `node`, and `sleep` exit with code 134 before producing useful output.
