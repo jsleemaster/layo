@@ -25,25 +25,39 @@ const clippedGroup: RendererNode = {
   ]
 };
 
+const polygonClipSource = {
+  origin: "penpot" as const,
+  shapeId: "penpot-mask-shape",
+  name: "Diamond mask",
+  shapeType: "path",
+  bounds: { x: 10, y: 20, width: 100, height: 60 },
+  points: [
+    { x: 60, y: 20 },
+    { x: 110, y: 50 },
+    { x: 60, y: 80 },
+    { x: 10, y: 50 }
+  ]
+};
+
 const polygonClippedGroup: RendererNode = {
   ...clippedGroup,
   id: "polygon-masked-group",
   name: "Polygon masked group",
   clip: {
     type: "bounds",
+    source: polygonClipSource
+  }
+};
+
+const alphaPolygonClippedGroup: RendererNode = {
+  ...clippedGroup,
+  id: "alpha-polygon-masked-group",
+  name: "Alpha polygon masked group",
+  clip: {
+    type: "bounds",
     source: {
-      origin: "penpot",
-      shapeId: "penpot-mask-shape",
-      name: "Diamond mask",
-      shapeType: "path",
-      bounds: { x: 10, y: 20, width: 100, height: 60 },
-      opacity: 0.72,
-      points: [
-        { x: 60, y: 20 },
-        { x: 110, y: 50 },
-        { x: 60, y: 80 },
-        { x: 10, y: 50 }
-      ]
+      ...polygonClipSource,
+      opacity: 0.72
     }
   }
 };
@@ -64,7 +78,7 @@ describe("clipped node artifact exports", () => {
     expect(svg).toContain('transform="translate(40 20)"');
   });
 
-  test("renders Penpot polygon mask source points as SVG clipPath polygons", () => {
+  test("renders opaque Penpot polygon mask source points as SVG clipPath polygons", () => {
     const svg = svgForNode(polygonClippedGroup);
 
     expect(svg).toContain('viewBox="0 0 100 60"');
@@ -72,6 +86,21 @@ describe("clipped node artifact exports", () => {
     expect(svg).toContain('<polygon points="50,0 100,30 50,60 0,30" />');
     expect(svg).not.toContain('<rect x="0" y="0" width="100" height="60" />');
     expect(svg).toContain('clip-path="url(#layo-clip-polygon-masked-group)"');
+    expect(svg).not.toContain('<mask id="layo-mask-polygon-masked-group"');
+    expect(svg).toContain('data-node-id="oversized-child"');
+    expect(svg).toContain('transform="translate(40 20)"');
+  });
+
+  test("renders translucent Penpot polygon mask source opacity as SVG masks", () => {
+    const svg = svgForNode(alphaPolygonClippedGroup);
+
+    expect(svg).toContain('viewBox="0 0 100 60"');
+    expect(svg).toContain(
+      '<mask id="layo-mask-alpha-polygon-masked-group" x="0" y="0" width="100" height="60" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">'
+    );
+    expect(svg).toContain('<polygon points="50,0 100,30 50,60 0,30" fill="#fff" fill-opacity="0.72" />');
+    expect(svg).toContain('mask="url(#layo-mask-alpha-polygon-masked-group)"');
+    expect(svg).not.toContain('clip-path="url(#layo-clip-alpha-polygon-masked-group)"');
     expect(svg).toContain('data-node-id="oversized-child"');
     expect(svg).toContain('transform="translate(40 20)"');
   });
@@ -83,11 +112,24 @@ describe("clipped node artifact exports", () => {
     expect(pdf).toContain("40 -30 90 70 re");
   });
 
-  test("renders Penpot polygon mask source points as PDF clipping paths", () => {
+  test("renders opaque Penpot polygon mask source points as PDF clipping paths", () => {
     const pdf = pdfTextForNode(polygonClippedGroup);
 
     expect(pdf).toContain(["q", "50 60 m", "100 30 l", "50 0 l", "0 30 l", "h", "W", "n"].join("\n"));
     expect(pdf).not.toContain(["0 0 100 60 re", "W", "n"].join("\n"));
+    expect(pdf).not.toContain("/MaskGs1 gs");
+    expect(pdf).toContain("40 -30 90 70 re");
+  });
+
+  test("renders translucent Penpot polygon mask source opacity as PDF alpha graphics state", () => {
+    const pdf = pdfTextForNode(alphaPolygonClippedGroup);
+
+    expect(pdf).toContain(
+      ["q", "50 60 m", "100 30 l", "50 0 l", "0 30 l", "h", "W", "n", "/MaskGs1 gs"].join("\n")
+    );
+    expect(pdf).toContain("/ExtGState << /MaskGs1");
+    expect(pdf).toContain("/ca 0.72");
+    expect(pdf).toContain("/CA 0.72");
     expect(pdf).toContain("40 -30 90 70 re");
   });
 });

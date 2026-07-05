@@ -24,6 +24,9 @@ interface PdfObject {
 interface PdfCommandEntry {
   type: "commands";
   commands: string[];
+  clipOpacity?: number;
+  graphicsStateName?: string;
+  graphicsStateId?: number;
 }
 
 interface ParsedShadowColor {
@@ -322,12 +325,30 @@ function svgShadowFilterAttribute(node: RendererNode) {
   return shadowLayersForNode(node).length > 0 && node.kind !== "group" ? ` filter="url(#${shadowFilterIdForNode(node)})"` : "";
 }
 
+function clipSourceOpacityForNode(node: RendererNode) {
+  const opacity = nodeClip(node)?.source?.opacity;
+  return typeof opacity === "number" && Number.isFinite(opacity) ? clampUnit(opacity) : 1;
+}
+
+function nodeClipUsesAlphaMask(node: RendererNode) {
+  return clipSourceOpacityForNode(node) < 1;
+}
+
 function clipPathIdForNode(node: RendererNode) {
   return `layo-clip-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
-function svgClipPathAttribute(node: RendererNode) {
-  return nodeClipsToBounds(node) ? ` clip-path="url(#${clipPathIdForNode(node)})"` : "";
+function maskIdForNode(node: RendererNode) {
+  return `layo-mask-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+function svgClipReferenceAttribute(node: RendererNode) {
+  if (!nodeClipsToBounds(node)) {
+    return "";
+  }
+  return nodeClipUsesAlphaMask(node)
+    ? ` mask="url(#${maskIdForNode(node)})"`
+    : ` clip-path="url(#${clipPathIdForNode(node)})"`;
 }
 
 function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
@@ -337,6 +358,22 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
   const polygonPoints = svgClipPolygonPointsForNode(node);
+
+  if (nodeClipUsesAlphaMask(node)) {
+    const opacity = formatNumber(clipSourceOpacityForNode(node));
+    const maskShape = polygonPoints
+      ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`
+      : `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff" fill-opacity="${opacity}" />`;
+    return [
+      indent(
+        `<mask id="${maskIdForNode(node)}" x="0" y="0" width="${width}" height="${height}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">`,
+        depth
+      ),
+      indent(maskShape, depth + 1),
+      indent("</mask>", depth)
+    ];
+  }
+
   const clipShape = polygonPoints
     ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
     : `<rect x="0" y="0" width="${width}" height="${height}" />`;
@@ -457,11 +494,11 @@ function indent(line: string, depth: number) {
 
 function svgLinesForNode(node: RendererNode, options: NodeArtifactOptions, depth: number, isRoot = false): string[] {
   const lines: string[] = [];
-  const clipPath = svgClipPathAttribute(node);
-  const shouldWrap = !isRoot || Boolean(clipPath);
+  const clipReference = svgClipReferenceAttribute(node);
+  const shouldWrap = !isRoot || Boolean(clipReference);
   if (shouldWrap) {
     const transform = isRoot ? "" : ` transform="${svgNodeTransform(node)}"`;
-    lines.push(indent(`<g ${svgNodeAttributes(node)}${transform}${clipPath}>`, depth));
+    lines.push(indent(`<g ${svgNodeAttributes(node)}${transform}${clipReference}>`, depth));
   }
 
   const self = svgSelfForNode(node, options);
@@ -570,6 +607,11 @@ function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: numbe
   const height = Math.max(1, Math.round(node.size.height));
   const pdfY = pageHeight - y - height;
   return ["q", `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "W", "n"];
+}
+
+function pdfClipOpacityForNode(node: RendererNode) {
+  const opacity = clipSourceOpacityForNode(node);
+  return opacity < 1 ? opacity : null;
 }
 
 function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -860,7 +902,7 @@ function collectPdfEntries(
   const clipCommands = pdfClipCommandsForNode(node, pageHeight, x, y);
 
   if (clipCommands) {
-    entries.push({ type: "commands", commands: clipCommands });
+    entries.push({ type: "commands", commands: clipCommands, clipOpacity: pdfClipOpacityForNode(node) ?? undefined });
   }
 
   if (node.kind !== "group") {
@@ -911,7 +953,7 @@ function contentForPdfEntries(entries: PdfEntry[]) {
   return [
     ...entries.flatMap((entry) => {
       if (entry.type === "commands") {
-        return entry.commands;
+        return entry.graphicsStateName ? [...entry.commands, `/${entry.graphicsStateName} gs`] : entry.commands;
       }
       if (entry.type === "shadow") {
         return pdfShadowCommands(entry);
@@ -1044,6 +1086,17 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
+  const clipOpacityEntries = entries.filter(
+    (entry): entry is PdfCommandEntry => entry.type === "commands" && typeof entry.clipOpacity === "number"
+  );
+  clipOpacityEntries.forEach((entry, index) => {
+    entry.graphicsStateName = `MaskGs${index + 1}`;
+    entry.graphicsStateId = addPdfObject(
+      objects,
+      `<< /Type /ExtGState /ca ${formatNumber(entry.clipOpacity ?? 1)} /CA ${formatNumber(entry.clipOpacity ?? 1)} >>`
+    );
+  });
+
   const content = contentForPdfEntries(entries);
   const contentBytes = new TextEncoder().encode(content);
   const embeddedFileNames = imageEntries
@@ -1054,9 +1107,14 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     .filter((entry) => entry.xObjectName && entry.xObjectId)
     .map((entry) => `/${entry.xObjectName} ${entry.xObjectId} 0 R`);
   const xObjectClause = xObjectEntries.length > 0 ? ` /XObject << ${xObjectEntries.join(" ")} >>` : "";
-  const extGStateEntries = shadowEntries
-    .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
-    .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`);
+  const extGStateEntries = [
+    ...shadowEntries
+      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
+      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
+    ...clipOpacityEntries
+      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
+      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`)
+  ];
   const extGStateClause = extGStateEntries.length > 0 ? ` /ExtGState << ${extGStateEntries.join(" ")} >>` : "";
 
   setPdfObject(objects, catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R${namesClause} >>`);
