@@ -67,7 +67,22 @@ interface PdfImageEntry {
   fileSpecId?: number;
 }
 
-type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry;
+interface PdfGradientFillEntry {
+  type: "gradientFill";
+  node: RendererNode;
+  source: NodePaintSource;
+  gradient: NodePaintGradient;
+  stops: NodePaintStop[];
+  x: number;
+  y: number;
+  pageHeight: number;
+  shadingName?: string;
+  shadingId?: number;
+  graphicsStateName?: string;
+  graphicsStateId?: number;
+}
+
+type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientFillEntry;
 
 interface ArtifactBounds {
   minX: number;
@@ -76,10 +91,15 @@ interface ArtifactBounds {
   maxY: number;
 }
 
-interface SvgFillGradient {
+interface FillGradient {
   source: NodePaintSource;
   gradient: NodePaintGradient;
   stops: NodePaintStop[];
+}
+
+interface PdfGradientStop {
+  offset: number;
+  rgb: [number, number, number];
 }
 
 function formatNumber(value: number) {
@@ -347,7 +367,7 @@ function gradientStopPercent(value: number) {
   return `${formatNumber(clampUnit(value) * 100)}%`;
 }
 
-function svgFillGradientForNode(node: RendererNode): SvgFillGradient | null {
+function fillGradientForNode(node: RendererNode): FillGradient | null {
   if (node.kind === "group" || node.content.type === "text") {
     return null;
   }
@@ -375,7 +395,7 @@ function svgGradientStopLine(source: NodePaintSource, stop: NodePaintStop) {
 }
 
 function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
-  const fillGradient = svgFillGradientForNode(node);
+  const fillGradient = fillGradientForNode(node);
   if (!fillGradient) {
     return [];
   }
@@ -402,7 +422,7 @@ function svgGradientLinesForTree(node: RendererNode, depth: number): string[] {
 
 function svgFillAttributeForNode(node: RendererNode) {
   const fill = escapeSvgText(node.style.fill);
-  const fillGradient = svgFillGradientForNode(node);
+  const fillGradient = fillGradientForNode(node);
   if (!fillGradient) {
     return `fill="${fill}"`;
   }
@@ -672,6 +692,106 @@ function pdfRgbOperands(rgb: [number, number, number] | null) {
     .join(" ");
 }
 
+function pdfRgbForColor(value: string): [number, number, number] | null {
+  const match = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const hex = match[1];
+  if (hex.length === 3) {
+    return hex.split("").map((channel) => Number.parseInt(`${channel}${channel}`, 16)) as [number, number, number];
+  }
+  return [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16)) as [number, number, number];
+}
+
+function pdfColorArray(rgb: [number, number, number]) {
+  return `[${pdfRgbOperands(rgb)}]`;
+}
+
+function pdfGradientStops(stops: NodePaintStop[]) {
+  const byOffset = new Map<number, PdfGradientStop>();
+  for (const stop of stops) {
+    const rgb = pdfRgbForColor(stop.color);
+    if (!rgb) {
+      return null;
+    }
+    byOffset.set(clampUnit(stop.offset), { offset: clampUnit(stop.offset), rgb });
+  }
+
+  const sortedStops = [...byOffset.values()].sort((left, right) => left.offset - right.offset);
+  if (sortedStops.length < 2) {
+    return null;
+  }
+
+  const firstStop = sortedStops[0];
+  const lastStop = sortedStops[sortedStops.length - 1];
+  const normalizedStops = [...sortedStops];
+  if (firstStop.offset > 0) {
+    normalizedStops.unshift({ ...firstStop, offset: 0 });
+  }
+  if (lastStop.offset < 1) {
+    normalizedStops.push({ ...lastStop, offset: 1 });
+  }
+  return normalizedStops;
+}
+
+function pdfFillGradientForNode(node: RendererNode): FillGradient | null {
+  const fillGradient = fillGradientForNode(node);
+  if (!fillGradient || !pdfGradientStops(fillGradient.stops)) {
+    return null;
+  }
+  return fillGradient;
+}
+
+function pdfGradientFunction(stops: PdfGradientStop[]) {
+  if (stops.length === 2) {
+    return `<< /FunctionType 2 /Domain [0 1] /C0 ${pdfColorArray(stops[0].rgb)} /C1 ${pdfColorArray(stops[1].rgb)} /N 1 >>`;
+  }
+
+  const functions = stops.slice(0, -1).map((stop, index) => {
+    const nextStop = stops[index + 1];
+    return `<< /FunctionType 2 /Domain [0 1] /C0 ${pdfColorArray(stop.rgb)} /C1 ${pdfColorArray(nextStop.rgb)} /N 1 >>`;
+  });
+  const bounds = stops
+    .slice(1, -1)
+    .map((stop) => formatNumber(stop.offset))
+    .join(" ");
+  const encode = functions.map(() => "0 1").join(" ");
+  return `<< /FunctionType 3 /Domain [0 1] /Functions [${functions.join(" ")}] /Bounds [${bounds}] /Encode [${encode}] >>`;
+}
+
+function gradientCoordinateUnit(value: number | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function pdfGradientCoords(entry: PdfGradientFillEntry) {
+  const width = Math.max(1, Math.round(entry.node.size.width));
+  const height = Math.max(1, Math.round(entry.node.size.height));
+  const start = entry.gradient.start ?? { x: 0, y: 0 };
+  const end = entry.gradient.end ?? { x: 1, y: 0 };
+  const x1 = entry.x + width * gradientCoordinateUnit(start.x, 0);
+  const y1 = entry.pageHeight - entry.y - height * gradientCoordinateUnit(start.y, 0);
+  const x2 = entry.x + width * gradientCoordinateUnit(end.x, 1);
+  const y2 = entry.pageHeight - entry.y - height * gradientCoordinateUnit(end.y, 0);
+  return [x1, y1, x2, y2].map(formatNumber).join(" ");
+}
+
+function pdfGradientShadingObject(entry: PdfGradientFillEntry) {
+  const stops = pdfGradientStops(entry.stops) ?? [
+    { offset: 0, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] },
+    { offset: 1, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] }
+  ];
+  return `<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [${pdfGradientCoords(entry)}] /Function ${pdfGradientFunction(
+    stops
+  )} /Extend [true true] >>`;
+}
+
+function pdfGradientFillOpacity(entry: PdfGradientFillEntry) {
+  const opacity = typeof entry.source.opacity === "number" && Number.isFinite(entry.source.opacity) ? clampUnit(entry.source.opacity) : 1;
+  return opacity < 1 ? opacity : null;
+}
+
 function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: number, y: number) {
   if (!nodeClipsToBounds(node)) {
     return null;
@@ -703,24 +823,49 @@ function pdfClipOpacityForNode(node: RendererNode) {
   return opacity < 1 ? opacity : null;
 }
 
+function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  if (!node.style.stroke || node.style.stroke_width <= 0) {
+    return [];
+  }
+
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const pdfY = pageHeight - y - height;
+  return [
+    "q",
+    `${pdfColorOperands(node.style.stroke)} RG`,
+    `${formatNumber(Math.max(0, node.style.stroke_width))} w`,
+    `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    "S",
+    "Q"
+  ];
+}
+
 function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
   const pdfY = pageHeight - y - height;
-  const commands = ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q"];
+  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q", ...pdfStrokeCommands(node, pageHeight, x, y)];
+}
 
-  if (node.style.stroke && node.style.stroke_width > 0) {
-    commands.push(
-      "q",
-      `${pdfColorOperands(node.style.stroke)} RG`,
-      `${formatNumber(Math.max(0, node.style.stroke_width))} w`,
-      `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`,
-      "S",
-      "Q"
-    );
+function pdfGradientFillCommands(entry: PdfGradientFillEntry) {
+  if (!entry.shadingName) {
+    return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
   }
 
-  return commands;
+  const width = Math.max(1, Math.round(entry.node.size.width));
+  const height = Math.max(1, Math.round(entry.node.size.height));
+  const pdfY = entry.pageHeight - entry.y - height;
+  const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
+  return [
+    "q",
+    `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    "W",
+    "n",
+    graphicsState,
+    `/${entry.shadingName} sh`,
+    "Q"
+  ].filter(Boolean);
 }
 
 function pdfTextCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -1005,7 +1150,16 @@ function collectPdfEntries(
   } else if (imageAsset) {
     entries.push({ type: "image", node, asset: imageAsset, x, y, pageHeight });
   } else if (node.kind !== "group") {
-    entries.push({ type: "commands", commands: pdfRectCommands(node, pageHeight, x, y) });
+    const fillGradient = pdfFillGradientForNode(node);
+    if (fillGradient) {
+      entries.push({ type: "gradientFill", node, ...fillGradient, x, y, pageHeight });
+      const strokeCommands = pdfStrokeCommands(node, pageHeight, x, y);
+      if (strokeCommands.length > 0) {
+        entries.push({ type: "commands", commands: strokeCommands });
+      }
+    } else {
+      entries.push({ type: "commands", commands: pdfRectCommands(node, pageHeight, x, y) });
+    }
   }
 
   for (const child of node.children) {
@@ -1047,6 +1201,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
       if (entry.type === "shadow") {
         return pdfShadowCommands(entry);
       }
+      if (entry.type === "gradientFill") {
+        return pdfGradientFillCommands(entry);
+      }
       return pdfImageCommands(entry);
     }),
     ""
@@ -1058,7 +1215,7 @@ function encodePdfPart(part: PdfPart) {
 }
 
 function concatPdfParts(parts: Uint8Array[]) {
-  const length = parts.reduce((total, part) => total + part.length, 0);
+  const length = parts.reduce((total, part) => total.length + part.length, 0);
   const output = new Uint8Array(length);
   let offset = 0;
   for (const part of parts) {
@@ -1186,6 +1343,17 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
+  const gradientEntries = entries.filter((entry): entry is PdfGradientFillEntry => entry.type === "gradientFill");
+  gradientEntries.forEach((entry, index) => {
+    entry.shadingName = `Sh${index + 1}`;
+    entry.shadingId = addPdfObject(objects, pdfGradientShadingObject(entry));
+    const opacity = pdfGradientFillOpacity(entry);
+    if (typeof opacity === "number") {
+      entry.graphicsStateName = `PaintGs${index + 1}`;
+      entry.graphicsStateId = addPdfObject(objects, `<< /Type /ExtGState /ca ${formatNumber(opacity)} /CA ${formatNumber(opacity)} >>`);
+    }
+  });
+
   const content = contentForPdfEntries(entries);
   const contentBytes = new TextEncoder().encode(content);
   const embeddedFileNames = imageEntries
@@ -1196,11 +1364,18 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     .filter((entry) => entry.xObjectName && entry.xObjectId)
     .map((entry) => `/${entry.xObjectName} ${entry.xObjectId} 0 R`);
   const xObjectClause = xObjectEntries.length > 0 ? ` /XObject << ${xObjectEntries.join(" ")} >>` : "";
+  const shadingEntries = gradientEntries
+    .filter((entry) => entry.shadingName && entry.shadingId)
+    .map((entry) => `/${entry.shadingName} ${entry.shadingId} 0 R`);
+  const shadingClause = shadingEntries.length > 0 ? ` /Shading << ${shadingEntries.join(" ")} >>` : "";
   const extGStateEntries = [
     ...shadowEntries
       .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
       .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
     ...clipOpacityEntries
+      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
+      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
+    ...gradientEntries
       .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
       .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`)
   ];
@@ -1211,7 +1386,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
   setPdfObject(
     objects,
     pageId,
-    `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontId} 0 R >>${xObjectClause}${extGStateClause} >> /Contents ${contentId} 0 R >>`
+    `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontId} 0 R >>${xObjectClause}${shadingClause}${extGStateClause} >> /Contents ${contentId} 0 R >>`
   );
   setPdfObject(objects, contentId, [`<< /Length ${contentBytes.length} >>\nstream\n`, contentBytes, "endstream"]);
   setPdfObject(objects, infoId, `<< /Title (${escapedName}) /Subject (${escapedNodeId}) /Creator (Layo) >>`);
