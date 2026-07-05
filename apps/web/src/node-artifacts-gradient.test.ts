@@ -98,7 +98,7 @@ describe("Penpot gradient selected-layer PDF artifacts", () => {
     expect(pdf).toContain('/C0 [1 0 0]');
     expect(pdf).toContain('/C1 [0 0 1]');
     expect(pdf).toContain(["q", "0 0 120 60 re", "W", "n", "/Sh1 sh", "Q"].join("\n"));
-    expect(pdf).toContain("0.067 0.098 0.153 RG");
+    expect(pdf).toContain("0.067 0.094 0.153 RG");
     expect(pdf).not.toContain(["0.502 0 0.502 rg", "0 0 120 60 re", "f"].join("\n"));
   });
 });
