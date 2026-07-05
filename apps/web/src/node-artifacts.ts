@@ -356,7 +356,7 @@ function svgShadowFilterAttribute(node: RendererNode) {
 }
 
 function svgGradientIdForNode(node: RendererNode, source: NodePaintSource) {
-  return `layo-gradient-${safeSvgIdSuffix(node.id)}-${source.index}`;
+  return `layo-gradient-${safeSvgIdSuffix(node.id)}-${source.kind}-${source.index}`;
 }
 
 function gradientCoordinatePercent(value: number | undefined) {
