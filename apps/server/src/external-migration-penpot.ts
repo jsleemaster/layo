@@ -372,7 +372,7 @@ function mapPenpotShape(
     style: {
       fill,
       stroke,
-      stroke_width: stroke ? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "strokes")) ?? {}, "strokeWidth", "stroke-width", "width"), 1) : 0,
+      stroke_width: stroke ? penpotStrokeWidth(shape.json) : 0,
       opacity
     },
     content: mapsAsImage && imageAsset
@@ -839,6 +839,15 @@ function penpotSolidStrokePaint(shape: JsonRecord): PenpotSolidFillPaint | null 
 
 function penpotStrokeColor(shape: JsonRecord): string | null {
   return penpotSolidStrokePaint(shape)?.color ?? null;
+}
+
+function penpotStrokeWidth(shape: JsonRecord): number {
+  const strokeRecords = recordsFor(valueFor(shape, "strokes"));
+  const widthSources = strokeRecords.length > 0 ? strokeRecords : [shape];
+  const widths = widthSources
+    .map((stroke) => finiteNumber(valueFor(stroke, "strokeWidth", "stroke-width", "width"), Number.NaN))
+    .filter((width) => Number.isFinite(width) && width >= 0);
+  return widths.length > 0 ? Math.max(...widths) : 1;
 }
 
 function firstRecord(value: unknown): JsonRecord | null {
