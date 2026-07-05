@@ -13,8 +13,11 @@ const pageId = "22222222-2222-2222-2222-222222222222";
 const frameId = "33333333-3333-3333-3333-333333333333";
 const strokeStackRectId = "12121212-1212-1212-1212-121212121212";
 const differentWidthStrokeRectId = "13131313-1313-1313-1313-131313131313";
+const mixedGradientStrokeRectId = "14141414-1414-1414-1414-141414141414";
 const expectedStrokeStackColor = "#800080";
 const expectedDifferentWidthStrokeWidth = 8;
+const expectedMixedGradientStrokeColor = "#804040";
+const expectedMixedGradientStrokeWidth = 6;
 
 async function openFilePanel(page: Page) {
   await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
@@ -66,10 +69,10 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           type: "frame",
           x: 40,
           y: 64,
-          width: 320,
+          width: 440,
           height: 160,
           fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
-          shapes: [strokeStackRectId, differentWidthStrokeRectId]
+          shapes: [strokeStackRectId, differentWidthStrokeRectId, mixedGradientStrokeRectId]
         }),
         "utf8"
       )
@@ -113,6 +116,35 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
         }),
         "utf8"
       )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${mixedGradientStrokeRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: mixedGradientStrokeRectId,
+          name: "Mixed gradient stroke card",
+          type: "rect",
+          x: 304,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
+          strokes: [
+            { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": expectedMixedGradientStrokeWidth },
+            {
+              "stroke-color-gradient": {
+                stops: [
+                  { color: "#00ff00", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "stroke-opacity": 1,
+              "stroke-width": expectedMixedGradientStrokeWidth
+            }
+          ]
+        }),
+        "utf8"
+      )
     }
   ]);
 }
@@ -134,6 +166,7 @@ test("file panel imports a Penpot solid stroke stack as a flattened visible stro
   await expect(page.getByTestId("project-name")).toHaveValue("Penpot Multi Stroke Board");
   await expect(page.getByTestId("layer-panel")).toContainText("Layered stroke card");
   await expect(page.getByTestId("layer-panel")).toContainText("Wide layered stroke card");
+  await expect(page.getByTestId("layer-panel")).toContainText("Mixed gradient stroke card");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
   const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
@@ -161,6 +194,18 @@ test("file panel imports a Penpot solid stroke stack as a flattened visible stro
       fill: "#ffffff",
       stroke: expectedStrokeStackColor,
       stroke_width: expectedDifferentWidthStrokeWidth,
+      opacity: 1
+    }
+  });
+  const mixedGradientStrokeStack = frame.children[2];
+  expect(mixedGradientStrokeStack).toMatchObject({
+    id: `penpot-${mixedGradientStrokeRectId}`,
+    kind: "rectangle",
+    name: "Mixed gradient stroke card",
+    style: {
+      fill: "#ffffff",
+      stroke: expectedMixedGradientStrokeColor,
+      stroke_width: expectedMixedGradientStrokeWidth,
       opacity: 1
     }
   });
