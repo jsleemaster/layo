@@ -105,6 +105,37 @@ export interface NodeClip {
   source?: NodeClipSource;
 }
 
+export interface NodePaintPoint {
+  x: number;
+  y: number;
+}
+
+export interface NodePaintStop {
+  color: string;
+  opacity: number;
+  offset: number;
+}
+
+export interface NodePaintGradient {
+  type?: string;
+  start?: NodePaintPoint;
+  end?: NodePaintPoint;
+  width?: number;
+  stops?: NodePaintStop[];
+}
+
+export interface NodePaintSource {
+  origin: "penpot";
+  kind: "fill" | "stroke";
+  paintType: "solid" | "gradient" | "image";
+  index: number;
+  color?: string;
+  opacity?: number;
+  blendMode?: string;
+  imageId?: string;
+  gradient?: NodePaintGradient;
+}
+
 export type ImageFitMode = "fill" | "fit";
 export type TextWritingMode = "horizontal_tb" | "vertical_rl" | "vertical_lr";
 export type TextOrientation = "mixed" | "upright" | "sideways";
@@ -142,6 +173,7 @@ export interface RendererNode {
     effect_shadows?: string[] | null;
     effect_shadow_token?: string | null;
     effect_shadow_style?: string | null;
+    paint_sources?: NodePaintSource[] | null;
   };
   content:
     | { type: "empty" }
