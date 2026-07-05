@@ -28,12 +28,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-frame-stroke-image-assets.md`; deployment remains intentionally deferred. |
+| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-frame-dual-image-paints.md`; deployment remains intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-frame-dual-image-paints.md` | Completed | Adapts a Penpot frame that has both packaged `fill-image` and packaged `stroke-image` records by preserving both referenced assets as deterministic frame image children before foreground layers. RED Full Verification #28727329333 failed in Core tests because the new dual image-paint cases received `mappedNodeCount: 3` and HTTP `assetCount: 1`; GREEN Full Verification #28727453802 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e with the new spec included at `[158/174]` and `174 passed (5.8m)`. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-frame-stroke-image-assets.md` | Completed | Adapts packaged Penpot frame `stroke-image` records by preserving the referenced image as a deterministic frame image child in local asset storage while keeping foreground children intact. RED Full Verification #28726006772 failed on `mappedNodeCount: 2` instead of 3 and HTTP `assetCount: 0`; GREEN Full Verification #28726205968 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e with the new spec included at `[157/173]` and `173 passed (5.5m)`. Storage Restore Drill #28726205973 and Storage Backup Retention #28726205979 passed for the same head. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-stroke-image-assets.md` | Completed | Adapts packaged Penpot rect `stroke-image` records by preserving the referenced image as a Layo image node in local asset storage. RED Full Verification #28725171703 failed on `importedAssets` length 0 and HTTP `assetCount: 0`; GREEN Full Verification #28725424332 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e with the new spec included at `[158/172]`. Storage Restore Drill #28725424329 and Storage Backup Retention #28725424333 passed for the same head. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-mixed-gradient-stroke-stack.md` | Completed | Adds server, HTTP persistence, and Playwright CLI coverage for a Penpot stroke stack mixing a front solid red stroke with a back `stroke-color-gradient` record. Full Verification #28724576060 passed, confirming the existing importer flattens the stack to `style.stroke: #804040` with `stroke_width: 6`; no importer code change was needed. Deployment remains intentionally deferred. |
