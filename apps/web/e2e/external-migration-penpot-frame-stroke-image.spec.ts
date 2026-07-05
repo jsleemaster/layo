@@ -14,12 +14,20 @@ const frameId = "33333333-3333-3333-3333-333333333333";
 const foregroundRectId = "24242424-2424-2424-2424-242424242424";
 const frameStrokeImageMediaId = "25252525-2525-2525-2525-252525252525";
 const frameStrokeImageStorageObjectId = "26262626-2626-2626-2626-262626262626";
+const frameFillImageMediaId = "27272727-2727-2727-2727-272727272727";
+const frameFillImageStorageObjectId = "28282828-2828-2828-2828-282828282828";
 const expectedFrameStrokeImageAssetId = `penpot-asset-${frameStrokeImageMediaId}`;
 const expectedFrameStrokeImageNodeId = `penpot-${frameId}-stroke-image`;
+const expectedFrameFillImageAssetId = `penpot-asset-${frameFillImageMediaId}`;
+const expectedFrameFillImageNodeId = `penpot-${frameId}-fill-image`;
 const pngImage = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
   "base64"
 );
+
+interface FrameStrokeImageArchiveOptions {
+  includeFrameFillImage?: boolean;
+}
 
 async function openFilePanel(page: Page) {
   await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
@@ -41,7 +49,22 @@ async function createProjectFromEmptyState(page: Page) {
   expect(projectId).not.toBe("sample-project");
 }
 
-function createPenpotFrameStrokeImageExportArchive(): Buffer {
+function createPenpotFrameStrokeImageExportArchive(options: FrameStrokeImageArchiveOptions = {}): Buffer {
+  const frameFills = options.includeFrameFillImage
+    ? [
+        {
+          "fill-image": {
+            id: frameFillImageMediaId,
+            name: "frame-background-texture.png",
+            width: 1,
+            height: 1,
+            mtype: "image/png"
+          },
+          "fill-opacity": 0.35
+        }
+      ]
+    : [{ "fill-color": "#ffffff", "fill-opacity": 1 }];
+
   return createZipArchive([
     {
       path: "manifest.json",
@@ -73,7 +96,7 @@ function createPenpotFrameStrokeImageExportArchive(): Buffer {
           y: 64,
           width: 240,
           height: 160,
-          fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
+          fills: frameFills,
           strokes: [
             {
               "stroke-image": {
@@ -138,7 +161,41 @@ function createPenpotFrameStrokeImageExportArchive(): Buffer {
     {
       path: `objects/${frameStrokeImageStorageObjectId}.png`,
       data: pngImage
-    }
+    },
+    ...(options.includeFrameFillImage
+      ? [
+          {
+            path: `files/${fileId}/media/${frameFillImageMediaId}.json`,
+            data: Buffer.from(
+              JSON.stringify({
+                id: frameFillImageMediaId,
+                name: "frame-background-texture.png",
+                width: 1,
+                height: 1,
+                mtype: "image/png",
+                mediaId: frameFillImageStorageObjectId
+              }),
+              "utf8"
+            )
+          },
+          {
+            path: `objects/${frameFillImageStorageObjectId}.json`,
+            data: Buffer.from(
+              JSON.stringify({
+                id: frameFillImageStorageObjectId,
+                size: pngImage.length,
+                contentType: "image/png",
+                bucket: "file-media"
+              }),
+              "utf8"
+            )
+          },
+          {
+            path: `objects/${frameFillImageStorageObjectId}.png`,
+            data: pngImage
+          }
+        ]
+      : [])
   ]);
 }
 
@@ -196,4 +253,79 @@ test("file panel imports a Penpot frame stroke-image record as a packaged backgr
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFrameStrokeImageAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();
   expect(await assetResponse.body()).toEqual(pngImage);
+});
+
+test("file panel imports Penpot frame fill-image and stroke-image records as separate packaged image layers", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const penpotZipPath = testInfo.outputPath("frame-dual-image-paints.penpot");
+  await writeFile(penpotZipPath, createPenpotFrameStrokeImageExportArchive({ includeFrameFillImage: true }));
+
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  const review = page.getByTestId("external-migration-review");
+  await expect(review).toContainText("Penpot");
+  await expect(review).toContainText("가져오기 가능");
+  await expect(page.getByTestId("external-migration-status")).toContainText("외부 디자인 검토됨");
+
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("external-migration-status")).toContainText("Penpot Frame Stroke Image Board 가져옴");
+  await expect(page.getByTestId("project-status")).toContainText("Penpot Frame Stroke Image Board 가져옴");
+  await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board");
+  await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board background");
+  await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board stroke image");
+  await expect(page.getByTestId("layer-panel")).toContainText("Foreground card");
+
+  const importedProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const projectPayload = await projectResponse.json();
+  const fileResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}`
+  );
+  expect(fileResponse.ok()).toBeTruthy();
+  const filePayload = await fileResponse.json();
+  const frame = filePayload.file.pages[0].children[0];
+  expect(frame.children).toHaveLength(3);
+  const fillImageNode = frame.children[0];
+  const strokeImageNode = frame.children[1];
+  const foregroundNode = frame.children[2];
+
+  expect(fillImageNode).toMatchObject({
+    id: expectedFrameFillImageNodeId,
+    kind: "image",
+    name: "Frame stroke image board background",
+    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.35 },
+    content: {
+      type: "image",
+      asset_id: expectedFrameFillImageAssetId,
+      natural_width: 1,
+      natural_height: 1,
+      fit_mode: "fill"
+    }
+  });
+  expect(strokeImageNode).toMatchObject({
+    id: expectedFrameStrokeImageNodeId,
+    kind: "image",
+    name: "Frame stroke image board stroke image",
+    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.55 },
+    content: {
+      type: "image",
+      asset_id: expectedFrameStrokeImageAssetId,
+      natural_width: 1,
+      natural_height: 1,
+      fit_mode: "fill"
+    }
+  });
+  expect(foregroundNode).toMatchObject({
+    id: `penpot-${foregroundRectId}`,
+    kind: "rectangle",
+    name: "Foreground card",
+    style: { fill: "#dbeafe", stroke: null, stroke_width: 0, opacity: 1 }
+  });
+
+  const fillAssetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFrameFillImageAssetId}`);
+  const strokeAssetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFrameStrokeImageAssetId}`);
+  expect(fillAssetResponse.ok()).toBeTruthy();
+  expect(strokeAssetResponse.ok()).toBeTruthy();
+  expect(await fillAssetResponse.body()).toEqual(pngImage);
+  expect(await strokeAssetResponse.body()).toEqual(pngImage);
 });
