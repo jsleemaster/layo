@@ -68,7 +68,7 @@ interface PdfImageEntry {
 }
 
 interface PdfGradientFillEntry {
-  type: "gradientFill";
+  type: \"gradientFill\";
   node: RendererNode;
   source: NodePaintSource;
   gradient: NodePaintGradient;
@@ -82,7 +82,24 @@ interface PdfGradientFillEntry {
   graphicsStateId?: number;
 }
 
-type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientFillEntry;
+interface PdfGradientStrokeEntry {
+  type: \"gradientStroke\";
+  node: RendererNode;
+  source: NodePaintSource;
+  gradient: NodePaintGradient;
+  stops: NodePaintStop[];
+  x: number;
+  y: number;
+  pageHeight: number;
+  shadingName?: string;
+  shadingId?: number;
+  graphicsStateName?: string;
+  graphicsStateId?: number;
+}
+
+type PdfGradientPaintEntry = PdfGradientFillEntry | PdfGradientStrokeEntry;
+
+type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientPaintEntry;
 
 interface ArtifactBounds {
   minX: number;
