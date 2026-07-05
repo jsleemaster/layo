@@ -30,6 +30,9 @@ import {
   type NodeExportPreset,
   type NodeLayout,
   type NodeLayoutItem,
+  type NodePaintGradient,
+  type NodePaintSource,
+  type NodePaintStop,
   type RendererDocument,
   type RendererNode,
   type TextOrientation,
@@ -318,6 +321,110 @@ function konvaShadowPropsForLayer(layer: ParsedEffectShadowLayer): Record<string
     shadowOffsetY: layer.offsetY,
     shadowBlur: layer.blur,
     shadowColor: layer.color
+  };
+}
+
+type CanvasPoint = { x: number; y: number };
+
+type CanvasLinearGradientProps = {
+  fillPriority?: "linear-gradient";
+  fillLinearGradientStartPoint?: CanvasPoint;
+  fillLinearGradientEndPoint?: CanvasPoint;
+  fillLinearGradientColorStops?: Array<number | string>;
+  strokeLinearGradientStartPoint?: CanvasPoint;
+  strokeLinearGradientEndPoint?: CanvasPoint;
+  strokeLinearGradientColorStops?: Array<number | string>;
+};
+
+function clampCanvasGradientUnit(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function canvasGradientCoordinate(value: number | undefined, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? clampCanvasGradientUnit(value) : fallback;
+}
+
+function canvasGradientPoint(
+  point: NodePaintGradient["start"] | undefined,
+  node: RendererNode,
+  fallback: CanvasPoint
+): CanvasPoint {
+  return {
+    x: node.size.width * canvasGradientCoordinate(point?.x, fallback.x),
+    y: node.size.height * canvasGradientCoordinate(point?.y, fallback.y)
+  };
+}
+
+function canvasGradientStopColor(source: NodePaintSource, stop: NodePaintStop) {
+  const opacity = clampCanvasGradientUnit(stop.opacity * (source.opacity ?? 1));
+  if (opacity >= 1) {
+    return stop.color;
+  }
+
+  const hexMatch = stop.color.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!hexMatch) {
+    return stop.color;
+  }
+
+  const hex = hexMatch[1];
+  const channels =
+    hex.length === 3
+      ? hex.split("").map((channel) => Number.parseInt(`${channel}${channel}`, 16))
+      : [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+  return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Math.round(opacity * 1000) / 1000})`;
+}
+
+function canvasGradientColorStops(source: NodePaintSource, stops: NodePaintStop[] | undefined) {
+  const normalizedStops = (stops ?? [])
+    .filter((stop) => Number.isFinite(stop.offset) && stop.color)
+    .sort((left, right) => left.offset - right.offset);
+  if (normalizedStops.length < 2) {
+    return null;
+  }
+  return normalizedStops.flatMap((stop) => [clampCanvasGradientUnit(stop.offset), canvasGradientStopColor(source, stop)]);
+}
+
+function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke") {
+  if (node.kind === "group" || node.content.type === "text") {
+    return null;
+  }
+
+  const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
+  for (const source of paintSources) {
+    const gradient = source.gradient;
+    const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+    const colorStops = canvasGradientColorStops(source, gradient?.stops);
+    if (source.kind === kind && source.paintType === "gradient" && type.includes("linear") && colorStops) {
+      return {
+        startPoint: canvasGradientPoint(gradient?.start, node, { x: 0, y: 0 }),
+        endPoint: canvasGradientPoint(gradient?.end, node, { x: 1, y: 0 }),
+        colorStops
+      };
+    }
+  }
+
+  return null;
+}
+
+function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
+  const fillGradient = canvasLinearGradientForNode(node, "fill");
+  const strokeGradient = canvasLinearGradientForNode(node, "stroke");
+  return {
+    ...(fillGradient
+      ? {
+          fillPriority: "linear-gradient" as const,
+          fillLinearGradientStartPoint: fillGradient.startPoint,
+          fillLinearGradientEndPoint: fillGradient.endPoint,
+          fillLinearGradientColorStops: fillGradient.colorStops
+        }
+      : {}),
+    ...(strokeGradient
+      ? {
+          strokeLinearGradientStartPoint: strokeGradient.startPoint,
+          strokeLinearGradientEndPoint: strokeGradient.endPoint,
+          strokeLinearGradientColorStops: strokeGradient.colorStops
+        }
+      : {})
   };
 }
 
@@ -3755,6 +3862,7 @@ function renderNode({
         strokeWidth={node.style.stroke_width}
         opacity={node.style.opacity}
         cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
+        {...canvasLinearGradientPropsForNode(node)}
         {...shadowProps}
       />
     );
