@@ -15,7 +15,7 @@ export interface NodeArtifactOptions {
 
 type PdfPart = string | Uint8Array;
 
-type ClippedRendererNode = RendererNode & { clip?: { type: "bounds" } | null };
+type ClippedRendererNode = RendererNode & { clip?: RendererNode["clip"] | null };
 
 interface PdfObject {
   parts: PdfPart[];
@@ -101,8 +101,33 @@ function svgNodeAttributes(node: RendererNode) {
   return `data-node-id="${escapeSvgText(node.id)}" data-node-name="${escapeSvgText(node.name)}" data-node-kind="${node.kind}"`;
 }
 
+function nodeClip(node: RendererNode) {
+  const clip = (node as ClippedRendererNode).clip;
+  return clip?.type === "bounds" ? clip : null;
+}
+
 function nodeClipsToBounds(node: RendererNode) {
-  return (node as ClippedRendererNode).clip?.type === "bounds";
+  return Boolean(nodeClip(node));
+}
+
+function svgClipPolygonPointsForNode(node: RendererNode) {
+  const source = nodeClip(node)?.source;
+  const points = source?.points;
+  const bounds = source?.bounds;
+  if (!points || points.length < 3 || !bounds || bounds.width <= 0 || bounds.height <= 0) {
+    return null;
+  }
+
+  const coordinates: string[] = [];
+  for (const point of points) {
+    const x = point.x - bounds.x;
+    const y = point.y - bounds.y;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      return null;
+    }
+    coordinates.push(`${formatNumber(x)},${formatNumber(y)}`);
+  }
+  return coordinates.join(" " );
 }
 
 function normalizedBase64(value: string) {
@@ -306,9 +331,13 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   }
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
+  const polygonPoints = svgClipPolygonPointsForNode(node);
+  const clipShape = polygonPoints
+    ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
+    : `<rect x="0" y="0" width="${width}" height="${height}" />`;
   return [
     indent(`<clipPath id="${clipPathIdForNode(node)}">`, depth),
-    indent(`<rect x="0" y="0" width="${width}" height="${height}" />`, depth + 1),
+    indent(clipShape, depth + 1),
     indent("</clipPath>", depth)
   ];
 }

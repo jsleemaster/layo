@@ -25,6 +25,29 @@ const clippedGroup: RendererNode = {
   ]
 };
 
+const polygonClippedGroup: RendererNode = {
+  ...clippedGroup,
+  id: "polygon-masked-group",
+  name: "Polygon masked group",
+  clip: {
+    type: "bounds",
+    source: {
+      origin: "penpot",
+      shapeId: "penpot-mask-shape",
+      name: "Diamond mask",
+      shapeType: "path",
+      bounds: { x: 10, y: 20, width: 100, height: 60 },
+      opacity: 0.72,
+      points: [
+        { x: 60, y: 20 },
+        { x: 110, y: 50 },
+        { x: 60, y: 80 },
+        { x: 10, y: 50 }
+      ]
+    }
+  }
+};
+
 describe("clipped node artifact exports", () => {
   test("renders selected clipped groups with bounded viewBox and SVG clipPath", () => {
     const svg = svgForNode(clippedGroup);
@@ -33,6 +56,18 @@ describe("clipped node artifact exports", () => {
     expect(svg).toContain('<clipPath id="layo-clip-masked-group">');
     expect(svg).toContain('<rect x="0" y="0" width="100" height="60" />');
     expect(svg).toContain('clip-path="url(#layo-clip-masked-group)"');
+    expect(svg).toContain('data-node-id="oversized-child"');
+    expect(svg).toContain('transform="translate(40 20)"');
+  });
+
+  test("renders Penpot polygon mask source points as SVG clipPath polygons", () => {
+    const svg = svgForNode(polygonClippedGroup);
+
+    expect(svg).toContain('viewBox="0 0 100 60"');
+    expect(svg).toContain('<clipPath id="layo-clip-polygon-masked-group">');
+    expect(svg).toContain('<polygon points="50,0 100,30 50,60 0,30" />');
+    expect(svg).not.toContain('<rect x="0" y="0" width="100" height="60" />');
+    expect(svg).toContain('clip-path="url(#layo-clip-polygon-masked-group)"');
     expect(svg).toContain('data-node-id="oversized-child"');
     expect(svg).toContain('transform="translate(40 20)"');
   });
