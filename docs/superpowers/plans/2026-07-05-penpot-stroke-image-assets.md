@@ -42,5 +42,15 @@ local asset storage and imported document tree.
 
 ## Verification Log
 
-- RED Full Verification is pending for this branch.
+- RED Full Verification #28725171703 failed as expected. Core tests showed
+  `imported.importedAssets` length `0` instead of `1`, and HTTP import returned
+  `assetCount: 0` instead of `1`.
+- GREEN Full Verification #28725424332 passed Penpot maturity/design gates,
+  typecheck, web build, Core tests, and Playwright CLI e2e after the importer
+  mapped rect `stroke-image` records through the packaged asset path.
+- The GREEN Playwright CLI log included
+  `apps/web/e2e/external-migration-penpot-stroke-image.spec.ts` at `[158/172]`
+  and finished with `172 passed (5.6m)`.
+- Storage Restore Drill #28725424329 and Storage Backup Retention #28725424333
+  passed for the same GREEN head.
 - Deployment remains intentionally deferred for this loop.
