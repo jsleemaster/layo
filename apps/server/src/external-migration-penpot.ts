@@ -3,8 +3,8 @@ import type {
   ExternalMigrationImportedAsset,
   ExternalMigrationImportResult,
   ExternalMigrationReviewOptions
-} from "./external-migration.js";
-import type { DesignFile, DesignNode, ImageFitMode } from "./storage.js";
+} from './external-migration.js';
+import type { DesignFile, DesignNode, ImageFitMode } from './storage.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -77,15 +77,15 @@ interface RgbaColor {
 }
 
 const ASSET_MEDIA_TYPES = new Map<string, string>([
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".webp", "image/webp"],
-  [".gif", "image/gif"],
-  [".svg", "image/svg+xml"],
-  [".avif", "image/avif"]
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+  ['.svg', 'image/svg+xml'],
+  ['.avif', 'image/avif']
 ]);
-const IMPORTABLE_IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+const IMPORTABLE_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function reviewPenpotZipEntries(
@@ -108,9 +108,9 @@ export function importPenpotZipEntries(
   entries: Map<string, Buffer>,
   options: { fileId?: string; name?: string; fileName?: string } = {}
 ): ExternalMigrationImportResult {
-  const penpotPackage = readPenpotPackage(entries, { fileName: options.fileName, sourceHint: "penpot" });
+  const penpotPackage = readPenpotPackage(entries, { fileName: options.fileName, sourceHint: 'penpot' });
   if (!penpotPackage || penpotPackage.pages.length === 0) {
-    throw inputValidationError("Penpot ZIP export does not contain importable pages.");
+    throw inputValidationError('Penpot ZIP export does not contain importable pages.');
   }
 
   const state: PenpotMappingState = {
@@ -127,14 +127,14 @@ export function importPenpotZipEntries(
   }));
   const fileName = normalizeImportName(options.name, penpotPackage.fileName);
   const file: DesignFile = {
-    id: safeStorageId(options.fileId, "penpot-import"),
+    id: safeStorageId(options.fileId, 'penpot-import'),
     name: fileName,
     pages
   };
 
   return {
-    source: "penpot",
-    sourceLabel: "Penpot",
+    source: 'penpot',
+    sourceLabel: 'Penpot',
     file,
     importedAssets: [...state.usedAssets.values()].map((asset) => ({ metadata: asset.metadata, data: asset.data })),
     mappedNodeCount: state.mappedNodeCount,
@@ -147,7 +147,7 @@ function readPenpotPackage(
   entries: Map<string, Buffer>,
   options: ExternalMigrationReviewOptions = {}
 ): PenpotPackage | null {
-  const manifest = parseJsonEntry(entries, "manifest.json");
+  const manifest = parseJsonEntry(entries, 'manifest.json');
   if (!isPenpotExportManifest(manifest)) {
     return null;
   }
@@ -162,9 +162,9 @@ function readPenpotPackage(
   const filePath = `files/${fileId}.json`;
   const fileJson = asRecord(parseJsonEntry(entries, filePath)) ?? {};
   const fileName =
-    normalizeImportName(options.fileName, stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? "Imported Penpot");
+    normalizeImportName(options.fileName, stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? 'Imported Penpot');
   const pages = readPenpotPages(entries, fileId);
-  const warnings = pages.length === 0 ? ["Penpot ZIP export did not contain readable page JSON entries."] : [];
+  const warnings = pages.length === 0 ? ['Penpot ZIP export did not contain readable page JSON entries.'] : [];
   const mediaById = readPenpotMedia(entries, fileId, warnings);
   const totalShapeCount = pages.reduce((total, page) => total + page.shapesById.size, 0);
   const documentCandidates: ExternalMigrationDocumentCandidate[] = [
@@ -225,7 +225,7 @@ function readPenpotShapes(
   pageJson: JsonRecord
 ): Map<string, PenpotShape> {
   const shapesById = new Map<string, PenpotShape>();
-  const objects = valueFor(pageJson, "objects");
+  const objects = valueFor(pageJson, 'objects');
   if (isRecord(objects)) {
     for (const [fallbackId, value] of Object.entries(objects)) {
       const shape = normalizePenpotShape(value, fallbackId);
@@ -235,7 +235,7 @@ function readPenpotShapes(
     }
   }
 
-  const inlineShapes = valueFor(pageJson, "shapes", "children");
+  const inlineShapes = valueFor(pageJson, 'shapes', 'children');
   if (Array.isArray(inlineShapes)) {
     for (const value of inlineShapes) {
       const shape = normalizePenpotShape(value);
@@ -265,15 +265,15 @@ function normalizePenpotShape(value: unknown, fallbackId?: string): PenpotShape 
   if (!isRecord(value)) {
     return null;
   }
-  const id = stringValue(valueFor(value, "id")) ?? fallbackId;
+  const id = stringValue(valueFor(value, 'id')) ?? fallbackId;
   if (!id) {
     return null;
   }
-  const type = normalizeShapeType(stringValue(valueFor(value, "type", "shapeType", "shape-type")));
+  const type = normalizeShapeType(stringValue(valueFor(value, 'type', 'shapeType', 'shape-type')));
   return {
     id,
-    name: stringValue(valueFor(value, "name")) ?? type ?? id,
-    type: type ?? "unknown",
+    name: stringValue(valueFor(value, 'name')) ?? type ?? id,
+    type: type ?? 'unknown',
     bounds: boundsForShape(value),
     childIds: childIdsForShape(value),
     json: value
@@ -312,7 +312,7 @@ function mapPenpotShape(
     return null;
   }
 
-  if (shape.type !== "frame" && shape.type !== "rect" && shape.type !== "text" && shape.type !== "image") {
+  if (shape.type !== 'frame' && shape.type !== 'rect' && shape.type !== 'text' && shape.type !== 'image') {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped unsupported Penpot shape type ${shape.type} (${shape.name}).`);
     return null;
@@ -322,50 +322,51 @@ function mapPenpotShape(
   const strokeImageRecord = penpotStrokeImageRecordForShape(shape);
   const imageMediaId = imageMediaIdForShape(shape, fillImageRecord, strokeImageRecord);
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
-  if (shape.type === "image" && !imageAsset) {
+  if (shape.type === 'image' && !imageAsset) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot image shape ${shape.name} because its packaged asset was not found.`);
     return null;
   }
 
-  if (shape.type === "rect" && imageMediaId && !imageAsset) {
-    const imageKind = fillImageRecord ? "fill-image" : "stroke-image";
+  if (shape.type === 'rect' && imageMediaId && !imageAsset) {
+    const imageKind = fillImageRecord ? 'fill-image' : 'stroke-image';
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot ${imageKind} shape ${shape.name} because its packaged asset was not found.`);
     return null;
   }
 
-  if (shape.type === "frame" && imageMediaId && !imageAsset) {
-    state.warnings.push(`Skipped Penpot frame fill-image on ${shape.name} because its packaged asset was not found.`);
+  if (shape.type === 'frame' && imageMediaId && !imageAsset) {
+    const imageKind = fillImageRecord ? 'fill-image' : 'stroke-image';
+    state.warnings.push(`Skipped Penpot frame ${imageKind} on ${shape.name} because its packaged asset was not found.`);
   }
 
   const transform = {
     x: roundGeometry(shape.bounds.x - (parentBounds?.x ?? 0)),
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
-    rotation: finiteNumber(valueFor(shape.json, "rotation"), 0)
+    rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const mapsAsImage = Boolean(imageAsset) && shape.type !== "frame";
+  const mapsAsImage = Boolean(imageAsset) && shape.type !== 'frame';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
   const fill = mapsAsImage
-    ? "#f3f4f6"
+    ? '#f3f4f6'
     : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
   const imagePaintRecord = fillImageRecord ?? strokeImageRecord;
   const imagePaintOpacity = imagePaintRecord
-    ? finiteNumber(valueFor(imagePaintRecord, "fillOpacity", "fill-opacity", "strokeOpacity", "stroke-opacity", "opacity"), 1)
+    ? finiteNumber(valueFor(imagePaintRecord, 'fillOpacity', 'fill-opacity', 'strokeOpacity', 'stroke-opacity', 'opacity'), 1)
     : undefined;
   const opacity = finiteNumber(
-    valueFor(shape.json, "opacity"),
+    valueFor(shape.json, 'opacity'),
     mapsAsImage && imagePaintOpacity !== undefined
       ? imagePaintOpacity
-      : solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, "fills")) ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+      : solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, 'fills')) ?? {}, 'fillOpacity', 'fill-opacity', 'opacity'), 1)
   );
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
 
   const mapped: DesignNode = {
     id: nodeId,
-    kind: mapsAsImage ? "image" : shape.type === "frame" ? "frame" : shape.type === "text" ? "text" : "rectangle",
+    kind: mapsAsImage ? 'image' : shape.type === 'frame' ? 'frame' : shape.type === 'text' ? 'text' : 'rectangle',
     name: shape.name,
     transform,
     size: {
@@ -379,23 +380,23 @@ function mapPenpotShape(
       opacity
     },
     content: mapsAsImage && imageAsset
-      ? imageContentForAsset(imageAsset, "fill")
-      : shape.type === "text"
+      ? imageContentForAsset(imageAsset, 'fill')
+      : shape.type === 'text'
       ? {
-          type: "text",
-          value: stringValue(valueFor(shape.json, "content", "characters", "text")) ?? "",
-          font_size: finiteNumber(valueFor(shape.json, "fontSize", "font-size"), 16),
-          font_family: stringValue(valueFor(shape.json, "fontFamily", "font-family")) ?? "Inter"
+          type: 'text',
+          value: stringValue(valueFor(shape.json, 'content', 'characters', 'text')) ?? '',
+          font_size: finiteNumber(valueFor(shape.json, 'fontSize', 'font-size'), 16),
+          font_family: stringValue(valueFor(shape.json, 'fontFamily', 'font-family')) ?? 'Inter'
         }
-      : { type: "empty" },
+      : { type: 'empty' },
     children: []
   };
 
-  if (imageAsset && shape.type !== "frame") {
+  if (imageAsset && shape.type !== 'frame') {
     state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
   }
 
-  if (shape.type === "frame") {
+  if (shape.type === 'frame') {
     const nextVisiting = new Set(visiting);
     nextVisiting.add(shape.id);
     const mappedChildren = shape.childIds.flatMap((childId) => {
@@ -409,7 +410,10 @@ function mapPenpotShape(
       return mappedChild ? [mappedChild] : [];
     });
     if (imageAsset) {
-      mapped.children = [frameFillImageNode(shape, imageAsset), ...mappedChildren];
+      const frameImageNode = fillImageRecord
+        ? frameFillImageNode(shape, imageAsset, fillImageRecord)
+        : frameStrokeImageNode(shape, imageAsset, strokeImageRecord);
+      mapped.children = [frameImageNode, ...mappedChildren];
       state.mappedNodeCount += 1;
       state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
     } else {
@@ -438,9 +442,9 @@ function readPenpotMedia(
       warnings.push(`Skipped unreadable Penpot media metadata ${entryPath}.`);
       continue;
     }
-    const mediaId = stringValue(valueFor(media, "id")) ?? match[1];
-    const storageObjectId = stringValue(valueFor(media, "mediaId", "media-id", "objectId", "object-id"));
-    const mediaType = stringValue(valueFor(media, "mtype", "mimeType", "mime-type", "contentType", "content-type"));
+    const mediaId = stringValue(valueFor(media, 'id')) ?? match[1];
+    const storageObjectId = stringValue(valueFor(media, 'mediaId', 'media-id', 'objectId', 'object-id'));
+    const mediaType = stringValue(valueFor(media, 'mtype', 'mimeType', 'mime-type', 'contentType', 'content-type'));
     if (!mediaId || !storageObjectId || !mediaType || !IMPORTABLE_IMAGE_MEDIA_TYPES.has(mediaType)) {
       warnings.push(`Skipped unsupported Penpot media metadata ${entryPath}.`);
       continue;
@@ -456,15 +460,15 @@ function readPenpotMedia(
       continue;
     }
 
-    const declaredSize = positiveNumber(valueFor(storageObject.metadata, "size"));
+    const declaredSize = positiveNumber(valueFor(storageObject.metadata, 'size'));
     if (declaredSize && declaredSize !== storageObject.data.length) {
       warnings.push(`Skipped Penpot media ${mediaId} because storage object size does not match metadata.`);
       continue;
     }
 
     const dimensions = dimensionsForImage(storageObject.data, mediaType);
-    const naturalWidth = positiveNumber(valueFor(media, "width")) ?? dimensions?.width;
-    const naturalHeight = positiveNumber(valueFor(media, "height")) ?? dimensions?.height;
+    const naturalWidth = positiveNumber(valueFor(media, 'width')) ?? dimensions?.width;
+    const naturalHeight = positiveNumber(valueFor(media, 'height')) ?? dimensions?.height;
     const assetId = penpotAssetStorageId(mediaId);
     mediaById.set(mediaId, {
       mediaId,
@@ -474,7 +478,7 @@ function readPenpotMedia(
       naturalHeight,
       metadata: {
         assetId,
-        name: stringValue(valueFor(media, "name")) ?? fileNameForPath(storageObject.path),
+        name: stringValue(valueFor(media, 'name')) ?? fileNameForPath(storageObject.path),
         mimeType: mediaType,
         byteLength: storageObject.data.length,
         url: `/assets/${assetId}`
@@ -514,20 +518,20 @@ function findPenpotStorageObject(
 }
 
 function penpotFillImageRecordForShape(shape: PenpotShape): JsonRecord | null {
-  if (shape.type !== "rect" && shape.type !== "frame") {
+  if (shape.type !== 'rect' && shape.type !== 'frame') {
     return null;
   }
-  return recordsFor(valueFor(shape.json, "fills")).find((fillRecord) =>
-    Boolean(asRecord(valueFor(fillRecord, "fillImage", "fill-image")))
+  return recordsFor(valueFor(shape.json, 'fills')).find((fillRecord) =>
+    Boolean(asRecord(valueFor(fillRecord, 'fillImage', 'fill-image')))
   ) ?? null;
 }
 
 function penpotStrokeImageRecordForShape(shape: PenpotShape): JsonRecord | null {
-  if (shape.type !== "rect") {
+  if (shape.type !== 'rect' && shape.type !== 'frame') {
     return null;
   }
-  return recordsFor(valueFor(shape.json, "strokes")).find((strokeRecord) =>
-    Boolean(asRecord(valueFor(strokeRecord, "strokeImage", "stroke-image")))
+  return recordsFor(valueFor(shape.json, 'strokes')).find((strokeRecord) =>
+    Boolean(asRecord(valueFor(strokeRecord, 'strokeImage', 'stroke-image')))
   ) ?? null;
 }
 
@@ -536,36 +540,63 @@ function imageMediaIdForShape(
   fillImageRecord: JsonRecord | null = penpotFillImageRecordForShape(shape),
   strokeImageRecord: JsonRecord | null = penpotStrokeImageRecordForShape(shape)
 ): string | undefined {
-  if (shape.type === "image") {
-    const metadata = asRecord(valueFor(shape.json, "metadata"));
-    return stringValue(valueFor(metadata ?? {}, "id"));
+  if (shape.type === 'image') {
+    const metadata = asRecord(valueFor(shape.json, 'metadata'));
+    return stringValue(valueFor(metadata ?? {}, 'id'));
   }
-  if (shape.type !== "rect" && shape.type !== "frame") {
+  if (shape.type !== 'rect' && shape.type !== 'frame') {
     return undefined;
   }
-  const fillImage = asRecord(valueFor(fillImageRecord ?? {}, "fillImage", "fill-image"));
-  const strokeImage = asRecord(valueFor(strokeImageRecord ?? {}, "strokeImage", "stroke-image"));
-  return stringValue(valueFor(fillImage ?? {}, "id")) ?? stringValue(valueFor(strokeImage ?? {}, "id"));
+  const fillImage = asRecord(valueFor(fillImageRecord ?? {}, 'fillImage', 'fill-image'));
+  const strokeImage = asRecord(valueFor(strokeImageRecord ?? {}, 'strokeImage', 'stroke-image'));
+  return stringValue(valueFor(fillImage ?? {}, 'id')) ?? stringValue(valueFor(strokeImage ?? {}, 'id'));
 }
 
-function frameFillImageNode(shape: PenpotShape, asset: PenpotPackageAsset): DesignNode {
-  const fillRecord = penpotFillImageRecordForShape(shape);
+function frameFillImageNode(
+  shape: PenpotShape,
+  asset: PenpotPackageAsset,
+  fillRecord: JsonRecord | null = penpotFillImageRecordForShape(shape)
+): DesignNode {
+  return frameImageNode(shape, asset, {
+    idSuffix: 'fill-image',
+    nameSuffix: 'background',
+    opacity: finiteNumber(valueFor(fillRecord ?? {}, 'fillOpacity', 'fill-opacity', 'opacity'), 1)
+  });
+}
+
+function frameStrokeImageNode(
+  shape: PenpotShape,
+  asset: PenpotPackageAsset,
+  strokeRecord: JsonRecord | null = penpotStrokeImageRecordForShape(shape)
+): DesignNode {
+  return frameImageNode(shape, asset, {
+    idSuffix: 'stroke-image',
+    nameSuffix: 'stroke image',
+    opacity: finiteNumber(valueFor(strokeRecord ?? {}, 'strokeOpacity', 'stroke-opacity', 'opacity'), 1)
+  });
+}
+
+function frameImageNode(
+  shape: PenpotShape,
+  asset: PenpotPackageAsset,
+  options: { idSuffix: string; nameSuffix: string; opacity: number }
+): DesignNode {
   return {
-    id: penpotStorageId(`${shape.id}-fill-image`, `${shape.type}-fill-image`),
-    kind: "image",
-    name: `${shape.name} background`,
+    id: penpotStorageId(`${shape.id}-${options.idSuffix}`, `${shape.type}-${options.idSuffix}`),
+    kind: 'image',
+    name: `${shape.name} ${options.nameSuffix}`,
     transform: { x: 0, y: 0, rotation: 0 },
     size: {
       width: roundGeometry(Math.max(1, shape.bounds.width)),
       height: roundGeometry(Math.max(1, shape.bounds.height))
     },
     style: {
-      fill: "#f3f4f6",
+      fill: '#f3f4f6',
       stroke: null,
       stroke_width: 0,
-      opacity: finiteNumber(valueFor(fillRecord ?? {}, "fillOpacity", "fill-opacity", "opacity"), 1)
+      opacity: options.opacity
     },
-    content: imageContentForAsset(asset, "fill"),
+    content: imageContentForAsset(asset, 'fill'),
     children: []
   };
 }
@@ -573,9 +604,9 @@ function frameFillImageNode(shape: PenpotShape, asset: PenpotPackageAsset): Desi
 function imageContentForAsset(
   asset: PenpotPackageAsset,
   fitMode: ImageFitMode
-): Extract<DesignNode["content"], { type: "image" }> {
-  const content: Extract<DesignNode["content"], { type: "image" }> = {
-    type: "image",
+): Extract<DesignNode['content'], { type: 'image' }> {
+  const content: Extract<DesignNode['content'], { type: 'image' }> = {
+    type: 'image',
     asset_id: asset.metadata.assetId,
     fit_mode: fitMode
   };
@@ -589,7 +620,7 @@ function imageContentForAsset(
 }
 
 function rootShapeIds(pageJson: JsonRecord, shapesById: Map<string, PenpotShape>): string[] {
-  const explicitRoots = arrayIds(valueFor(pageJson, "rootShapes", "root-shapes", "children"))
+  const explicitRoots = arrayIds(valueFor(pageJson, 'rootShapes', 'root-shapes', 'children'))
     .filter((shapeId) => shapesById.has(shapeId));
   if (explicitRoots.length > 0) {
     return explicitRoots;
@@ -606,7 +637,7 @@ function rootShapeIds(pageJson: JsonRecord, shapesById: Map<string, PenpotShape>
 }
 
 function childIdsForShape(shape: JsonRecord): string[] {
-  return arrayIds(valueFor(shape, "shapes", "children"));
+  return arrayIds(valueFor(shape, 'shapes', 'children'));
 }
 
 function arrayIds(value: unknown): string[] {
@@ -619,7 +650,7 @@ function arrayIds(value: unknown): string[] {
       return [direct];
     }
     if (isRecord(entry)) {
-      const id = stringValue(valueFor(entry, "id"));
+      const id = stringValue(valueFor(entry, 'id'));
       return id ? [id] : [];
     }
     return [];
@@ -630,8 +661,8 @@ function isPenpotExportManifest(value: unknown): value is JsonRecord {
   if (!isRecord(value)) {
     return false;
   }
-  const type = stringValue(valueFor(value, "type"));
-  return type === "penpot/export-files" && Array.isArray(value.files);
+  const type = stringValue(valueFor(value, 'type'));
+  return type === 'penpot/export-files' && Array.isArray(value.files);
 }
 
 function firstFileIdFromEntries(entries: Map<string, Buffer>): string | undefined {
@@ -650,8 +681,8 @@ function parseJsonEntry(entries: Map<string, Buffer>, entryPath: string): unknow
 }
 
 function parseJsonBuffer(data: Buffer): unknown | undefined {
-  const text = data.toString("utf8").trim();
-  if (!text || (!text.startsWith("{") && !text.startsWith("["))) {
+  const text = data.toString('utf8').trim();
+  if (!text || (!text.startsWith('{') && !text.startsWith('['))) {
     return undefined;
   }
   try {
@@ -662,30 +693,30 @@ function parseJsonBuffer(data: Buffer): unknown | undefined {
 }
 
 function boundsForShape(shape: JsonRecord): PenpotBounds {
-  const selrect = asRecord(valueFor(shape, "selrect", "selRect"));
-  const size = asRecord(valueFor(shape, "size"));
+  const selrect = asRecord(valueFor(shape, 'selrect', 'selRect'));
+  const size = asRecord(valueFor(shape, 'size'));
   return {
-    x: finiteNumber(valueFor(shape, "x", "left"), finiteNumber(valueFor(selrect ?? {}, "x", "left"), 0)),
-    y: finiteNumber(valueFor(shape, "y", "top"), finiteNumber(valueFor(selrect ?? {}, "y", "top"), 0)),
-    width: finiteNumber(valueFor(shape, "width", "w"), finiteNumber(valueFor(selrect ?? {}, "width", "w", "x2"), finiteNumber(valueFor(size ?? {}, "width", "x"), 100))),
-    height: finiteNumber(valueFor(shape, "height", "h"), finiteNumber(valueFor(selrect ?? {}, "height", "h", "y2"), finiteNumber(valueFor(size ?? {}, "height", "y"), 48)))
+    x: finiteNumber(valueFor(shape, 'x', 'left'), finiteNumber(valueFor(selrect ?? {}, 'x', 'left'), 0)),
+    y: finiteNumber(valueFor(shape, 'y', 'top'), finiteNumber(valueFor(selrect ?? {}, 'y', 'top'), 0)),
+    width: finiteNumber(valueFor(shape, 'width', 'w'), finiteNumber(valueFor(selrect ?? {}, 'width', 'w', 'x2'), finiteNumber(valueFor(size ?? {}, 'width', 'x'), 100))),
+    height: finiteNumber(valueFor(shape, 'height', 'h'), finiteNumber(valueFor(selrect ?? {}, 'height', 'h', 'y2'), finiteNumber(valueFor(size ?? {}, 'height', 'y'), 48)))
   };
 }
 
 function penpotFillColor(shape: JsonRecord): string | null {
-  return penpotSolidFillPaint(shape)?.color ?? colorValue(valueFor(shape, "fillColor", "fill-color", "color"));
+  return penpotSolidFillPaint(shape)?.color ?? colorValue(valueFor(shape, 'fillColor', 'fill-color', 'color'));
 }
 
 function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
-  const fillRecords = recordsFor(valueFor(shape, "fills"));
+  const fillRecords = recordsFor(valueFor(shape, 'fills'));
   const fills = (fillRecords.length > 0 ? fillRecords : [shape]).flatMap((fill) => {
-    const solidColor = colorValue(valueFor(fill, "fillColor", "fill-color", "color"));
+    const solidColor = colorValue(valueFor(fill, 'fillColor', 'fill-color', 'color'));
     const gradientPaint = solidColor ? null : penpotGradientFillPaint(fill);
     const color = solidColor ?? gradientPaint?.color;
     if (!color) {
       return [];
     }
-    const fillOpacity = clampOpacity(finiteNumber(valueFor(fill, "fillOpacity", "fill-opacity", "opacity"), 1));
+    const fillOpacity = clampOpacity(finiteNumber(valueFor(fill, 'fillOpacity', 'fill-opacity', 'opacity'), 1));
     return [
       {
         color,
@@ -699,7 +730,6 @@ function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
   }
 
   let composite: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
-  // Penpot stores fills front-to-back, so composite the back paint first.
   for (const fill of [...fills].reverse()) {
     composite = compositeRgba(hexToRgba(fill.color, fill.opacity), composite);
   }
@@ -711,11 +741,11 @@ function penpotSolidFillPaint(shape: JsonRecord): PenpotSolidFillPaint | null {
 }
 
 function penpotGradientFillPaint(fill: JsonRecord): PenpotSolidFillPaint | null {
-  return penpotGradientPaint(fill, ["fillColorGradient", "fill-color-gradient", "gradient"]);
+  return penpotGradientPaint(fill, ['fillColorGradient', 'fill-color-gradient', 'gradient']);
 }
 
 function penpotGradientStrokePaint(stroke: JsonRecord): PenpotSolidFillPaint | null {
-  return penpotGradientPaint(stroke, ["strokeColorGradient", "stroke-color-gradient", "gradient"]);
+  return penpotGradientPaint(stroke, ['strokeColorGradient', 'stroke-color-gradient', 'gradient']);
 }
 
 function penpotGradientPaint(record: JsonRecord, gradientKeys: string[]): PenpotSolidFillPaint | null {
@@ -724,9 +754,9 @@ function penpotGradientPaint(record: JsonRecord, gradientKeys: string[]): Penpot
     return null;
   }
 
-  const stops = recordsFor(valueFor(gradient, "stops"))
+  const stops = recordsFor(valueFor(gradient, 'stops'))
     .flatMap((stop) => {
-      const color = colorValue(valueFor(stop, "color", "fillColor", "fill-color", "strokeColor", "stroke-color"));
+      const color = colorValue(valueFor(stop, 'color', 'fillColor', 'fill-color', 'strokeColor', 'stroke-color'));
       if (!color) {
         return [];
       }
@@ -735,10 +765,10 @@ function penpotGradientPaint(record: JsonRecord, gradientKeys: string[]): Penpot
           ...hexToRgba(
             color,
             clampOpacity(
-              finiteNumber(valueFor(stop, "opacity", "fillOpacity", "fill-opacity", "strokeOpacity", "stroke-opacity"), 1)
+              finiteNumber(valueFor(stop, 'opacity', 'fillOpacity', 'fill-opacity', 'strokeOpacity', 'stroke-opacity'), 1)
             )
           ),
-          offset: clampOpacity(finiteNumber(valueFor(stop, "offset"), 0))
+          offset: clampOpacity(finiteNumber(valueFor(stop, 'offset'), 0))
         }
       ];
     })
@@ -806,7 +836,7 @@ function rgbaToHex(color: RgbaColor): string {
 }
 
 function colorChannelToHex(value: number): string {
-  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, "0");
+  return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
 }
 
 function clampOpacity(value: number): number {
@@ -818,15 +848,15 @@ function roundOpacity(value: number): number {
 }
 
 function penpotSolidStrokePaint(shape: JsonRecord): PenpotSolidFillPaint | null {
-  const strokeRecords = recordsFor(valueFor(shape, "strokes"));
+  const strokeRecords = recordsFor(valueFor(shape, 'strokes'));
   const strokes = (strokeRecords.length > 0 ? strokeRecords : [shape]).flatMap((stroke) => {
-    const solidColor = colorValue(valueFor(stroke, "strokeColor", "stroke-color", "color"));
+    const solidColor = colorValue(valueFor(stroke, 'strokeColor', 'stroke-color', 'color'));
     const gradientPaint = solidColor ? null : penpotGradientStrokePaint(stroke);
     const color = solidColor ?? gradientPaint?.color;
     if (!color) {
       return [];
     }
-    const strokeOpacity = clampOpacity(finiteNumber(valueFor(stroke, "strokeOpacity", "stroke-opacity", "opacity"), 1));
+    const strokeOpacity = clampOpacity(finiteNumber(valueFor(stroke, 'strokeOpacity', 'stroke-opacity', 'opacity'), 1));
     return [
       {
         color,
@@ -840,7 +870,6 @@ function penpotSolidStrokePaint(shape: JsonRecord): PenpotSolidFillPaint | null 
   }
 
   let composite: RgbaColor = { r: 0, g: 0, b: 0, a: 0 };
-  // Penpot stores strokes front-to-back, so composite the back paint first.
   for (const stroke of [...strokes].reverse()) {
     composite = compositeRgba(hexToRgba(stroke.color, stroke.opacity), composite);
   }
@@ -856,10 +885,10 @@ function penpotStrokeColor(shape: JsonRecord): string | null {
 }
 
 function penpotStrokeWidth(shape: JsonRecord): number {
-  const strokeRecords = recordsFor(valueFor(shape, "strokes"));
+  const strokeRecords = recordsFor(valueFor(shape, 'strokes'));
   const widthSources = strokeRecords.length > 0 ? strokeRecords : [shape];
   const widths = widthSources
-    .map((stroke) => finiteNumber(valueFor(stroke, "strokeWidth", "stroke-width", "width"), Number.NaN))
+    .map((stroke) => finiteNumber(valueFor(stroke, 'strokeWidth', 'stroke-width', 'width'), Number.NaN))
     .filter((width) => Number.isFinite(width) && width >= 0);
   return widths.length > 0 ? Math.max(...widths) : 1;
 }
@@ -884,26 +913,26 @@ function colorValue(value: unknown): string | null {
   const shortHex = trimmed.match(/^#([0-9a-fA-F]{3})$/);
   if (shortHex) {
     return `#${shortHex[1]
-      .split("")
+      .split('')
       .map((part) => `${part}${part}`)
-      .join("")}`.toLowerCase();
+      .join('')}`.toLowerCase();
   }
   const hex = trimmed.match(/^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/);
   return hex ? `#${hex[1]}`.toLowerCase() : null;
 }
 
 function defaultFillForPenpotType(type: string): string {
-  if (type === "text") {
-    return "#111827";
+  if (type === 'text') {
+    return '#111827';
   }
-  if (type === "frame") {
-    return "#ffffff";
+  if (type === 'frame') {
+    return '#ffffff';
   }
-  return "#e5e7eb";
+  return '#e5e7eb';
 }
 
 function normalizeShapeType(value: string | undefined): string | undefined {
-  return value?.replace(/^:/, "").toLowerCase();
+  return value?.replace(/^:/, '').toLowerCase();
 }
 
 function penpotStorageId(value: unknown, fallback: string): string {
@@ -921,11 +950,11 @@ function safeStorageId(value: string | undefined, fallback: string): string {
 }
 
 function storageIdSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/^-+|-+$/g, "") || "imported";
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '') || 'imported';
 }
 
 function normalizeImportName(value: string | undefined, fallback: string): string {
-  return value?.trim() || fallback.trim() || "Imported Penpot";
+  return value?.trim() || fallback.trim() || 'Imported Penpot';
 }
 
 function finiteNumber(value: unknown, fallback: number): number {
@@ -952,7 +981,7 @@ function valueFor(record: JsonRecord, ...keys: string[]): unknown {
 }
 
 function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function asRecord(value: unknown): JsonRecord | null {
@@ -960,13 +989,7 @@ function asRecord(value: unknown): JsonRecord | null {
 }
 
 function isRecord(value: unknown): value is JsonRecord {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function extensionForPath(entryPath: string): string {
-  const lastSegment = entryPath.toLowerCase().split("/").pop() ?? entryPath.toLowerCase();
-  const dotIndex = lastSegment.lastIndexOf(".");
-  return dotIndex >= 0 ? lastSegment.slice(dotIndex) : "";
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function extensionForMediaType(mediaType: string): string | undefined {
@@ -979,42 +1002,26 @@ function extensionForMediaType(mediaType: string): string | undefined {
 }
 
 function fileNameForPath(entryPath: string): string {
-  return entryPath.split("/").pop()?.trim() || "image";
+  return entryPath.split('/').pop()?.trim() || 'image';
 }
 
 function dimensionsForImage(data: Buffer, mediaType: string): { width: number; height: number } | null {
-  if (mediaType === "image/png" && data.length >= 24 && data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+  if (mediaType === 'image/png' && data.length >= 24 && data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
     const width = data.readUInt32BE(16);
     const height = data.readUInt32BE(20);
     return width > 0 && height > 0 ? { width, height } : null;
   }
-
-  const textHeader = data.subarray(0, 512).toString("utf8").replace(/^\uFEFF/, "").trimStart();
-  if (mediaType === "image/svg+xml" && textHeader.startsWith("<svg")) {
-    const width = numberAttribute(textHeader, "width");
-    const height = numberAttribute(textHeader, "height");
-    return width && height ? { width, height } : null;
-  }
-
   return null;
 }
 
-function numberAttribute(text: string, attributeName: "width" | "height"): number | null {
-  const match = text.match(new RegExp(`${attributeName}=["']([0-9.]+)`));
-  if (!match) {
-    return null;
-  }
-  const value = Number(match[1]);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const specials = new Set(['.', '*', '+', '?', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\']);
+  return [...value].map((char) => (specials.has(char) ? `\\${char}` : char)).join('');
 }
 
 function inputValidationError(message: string): Error {
   const error = new Error(message) as Error & { code: string; statusCode: number };
-  error.code = "CANVAS_INPUT_VALIDATION";
+  error.code = 'CANVAS_INPUT_VALIDATION';
   error.statusCode = 400;
   return error;
 }
