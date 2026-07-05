@@ -68,7 +68,7 @@ interface PdfImageEntry {
 }
 
 interface PdfGradientFillEntry {
-  type: "gradientFill";
+  type: \"gradientFill\";
   node: RendererNode;
   source: NodePaintSource;
   gradient: NodePaintGradient;
@@ -808,7 +808,7 @@ function gradientCoordinateUnit(value: number | undefined, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function pdfGradientCoords(entry: PdfGradientFillEntry) {
+function pdfGradientCoords(entry: PdfGradientPaintEntry) {
   const width = Math.max(1, Math.round(entry.node.size.width));
   const height = Math.max(1, Math.round(entry.node.size.height));
   const start = entry.gradient.start ?? { x: 0, y: 0 };
@@ -820,7 +820,7 @@ function pdfGradientCoords(entry: PdfGradientFillEntry) {
   return [x1, y1, x2, y2].map(formatNumber).join(" ");
 }
 
-function pdfGradientShadingObject(entry: PdfGradientFillEntry) {
+function pdfGradientShadingObject(entry: PdfGradientPaintEntry) {
   const stops = pdfGradientStops(entry.stops) ?? [
     { offset: 0, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] },
     { offset: 1, rgb: pdfRgbForColor(entry.node.style.fill) ?? [0, 0, 0] }
@@ -830,7 +830,7 @@ function pdfGradientShadingObject(entry: PdfGradientFillEntry) {
   )} /Extend [true true] >>`;
 }
 
-function pdfGradientFillOpacity(entry: PdfGradientFillEntry) {
+function pdfGradientFillOpacity(entry: PdfGradientPaintEntry) {
   const opacity = typeof entry.source.opacity === "number" && Number.isFinite(entry.source.opacity) ? clampUnit(entry.source.opacity) : 1;
   return opacity < 1 ? opacity : null;
 }
@@ -891,7 +891,7 @@ function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: n
   return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q", ...pdfStrokeCommands(node, pageHeight, x, y)];
 }
 
-function pdfGradientFillCommands(entry: PdfGradientFillEntry) {
+function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   if (!entry.shadingName) {
     return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
   }
@@ -1386,7 +1386,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
-  const gradientEntries = entries.filter((entry): entry is PdfGradientFillEntry => entry.type === "gradientFill");
+  const gradientEntries = entries.filter((entry): entry is PdfGradientPaintEntry => entry.type === "gradientFill");
   gradientEntries.forEach((entry, index) => {
     entry.shadingName = `Sh${index + 1}`;
     entry.shadingId = addPdfObject(objects, pdfGradientShadingObject(entry));
