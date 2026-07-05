@@ -8,6 +8,21 @@ const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
 const groupId = "33333333-3333-3333-3333-333333333333";
 const rectId = "44444444-4444-4444-4444-444444444444";
+const maskPoints = [
+  { x: 120, y: 64 },
+  { x: 200, y: 112 },
+  { x: 120, y: 160 },
+  { x: 40, y: 112 }
+];
+const maskSource = {
+  origin: "penpot",
+  shapeId: groupId,
+  name: "Masked artwork",
+  shapeType: "group",
+  bounds: { x: 40, y: 64, width: 160, height: 96 },
+  opacity: 0.72,
+  points: maskPoints
+};
 const clippedMaskWarning =
   "Imported Penpot masked group Masked artwork with Layo bounds clipping; complex mask shapes are not preserved.";
 
@@ -46,6 +61,8 @@ function createPenpotClippedMaskedGroupArchive(): Buffer {
           y: 64,
           width: 160,
           height: 96,
+          opacity: 0.72,
+          points: maskPoints,
           shapes: [rectId]
         }),
         "utf8"
@@ -91,7 +108,7 @@ test("imports Penpot masked groups with bounds clipping metadata for agents and 
     id: `penpot-${groupId}`,
     kind: "group",
     name: "Masked artwork",
-    clip: { type: "bounds" },
+    clip: { type: "bounds", source: maskSource },
     transform: { x: 40, y: 64, rotation: 0 },
     size: { width: 160, height: 96 }
   });
@@ -108,14 +125,17 @@ test("imports Penpot masked groups with bounds clipping metadata for agents and 
   const inspection = inspectCanvas(imported.file);
   expect(inspection.nodes.find((node) => node.id === `penpot-${groupId}`)).toMatchObject({
     id: `penpot-${groupId}`,
-    clip: { type: "bounds" }
+    clip: { type: "bounds", source: maskSource }
   });
 
   const exported = exportDesignToCode(imported.file);
   const rootElement = exported.elements.find((element) => element.id === `penpot-${groupId}`);
   expect(rootElement?.structure).toMatchObject({
     id: `penpot-${groupId}`,
-    clip: { type: "bounds" }
+    clip: { type: "bounds", source: maskSource }
+  });
+  expect(rootElement?.structure.annotations.find((annotation) => annotation.kind === "clip")).toMatchObject({
+    detail: "Penpot mask source Masked artwork preserves 4 point(s); CSS uses bounds clipping fallback"
   });
   expect(rootElement?.css).toContain("overflow: hidden;");
 });
