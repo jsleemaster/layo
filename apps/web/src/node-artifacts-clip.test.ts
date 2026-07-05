@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { RendererNode } from "@layo/renderer";
-import { svgForNode } from "./node-artifacts";
+import { pdfForNode, svgForNode } from "./node-artifacts";
 
 const clippedGroup: RendererNode = {
   id: "masked-group",
@@ -48,6 +48,10 @@ const polygonClippedGroup: RendererNode = {
   }
 };
 
+function pdfTextForNode(node: RendererNode) {
+  return new TextDecoder().decode(pdfForNode(node));
+}
+
 describe("clipped node artifact exports", () => {
   test("renders selected clipped groups with bounded viewBox and SVG clipPath", () => {
     const svg = svgForNode(clippedGroup);
@@ -70,5 +74,20 @@ describe("clipped node artifact exports", () => {
     expect(svg).toContain('clip-path="url(#layo-clip-polygon-masked-group)"');
     expect(svg).toContain('data-node-id="oversized-child"');
     expect(svg).toContain('transform="translate(40 20)"');
+  });
+
+  test("renders bounds-clipped groups as PDF clipping scopes", () => {
+    const pdf = pdfTextForNode(clippedGroup);
+
+    expect(pdf).toContain(["q", "0 0 100 60 re", "W", "n"].join("\n"));
+    expect(pdf).toContain("40 -30 90 70 re");
+  });
+
+  test("renders Penpot polygon mask source points as PDF clipping paths", () => {
+    const pdf = pdfTextForNode(polygonClippedGroup);
+
+    expect(pdf).toContain(["q", "50 60 m", "100 30 l", "50 0 l", "0 30 l", "h", "W", "n"].join("\n"));
+    expect(pdf).not.toContain(["0 0 100 60 re", "W", "n"].join("\n"));
+    expect(pdf).toContain("40 -30 90 70 re");
   });
 });
