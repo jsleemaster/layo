@@ -47,8 +47,16 @@ children intact.
 
 ## Verification Log
 
-- RED pending: run Full Verification after opening the PR and confirm the new
-  server test fails because the current importer ignores frame `stroke-image`
-  records.
-- GREEN pending.
+- RED Full Verification #28726006772 failed as expected. Core tests showed the
+  new frame stroke-image server fixture importing only 2 mapped nodes instead of
+  3, and HTTP import returned `assetCount: 0` instead of `1`.
+- GREEN Full Verification #28726205968 passed Penpot maturity/design gates,
+  typecheck, web build, Core tests, and Playwright CLI e2e after frame
+  `stroke-image` records mapped through the existing local asset path as
+  deterministic frame image children.
+- The GREEN Playwright CLI suite included
+  `apps/web/e2e/external-migration-penpot-frame-stroke-image.spec.ts` at
+  `[157/173]` and finished with `173 passed (5.5m)`.
+- Storage Restore Drill #28726205973 and Storage Backup Retention #28726205979
+  passed for the same GREEN head.
 - Deployment remains intentionally deferred for this loop.
