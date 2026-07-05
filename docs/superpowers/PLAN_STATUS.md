@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-mask-polygon-svg-artifact.md`; deployment remains intentionally deferred. |
+| `2026-07-05-penpot-mask-polygon-pdf-artifact.md` | Active | PDF artifact polygon clipping slice in progress; deployment remains intentionally deferred. |
 
 ## Completed Plans
 
