@@ -28,12 +28,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `_None_` | Idle | PR #231 completed the solid multi-stroke flattening loop and was squash-merged as `ca7e91fac6d934ca2c6bce6df563111630d1b542`. Deployment remains intentionally deferred. Create the next goal from the next Penpot benchmark gap or failed verification case. |
+| _None_ | Idle | Latest Penpot different-width stroke stack slice is recorded under Completed Plans. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-different-width-stroke-stack.md` | Completed | Adapts Penpot solid `strokes` stacks with different `stroke-width` values by preserving the widest valid stroke width as Layo's single `style.stroke_width` while keeping the existing flattened stroke color path. RED Full Verification #28723902377 failed on `stroke_width: 2` instead of 8; GREEN Full Verification #28724082389 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-solid-multi-stroke-flattening.md` | Completed | Adapts Penpot same-width solid `strokes` stacks by flattening front-to-back paint order into one deterministic Layo `style.stroke` color and opacity. RED Full Verification #28722912062 failed on `#ff0000` instead of `#800080`; GREEN Full Verification #28722958842 passed after implementation; final docs/head Full Verification #28723174583, Storage Restore Drill #28723174585, and Storage Backup Retention #28723174586 passed. PR #231 was squash-merged as `ca7e91fac6d934ca2c6bce6df563111630d1b542`. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-stroke-gradient-flattening.md` | Completed | Adapts Penpot `stroke-color-gradient` stop vectors by flattening midpoint color into deterministic Layo `style.stroke` while preserving stroke width. Initial RED Full Verification #28722244025 caught missing e2e script registration; RED Full Verification #28722292528 failed with `stroke: null` and `stroke_width: 0`; GREEN Full Verification #28722346733, Storage Restore Drill #28722346756, and Storage Backup Retention #28722346750 passed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-mixed-fill-image-stack.md` | Completed | Adapts Penpot mixed color/gradient plus packaged `fill-image` stacks by scanning every `fills` record for importable image metadata before color/gradient fallback. RED Full Verification #28721329168 failed on importedAssets length 0 and HTTP assetCount 0; final Full Verification #28721565316, Storage Restore Drill #28721565313, and Storage Backup Retention #28721565300 passed. Deployment remains intentionally deferred. |

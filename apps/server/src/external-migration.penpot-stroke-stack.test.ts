@@ -13,7 +13,9 @@ const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
 const frameId = "33333333-3333-3333-3333-333333333333";
 const strokeStackRectId = "12121212-1212-1212-1212-121212121212";
+const differentWidthStrokeRectId = "13131313-1313-1313-1313-131313131313";
 const expectedStrokeStackColor = "#800080";
+const expectedDifferentWidthStrokeWidth = 8;
 
 afterEach(async () => {
   if (tempRoot) {
@@ -52,10 +54,10 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           type: "frame",
           x: 40,
           y: 64,
-          width: 240,
+          width: 320,
           height: 160,
           fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
-          shapes: [strokeStackRectId]
+          shapes: [strokeStackRectId, differentWidthStrokeRectId]
         }),
         "utf8"
       )
@@ -75,6 +77,26 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           strokes: [
             { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": 4 },
             { "stroke-color": "#0000ff", "stroke-opacity": 1, "stroke-width": 4 }
+          ]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${differentWidthStrokeRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: differentWidthStrokeRectId,
+          name: "Wide layered stroke card",
+          type: "rect",
+          x: 184,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
+          strokes: [
+            { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": 2 },
+            { "stroke-color": "#0000ff", "stroke-opacity": 1, "stroke-width": expectedDifferentWidthStrokeWidth }
           ]
         }),
         "utf8"
@@ -104,7 +126,7 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
   expect(imported).toMatchObject({
     source: "penpot",
     sourceLabel: "Penpot",
-    mappedNodeCount: 2,
+    mappedNodeCount: 3,
     skippedNodeCount: 0
   });
   expect(imported.importedAssets).toHaveLength(0);
@@ -115,6 +137,17 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
     kind: "rectangle",
     name: "Layered stroke card",
     style: { fill: "#ffffff", stroke: expectedStrokeStackColor, stroke_width: 4, opacity: 1 }
+  });
+  expect(frame.children[1]).toMatchObject({
+    id: `penpot-${differentWidthStrokeRectId}`,
+    kind: "rectangle",
+    name: "Wide layered stroke card",
+    style: {
+      fill: "#ffffff",
+      stroke: expectedStrokeStackColor,
+      stroke_width: expectedDifferentWidthStrokeWidth,
+      opacity: 1
+    }
   });
 });
 
@@ -158,7 +191,7 @@ test("reviews imports and persists flattened Penpot solid stroke stacks", async 
     source: "penpot",
     sourceLabel: "Penpot",
     assetCount: 0,
-    mappedNodeCount: 2,
+    mappedNodeCount: 3,
     skippedNodeCount: 0,
     project: { name: "Penpot Multi Stroke Board" },
     file: { name: "Penpot Multi Stroke Board", pages: [{ name: "Multi strokes" }] }
@@ -173,5 +206,16 @@ test("reviews imports and persists flattened Penpot solid stroke stacks", async 
     kind: "rectangle",
     name: "Layered stroke card",
     style: { fill: "#ffffff", stroke: expectedStrokeStackColor, stroke_width: 4, opacity: 1 }
+  });
+  expect(frame.children[1]).toMatchObject({
+    id: `penpot-${differentWidthStrokeRectId}`,
+    kind: "rectangle",
+    name: "Wide layered stroke card",
+    style: {
+      fill: "#ffffff",
+      stroke: expectedStrokeStackColor,
+      stroke_width: expectedDifferentWidthStrokeWidth,
+      opacity: 1
+    }
   });
 });
