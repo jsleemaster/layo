@@ -110,7 +110,7 @@ function nodeClipsToBounds(node: RendererNode) {
   return Boolean(nodeClip(node));
 }
 
-function svgClipPolygonPointsForNode(node: RendererNode) {
+function clipPolygonPointsForNode(node: RendererNode) {
   const source = nodeClip(node)?.source;
   const points = source?.points;
   const bounds = source?.bounds;
@@ -118,16 +118,21 @@ function svgClipPolygonPointsForNode(node: RendererNode) {
     return null;
   }
 
-  const coordinates: string[] = [];
+  const coordinates: Array<{ x: number; y: number }> = [];
   for (const point of points) {
     const x = point.x - bounds.x;
     const y = point.y - bounds.y;
     if (!Number.isFinite(x) || !Number.isFinite(y)) {
       return null;
     }
-    coordinates.push(`${formatNumber(x)},${formatNumber(y)}`);
+    coordinates.push({ x, y });
   }
-  return coordinates.join(" " );
+  return coordinates;
+}
+
+function svgClipPolygonPointsForNode(node: RendererNode) {
+  const points = clipPolygonPointsForNode(node);
+  return points ? points.map((point) => `${formatNumber(point.x)},${formatNumber(point.y)}`).join(" ") : null;
 }
 
 function normalizedBase64(value: string) {
@@ -541,6 +546,32 @@ function pdfRgbOperands(rgb: [number, number, number] | null) {
     .join(" ");
 }
 
+function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: number, y: number) {
+  if (!nodeClipsToBounds(node)) {
+    return null;
+  }
+
+  const polygonPoints = clipPolygonPointsForNode(node);
+  if (polygonPoints) {
+    const [firstPoint, ...remainingPoints] = polygonPoints;
+    return [
+      "q",
+      `${formatNumber(x + firstPoint.x)} ${formatNumber(pageHeight - y - firstPoint.y)} m`,
+      ...remainingPoints.map(
+        (point) => `${formatNumber(x + point.x)} ${formatNumber(pageHeight - y - point.y)} l`
+      ),
+      "h",
+      "W",
+      "n"
+    ];
+  }
+
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const pdfY = pageHeight - y - height;
+  return ["q", `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "W", "n"];
+}
+
 function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
@@ -826,6 +857,11 @@ function collectPdfEntries(
   const x = isRoot ? originX : originX + node.transform.x;
   const y = isRoot ? originY : originY + node.transform.y;
   const imageAsset = imageAssetForNode(node, options);
+  const clipCommands = pdfClipCommandsForNode(node, pageHeight, x, y);
+
+  if (clipCommands) {
+    entries.push({ type: "commands", commands: clipCommands });
+  }
 
   if (node.kind !== "group") {
     for (const layer of shadowLayersForNode(node)) {
@@ -843,6 +879,10 @@ function collectPdfEntries(
 
   for (const child of node.children) {
     collectPdfEntries(child, options, pageHeight, x, y, entries);
+  }
+
+  if (clipCommands) {
+    entries.push({ type: "commands", commands: ["Q"] });
   }
 }
 
