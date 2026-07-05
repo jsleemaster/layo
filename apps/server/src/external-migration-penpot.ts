@@ -87,6 +87,46 @@ const ASSET_MEDIA_TYPES = new Map<string, string>([
 ]);
 const IMPORTABLE_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const SVG_RAW_TAGS = new Set([
+  'a',
+  'circle',
+  'clipPath',
+  'defs',
+  'desc',
+  'ellipse',
+  'feBlend',
+  'feColorMatrix',
+  'feComponentTransfer',
+  'feComposite',
+  'feFlood',
+  'feGaussianBlur',
+  'feImage',
+  'feMerge',
+  'feMergeNode',
+  'feOffset',
+  'filter',
+  'g',
+  'image',
+  'line',
+  'linearGradient',
+  'mask',
+  'metadata',
+  'path',
+  'pattern',
+  'polygon',
+  'polyline',
+  'radialGradient',
+  'rect',
+  'stop',
+  'style',
+  'svg',
+  'symbol',
+  'text',
+  'textPath',
+  'title',
+  'tspan',
+  'use'
+]);
 
 export function reviewPenpotZipEntries(
   entries: Map<string, Buffer>,
@@ -312,7 +352,13 @@ function mapPenpotShape(
     return null;
   }
 
-  if (shape.type !== 'frame' && shape.type !== 'rect' && shape.type !== 'text' && shape.type !== 'image') {
+  if (
+    shape.type !== 'frame'
+    && shape.type !== 'rect'
+    && shape.type !== 'text'
+    && shape.type !== 'image'
+    && shape.type !== 'svg-raw'
+  ) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped unsupported Penpot shape type ${shape.type} (${shape.name}).`);
     return null;
@@ -328,6 +374,13 @@ function mapPenpotShape(
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   const fillImageAsset = fillImageMediaId ? state.assetsById.get(fillImageMediaId) : undefined;
   const strokeImageAsset = strokeImageMediaId ? state.assetsById.get(strokeImageMediaId) : undefined;
+  const svgRawAsset = shape.type === 'svg-raw' ? svgRawAssetForShape(shape, shapesById) : undefined;
+  if (shape.type === 'svg-raw' && !svgRawAsset) {
+    state.skippedNodeCount += 1;
+    state.warnings.push(`Skipped Penpot svg-raw shape ${shape.name} because its SVG content was not readable.`);
+    return null;
+  }
+
   if (shape.type === 'image' && !imageAsset) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot image shape ${shape.name} because its packaged asset was not found.`);
@@ -355,7 +408,8 @@ function mapPenpotShape(
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const mapsAsImage = Boolean(imageAsset) && shape.type !== 'frame';
+  const renderedImageAsset = svgRawAsset ?? imageAsset;
+  const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
   const fill = mapsAsImage
     ? '#f3f4f6'
@@ -389,8 +443,8 @@ function mapPenpotShape(
       stroke_width: stroke ? penpotStrokeWidth(shape.json) : 0,
       opacity
     },
-    content: mapsAsImage && imageAsset
-      ? imageContentForAsset(imageAsset, 'fill')
+    content: mapsAsImage && renderedImageAsset
+      ? imageContentForAsset(renderedImageAsset, 'fill')
       : shape.type === 'text'
       ? {
           type: 'text',
@@ -402,8 +456,8 @@ function mapPenpotShape(
     children: []
   };
 
-  if (imageAsset && shape.type !== 'frame') {
-    state.usedAssets.set(imageAsset.metadata.assetId, imageAsset);
+  if (renderedImageAsset && shape.type !== 'frame') {
+    state.usedAssets.set(renderedImageAsset.metadata.assetId, renderedImageAsset);
   }
 
   if (shape.type === 'frame') {
@@ -572,6 +626,182 @@ function imageMediaIdForShape(
   }
   return imageMediaIdForPaintRecord(fillImageRecord, 'fillImage', 'fill-image')
     ?? imageMediaIdForPaintRecord(strokeImageRecord, 'strokeImage', 'stroke-image');
+}
+
+function svgRawAssetForShape(shape: PenpotShape, shapesById: Map<string, PenpotShape>): PenpotPackageAsset | undefined {
+  const markup = svgRawMarkupForShape(shape, shapesById);
+  if (!markup) {
+    return undefined;
+  }
+
+  const data = Buffer.from(markup, 'utf8');
+  const assetId = penpotAssetStorageId(`${shape.id}-svg-raw`);
+  const shapeName = shape.name.trim() || 'SVG raw';
+  const name = shapeName.toLowerCase().endsWith('.svg') ? shapeName : `${shapeName}.svg`;
+  return {
+    mediaId: `${shape.id}-svg-raw`,
+    storageObjectId: `${shape.id}-svg-raw`,
+    path: `svg-raw/${assetId}.svg`,
+    naturalWidth: positiveNumber(shape.bounds.width),
+    naturalHeight: positiveNumber(shape.bounds.height),
+    metadata: {
+      assetId,
+      name,
+      mimeType: 'image/svg+xml',
+      byteLength: data.length,
+      url: `/assets/${assetId}`
+    },
+    data
+  };
+}
+
+function svgRawMarkupForShape(shape: PenpotShape, shapesById: Map<string, PenpotShape>): string | undefined {
+  const directMarkup = stringValue(valueFor(shape.json, 'content', 'svg', 'rawSvg', 'raw-svg', 'markup'))?.trim();
+  if (directMarkup?.startsWith('<svg')) {
+    return directMarkup;
+  }
+
+  const content = asRecord(valueFor(shape.json, 'content'));
+  if (!content) {
+    return undefined;
+  }
+  const markup = serializeSvgRawContent(content, shape, shapesById, new Set([shape.id]));
+  return markup?.startsWith('<svg') ? markup : undefined;
+}
+
+function serializeSvgRawContent(
+  content: JsonRecord,
+  shape: PenpotShape,
+  shapesById: Map<string, PenpotShape>,
+  visiting: Set<string>
+): string | undefined {
+  const tag = normalizeSvgRawTag(stringValue(valueFor(content, 'tag')));
+  if (!tag || !SVG_RAW_TAGS.has(tag)) {
+    return undefined;
+  }
+
+  const attrs = svgRawAttributesForContent(content);
+  if (tag === 'svg') {
+    if (!attrs.has('xmlns')) {
+      attrs.set('xmlns', 'http://www.w3.org/2000/svg');
+    }
+    if (!attrs.has('width')) {
+      attrs.set('width', String(roundGeometry(Math.max(1, shape.bounds.width))));
+    }
+    if (!attrs.has('height')) {
+      attrs.set('height', String(roundGeometry(Math.max(1, shape.bounds.height))));
+    }
+    if (!attrs.has('viewBox')) {
+      attrs.set('viewBox', `0 0 ${roundGeometry(Math.max(1, shape.bounds.width))} ${roundGeometry(Math.max(1, shape.bounds.height))}`);
+    }
+  }
+
+  const inlineChildren = serializeSvgRawInlineContent(valueFor(content, 'content'), shape, shapesById, visiting);
+  const shapeChildren = shape.childIds
+    .map((childId) => shapesById.get(childId))
+    .filter((child): child is PenpotShape => Boolean(child))
+    .flatMap((child) => {
+      if (visiting.has(child.id)) {
+        return [];
+      }
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(child.id);
+      const childContent = valueFor(child.json, 'content');
+      if (typeof childContent === 'string') {
+        return [escapeSvgText(childContent)];
+      }
+      const childRecord = asRecord(childContent);
+      const serialized = childRecord ? serializeSvgRawContent(childRecord, child, shapesById, nextVisiting) : undefined;
+      return serialized ? [serialized] : [];
+    })
+    .join('');
+
+  return `<${tag}${serializeSvgAttributes(attrs)}>${inlineChildren}${shapeChildren}</${tag}>`;
+}
+
+function serializeSvgRawInlineContent(
+  value: unknown,
+  shape: PenpotShape,
+  shapesById: Map<string, PenpotShape>,
+  visiting: Set<string>
+): string {
+  if (typeof value === 'string') {
+    return escapeSvgText(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => serializeSvgRawInlineContent(entry, shape, shapesById, visiting)).join('');
+  }
+  if (isRecord(value)) {
+    return serializeSvgRawContent(value, shape, shapesById, visiting) ?? '';
+  }
+  return '';
+}
+
+function svgRawAttributesForContent(content: JsonRecord): Map<string, string> {
+  const attrs = new Map<string, string>();
+  const source = asRecord(valueFor(content, 'svgAttrs', 'svg-attrs', 'attrs', 'attributes')) ?? {};
+  for (const [rawName, rawValue] of Object.entries(source)) {
+    const name = normalizeSvgAttributeName(rawName);
+    const value = svgAttributeValue(rawValue);
+    if (name && value !== undefined) {
+      attrs.set(name, value);
+    }
+  }
+  return attrs;
+}
+
+function normalizeSvgRawTag(value: string | undefined): string | undefined {
+  const tag = value?.replace(/^:/, '').trim();
+  if (!tag) {
+    return undefined;
+  }
+  if (tag.toLowerCase() === 'textpath') {
+    return 'textPath';
+  }
+  return tag;
+}
+
+function normalizeSvgAttributeName(name: string): string | undefined {
+  const trimmed = name.replace(/^:/, '').trim();
+  if (!trimmed || trimmed.toLowerCase().startsWith('on')) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function svgAttributeValue(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  return undefined;
+}
+
+function serializeSvgAttributes(attrs: Map<string, string>): string {
+  const serialized = [...attrs.entries()]
+    .map(([name, value]) => `${name}="${escapeSvgAttribute(value)}"`)
+    .join(' ');
+  return serialized ? ` ${serialized}` : '';
+}
+
+function escapeSvgAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeSvgText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function frameFillImageNode(
