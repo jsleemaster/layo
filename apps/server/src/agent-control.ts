@@ -10,8 +10,31 @@ import type { DesignFile, DesignNode } from "./storage";
 
 export * from "./agent-control-base.js";
 
+export interface NodeClipPoint {
+  x: number;
+  y: number;
+}
+
+export interface NodeClipBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface NodeClipSource {
+  origin: "penpot";
+  shapeId: string;
+  name: string;
+  shapeType: string;
+  bounds: NodeClipBounds;
+  opacity?: number;
+  points?: NodeClipPoint[];
+}
+
 export interface NodeClip {
   type: "bounds";
+  source?: NodeClipSource;
 }
 
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
@@ -117,5 +140,9 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
 
 function nodeClip(node: DesignNode): NodeClip | undefined {
   const clip = (node as ClippedDesignNode).clip;
-  return clip?.type === "bounds" ? { type: "bounds" } : undefined;
+  return clip?.type === "bounds" ? cloneNodeClip(clip) : undefined;
+}
+
+function cloneNodeClip(clip: NodeClip): NodeClip {
+  return clip.source ? { type: "bounds", source: structuredClone(clip.source) } : { type: "bounds" };
 }
