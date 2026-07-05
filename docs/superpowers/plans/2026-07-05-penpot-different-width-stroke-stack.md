@@ -37,13 +37,21 @@ stack flattening: Penpot `strokes` records in one stack can carry different
   imported layer through the visible file-panel import flow and persisted HTTP
   document.
 
-Expected RED: current importer reads the first stroke record width and imports
-`stroke_width: 2` instead of the expected 8.
+RED Full Verification #28723902377 failed in Core tests because the current
+importer read the first stroke record and imported `stroke_width: 2` instead of
+the expected widest width, 8.
 
 ## GREEN Implementation
 
-Pending.
+`apps/server/src/external-migration-penpot.ts` now resolves the single Layo
+stroke width from all Penpot `strokes` records. It keeps the existing flattened
+stroke color path and imports the maximum valid `strokeWidth`, `stroke-width`, or
+`width` value from the stack, falling back to 1 only when no width is present.
 
 ## Verification Log
 
-Pending.
+- RED Full Verification #28723902377 failed as expected on `stroke_width: 2`
+  versus expected 8.
+- GREEN Full Verification #28724082389 passed Penpot maturity/design gates,
+  typecheck, web build, Core tests, and Playwright CLI e2e.
+- Deployment remains intentionally deferred for this loop.
