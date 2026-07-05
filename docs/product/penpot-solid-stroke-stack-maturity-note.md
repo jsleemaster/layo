@@ -52,11 +52,25 @@ gradient stroke stack slice:
 - The existing importer path flattened that stack to `style.stroke: #804040` and
   `stroke_width: 6`, so no importer code change was needed.
 
+`2026-07-05-penpot-stroke-image-assets.md` closes the packaged rect
+`stroke-image` asset preservation slice:
+
+- RED Full Verification #28725171703 failed because the importer dropped the
+  packaged image-backed stroke asset, leaving `importedAssets` empty and HTTP
+  import `assetCount: 0`.
+- GREEN Full Verification #28725424332 passed after rect `stroke-image` records
+  mapped through the existing local asset path as Layo image nodes.
+- The GREEN Playwright CLI suite included the new stroke-image import spec at
+  `[158/172]` and finished with `172 passed (5.6m)`.
+- Storage Restore Drill #28725424329 and Storage Backup Retention #28725424333
+  passed for the same head.
+- This is asset preservation, not exact Penpot stroke-band rendering fidelity.
+
 ## Remaining Import Gaps
 
 These Penpot import/export maturity gaps remain open:
 
-- stroke images and image-backed stroke records
+- exact image-backed stroke-band rendering, frame stroke-image backgrounds, and mixed image stroke stacks
 - exact gradient angle/radius fidelity
 - exact paint compositing for blend modes and masks
 - stroke alignment, caps, joins, dashes, and independent per-paint stroke bands
