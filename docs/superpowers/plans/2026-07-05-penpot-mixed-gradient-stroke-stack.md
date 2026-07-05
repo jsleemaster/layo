@@ -39,4 +39,9 @@ solid stroke paints and gradient stroke paints in one ordered stack.
 
 ## Verification Log
 
-Pending.
+- Full Verification #28724576060 passed Penpot maturity/design gates, typecheck,
+  web build, Core tests, and Playwright CLI e2e with the new mixed solid/gradient
+  stroke stack fixture.
+- No importer code change was needed; the coverage probe confirmed that the
+  existing Penpot stroke stack flattening path already handles this case.
+- Deployment remains intentionally deferred for this loop.
