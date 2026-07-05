@@ -6,6 +6,15 @@ async function readText(path) {
   return readFile(path, "utf8");
 }
 
+function sectionBetween(text, startHeading, endHeading) {
+  const start = text.indexOf(startHeading);
+  assert.notEqual(start, -1);
+  const bodyStart = start + startHeading.length;
+  const end = text.indexOf(endHeading, bodyStart);
+  assert.notEqual(end, -1);
+  return text.slice(bodyStart, end);
+}
+
 test("product docs target Penpot-comparable team-product maturity", async () => {
   const benchmark = await readText("docs/product/penpot-maturity-benchmark.md");
 
@@ -34,6 +43,14 @@ test("plan status keeps one canonical markdown document", async () => {
   assert.equal(status.match(/^## Completed Plans$/gm)?.length ?? 0, 1);
   assert.ok(status.indexOf("## Current Active Plan") < status.indexOf("## Completed Plans"));
   assert.doesNotMatch(status, /\| .* \|# Superpowers Plan Status/m);
+});
+
+test("merged Penpot solid multi-stroke plan is not routed as active", async () => {
+  const status = await readText("docs/superpowers/PLAN_STATUS.md");
+  const activePlan = sectionBetween(status, "## Current Active Plan", "## Completed Plans");
+
+  assert.doesNotMatch(activePlan, /2026-07-05-penpot-solid-multi-stroke-flattening\.md/);
+  assert.match(status, /`2026-07-05-penpot-solid-multi-stroke-flattening\.md` \| Completed/);
 });
 
 test("active top-level docs no longer frame Layo as a small personal editor", async () => {
