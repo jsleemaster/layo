@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
 import { importExternalMigrationArchive } from "./external-migration";
 import { exportDesignToCode } from "./code-export";
+import { inspectCanvas } from "./agent-control";
 
 const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
@@ -71,7 +72,7 @@ function createPenpotClippedMaskedGroupArchive(): Buffer {
   ]);
 }
 
-test("imports Penpot masked groups with bounds clipping metadata for persistence and handoff", () => {
+test("imports Penpot masked groups with bounds clipping metadata for agents and handoff", () => {
   const imported = importExternalMigrationArchive(createPenpotClippedMaskedGroupArchive(), {
     fileName: "masked-group-clipping.penpot",
     fileId: "penpot-masked-group-clipping-imported-file"
@@ -102,6 +103,12 @@ test("imports Penpot masked groups with bounds clipping metadata for persistence
     transform: { x: 16, y: 16, rotation: 0 },
     size: { width: 220, height: 140 },
     style: { fill: "#38bdf8", stroke: "#0f172a", stroke_width: 2, opacity: 0.9 }
+  });
+
+  const inspection = inspectCanvas(imported.file);
+  expect(inspection.nodes.find((node) => node.id === `penpot-${groupId}`)).toMatchObject({
+    id: `penpot-${groupId}`,
+    clip: { type: "bounds" }
   });
 
   const exported = exportDesignToCode(imported.file);

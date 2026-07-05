@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-mask-clipping-import.md`; deployment remains intentionally deferred. |
+| `2026-07-05-clip-agent-inspection-summary.md` | Active | Next Penpot maturity-loop slice from the PR #241 follow-up: expose `clip: { type: "bounds" }` in agent inspection summaries. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
