@@ -45,13 +45,19 @@ Repair Full Verification #28730992728 then passed Penpot maturity/design gates, 
 - Adds selected-layer SVG artifact `clipPath` output and keeps clipped group artifacts bounded to the group size.
 - Updates the visible file-panel Penpot import e2e so the masked group contains an oversized child and persists the bounds-clip metadata.
 
-## Verification Status
+## GREEN Evidence
 
-Implementation checkpoint Full Verification #28731065239 reached green Penpot maturity/design gates, Typecheck, Web build, and Core tests. Its Playwright CLI e2e step was still in progress when this documentation cleanup was committed, and the workflow is configured to cancel in-progress runs on a newer PR commit.
+Code-head Full Verification #28731065239, job #85196617567, passed:
 
-Final acceptance is therefore the next Full Verification run on the documentation head. This plan must not be marked completed until that run passes.
+- Penpot maturity and design rule gates.
+- Typecheck.
+- Web build.
+- Core tests.
+- Playwright CLI e2e.
 
-## Direct Browser Evidence Required
+Documentation-head Full Verification #28731268949, job #85197197280, also passed the same gate sequence. The Playwright CLI e2e suite ran the clipping import scenario at `[159/177]` as `apps/web/e2e/external-migration-penpot-masked-group.spec.ts`, and the final result was `177 passed (6.0m)`.
+
+## Direct Browser Evidence
 
 The Playwright CLI e2e path for this slice uses the visible file panel to import a `.penpot` package, waits for the Korean import status, inspects the layer panel for the masked group and oversized child, and verifies the persisted project/file JSON served by the local API includes `clip: { type: "bounds" }` on the imported group.
 
