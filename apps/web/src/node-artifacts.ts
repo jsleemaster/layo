@@ -1229,14 +1229,21 @@ function collectPdfEntries(
     entries.push({ type: "image", node, asset: imageAsset, x, y, pageHeight });
   } else if (node.kind !== "group") {
     const fillGradient = pdfFillGradientForNode(node);
+    const strokeGradient = pdfStrokeGradientForNode(node);
+
     if (fillGradient) {
       entries.push({ type: "gradientFill", node, ...fillGradient, x, y, pageHeight });
+    } else {
+      entries.push({ type: "commands", commands: pdfFillCommands(node, pageHeight, x, y) });
+    }
+
+    if (strokeGradient) {
+      entries.push({ type: "gradientStroke", node, ...strokeGradient, x, y, pageHeight });
+    } else {
       const strokeCommands = pdfStrokeCommands(node, pageHeight, x, y);
       if (strokeCommands.length > 0) {
         entries.push({ type: "commands", commands: strokeCommands });
       }
-    } else {
-      entries.push({ type: "commands", commands: pdfRectCommands(node, pageHeight, x, y) });
     }
   }
 
