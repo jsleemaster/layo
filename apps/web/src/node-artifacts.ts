@@ -15,6 +15,8 @@ export interface NodeArtifactOptions {
 
 type PdfPart = string | Uint8Array;
 
+type ClippedRendererNode = RendererNode & { clip?: { type: "bounds" } | null };
+
 interface PdfObject {
   parts: PdfPart[];
 }
@@ -97,6 +99,10 @@ function svgNodeTransform(node: RendererNode) {
 
 function svgNodeAttributes(node: RendererNode) {
   return `data-node-id="${escapeSvgText(node.id)}" data-node-name="${escapeSvgText(node.name)}" data-node-kind="${node.kind}"`;
+}
+
+function nodeClipsToBounds(node: RendererNode) {
+  return (node as ClippedRendererNode).clip?.type === "bounds";
 }
 
 function normalizedBase64(value: string) {
@@ -257,6 +263,10 @@ function artifactBoundsForNode(node: RendererNode): ArtifactBounds {
   const height = Math.max(1, Math.round(node.size.height));
   let bounds = mergeBounds(boundsForBox(width, height), shadowBoundsForNode(node) ?? boundsForBox(width, height));
 
+  if (nodeClipsToBounds(node)) {
+    return bounds;
+  }
+
   for (const child of node.children) {
     bounds = mergeBounds(bounds, translateBounds(artifactBoundsForNode(child), child.transform.x, child.transform.y));
   }
@@ -280,6 +290,31 @@ function shadowFilterIdForNode(node: RendererNode) {
 
 function svgShadowFilterAttribute(node: RendererNode) {
   return shadowLayersForNode(node).length > 0 && node.kind !== "group" ? ` filter="url(#${shadowFilterIdForNode(node)})"` : "";
+}
+
+function clipPathIdForNode(node: RendererNode) {
+  return `layo-clip-${node.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+function svgClipPathAttribute(node: RendererNode) {
+  return nodeClipsToBounds(node) ? ` clip-path="url(#${clipPathIdForNode(node)})"` : "";
+}
+
+function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
+  if (!nodeClipsToBounds(node)) {
+    return [];
+  }
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  return [
+    indent(`<clipPath id="${clipPathIdForNode(node)}">`, depth),
+    indent(`<rect x="0" y="0" width="${width}" height="${height}" />`, depth + 1),
+    indent("</clipPath>", depth)
+  ];
+}
+
+function svgClipPathLinesForTree(node: RendererNode, depth: number): string[] {
+  return [...svgClipPathLinesForNode(node, depth), ...node.children.flatMap((child) => svgClipPathLinesForTree(child, depth))];
 }
 
 function svgShadowFilterLinesForNode(node: RendererNode, depth: number): string[] {
@@ -326,8 +361,8 @@ function svgShadowFilterLinesForTree(node: RendererNode, depth: number): string[
 }
 
 function svgDefsForNode(node: RendererNode, depth: number): string[] {
-  const filterLines = svgShadowFilterLinesForTree(node, depth + 1);
-  return filterLines.length > 0 ? [indent("<defs>", depth), ...filterLines, indent("</defs>", depth)] : [];
+  const defLines = [...svgShadowFilterLinesForTree(node, depth + 1), ...svgClipPathLinesForTree(node, depth + 1)];
+  return defLines.length > 0 ? [indent("<defs>", depth), ...defLines, indent("</defs>", depth)] : [];
 }
 
 function imageAssetForNode(node: RendererNode, options: NodeArtifactOptions) {
@@ -388,20 +423,24 @@ function indent(line: string, depth: number) {
 
 function svgLinesForNode(node: RendererNode, options: NodeArtifactOptions, depth: number, isRoot = false): string[] {
   const lines: string[] = [];
-  if (!isRoot) {
-    lines.push(indent(`<g ${svgNodeAttributes(node)} transform="${svgNodeTransform(node)}">`, depth));
+  const clipPath = svgClipPathAttribute(node);
+  const shouldWrap = !isRoot || Boolean(clipPath);
+  if (shouldWrap) {
+    const transform = isRoot ? "" : ` transform="${svgNodeTransform(node)}"`;
+    lines.push(indent(`<g ${svgNodeAttributes(node)}${transform}${clipPath}>`, depth));
   }
 
   const self = svgSelfForNode(node, options);
+  const childDepth = shouldWrap ? depth + 1 : depth;
   if (self) {
-    lines.push(indent(self, isRoot ? depth : depth + 1));
+    lines.push(indent(self, childDepth));
   }
 
   for (const child of node.children) {
-    lines.push(...svgLinesForNode(child, options, isRoot ? depth : depth + 1));
+    lines.push(...svgLinesForNode(child, options, childDepth));
   }
 
-  if (!isRoot) {
+  if (shouldWrap) {
     lines.push(indent("</g>", depth));
   }
   return lines;
