@@ -43,7 +43,9 @@ Local RED execution is unavailable in this Codex session because local shell com
 
 ## Verification
 
-Pending CI verification.
+- Full Verification #28733326443 first attempt passed Penpot maturity/design gates, typecheck, web build, and Core tests, including the polygon code-export regression, then failed Playwright CLI e2e on `apps/web/e2e/editor-mvp.spec.ts:1309` when the unrelated component variant test observed a transient missing variant option/instance response.
+- Rerun job #85217867262 for the same workflow run passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 5m15s.
+- Local shell verification remains unavailable in this Codex session because local commands such as `python3`, `git status`, `git branch`, `git worktree list`, and `sleep` exit with code 134 before producing useful output.
 
 ## Remaining Divergence
 
