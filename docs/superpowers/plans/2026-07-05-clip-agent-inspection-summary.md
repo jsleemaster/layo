@@ -37,9 +37,26 @@ Local RED execution could not be rerun in this Codex session because every shell
 - Overrides `inspectCanvas`, `findNodes`, and `createAgentBatchResult` so node summaries include optional `clip: { type: "bounds" }` when present on a design node.
 - Adds server regression coverage to the Penpot masked-group clipping test so persistence, agent inspection, and code handoff all assert the same clipping signal.
 
-## Verification
+## GREEN Evidence
 
-Pending remote CI. Browser Playwright proof is not expanded in this slice because no browser behavior changes; PR #241 already covered visible import/clipping persistence with Playwright CLI e2e.
+Code-head Full Verification #28731905701, job #85199031296, passed:
+
+- Penpot maturity and design rule gates.
+- Typecheck.
+- Web build.
+- Core tests, including the server regression for `inspectCanvas` clip summaries.
+- Playwright CLI e2e.
+
+The Playwright CLI e2e suite ran the existing clipped masked-group browser scenario at `[159/177]` as `apps/web/e2e/external-migration-penpot-masked-group.spec.ts`, and the final result was `177 passed (5.9m)`.
+
+## Direct Browser Evidence
+
+No new browser behavior is introduced in this slice. Browser-level proof remains the existing Playwright CLI e2e path from PR #241 and this PR's full-suite rerun: it imports a Penpot masked group through the visible file panel, checks the Korean import status and layer tree, and verifies persisted project JSON includes `clip: { type: "bounds" }` on the imported group.
+
+## Remaining Divergence
+
+- Arbitrary Penpot mask paths, alpha masks, and exact blend/compositing fidelity remain follow-up import/export gaps.
+- Components, variants, tokens, and library relations remain broader Penpot import/export maturity gaps.
 
 ## Deployment
 
