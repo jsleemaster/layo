@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | Latest Penpot mixed solid/gradient stroke stack slice is recorded under Completed Plans. Deployment remains intentionally deferred. |
+| `2026-07-05-penpot-stroke-image-assets.md` | Active | RED coverage added for packaged Penpot rect `stroke-image` records. Expected failure: review sees the packaged media, but import drops the image-backed stroke asset and persists a plain rectangle instead of a Layo image node. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
