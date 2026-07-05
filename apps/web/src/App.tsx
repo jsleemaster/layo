@@ -355,8 +355,8 @@ function canvasGradientPoint(
   };
 }
 
-function canvasGradientStopColor(source: NodePaintSource, stop: NodePaintStop) {
-  const opacity = clampCanvasGradientUnit(stop.opacity * (source.opacity ?? 1));
+function canvasGradientStopColor(stop: NodePaintStop) {
+  const opacity = clampCanvasGradientUnit(stop.opacity);
   if (opacity >= 1) {
     return stop.color;
   }
@@ -374,14 +374,14 @@ function canvasGradientStopColor(source: NodePaintSource, stop: NodePaintStop) {
   return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Math.round(opacity * 1000) / 1000})`;
 }
 
-function canvasGradientColorStops(source: NodePaintSource, stops: NodePaintStop[] | undefined) {
+function canvasGradientColorStops(stops: NodePaintStop[] | undefined) {
   const normalizedStops = (stops ?? [])
     .filter((stop) => Number.isFinite(stop.offset) && stop.color)
     .sort((left, right) => left.offset - right.offset);
   if (normalizedStops.length < 2) {
     return null;
   }
-  return normalizedStops.flatMap((stop) => [clampCanvasGradientUnit(stop.offset), canvasGradientStopColor(source, stop)]);
+  return normalizedStops.flatMap((stop) => [clampCanvasGradientUnit(stop.offset), canvasGradientStopColor(stop)]);
 }
 
 function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke") {
@@ -389,21 +389,31 @@ function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke"
     return null;
   }
 
-  const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
-  for (const source of paintSources) {
-    const gradient = source.gradient;
-    const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
-    const colorStops = canvasGradientColorStops(source, gradient?.stops);
-    if (source.kind === kind && source.paintType === "gradient" && type.includes("linear") && colorStops) {
-      return {
-        startPoint: canvasGradientPoint(gradient?.start, node, { x: 0, y: 0 }),
-        endPoint: canvasGradientPoint(gradient?.end, node, { x: 1, y: 0 }),
-        colorStops
-      };
-    }
+  const paintSources = (node.style.paint_sources ?? [])
+    .filter((source) => source.kind === kind)
+    .sort((left, right) => left.index - right.index);
+  if (paintSources.length !== 1) {
+    return null;
   }
 
-  return null;
+  const source = paintSources[0];
+  if (!source) {
+    return null;
+  }
+
+  const gradient = source.gradient;
+  const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+  const blendMode = source.blendMode?.replace(/^:/, "").toLowerCase() ?? "normal";
+  const colorStops = canvasGradientColorStops(gradient?.stops);
+  if (source.paintType !== "gradient" || !type.includes("linear") || blendMode !== "normal" || !colorStops) {
+    return null;
+  }
+
+  return {
+    startPoint: canvasGradientPoint(gradient?.start, node, { x: 0, y: 0 }),
+    endPoint: canvasGradientPoint(gradient?.end, node, { x: 1, y: 0 }),
+    colorStops
+  };
 }
 
 function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
