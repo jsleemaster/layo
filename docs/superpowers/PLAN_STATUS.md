@@ -28,12 +28,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-05-penpot-mixed-gradient-stroke-stack.md` | Active | Coverage probe pending for adapting mixed solid plus `stroke-color-gradient` Penpot stroke stacks into Layo's flattened single `style.stroke`. If verification fails, the failed assertion becomes the next implementation goal. Deployment remains intentionally deferred. |
+| _None_ | Idle | Latest Penpot mixed solid/gradient stroke stack slice is recorded under Completed Plans. Deployment remains intentionally deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-05-penpot-mixed-gradient-stroke-stack.md` | Completed | Adds server, HTTP persistence, and Playwright CLI coverage for a Penpot stroke stack mixing a front solid red stroke with a back `stroke-color-gradient` record. Full Verification #28724576060 passed, confirming the existing importer flattens the stack to `style.stroke: #804040` with `stroke_width: 6`; no importer code change was needed. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-different-width-stroke-stack.md` | Completed | Adapts Penpot solid `strokes` stacks with different `stroke-width` values by preserving the widest valid stroke width as Layo's single `style.stroke_width` while keeping the existing flattened stroke color path. RED Full Verification #28723902377 failed on `stroke_width: 2` instead of 8; GREEN Full Verification #28724082389 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-solid-multi-stroke-flattening.md` | Completed | Adapts Penpot same-width solid `strokes` stacks by flattening front-to-back paint order into one deterministic Layo `style.stroke` color and opacity. RED Full Verification #28722912062 failed on `#ff0000` instead of `#800080`; GREEN Full Verification #28722958842 passed after implementation; final docs/head Full Verification #28723174583, Storage Restore Drill #28723174585, and Storage Backup Retention #28723174586 passed. PR #231 was squash-merged as `ca7e91fac6d934ca2c6bce6df563111630d1b542`. Deployment remains intentionally deferred. |
 | `2026-07-05-penpot-stroke-gradient-flattening.md` | Completed | Adapts Penpot `stroke-color-gradient` stop vectors by flattening midpoint color into deterministic Layo `style.stroke` while preserving stroke width. Initial RED Full Verification #28722244025 caught missing e2e script registration; RED Full Verification #28722292528 failed with `stroke: null` and `stroke_width: 0`; GREEN Full Verification #28722346733, Storage Restore Drill #28722346756, and Storage Backup Retention #28722346750 passed. Deployment remains intentionally deferred. |
