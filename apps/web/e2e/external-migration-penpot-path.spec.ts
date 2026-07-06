@@ -271,6 +271,42 @@ test("file panel preserves Penpot even-odd path fill rule in imported SVG asset"
     }
   });
 
+  const exportResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/export/code`
+  );
+  expect(exportResponse.ok()).toBeTruthy();
+  const exportPayload = await exportResponse.json();
+  const exportedFrame = exportPayload.export.implementationSpec.elements.find(
+    (element: { id: string }) => element.id === `penpot-${frameId}`
+  );
+  const exportedPathNode = exportedFrame.structure.children.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(exportedPathNode).toMatchObject({
+    id: `penpot-${evenOddPathId}`,
+    kind: "image",
+    content: {
+      type: "image",
+      assetId: expectedEvenOddPathAssetId,
+      fitMode: "fill",
+      vectorSource: {
+        origin: "penpot",
+        shapeId: evenOddPathId,
+        shapeType: "path",
+        pathData: evenOddPathData,
+        fillRule: "evenodd",
+        bounds: { x: 56, y: 80, width: 100, height: 100 }
+      }
+    },
+    annotations: expect.arrayContaining([
+      expect.objectContaining({
+        id: `penpot-${evenOddPathId}-vector-source`,
+        label: "Penpot vector",
+        kind: "asset"
+      })
+    ])
+  });
+
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedEvenOddPathAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();
   expect(await assetResponse.body()).toEqual(expectedEvenOddPathSvgBytes);

@@ -57,21 +57,38 @@ export interface NodePaintSource {
   gradient?: NodePaintGradient;
 }
 
+export interface NodeVectorSource {
+  origin: "penpot";
+  shapeId: string;
+  shapeType: "path";
+  bounds: NodeClipBounds;
+  pathData: string;
+  fillRule?: "nonzero" | "evenodd";
+}
+
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
 type PaintSourceDesignNode = DesignNode & {
   style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
+};
+type VectorSourceDesignNode = DesignNode & {
+  content: Extract<DesignNode["content"], { type: "image" }> & { vector_source?: NodeVectorSource | null };
 };
 type ClipStructureNode = CodeStructureNode & { clip?: NodeClip; children: ClipStructureNode[] };
 type PaintStructureNode = CodeStructureNode & {
   style: CodeStructureNode["style"] & { paintSources?: NodePaintSource[] };
   children: PaintStructureNode[];
 };
+type VectorStructureNode = CodeStructureNode & {
+  content: CodeStructureNode["content"] & { vectorSource?: NodeVectorSource };
+  children: VectorStructureNode[];
+};
 
 export function exportDesignToCode(document: DesignFile, options: CodeExportOptions = {}): CodeExportResult {
   const result = exportBaseDesignToCode(document, options);
   const clipsByNodeId = clippedNodesById(document);
   const paintSourcesByNodeId = paintSourcesByNodeIdForDocument(document);
-  if (clipsByNodeId.size === 0 && paintSourcesByNodeId.size === 0) {
+  const vectorSourcesByNodeId = vectorSourcesByNodeIdForDocument(document);
+  if (clipsByNodeId.size === 0 && paintSourcesByNodeId.size === 0 && vectorSourcesByNodeId.size === 0) {
     return result;
   }
 
@@ -91,6 +108,9 @@ export function exportDesignToCode(document: DesignFile, options: CodeExportOpti
       enrichStructurePaintSources(element.structure as PaintStructureNode, paintSourcesByNodeId);
       element.css = enrichCssPaintSources(element.css, paintSourcesByNodeId);
     }
+    if (vectorSourcesByNodeId.size > 0) {
+      enrichStructureVectorSources(element.structure as VectorStructureNode, vectorSourcesByNodeId);
+    }
     refreshElementJsModule(element);
   }
   for (const component of result.implementationSpec.components) {
@@ -99,6 +119,9 @@ export function exportDesignToCode(document: DesignFile, options: CodeExportOpti
     }
     if (paintSourcesByNodeId.size > 0) {
       enrichStructurePaintSources(component.structure as PaintStructureNode, paintSourcesByNodeId);
+    }
+    if (vectorSourcesByNodeId.size > 0) {
+      enrichStructureVectorSources(component.structure as VectorStructureNode, vectorSourcesByNodeId);
     }
   }
 
@@ -154,6 +177,32 @@ function enrichStructurePaintSources(
 
   for (const child of structure.children) {
     enrichStructurePaintSources(child, paintSourcesByNodeId);
+  }
+}
+
+function enrichStructureVectorSources(
+  structure: VectorStructureNode,
+  vectorSourcesByNodeId: Map<string, NodeVectorSource>
+): void {
+  const vectorSource = vectorSourcesByNodeId.get(structure.id);
+  if (vectorSource && structure.content.type === "image") {
+    structure.content = { ...structure.content, vectorSource: structuredClone(vectorSource) };
+    if (!structure.annotations.some((annotation) => annotation.id === `${structure.id}-vector-source`)) {
+      structure.annotations.push({
+        id: `${structure.id}-vector-source`,
+        label: "Penpot vector",
+        value: `${vectorSource.shapeType} source preserved`,
+        detail: `Original Penpot ${vectorSource.shapeType} ${vectorSource.shapeId} keeps path data${
+          vectorSource.fillRule ? ` and ${vectorSource.fillRule} fill rule` : ""
+        } while Layo uses an SVG image asset bridge`,
+        kind: "asset",
+        sourceNodeIds: [structure.id]
+      });
+    }
+  }
+
+  for (const child of structure.children) {
+    enrichStructureVectorSources(child, vectorSourcesByNodeId);
   }
 }
 
@@ -357,6 +406,16 @@ function paintSourcesByNodeIdForDocument(document: DesignFile): Map<string, Node
   return paintSourcesByNodeId;
 }
 
+function vectorSourcesByNodeIdForDocument(document: DesignFile): Map<string, NodeVectorSource> {
+  const vectorSourcesByNodeId = new Map<string, NodeVectorSource>();
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectVectorSourceNodes(node, vectorSourcesByNodeId);
+    }
+  }
+  return vectorSourcesByNodeId;
+}
+
 function collectClippedNodes(node: DesignNode, clipsByNodeId: Map<string, NodeClip>): void {
   const clip = nodeClip(node);
   if (clip) {
@@ -377,6 +436,16 @@ function collectPaintSourceNodes(node: DesignNode, paintSourcesByNodeId: Map<str
   }
 }
 
+function collectVectorSourceNodes(node: DesignNode, vectorSourcesByNodeId: Map<string, NodeVectorSource>): void {
+  const vectorSource = nodeVectorSource(node);
+  if (vectorSource) {
+    vectorSourcesByNodeId.set(node.id, vectorSource);
+  }
+  for (const child of node.children) {
+    collectVectorSourceNodes(child, vectorSourcesByNodeId);
+  }
+}
+
 function nodeClip(node: DesignNode): NodeClip | undefined {
   const clip = (node as ClippedDesignNode).clip;
   return clip?.type === "bounds" ? cloneNodeClip(clip) : undefined;
@@ -385,6 +454,14 @@ function nodeClip(node: DesignNode): NodeClip | undefined {
 function nodePaintSources(node: DesignNode): NodePaintSource[] {
   const paintSources = (node as PaintSourceDesignNode).style.paint_sources;
   return Array.isArray(paintSources) ? paintSources.map((source) => structuredClone(source)) : [];
+}
+
+function nodeVectorSource(node: DesignNode): NodeVectorSource | undefined {
+  if (node.content.type !== "image") {
+    return undefined;
+  }
+  const vectorSource = (node as VectorSourceDesignNode).content.vector_source;
+  return vectorSource ? structuredClone(vectorSource) : undefined;
 }
 
 function cloneNodeClip(clip: NodeClip): NodeClip {
