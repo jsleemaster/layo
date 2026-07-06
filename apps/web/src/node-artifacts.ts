@@ -176,6 +176,15 @@ function svgEllipseAttributes(width: number, height: number) {
   return `cx="${formatNumber(width / 2)}" cy="${formatNumber(height / 2)}" rx="${formatNumber(width / 2)}" ry="${formatNumber(height / 2)}"`;
 }
 
+function clipSourcePathDataForNode(node: RendererNode) {
+  const pathData = nodeClip(node)?.source?.pathData;
+  return typeof pathData === "string" && pathData.trim() ? pathData.trim() : null;
+}
+
+function svgPathElement(pathData: string, attributes = "") {
+  return "<path d=\"" + escapeSvgText(pathData) + "\"" + attributes + " />";
+}
+
 function clipPolygonPointsForNode(node: RendererNode) {
   const source = nodeClip(node)?.source;
   const points = source?.points;
@@ -612,13 +621,16 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   }
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
+  const pathData = clipSourcePathDataForNode(node);
   const polygonPoints = svgClipPolygonPointsForNode(node);
 
   if (nodeClipUsesAlphaMask(node)) {
     const opacity = formatNumber(clipSourceOpacityForNode(node));
-    const maskShape = polygonPoints
-      ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`
-      : nodeClipUsesEllipseShape(node)
+    const maskShape = pathData
+      ? svgPathElement(pathData, " fill=\"#fff\" fill-opacity=\"" + opacity + "\"")
+      : polygonPoints
+        ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`
+        : nodeClipUsesEllipseShape(node)
         ? `<ellipse ${svgEllipseAttributes(width, height)} fill="#fff" fill-opacity="${opacity}" />`
         : `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff" fill-opacity="${opacity}" />`;
     return [
@@ -631,9 +643,11 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
     ];
   }
 
-  const clipShape = polygonPoints
-    ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
-    : nodeClipUsesEllipseShape(node)
+  const clipShape = pathData
+    ? svgPathElement(pathData)
+    : polygonPoints
+      ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
+      : nodeClipUsesEllipseShape(node)
       ? `<ellipse ${svgEllipseAttributes(width, height)} />`
       : `<rect x="0" y="0" width="${width}" height="${height}" />`;
   return [
@@ -748,6 +762,10 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
+  const pathData = clipSourcePathDataForNode(node);
+  if (pathData) {
+    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + opacity + filter + " />";
+  }
   if (nodeClipUsesEllipseShape(node)) {
     return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
   }
@@ -1046,6 +1064,145 @@ function pdfGradientFillOpacity(entry: PdfGradientPaintEntry) {
 }
 
 const pdfEllipseKappa = 0.552284749831;
+function svgPathTokens(pathData: string) {
+  return pathData.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [];
+}
+
+function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x: number, y: number) {
+  const tokens = svgPathTokens(pathData);
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  let index = 0;
+  let command = "";
+  let current = { x: 0, y: 0 };
+  let subpathStart = { x: 0, y: 0 };
+  const commands: string[] = [];
+  const isCommand = (token: string) => /^[a-zA-Z]$/.test(token);
+  const hasNumber = () => index < tokens.length && !isCommand(tokens[index]);
+  const readNumber = () => {
+    if (!hasNumber()) {
+      return null;
+    }
+    const value = Number(tokens[index]);
+    index += 1;
+    return Number.isFinite(value) ? value : null;
+  };
+  const absolutePoint = (pointX: number, pointY: number, relative: boolean) => ({
+    x: relative ? current.x + pointX : pointX,
+    y: relative ? current.y + pointY : pointY
+  });
+  const pdfX = (pointX: number) => formatNumber(x + pointX);
+  const pdfY = (pointY: number) => formatNumber(pageHeight - y - pointY);
+  const lineTo = (point: { x: number; y: number }) => {
+    commands.push(pdfX(point.x) + " " + pdfY(point.y) + " l");
+    current = point;
+  };
+
+  while (index < tokens.length) {
+    if (isCommand(tokens[index])) {
+      command = tokens[index];
+      index += 1;
+    } else if (!command) {
+      return null;
+    }
+
+    const relative = command === command.toLowerCase();
+    switch (command.toUpperCase()) {
+      case "M": {
+        let first = true;
+        while (hasNumber()) {
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (pointX === null || pointY === null) {
+            return null;
+          }
+          const point = absolutePoint(pointX, pointY, relative);
+          commands.push(pdfX(point.x) + " " + pdfY(point.y) + " " + (first ? "m" : "l"));
+          current = point;
+          if (first) {
+            subpathStart = point;
+            first = false;
+          }
+        }
+        command = relative ? "l" : "L";
+        break;
+      }
+      case "L":
+        while (hasNumber()) {
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (pointX === null || pointY === null) {
+            return null;
+          }
+          lineTo(absolutePoint(pointX, pointY, relative));
+        }
+        break;
+      case "H":
+        while (hasNumber()) {
+          const pointX = readNumber();
+          if (pointX === null) {
+            return null;
+          }
+          lineTo({ x: relative ? current.x + pointX : pointX, y: current.y });
+        }
+        break;
+      case "V":
+        while (hasNumber()) {
+          const pointY = readNumber();
+          if (pointY === null) {
+            return null;
+          }
+          lineTo({ x: current.x, y: relative ? current.y + pointY : pointY });
+        }
+        break;
+      case "C":
+        while (hasNumber()) {
+          const x1 = readNumber();
+          const y1 = readNumber();
+          const x2 = readNumber();
+          const y2 = readNumber();
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (x1 === null || y1 === null || x2 === null || y2 === null || pointX === null || pointY === null) {
+            return null;
+          }
+          const first = absolutePoint(x1, y1, relative);
+          const second = absolutePoint(x2, y2, relative);
+          const point = absolutePoint(pointX, pointY, relative);
+          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
+          current = point;
+        }
+        break;
+      case "Q":
+        while (hasNumber()) {
+          const qx = readNumber();
+          const qy = readNumber();
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (qx === null || qy === null || pointX === null || pointY === null) {
+            return null;
+          }
+          const control = absolutePoint(qx, qy, relative);
+          const point = absolutePoint(pointX, pointY, relative);
+          const first = { x: current.x + (2 / 3) * (control.x - current.x), y: current.y + (2 / 3) * (control.y - current.y) };
+          const second = { x: point.x + (2 / 3) * (control.x - point.x), y: point.y + (2 / 3) * (control.y - point.y) };
+          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
+          current = point;
+        }
+        break;
+      case "Z":
+        commands.push("h");
+        current = subpathStart;
+        break;
+      default:
+        return null;
+    }
+  }
+
+  return commands.length > 0 ? commands : null;
+}
 
 function pdfEllipsePathCommands(x: number, y: number, width: number, height: number, pageHeight: number) {
   const rx = width / 2;
@@ -1076,6 +1233,13 @@ function pdfShapePathCommandsForNode(node: RendererNode, pageHeight: number, x: 
   }
   const pathX = x + inset;
   const pathY = y + inset;
+  if (inset === 0) {
+    const pathData = clipSourcePathDataForNode(node);
+    const pathCommands = pathData ? pdfPathCommandsFromSvgPathData(pathData, pageHeight, pathX, pathY) : null;
+    if (pathCommands) {
+      return pathCommands;
+    }
+  }
   if (nodeClipUsesEllipseShape(node)) {
     return pdfEllipsePathCommands(pathX, pathY, width, height, pageHeight);
   }

@@ -98,6 +98,7 @@ export interface NodeClipSource {
   bounds: NodeClipBounds;
   opacity?: number;
   points?: NodeClipPoint[];
+  pathData?: string;
 }
 
 export interface NodeClip {
