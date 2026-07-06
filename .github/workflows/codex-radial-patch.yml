@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   apply:
-    if: ${{ github.actor != 'github-actions[bot]' }}
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,25 +19,31 @@ jobs:
           fetch-depth: 0
       - name: Apply radial SVG artifact patch
         run: |
-          node <<'NODE'
-          const fs = require("node:fs");
-          const path = "apps/web/src/node-artifacts.ts";
-          let content = fs.readFileSync(path, "utf8");
+          python3 - <<'PY'
+          from pathlib import Path
 
-          function replaceOnce(oldText, newText) {
-            if (!content.includes(oldText)) {
-              throw new Error(`Patch target not found: ${oldText.slice(0, 80)}`);
-            }
-            content = content.replace(oldText, newText);
-          }
+          path = Path("apps/web/src/node-artifacts.ts")
+          content = path.read_text()
 
-          replaceOnce(`interface FillGradient {
+          def replace_exact(old, new):
+              global content
+              if old not in content:
+                  raise RuntimeError(f"Patch target not found: {old[:80]}")
+              content = content.replace(old, new, 1)
+
+          def replace_between(start_marker, end_marker, replacement):
+              global content
+              start = content.index(start_marker)
+              end = content.index(end_marker, start)
+              content = content[:start] + replacement + content[end:]
+
+          replace_exact('''interface FillGradient {
   source: NodePaintSource;
   gradient: NodePaintGradient;
   stops: NodePaintStop[];
 }
 
-interface PdfGradientStop {`, `type SvgGradientType = "linear" | "radial";
+interface PdfGradientStop {''', '''type SvgGradientType = "linear" | "radial";
 
 interface FillGradient {
   source: NodePaintSource;
@@ -49,36 +55,9 @@ interface SvgGradient extends FillGradient {
   type: SvgGradientType;
 }
 
-interface PdfGradientStop {`);
+interface PdfGradientStop {''')
 
-          replaceOnce(`function paintGradientForNode(node: RendererNode, kind: "fill" | "stroke"): FillGradient | null {
-  if (node.kind === "group" || node.content.type === "text") {
-    return null;
-  }
-
-  const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
-  for (const source of paintSources) {
-    const gradient = source.gradient;
-    if (!gradient) {
-      continue;
-    }
-    const type = gradient.type?.replace(/^:/, "").toLowerCase() ?? "linear";
-    const stops = gradient.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
-    if (source.kind === kind && source.paintType === "gradient" && type.includes("linear") && stops.length >= 2) {
-      return { source, gradient, stops };
-    }
-  }
-
-  return null;
-}
-
-function fillGradientForNode(node: RendererNode) {
-  return paintGradientForNode(node, "fill");
-}
-
-function strokeGradientForNode(node: RendererNode) {
-  return paintGradientForNode(node, "stroke");
-}`, `function normalizedGradientType(gradient: NodePaintGradient) {
+          replace_between('function paintGradientForNode', '\n\nfunction svgGradientStopLine', '''function normalizedGradientType(gradient: NodePaintGradient) {
   return gradient.type?.replace(/^:/, "").toLowerCase() ?? "linear";
 }
 
@@ -148,24 +127,9 @@ function svgFillGradientForNode(node: RendererNode) {
 
 function svgStrokeGradientForNode(node: RendererNode) {
   return svgPaintGradientForNode(node, "stroke");
-}`);
+}''')
 
-          replaceOnce(`function svgGradientLinesForGradient(node: RendererNode, paintGradient: FillGradient, depth: number): string[] {
-  const start = paintGradient.gradient.start ?? { x: 0, y: 0 };
-  const end = paintGradient.gradient.end ?? { x: 1, y: 0 };
-  return [
-    indent(
-      \`<linearGradient id="\${svgGradientIdForNode(node, paintGradient.source)}" x1="\${gradientCoordinatePercent(
-        start.x
-      )}" y1="\${gradientCoordinatePercent(start.y)}" x2="\${gradientCoordinatePercent(end.x)}" y2="\${gradientCoordinatePercent(end.y)}">\`,
-      depth
-    ),
-    ...[...paintGradient.stops]
-      .sort((left, right) => left.offset - right.offset)
-      .map((stop) => indent(svgGradientStopLine(paintGradient.source, stop), depth + 1)),
-    indent("</linearGradient>", depth)
-  ];
-}`, `function svgGradientStopLinesForGradient(paintGradient: FillGradient, depth: number) {
+          replace_between('function svgGradientLinesForGradient', '\n\nfunction svgGradientLinesForTree', '''function svgGradientStopLinesForGradient(paintGradient: FillGradient, depth: number) {
   return [...paintGradient.stops]
     .sort((left, right) => left.offset - right.offset)
     .map((stop) => indent(svgGradientStopLine(paintGradient.source, stop), depth + 1));
@@ -187,11 +151,11 @@ function svgGradientLinesForGradient(node: RendererNode, paintGradient: SvgGradi
     const center = paintGradient.gradient.start ?? { x: 0.5, y: 0.5 };
     return [
       indent(
-        \`<radialGradient id="\${svgGradientIdForNode(node, paintGradient.source)}" cx="\${gradientCoordinatePercent(
+        `<radialGradient id="${svgGradientIdForNode(node, paintGradient.source)}" cx="${gradientCoordinatePercent(
           gradientCoordinateUnit(center.x, 0.5)
-        )}" cy="\${gradientCoordinatePercent(gradientCoordinateUnit(center.y, 0.5))}" r="\${gradientCoordinatePercent(
+        )}" cy="${gradientCoordinatePercent(gradientCoordinateUnit(center.y, 0.5))}" r="${gradientCoordinatePercent(
           svgRadialGradientRadius(paintGradient.gradient)
-        )}">\`,
+        )}">`,
         depth
       ),
       ...svgGradientStopLinesForGradient(paintGradient, depth),
@@ -203,62 +167,43 @@ function svgGradientLinesForGradient(node: RendererNode, paintGradient: SvgGradi
   const end = paintGradient.gradient.end ?? { x: 1, y: 0 };
   return [
     indent(
-      \`<linearGradient id="\${svgGradientIdForNode(node, paintGradient.source)}" x1="\${gradientCoordinatePercent(
+      `<linearGradient id="${svgGradientIdForNode(node, paintGradient.source)}" x1="${gradientCoordinatePercent(
         start.x
-      )}" y1="\${gradientCoordinatePercent(start.y)}" x2="\${gradientCoordinatePercent(end.x)}" y2="\${gradientCoordinatePercent(end.y)}">\`,
+      )}" y1="${gradientCoordinatePercent(start.y)}" x2="${gradientCoordinatePercent(end.x)}" y2="${gradientCoordinatePercent(end.y)}">`,
       depth
     ),
     ...svgGradientStopLinesForGradient(paintGradient, depth),
     indent("</linearGradient>", depth)
   ];
-}`);
+}
 
-          replaceOnce(`function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
-  const gradients = [fillGradientForNode(node), strokeGradientForNode(node)].filter(
-    (paintGradient): paintGradient is FillGradient => Boolean(paintGradient)
-  );
-  return gradients.flatMap((paintGradient) => svgGradientLinesForGradient(node, paintGradient, depth));
-}`, `function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
+function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
   const gradients = [svgFillGradientForNode(node), svgStrokeGradientForNode(node)].filter(
     (paintGradient): paintGradient is SvgGradient => Boolean(paintGradient)
   );
   return gradients.flatMap((paintGradient) => svgGradientLinesForGradient(node, paintGradient, depth));
-}`);
+}''')
 
-          replaceOnce(`function svgFillAttributeForNode(node: RendererNode) {
-  const fill = escapeSvgText(node.style.fill);
-  const fillGradient = fillGradientForNode(node);
-  if (!fillGradient) {
-    return \`fill="\${fill}"\`;
-  }
-  return \`fill="url(#\${svgGradientIdForNode(node, fillGradient.source)})" data-fallback-fill="\${fill}"\`;
-}`, `function svgFillAttributeForNode(node: RendererNode) {
+          replace_between('function svgFillAttributeForNode', '\n\nfunction svgStrokeAttributeForNode', '''function svgFillAttributeForNode(node: RendererNode) {
   const fill = escapeSvgText(node.style.fill);
   const fillGradient = svgFillGradientForNode(node);
   if (!fillGradient) {
-    return \`fill="\${fill}"\`;
+    return `fill="${fill}"`;
   }
-  return \`fill="url(#\${svgGradientIdForNode(node, fillGradient.source)})" data-fallback-fill="\${fill}"\`;
-}`);
+  return `fill="url(#${svgGradientIdForNode(node, fillGradient.source)})" data-fallback-fill="${fill}"`;
+}''')
 
-          replaceOnce(`function svgStrokeAttributeForNode(node: RendererNode) {
-  const stroke = node.style.stroke ? escapeSvgText(node.style.stroke) : "none";
-  const strokeGradient = node.style.stroke ? strokeGradientForNode(node) : null;
-  if (!strokeGradient) {
-    return \`stroke="\${stroke}"\`;
-  }
-  return \`stroke="url(#\${svgGradientIdForNode(node, strokeGradient.source)})" data-fallback-stroke="\${stroke}"\`;
-}`, `function svgStrokeAttributeForNode(node: RendererNode) {
+          replace_between('function svgStrokeAttributeForNode', '\n\nfunction clipSourceOpacityForNode', '''function svgStrokeAttributeForNode(node: RendererNode) {
   const stroke = node.style.stroke ? escapeSvgText(node.style.stroke) : "none";
   const strokeGradient = node.style.stroke ? svgStrokeGradientForNode(node) : null;
   if (!strokeGradient) {
-    return \`stroke="\${stroke}"\`;
+    return `stroke="${stroke}"`;
   }
-  return \`stroke="url(#\${svgGradientIdForNode(node, strokeGradient.source)})" data-fallback-stroke="\${stroke}"\`;
-}`);
+  return `stroke="url(#${svgGradientIdForNode(node, strokeGradient.source)})" data-fallback-stroke="${stroke}"`;
+}''')
 
-          fs.writeFileSync(path, content);
-          NODE
+          path.write_text(content)
+          PY
       - name: Commit patch and remove temporary workflow
         run: |
           rm -f .github/workflows/codex-radial-patch.yml
