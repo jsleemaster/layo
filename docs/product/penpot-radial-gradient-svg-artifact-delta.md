@@ -19,6 +19,7 @@ Layo now adapts the first selected-layer SVG artifact slice for preserved Penpot
 - RED Full Verification #28751033299 failed because the radial fixture exported fallback `fill="#800080"` without `<defs>`.
 - GREEN PR-head Full Verification #28772353798 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 7m57s. Storage Restore Drill #28772353810 and Storage Backup Retention #28772353751 passed for the same head.
 - Latest PR-head checks remain the merge gate for any evidence-only follow-up commits after this recorded GREEN run.
+- Plan routing was checked after documentation cleanup: `PLAN_STATUS.md` leaves Current Active Plan idle and records this slice under Completed Plans.
 
 ## Follow-Up Gaps
 
