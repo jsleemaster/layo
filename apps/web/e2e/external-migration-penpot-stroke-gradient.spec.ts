@@ -308,7 +308,7 @@ function createPenpotRadialStrokeGradientExportArchive(): Buffer {
           x: 64,
           y: 88,
           width: 96,
-          height: 72,
+          height: 24,
           fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
           strokes: [
             {
@@ -515,12 +515,12 @@ test("dev panel PNG raster artifact preserves the imported Penpot radial stroke 
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);
-  const topInnerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), 32);
+  const centerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), Math.floor(height / 2));
   const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));
 
-  expect(topInnerStroke.r).toBeGreaterThan(topInnerStroke.b + 40);
+  expect(centerStroke.r).toBeGreaterThan(centerStroke.b + 40);
   expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);
-  expect(topInnerStroke.a).toBeGreaterThan(200);
+  expect(centerStroke.a).toBeGreaterThan(200);
   expect(rightStroke.a).toBeGreaterThan(200);
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("Radial stroke card PNG 다운로드됨");
 });
