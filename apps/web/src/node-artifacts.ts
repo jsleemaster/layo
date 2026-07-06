@@ -1068,6 +1068,112 @@ function svgPathTokens(pathData: string) {
   return pathData.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [];
 }
 
+interface SvgPathPoint {
+  x: number;
+  y: number;
+}
+
+function reflectedPathPoint(point: SvgPathPoint, around: SvgPathPoint): SvgPathPoint {
+  return { x: around.x * 2 - point.x, y: around.y * 2 - point.y };
+}
+
+function svgArcAngle(left: SvgPathPoint, right: SvgPathPoint) {
+  const denominator = Math.hypot(left.x, left.y) * Math.hypot(right.x, right.y);
+  if (denominator === 0) {
+    return 0;
+  }
+  const dot = Math.max(-1, Math.min(1, (left.x * right.x + left.y * right.y) / denominator));
+  const sign = left.x * right.y - left.y * right.x < 0 ? -1 : 1;
+  return sign * Math.acos(dot);
+}
+
+function svgArcPoint(center: SvgPathPoint, radiusX: number, radiusY: number, cosPhi: number, sinPhi: number, angle: number): SvgPathPoint {
+  const unitX = Math.cos(angle);
+  const unitY = Math.sin(angle);
+  return {
+    x: center.x + radiusX * cosPhi * unitX - radiusY * sinPhi * unitY,
+    y: center.y + radiusX * sinPhi * unitX + radiusY * cosPhi * unitY
+  };
+}
+
+function svgArcControlPoint(center: SvgPathPoint, radiusX: number, radiusY: number, cosPhi: number, sinPhi: number, angle: number, scale: number): SvgPathPoint {
+  const unitX = Math.cos(angle);
+  const unitY = Math.sin(angle);
+  const tangentX = -unitY;
+  const tangentY = unitX;
+  return {
+    x: center.x + radiusX * cosPhi * (unitX + scale * tangentX) - radiusY * sinPhi * (unitY + scale * tangentY),
+    y: center.y + radiusX * sinPhi * (unitX + scale * tangentX) + radiusY * cosPhi * (unitY + scale * tangentY)
+  };
+}
+
+function pdfArcCurveSegments(start: SvgPathPoint, end: SvgPathPoint, radiusX: number, radiusY: number, xAxisRotation: number, largeArcFlag: number, sweepFlag: number) {
+  let rx = Math.abs(radiusX);
+  let ry = Math.abs(radiusY);
+  if (rx === 0 || ry === 0) {
+    return null;
+  }
+  if (Math.abs(start.x - end.x) < 0.000001 && Math.abs(start.y - end.y) < 0.000001) {
+    return [];
+  }
+
+  const phi = (xAxisRotation * Math.PI) / 180;
+  const cosPhi = Math.cos(phi);
+  const sinPhi = Math.sin(phi);
+  const dx = (start.x - end.x) / 2;
+  const dy = (start.y - end.y) / 2;
+  const x1Prime = cosPhi * dx + sinPhi * dy;
+  const y1Prime = -sinPhi * dx + cosPhi * dy;
+  const radiusScale = (x1Prime * x1Prime) / (rx * rx) + (y1Prime * y1Prime) / (ry * ry);
+  if (radiusScale > 1) {
+    const scale = Math.sqrt(radiusScale);
+    rx *= scale;
+    ry *= scale;
+  }
+
+  const rxSquared = rx * rx;
+  const rySquared = ry * ry;
+  const x1PrimeSquared = x1Prime * x1Prime;
+  const y1PrimeSquared = y1Prime * y1Prime;
+  const denominator = rxSquared * y1PrimeSquared + rySquared * x1PrimeSquared;
+  if (denominator === 0) {
+    return null;
+  }
+  const sign = Boolean(largeArcFlag) === Boolean(sweepFlag) ? -1 : 1;
+  const centerScale = sign * Math.sqrt(Math.max(0, (rxSquared * rySquared - rxSquared * y1PrimeSquared - rySquared * x1PrimeSquared) / denominator));
+  const cxPrime = centerScale * ((rx * y1Prime) / ry);
+  const cyPrime = centerScale * -((ry * x1Prime) / rx);
+  const center = {
+    x: cosPhi * cxPrime - sinPhi * cyPrime + (start.x + end.x) / 2,
+    y: sinPhi * cxPrime + cosPhi * cyPrime + (start.y + end.y) / 2
+  };
+
+  const startVector = { x: (x1Prime - cxPrime) / rx, y: (y1Prime - cyPrime) / ry };
+  const endVector = { x: (-x1Prime - cxPrime) / rx, y: (-y1Prime - cyPrime) / ry };
+  const startAngle = svgArcAngle({ x: 1, y: 0 }, startVector);
+  let sweepAngle = svgArcAngle(startVector, endVector);
+  if (!sweepFlag && sweepAngle > 0) {
+    sweepAngle -= Math.PI * 2;
+  } else if (sweepFlag && sweepAngle < 0) {
+    sweepAngle += Math.PI * 2;
+  }
+
+  const segmentCount = Math.max(1, Math.ceil(Math.abs(sweepAngle) / (Math.PI / 2)));
+  const segmentAngle = sweepAngle / segmentCount;
+  const segments: Array<[SvgPathPoint, SvgPathPoint, SvgPathPoint]> = [];
+  for (let segment = 0; segment < segmentCount; segment += 1) {
+    const angle1 = startAngle + segment * segmentAngle;
+    const angle2 = angle1 + segmentAngle;
+    const controlScale = (4 / 3) * Math.tan((angle2 - angle1) / 4);
+    segments.push([
+      svgArcControlPoint(center, rx, ry, cosPhi, sinPhi, angle1, controlScale),
+      svgArcControlPoint(center, rx, ry, cosPhi, sinPhi, angle2, -controlScale),
+      svgArcPoint(center, rx, ry, cosPhi, sinPhi, angle2)
+    ]);
+  }
+  return segments;
+}
+
 function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x: number, y: number) {
   const tokens = svgPathTokens(pathData);
   if (tokens.length === 0) {
@@ -1076,8 +1182,10 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
 
   let index = 0;
   let command = "";
-  let current = { x: 0, y: 0 };
-  let subpathStart = { x: 0, y: 0 };
+  let current: SvgPathPoint = { x: 0, y: 0 };
+  let subpathStart: SvgPathPoint = { x: 0, y: 0 };
+  let lastCubicControl: SvgPathPoint | null = null;
+  let lastQuadraticControl: SvgPathPoint | null = null;
   const commands: string[] = [];
   const isCommand = (token: string) => /^[a-zA-Z]$/.test(token);
   const hasNumber = () => index < tokens.length && !isCommand(tokens[index]);
@@ -1095,9 +1203,28 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
   });
   const pdfX = (pointX: number) => formatNumber(x + pointX);
   const pdfY = (pointY: number) => formatNumber(pageHeight - y - pointY);
-  const lineTo = (point: { x: number; y: number }) => {
+  const resetControls = () => {
+    lastCubicControl = null;
+    lastQuadraticControl = null;
+  };
+  const lineTo = (point: SvgPathPoint) => {
     commands.push(pdfX(point.x) + " " + pdfY(point.y) + " l");
     current = point;
+    resetControls();
+  };
+  const curveTo = (first: SvgPathPoint, second: SvgPathPoint, point: SvgPathPoint) => {
+    commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
+    current = point;
+    lastCubicControl = second;
+    lastQuadraticControl = null;
+  };
+  const quadraticTo = (control: SvgPathPoint, point: SvgPathPoint) => {
+    const first = { x: current.x + (2 / 3) * (control.x - current.x), y: current.y + (2 / 3) * (control.y - current.y) };
+    const second = { x: point.x + (2 / 3) * (control.x - point.x), y: point.y + (2 / 3) * (control.y - point.y) };
+    commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
+    current = point;
+    lastCubicControl = null;
+    lastQuadraticControl = control;
   };
 
   while (index < tokens.length) {
@@ -1121,6 +1248,7 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
           const point = absolutePoint(pointX, pointY, relative);
           commands.push(pdfX(point.x) + " " + pdfY(point.y) + " " + (first ? "m" : "l"));
           current = point;
+          resetControls();
           if (first) {
             subpathStart = point;
             first = false;
@@ -1168,11 +1296,20 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
           if (x1 === null || y1 === null || x2 === null || y2 === null || pointX === null || pointY === null) {
             return null;
           }
-          const first = absolutePoint(x1, y1, relative);
-          const second = absolutePoint(x2, y2, relative);
-          const point = absolutePoint(pointX, pointY, relative);
-          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
-          current = point;
+          curveTo(absolutePoint(x1, y1, relative), absolutePoint(x2, y2, relative), absolutePoint(pointX, pointY, relative));
+        }
+        break;
+      case "S":
+        while (hasNumber()) {
+          const x2 = readNumber();
+          const y2 = readNumber();
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (x2 === null || y2 === null || pointX === null || pointY === null) {
+            return null;
+          }
+          const first = lastCubicControl ? reflectedPathPoint(lastCubicControl, current) : current;
+          curveTo(first, absolutePoint(x2, y2, relative), absolutePoint(pointX, pointY, relative));
         }
         break;
       case "Q":
@@ -1184,17 +1321,49 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
           if (qx === null || qy === null || pointX === null || pointY === null) {
             return null;
           }
-          const control = absolutePoint(qx, qy, relative);
+          quadraticTo(absolutePoint(qx, qy, relative), absolutePoint(pointX, pointY, relative));
+        }
+        break;
+      case "T":
+        while (hasNumber()) {
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (pointX === null || pointY === null) {
+            return null;
+          }
+          const control = lastQuadraticControl ? reflectedPathPoint(lastQuadraticControl, current) : current;
+          quadraticTo(control, absolutePoint(pointX, pointY, relative));
+        }
+        break;
+      case "A":
+        while (hasNumber()) {
+          const radiusX = readNumber();
+          const radiusY = readNumber();
+          const rotation = readNumber();
+          const largeArc = readNumber();
+          const sweep = readNumber();
+          const pointX = readNumber();
+          const pointY = readNumber();
+          if (radiusX === null || radiusY === null || rotation === null || largeArc === null || sweep === null || pointX === null || pointY === null) {
+            return null;
+          }
           const point = absolutePoint(pointX, pointY, relative);
-          const first = { x: current.x + (2 / 3) * (control.x - current.x), y: current.y + (2 / 3) * (control.y - current.y) };
-          const second = { x: point.x + (2 / 3) * (control.x - point.x), y: point.y + (2 / 3) * (control.y - point.y) };
-          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
-          current = point;
+          const arcSegments = pdfArcCurveSegments(current, point, radiusX, radiusY, rotation, largeArc, sweep);
+          if (!arcSegments) {
+            lineTo(point);
+          } else {
+            for (const [first, second, arcPoint] of arcSegments) {
+              commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(arcPoint.x) + " " + pdfY(arcPoint.y) + " c");
+            }
+            current = point;
+            resetControls();
+          }
         }
         break;
       case "Z":
         commands.push("h");
         current = subpathStart;
+        resetControls();
         break;
       default:
         return null;
@@ -1203,7 +1372,6 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
 
   return commands.length > 0 ? commands : null;
 }
-
 function pdfEllipsePathCommands(x: number, y: number, width: number, height: number, pageHeight: number) {
   const rx = width / 2;
   const ry = height / 2;
