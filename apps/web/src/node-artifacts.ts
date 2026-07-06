@@ -1065,7 +1065,7 @@ function pdfGradientFillOpacity(entry: PdfGradientPaintEntry) {
 
 const pdfEllipseKappa = 0.552284749831;
 function svgPathTokens(pathData: string) {
-  return pathData.match(/[a-zA-Z]|[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:e[-+]?\\d+)?/gi) ?? [];
+  return pathData.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [];
 }
 
 function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x: number, y: number) {
