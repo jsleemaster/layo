@@ -108,10 +108,16 @@ interface ArtifactBounds {
   maxY: number;
 }
 
+type SvgGradientType = "linear" | "radial";
+
 interface FillGradient {
   source: NodePaintSource;
   gradient: NodePaintGradient;
   stops: NodePaintStop[];
+}
+
+interface SvgGradient extends FillGradient {
+  type: SvgGradientType;
 }
 
 interface PdfGradientStop {
@@ -384,6 +390,14 @@ function gradientStopPercent(value: number) {
   return `${formatNumber(clampUnit(value) * 100)}%`;
 }
 
+function normalizedGradientType(gradient: NodePaintGradient) {
+  return gradient.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+}
+
+function gradientStopsForGradient(gradient: NodePaintGradient) {
+  return gradient.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
+}
+
 function paintGradientForNode(node: RendererNode, kind: "fill" | "stroke"): FillGradient | null {
   if (node.kind === "group" || node.content.type === "text") {
     return null;
@@ -395,10 +409,37 @@ function paintGradientForNode(node: RendererNode, kind: "fill" | "stroke"): Fill
     if (!gradient) {
       continue;
     }
-    const type = gradient.type?.replace(/^:/, "").toLowerCase() ?? "linear";
-    const stops = gradient.stops?.filter((stop) => Number.isFinite(stop.offset) && stop.color) ?? [];
+    const type = normalizedGradientType(gradient);
+    const stops = gradientStopsForGradient(gradient);
     if (source.kind === kind && source.paintType === "gradient" && type.includes("linear") && stops.length >= 2) {
       return { source, gradient, stops };
+    }
+  }
+
+  return null;
+}
+
+function svgPaintGradientForNode(node: RendererNode, kind: "fill" | "stroke"): SvgGradient | null {
+  if (node.kind === "group" || node.content.type === "text") {
+    return null;
+  }
+
+  const paintSources = [...(node.style.paint_sources ?? [])].sort((left, right) => left.index - right.index);
+  for (const source of paintSources) {
+    const gradient = source.gradient;
+    if (!gradient) {
+      continue;
+    }
+    const type = normalizedGradientType(gradient);
+    const stops = gradientStopsForGradient(gradient);
+    let svgType: SvgGradientType | null = null;
+    if (type.includes("linear")) {
+      svgType = "linear";
+    } else if (type.includes("radial")) {
+      svgType = "radial";
+    }
+    if (source.kind === kind && source.paintType === "gradient" && svgType && stops.length >= 2) {
+      return { source, gradient, stops, type: svgType };
     }
   }
 
@@ -413,13 +454,54 @@ function strokeGradientForNode(node: RendererNode) {
   return paintGradientForNode(node, "stroke");
 }
 
+function svgFillGradientForNode(node: RendererNode) {
+  return svgPaintGradientForNode(node, "fill");
+}
+
+function svgStrokeGradientForNode(node: RendererNode) {
+  return svgPaintGradientForNode(node, "stroke");
+}
+
 function svgGradientStopLine(source: NodePaintSource, stop: NodePaintStop) {
   const opacity = clampUnit(stop.opacity * (source.opacity ?? 1));
   const opacityAttribute = opacity < 1 ? ` stop-opacity="${formatNumber(opacity)}"` : "";
   return `<stop offset="${gradientStopPercent(stop.offset)}" stop-color="${escapeSvgText(stop.color)}"${opacityAttribute} />`;
 }
 
-function svgGradientLinesForGradient(node: RendererNode, paintGradient: FillGradient, depth: number): string[] {
+function svgGradientStopLinesForGradient(paintGradient: FillGradient, depth: number) {
+  return [...paintGradient.stops]
+    .sort((left, right) => left.offset - right.offset)
+    .map((stop) => indent(svgGradientStopLine(paintGradient.source, stop), depth + 1));
+}
+
+function svgRadialGradientRadius(gradient: NodePaintGradient) {
+  const start = gradient.start ?? { x: 0.5, y: 0.5 };
+  const end = gradient.end ?? { x: 1, y: 0.5 };
+  const startX = gradientCoordinateUnit(start.x, 0.5);
+  const startY = gradientCoordinateUnit(start.y, 0.5);
+  const endX = gradientCoordinateUnit(end.x, startX + 0.5);
+  const endY = gradientCoordinateUnit(end.y, startY);
+  const radius = Math.hypot(endX - startX, endY - startY);
+  return radius > 0 ? radius : 0.5;
+}
+
+function svgGradientLinesForGradient(node: RendererNode, paintGradient: SvgGradient, depth: number): string[] {
+  if (paintGradient.type === "radial") {
+    const center = paintGradient.gradient.start ?? { x: 0.5, y: 0.5 };
+    return [
+      indent(
+        `<radialGradient id="${svgGradientIdForNode(node, paintGradient.source)}" cx="${gradientCoordinatePercent(
+          gradientCoordinateUnit(center.x, 0.5)
+        )}" cy="${gradientCoordinatePercent(gradientCoordinateUnit(center.y, 0.5))}" r="${gradientCoordinatePercent(
+          svgRadialGradientRadius(paintGradient.gradient)
+        )}">`,
+        depth
+      ),
+      ...svgGradientStopLinesForGradient(paintGradient, depth),
+      indent("</radialGradient>", depth)
+    ];
+  }
+
   const start = paintGradient.gradient.start ?? { x: 0, y: 0 };
   const end = paintGradient.gradient.end ?? { x: 1, y: 0 };
   return [
@@ -429,16 +511,14 @@ function svgGradientLinesForGradient(node: RendererNode, paintGradient: FillGrad
       )}" y1="${gradientCoordinatePercent(start.y)}" x2="${gradientCoordinatePercent(end.x)}" y2="${gradientCoordinatePercent(end.y)}">`,
       depth
     ),
-    ...[...paintGradient.stops]
-      .sort((left, right) => left.offset - right.offset)
-      .map((stop) => indent(svgGradientStopLine(paintGradient.source, stop), depth + 1)),
+    ...svgGradientStopLinesForGradient(paintGradient, depth),
     indent("</linearGradient>", depth)
   ];
 }
 
 function svgGradientLinesForNode(node: RendererNode, depth: number): string[] {
-  const gradients = [fillGradientForNode(node), strokeGradientForNode(node)].filter(
-    (paintGradient): paintGradient is FillGradient => Boolean(paintGradient)
+  const gradients = [svgFillGradientForNode(node), svgStrokeGradientForNode(node)].filter(
+    (paintGradient): paintGradient is SvgGradient => Boolean(paintGradient)
   );
   return gradients.flatMap((paintGradient) => svgGradientLinesForGradient(node, paintGradient, depth));
 }
@@ -449,7 +529,7 @@ function svgGradientLinesForTree(node: RendererNode, depth: number): string[] {
 
 function svgFillAttributeForNode(node: RendererNode) {
   const fill = escapeSvgText(node.style.fill);
-  const fillGradient = fillGradientForNode(node);
+  const fillGradient = svgFillGradientForNode(node);
   if (!fillGradient) {
     return `fill="${fill}"`;
   }
@@ -458,7 +538,7 @@ function svgFillAttributeForNode(node: RendererNode) {
 
 function svgStrokeAttributeForNode(node: RendererNode) {
   const stroke = node.style.stroke ? escapeSvgText(node.style.stroke) : "none";
-  const strokeGradient = node.style.stroke ? strokeGradientForNode(node) : null;
+  const strokeGradient = node.style.stroke ? svgStrokeGradientForNode(node) : null;
   if (!strokeGradient) {
     return `stroke="${stroke}"`;
   }
