@@ -307,6 +307,93 @@ test("file panel preserves Penpot even-odd path fill rule in imported SVG asset"
     ])
   });
 
+  const revisedPathData = "M0 0 H100 V100 H0 Z";
+  const revisedVectorSource = {
+    origin: "penpot",
+    shapeId: evenOddPathId,
+    shapeType: "path",
+    pathData: revisedPathData,
+    fillRule: "nonzero",
+    bounds: { x: 56, y: 80, width: 100, height: 100 }
+  };
+  const vectorCommand = {
+    type: "set_vector_source",
+    nodeId: `penpot-${evenOddPathId}`,
+    vectorSource: revisedVectorSource
+  };
+
+  const dryRunVectorResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/agent/commands`,
+    { data: { dryRun: true, commands: [vectorCommand] } }
+  );
+  expect(dryRunVectorResponse.ok()).toBeTruthy();
+  const dryRunVectorPayload = await dryRunVectorResponse.json();
+  expect(dryRunVectorPayload.result.persisted).toBe(false);
+  expect(dryRunVectorPayload.result.changeSummary.updatedNodeIds).toContain(`penpot-${evenOddPathId}`);
+  const dryRunVectorNode = dryRunVectorPayload.result.inspection.nodes.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(dryRunVectorNode).toMatchObject({
+    id: `penpot-${evenOddPathId}`,
+    vectorSource: revisedVectorSource
+  });
+
+  const unchangedInspectResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/agent/inspect`
+  );
+  expect(unchangedInspectResponse.ok()).toBeTruthy();
+  const unchangedInspectPayload = await unchangedInspectResponse.json();
+  const unchangedPathNode = unchangedInspectPayload.inspection.nodes.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(unchangedPathNode).toMatchObject({
+    vectorSource: {
+      pathData: evenOddPathData,
+      fillRule: "evenodd"
+    }
+  });
+
+  const applyVectorResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/agent/commands`,
+    { data: { dryRun: false, commands: [vectorCommand] } }
+  );
+  expect(applyVectorResponse.ok()).toBeTruthy();
+  const applyVectorPayload = await applyVectorResponse.json();
+  expect(applyVectorPayload.result.persisted).toBe(true);
+  expect(applyVectorPayload.result.changeSummary.updatedNodeIds).toContain(`penpot-${evenOddPathId}`);
+  const appliedVectorNode = applyVectorPayload.result.inspection.nodes.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(appliedVectorNode).toMatchObject({
+    id: `penpot-${evenOddPathId}`,
+    vectorSource: revisedVectorSource
+  });
+
+  const exportAfterVectorCommandResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/export/code`
+  );
+  expect(exportAfterVectorCommandResponse.ok()).toBeTruthy();
+  const exportAfterVectorCommandPayload = await exportAfterVectorCommandResponse.json();
+  const exportedFrameAfterVectorCommand = exportAfterVectorCommandPayload.export.implementationSpec.elements.find(
+    (element: { id: string }) => element.id === `penpot-${frameId}`
+  );
+  const exportedPathAfterVectorCommand = exportedFrameAfterVectorCommand.structure.children.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(exportedPathAfterVectorCommand).toMatchObject({
+    content: {
+      type: "image",
+      vectorSource: revisedVectorSource
+    },
+    annotations: expect.arrayContaining([
+      expect.objectContaining({
+        id: `penpot-${evenOddPathId}-vector-source`,
+        label: "Penpot vector",
+        kind: "asset"
+      })
+    ])
+  });
+
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedEvenOddPathAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();
   expect(await assetResponse.body()).toEqual(expectedEvenOddPathSvgBytes);
