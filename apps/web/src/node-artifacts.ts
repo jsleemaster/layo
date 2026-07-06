@@ -874,15 +874,7 @@ function pdfGradientStops(stops: NodePaintStop[]) {
 
 function pdfSupportsGradient(gradient: NodePaintGradient) {
   const type = normalizedGradientType(gradient);
-  if (type.includes("linear")) {
-    return true;
-  }
-  if (!type.includes("radial")) {
-    return false;
-  }
-
-  const width = typeof gradient.width === "number" && Number.isFinite(gradient.width) && gradient.width > 0 ? gradient.width : 1;
-  return Math.abs(width - 1) < 0.0005;
+  return type.includes("linear") || type.includes("radial");
 }
 
 function pdfPaintGradientForNode(node: RendererNode, kind: "fill" | "stroke"): FillGradient | null {
@@ -949,7 +941,19 @@ function pdfGradientCoords(entry: PdfGradientPaintEntry) {
   return [x1, y1, x2, y2].map(formatNumber).join(" ");
 }
 
-function pdfRadialGradientCoords(entry: PdfGradientPaintEntry) {
+interface PdfRadialGradientGeometry {
+  centerX: number;
+  centerY: number;
+  radius: number;
+  width: number;
+  angleRadians: number;
+}
+
+function pdfRadialGradientWidth(gradient: NodePaintGradient) {
+  return typeof gradient.width === "number" && Number.isFinite(gradient.width) && gradient.width > 0 ? gradient.width : 1;
+}
+
+function pdfRadialGradientGeometry(entry: PdfGradientPaintEntry): PdfRadialGradientGeometry {
   const width = Math.max(1, Math.round(entry.node.size.width));
   const height = Math.max(1, Math.round(entry.node.size.height));
   const start = entry.gradient.start ?? { x: 0.5, y: 0.5 };
@@ -961,8 +965,45 @@ function pdfRadialGradientCoords(entry: PdfGradientPaintEntry) {
   const centerX = entry.x + width * startX;
   const centerY = entry.pageHeight - entry.y - height * startY;
   const radius = Math.hypot((endX - startX) * width, (endY - startY) * height);
-  const outerRadius = radius > 0 ? radius : Math.max(width, height) / 2;
-  return [centerX, centerY, 0, centerX, centerY, outerRadius].map(formatNumber).join(" ");
+  const angleRadians = Math.atan2(endY - startY, endX - startX) + Math.PI / 2;
+
+  return {
+    centerX,
+    centerY,
+    radius: radius > 0 ? radius : Math.max(width, height) / 2,
+    width: pdfRadialGradientWidth(entry.gradient),
+    angleRadians
+  };
+}
+
+function pdfRadialGradientUsesTransform(entry: PdfGradientPaintEntry) {
+  return normalizedGradientType(entry.gradient).includes("radial") && Math.abs(pdfRadialGradientWidth(entry.gradient) - 1) >= 0.0005;
+}
+
+function pdfRadialGradientCoords(entry: PdfGradientPaintEntry) {
+  const geometry = pdfRadialGradientGeometry(entry);
+  if (pdfRadialGradientUsesTransform(entry)) {
+    return [0, 0, 0, 0, 0, geometry.radius].map(formatNumber).join(" ");
+  }
+  return [geometry.centerX, geometry.centerY, 0, geometry.centerX, geometry.centerY, geometry.radius].map(formatNumber).join(" ");
+}
+
+function pdfGradientTransformCommand(entry: PdfGradientPaintEntry) {
+  if (!pdfRadialGradientUsesTransform(entry)) {
+    return "";
+  }
+
+  const geometry = pdfRadialGradientGeometry(entry);
+  const cos = Math.cos(geometry.angleRadians);
+  const sin = Math.sin(geometry.angleRadians);
+  return [
+    cos * geometry.width,
+    sin * geometry.width,
+    -sin,
+    cos,
+    geometry.centerX,
+    geometry.centerY
+  ].map(formatNumber).join(" ") + " cm";
 }
 
 function pdfGradientShadingObject(entry: PdfGradientPaintEntry) {
@@ -1052,12 +1093,14 @@ function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   const height = Math.max(1, Math.round(entry.node.size.height));
   const pdfY = entry.pageHeight - entry.y - height;
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
+  const transform = pdfGradientTransformCommand(entry);
   return [
     "q",
     `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
     "W",
     "n",
     graphicsState,
+    transform,
     `/${entry.shadingName} sh`,
     "Q"
   ].filter(Boolean);
@@ -1080,6 +1123,7 @@ function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
   const innerHeight = Math.max(0, height - inset * 2);
   const pdfY = entry.pageHeight - entry.y - height;
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
+  const transform = pdfGradientTransformCommand(entry);
   return [
     "q",
     `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
@@ -1089,6 +1133,7 @@ function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
     innerWidth > 0 && innerHeight > 0 ? "W*" : "W",
     "n",
     graphicsState,
+    transform,
     `/${entry.shadingName} sh`,
     "Q"
   ].filter(Boolean);
