@@ -19,7 +19,7 @@ Layo adapts this behavior for the supported selected-layer raster/canvas slice. 
 ## Verification
 
 - RED: Full Verification #28779327961 failed only in Playwright CLI e2e on `dev panel PNG raster artifact preserves the imported Penpot radial width geometry`; the top vertical probe sampled `b = 136` instead of being blue-dominant.
-- GREEN: PR-head Full Verification is required before merge, with deployment intentionally deferred because Vercel is rate-limited and not part of this product-maturity slice.
+- GREEN: PR-head Full Verification #28780614235 passed, including typecheck, web build, Core tests, and Playwright CLI e2e. Storage Restore Drill #28780614255 and Storage Backup Retention #28780614275 also passed for the same head. PR #260 was squash-merged as `630fd73b62e04aaa10e63409c0fc6f9f6ccacc53`. Deployment remains intentionally deferred because Vercel is rate-limited and not part of this product-maturity slice.
 
 ## Remaining Gaps
 
