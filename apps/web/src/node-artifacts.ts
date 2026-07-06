@@ -485,16 +485,37 @@ function svgRadialGradientRadius(gradient: NodePaintGradient) {
   return radius > 0 ? radius : 0.5;
 }
 
+function svgRadialGradientTransform(gradient: NodePaintGradient) {
+  const width = typeof gradient.width === "number" && Number.isFinite(gradient.width) && gradient.width > 0 ? gradient.width : 1;
+  if (Math.abs(width - 1) < 0.0005) {
+    return "";
+  }
+
+  const start = gradient.start ?? { x: 0.5, y: 0.5 };
+  const end = gradient.end ?? { x: 1, y: 0.5 };
+  const startX = gradientCoordinateUnit(start.x, 0.5);
+  const startY = gradientCoordinateUnit(start.y, 0.5);
+  const endX = gradientCoordinateUnit(end.x, startX + 0.5);
+  const endY = gradientCoordinateUnit(end.y, startY);
+  const angle = (Math.atan2(endY - startY, endX - startX) * 180) / Math.PI + 90;
+  const center = `${gradientCoordinatePercent(startX)} ${gradientCoordinatePercent(startY)}`;
+
+  return ` gradientTransform="translate(${center}) rotate(${formatNumber(angle)}) scale(${formatNumber(
+    width
+  )} 1) translate(-${gradientCoordinatePercent(startX)} -${gradientCoordinatePercent(startY)})"`;
+}
+
 function svgGradientLinesForGradient(node: RendererNode, paintGradient: SvgGradient, depth: number): string[] {
   if (paintGradient.type === "radial") {
     const center = paintGradient.gradient.start ?? { x: 0.5, y: 0.5 };
+    const transform = svgRadialGradientTransform(paintGradient.gradient);
     return [
       indent(
         `<radialGradient id="${svgGradientIdForNode(node, paintGradient.source)}" cx="${gradientCoordinatePercent(
           gradientCoordinateUnit(center.x, 0.5)
         )}" cy="${gradientCoordinatePercent(gradientCoordinateUnit(center.y, 0.5))}" r="${gradientCoordinatePercent(
           svgRadialGradientRadius(paintGradient.gradient)
-        )}">`,
+        )}"${transform}>`,
         depth
       ),
       ...svgGradientStopLinesForGradient(paintGradient, depth),
