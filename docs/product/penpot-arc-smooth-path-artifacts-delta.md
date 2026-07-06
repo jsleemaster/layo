@@ -1,7 +1,4 @@
-from pathlib import Path
-
-arc_doc = Path('docs/product/penpot-arc-smooth-path-artifacts-delta.md')
-arc_doc.write_text('''# Penpot Arc And Smooth Path Artifacts Delta
+# Penpot Arc And Smooth Path Artifacts Delta
 
 Date: 2026-07-06
 
@@ -59,12 +56,3 @@ Final PR-head verification is tracked in the PR body because the last evidence l
 - Image-gradient interactions.
 - Group/text gradient rendering and deeper multi-paint stack parity.
 - Masks, components, variants, tokens, and shared-library relation import/export parity.
-''')
-
-benchmark = Path('docs/product/penpot-maturity-benchmark.md')
-text = benchmark.read_text()
-old = "`2026-07-06-penpot-vector-path-artifacts-delta.md` adapts preserved Penpot path geometry for selected-layer SVG/PDF artifacts by emitting path primitives and parsing M/L/H/V/C/Q/Z commands for PDF clip, fill, stroke, and gradient paths. Exact mixed-stack overlay/blend compositing, image-gradient interactions, path commands beyond M/L/H/V/C/Q/Z, group/text gradient rendering, masks, SVG raw shapes, components, variants, tokens, and shared library relations remain follow-up import/export gaps."
-new = "`2026-07-06-penpot-vector-path-artifacts-delta.md` adapts preserved Penpot path geometry for selected-layer SVG/PDF artifacts by emitting path primitives and parsing M/L/H/V/C/Q/Z commands for PDF clip, fill, stroke, and gradient paths. `2026-07-06-penpot-arc-smooth-path-artifacts-delta.md` extends that PDF path parser for Penpot-origin A/S/T commands by converting arcs and smooth curves into cubic PDF path commands for clip, fill, stroke, and gradient artifacts. Exact mixed-stack overlay/blend compositing, image-gradient interactions, path fill-rule/compound-path semantics and raw path import beyond selected-layer artifacts, group/text gradient rendering, masks, SVG raw shapes, components, variants, tokens, and shared library relations remain follow-up import/export gaps."
-if old not in text:
-    raise SystemExit('benchmark evidence paragraph not found')
-benchmark.write_text(text.replace(old, new))
