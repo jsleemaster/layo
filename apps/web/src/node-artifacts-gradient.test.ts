@@ -146,6 +146,42 @@ const penpotStrokeGradientCard: RendererNode = {
   children: []
 };
 
+const penpotRadialStrokeGradientCard: RendererNode = {
+  id: "penpot-radial-stroke-gradient-artifact-card",
+  kind: "rectangle",
+  name: "Penpot radial stroke gradient artifact card",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  style: {
+    fill: "#ffffff",
+    stroke: "#800080",
+    stroke_width: 4,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "stroke",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
 const penpotDualGradientCard: RendererNode = {
   ...penpotGradientCard,
   id: "penpot-dual-gradient-artifact-card",
@@ -244,6 +280,20 @@ describe("Penpot gradient selected-layer SVG artifacts", () => {
     expect(svg).toContain('stroke-width="4"');
   });
 
+  test("renders preserved Penpot radial stroke gradients as SVG paint servers", () => {
+    const svg = svgForNode(penpotRadialStrokeGradientCard);
+
+    expect(svg).toContain("<defs>");
+    expect(svg).toContain(
+      "<radialGradient id=\"layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0\" cx=\"50%\" cy=\"50%\" r=\"50%\">"
+    );
+    expect(svg).toContain("<stop offset=\"0%\" stop-color=\"#ff0000\" />");
+    expect(svg).toContain("<stop offset=\"100%\" stop-color=\"#0000ff\" />");
+    expect(svg).toContain("fill=\"#ffffff\"");
+    expect(svg).toContain("stroke=\"url(#layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0)\"");
+    expect(svg).toContain("data-fallback-stroke=\"#800080\"");
+  });
+
   test("uses distinct SVG paint server ids when Penpot fill and stroke gradients share an index", () => {
     const svg = svgForNode(penpotDualGradientCard);
 
@@ -286,5 +336,19 @@ describe("Penpot gradient selected-layer PDF artifacts", () => {
     expect(pdf).toContain('/C1 [0 1 0]');
     expect(pdf).toContain(["q", "0 0 120 60 re", "4 4 112 52 re", "W*", "n", "/Sh1 sh", "Q"].join("\n"));
     expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\n"));
+  });
+
+  test("renders preserved Penpot radial stroke gradients as radial shading resources", () => {
+    const pdf = pdfTextForNode(penpotRadialStrokeGradientCard);
+
+    expect(pdf).toContain("/Shading << /Sh1");
+    expect(pdf).toContain("/ShadingType 3");
+    expect(pdf).toContain("/ColorSpace /DeviceRGB");
+    expect(pdf).toContain("/Coords [60 30 0 60 30 60]");
+    expect(pdf).toContain("/FunctionType 2");
+    expect(pdf).toContain("/C0 [1 0 0]");
+    expect(pdf).toContain("/C1 [0 0 1]");
+    expect(pdf).toContain(["q", "0 0 120 60 re", "4 4 112 52 re", "W*", "n", "/Sh1 sh", "Q"].join("\n"));
+    expect(pdf).not.toContain(["0.502 0 0.502 RG", "4 w", "0 0 120 60 re", "S"].join("\n"));
   });
 });

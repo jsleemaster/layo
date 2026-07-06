@@ -14,6 +14,7 @@ const frameId = "33333333-3333-3333-3333-333333333333";
 const strokeGradientRectId = "f0f0f0f0-f0f0-f0f0-f0f0-f0f0f0f0f0f0";
 const radialGradientRectId = "a0a0a0a0-a0a0-a0a0-a0a0-a0a0a0a0a0a0";
 const radialGradientWidthRectId = "b0b0b0b0-b0b0-b0b0-b0b0-b0b0b0b0b0b0";
+const radialStrokeGradientRectId = "c0c0c0c0-c0c0-c0c0-c0c0-c0c0c0c0c0c0";
 const expectedStrokeGradientColor = "#800080";
 
 async function openFilePanel(page: Page) {
@@ -259,6 +260,81 @@ function createPenpotRadialWidthGradientExportArchive(): Buffer {
   ]);
 }
 
+function createPenpotRadialStrokeGradientExportArchive(): Buffer {
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: Buffer.from(
+        JSON.stringify({
+          type: "penpot/export-files",
+          version: 1,
+          files: [{ id: fileId, name: "Penpot Radial Stroke Board", features: [] }]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}.json`,
+      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Radial Stroke Board" }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: Buffer.from(JSON.stringify({ id: pageId, name: "Radial stroke gradients", index: 0, objects: {} }), "utf8")
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: frameId,
+          name: "Radial stroke frame",
+          type: "frame",
+          x: 40,
+          y: 64,
+          width: 240,
+          height: 160,
+          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+          shapes: [radialStrokeGradientRectId]
+        }),
+        "utf8"
+      )
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${radialStrokeGradientRectId}.json`,
+      data: Buffer.from(
+        JSON.stringify({
+          id: radialStrokeGradientRectId,
+          name: "Radial stroke card",
+          type: "rect",
+          x: 64,
+          y: 88,
+          width: 96,
+          height: 72,
+          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+          strokes: [
+            {
+              "stroke-color-gradient": {
+                type: "radial",
+                "start-x": 0.5,
+                "start-y": 0.5,
+                "end-x": 1,
+                "end-y": 0.5,
+                width: 1,
+                stops: [
+                  { color: "#ff0000", opacity: 1, offset: 0 },
+                  { color: "#0000ff", opacity: 1, offset: 1 }
+                ]
+              },
+              "stroke-opacity": 1,
+              "stroke-width": 24
+            }
+          ]
+        }),
+        "utf8"
+      )
+    }
+  ]);
+}
+
 test("file panel imports a Penpot stroke gradient as a flattened visible stroke", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("stroke-gradients.penpot");
@@ -411,6 +487,42 @@ test("dev panel PNG raster artifact preserves the imported Penpot radial width g
   expect(rightFill.a).toBeGreaterThan(200);
   expect(verticalProbe.a).toBeGreaterThan(200);
   await expect(page.getByTestId("dev-panel-asset-status")).toContainText("Radial width fill card PNG 다운로드됨");
+});
+
+test("dev panel PNG raster artifact preserves the imported Penpot radial stroke gradient", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const penpotZipPath = testInfo.outputPath("radial-stroke-gradient-raster.penpot");
+  await writeFile(penpotZipPath, createPenpotRadialStrokeGradientExportArchive());
+
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  await expect(page.getByTestId("external-migration-review")).toContainText("가져오기 가능");
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+  await expect(page.getByTestId("layer-panel")).toContainText("Radial stroke card");
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "Radial stroke card" }).click();
+  await page.getByTestId("inspector-tab-dev").click();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe(`penpot-${radialStrokeGradientRectId}.png`);
+  const downloadPath = await download.path();
+  if (!downloadPath) {
+    throw new Error("radial stroke gradient raster png download path missing");
+  }
+
+  const png = await readFile(downloadPath);
+  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const topInnerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), 32);
+  const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));
+
+  expect(topInnerStroke.r).toBeGreaterThan(topInnerStroke.b + 40);
+  expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);
+  expect(topInnerStroke.a).toBeGreaterThan(200);
+  expect(rightStroke.a).toBeGreaterThan(200);
+  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("Radial stroke card PNG 다운로드됨");
 });
 
 async function imagePixel(page: Page, image: Buffer, mimeType: "image/png", x: number, y: number) {
