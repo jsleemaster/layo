@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-05
+Last audited: 2026-07-06
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-05-penpot-gradient-raster-artifact.md`; deployment remains intentionally deferred. |
+| `2026-07-06-penpot-radial-gradient-svg-artifact.md` | In progress | Penpot maturity-loop slice for selected-layer SVG simple circular radial fill gradients. RED Full Verification #28751033299 failed in Core tests because SVG artifacts fell back to `fill="#800080"` without `<defs>/<radialGradient>`. Implementation is on `codex/penpot-radial-gradient-svg-artifact`; PR-head GREEN verification is pending. |
 
 ## Completed Plans
 
