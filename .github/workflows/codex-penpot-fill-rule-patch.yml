@@ -6,6 +6,10 @@ name: Codex Penpot Fill Rule Patch
       - main
     paths:
       - ".github/workflows/codex-penpot-fill-rule-patch.yml"
+  pull_request:
+    paths:
+      - "scripts/codex/penpot-fill-rule-artifacts.mjs"
+      - "apps/web/src/node-artifacts-fill-rule.test.ts"
 
 permissions:
   contents: write
