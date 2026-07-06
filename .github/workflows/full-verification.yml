@@ -30,12 +30,13 @@ jobs:
           path = Path('apps/web/src/node-artifacts.ts')
           text = path.read_text()
 
-          def need(marker):
-              if marker not in text:
-                  raise SystemExit(f'missing marker: {marker}')
+          def replace_once(old, new):
+              global text
+              if old not in text:
+                  raise SystemExit('missing marker: ' + old[:80])
+              text = text.replace(old, new, 1)
 
-          need('function svgEllipseAttributes(width: number, height: number) {')
-          text = text.replace(
+          replace_once(
               'function clipPolygonPointsForNode(node: RendererNode) {',
               '''function clipSourcePathDataForNode(node: RendererNode) {
   const pathData = nodeClip(node)?.source?.pathData;
@@ -43,38 +44,33 @@ jobs:
 }
 
 function svgPathElement(pathData: string, attributes = "") {
-  return `<path d="${escapeSvgText(pathData)}"${attributes} />`;
+  return "<path d=\"" + escapeSvgText(pathData) + "\"" + attributes + " />";
 }
 
 function clipPolygonPointsForNode(node: RendererNode) {''',
-              1,
           )
 
-          text = text.replace(
+          replace_once(
               '  const polygonPoints = svgClipPolygonPointsForNode(node);\n\n  if (nodeClipUsesAlphaMask(node)) {',
               '  const pathData = clipSourcePathDataForNode(node);\n  const polygonPoints = svgClipPolygonPointsForNode(node);\n\n  if (nodeClipUsesAlphaMask(node)) {',
-              1,
           )
-          text = text.replace(
+          replace_once(
               '    const maskShape = polygonPoints\n      ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`\n      : nodeClipUsesEllipseShape(node)',
-              '    const maskShape = pathData\n      ? svgPathElement(pathData, ` fill="#fff" fill-opacity="${opacity}"`)\n      : polygonPoints\n        ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`\n        : nodeClipUsesEllipseShape(node)',
-              1,
+              '    const maskShape = pathData\n      ? svgPathElement(pathData, " fill=\"#fff\" fill-opacity=\"" + opacity + "\"")\n      : polygonPoints\n        ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`\n        : nodeClipUsesEllipseShape(node)',
           )
-          text = text.replace(
+          replace_once(
               '  const clipShape = polygonPoints\n    ? `<polygon points="${escapeSvgText(polygonPoints)}" />`\n    : nodeClipUsesEllipseShape(node)',
               '  const clipShape = pathData\n    ? svgPathElement(pathData)\n    : polygonPoints\n      ? `<polygon points="${escapeSvgText(polygonPoints)}" />`\n      : nodeClipUsesEllipseShape(node)',
-              1,
           )
 
-          text = text.replace(
+          replace_once(
               '  const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";\n  if (nodeClipUsesEllipseShape(node)) {',
-              '  const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";\n  const pathData = clipSourcePathDataForNode(node);\n  if (pathData) {\n    return `<path ${svgNodeAttributes(node)}${assetAttribute} d="${escapeSvgText(pathData)}" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;\n  }\n  if (nodeClipUsesEllipseShape(node)) {',
-              1,
+              '  const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";\n  const pathData = clipSourcePathDataForNode(node);\n  if (pathData) {\n    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + opacity + filter + " />";\n  }\n  if (nodeClipUsesEllipseShape(node)) {',
           )
 
-          pdf_helper = r'''
+          pdf_helper = '''
 function svgPathTokens(pathData: string) {
-  return pathData.match(/[a-zA-Z]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi) ?? [];
+  return pathData.match(/[a-zA-Z]|[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:e[-+]?\\d+)?/gi) ?? [];
 }
 
 function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x: number, y: number) {
@@ -91,7 +87,9 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
   const isCommand = (token: string) => /^[a-zA-Z]$/.test(token);
   const hasNumber = () => index < tokens.length && !isCommand(tokens[index]);
   const readNumber = () => {
-    if (!hasNumber()) return null;
+    if (!hasNumber()) {
+      return null;
+    }
     const value = Number(tokens[index]);
     index += 1;
     return Number.isFinite(value) ? value : null;
@@ -103,7 +101,7 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
   const pdfX = (pointX: number) => formatNumber(x + pointX);
   const pdfY = (pointY: number) => formatNumber(pageHeight - y - pointY);
   const lineTo = (point: { x: number; y: number }) => {
-    commands.push(`${pdfX(point.x)} ${pdfY(point.y)} l`);
+    commands.push(pdfX(point.x) + " " + pdfY(point.y) + " l");
     current = point;
   };
 
@@ -122,9 +120,11 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
         while (hasNumber()) {
           const pointX = readNumber();
           const pointY = readNumber();
-          if (pointX === null || pointY === null) return null;
+          if (pointX === null || pointY === null) {
+            return null;
+          }
           const point = absolutePoint(pointX, pointY, relative);
-          commands.push(`${pdfX(point.x)} ${pdfY(point.y)} ${first ? "m" : "l"}`);
+          commands.push(pdfX(point.x) + " " + pdfY(point.y) + " " + (first ? "m" : "l"));
           current = point;
           if (first) {
             subpathStart = point;
@@ -138,21 +138,27 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
         while (hasNumber()) {
           const pointX = readNumber();
           const pointY = readNumber();
-          if (pointX === null || pointY === null) return null;
+          if (pointX === null || pointY === null) {
+            return null;
+          }
           lineTo(absolutePoint(pointX, pointY, relative));
         }
         break;
       case "H":
         while (hasNumber()) {
           const pointX = readNumber();
-          if (pointX === null) return null;
+          if (pointX === null) {
+            return null;
+          }
           lineTo({ x: relative ? current.x + pointX : pointX, y: current.y });
         }
         break;
       case "V":
         while (hasNumber()) {
           const pointY = readNumber();
-          if (pointY === null) return null;
+          if (pointY === null) {
+            return null;
+          }
           lineTo({ x: current.x, y: relative ? current.y + pointY : pointY });
         }
         break;
@@ -164,11 +170,13 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
           const y2 = readNumber();
           const pointX = readNumber();
           const pointY = readNumber();
-          if (x1 === null || y1 === null || x2 === null || y2 === null || pointX === null || pointY === null) return null;
+          if (x1 === null || y1 === null || x2 === null || y2 === null || pointX === null || pointY === null) {
+            return null;
+          }
           const first = absolutePoint(x1, y1, relative);
           const second = absolutePoint(x2, y2, relative);
           const point = absolutePoint(pointX, pointY, relative);
-          commands.push(`${pdfX(first.x)} ${pdfY(first.y)} ${pdfX(second.x)} ${pdfY(second.y)} ${pdfX(point.x)} ${pdfY(point.y)} c`);
+          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
           current = point;
         }
         break;
@@ -178,12 +186,14 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
           const qy = readNumber();
           const pointX = readNumber();
           const pointY = readNumber();
-          if (qx === null || qy === null || pointX === null || pointY === null) return null;
+          if (qx === null || qy === null || pointX === null || pointY === null) {
+            return null;
+          }
           const control = absolutePoint(qx, qy, relative);
           const point = absolutePoint(pointX, pointY, relative);
           const first = { x: current.x + (2 / 3) * (control.x - current.x), y: current.y + (2 / 3) * (control.y - current.y) };
           const second = { x: point.x + (2 / 3) * (control.x - point.x), y: point.y + (2 / 3) * (control.y - point.y) };
-          commands.push(`${pdfX(first.x)} ${pdfY(first.y)} ${pdfX(second.x)} ${pdfY(second.y)} ${pdfX(point.x)} ${pdfY(point.y)} c`);
+          commands.push(pdfX(first.x) + " " + pdfY(first.y) + " " + pdfX(second.x) + " " + pdfY(second.y) + " " + pdfX(point.x) + " " + pdfY(point.y) + " c");
           current = point;
         }
         break;
@@ -199,15 +209,13 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
   return commands.length > 0 ? commands : null;
 }
 '''
-          text = text.replace(
+          replace_once(
               'const pdfEllipseKappa = 0.552284749831;\n\nfunction pdfEllipsePathCommands',
               'const pdfEllipseKappa = 0.552284749831;\n' + pdf_helper + '\nfunction pdfEllipsePathCommands',
-              1,
           )
-          text = text.replace(
+          replace_once(
               '  const pathX = x + inset;\n  const pathY = y + inset;\n  if (nodeClipUsesEllipseShape(node)) {',
               '  const pathX = x + inset;\n  const pathY = y + inset;\n  if (inset === 0) {\n    const pathData = clipSourcePathDataForNode(node);\n    const pathCommands = pathData ? pdfPathCommandsFromSvgPathData(pathData, pageHeight, pathX, pathY) : null;\n    if (pathCommands) {\n      return pathCommands;\n    }\n  }\n  if (nodeClipUsesEllipseShape(node)) {',
-              1,
           )
 
           path.write_text(text)
