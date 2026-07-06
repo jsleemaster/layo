@@ -65,6 +65,7 @@ export interface NodePaintSource {
   gradient?: NodePaintGradient;
 }
 
+type PenpotPathFillRule = "nonzero" | "evenodd";
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
 type PaintSourceDesignNode = DesignNode & {
   style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
@@ -81,10 +82,41 @@ export function importExternalMigrationArchive(
 
   try {
     const entries = readZipArchive(archive);
-    return enrichPenpotPaintSources(enrichPenpotMaskedGroupClipSources(imported, entries), entries);
+    const withPathFillRules = enrichPenpotPathFillRuleAssets(imported, entries);
+    const withClipSources = enrichPenpotMaskedGroupClipSources(withPathFillRules, entries);
+    return enrichPenpotPaintSources(withClipSources, entries);
   } catch {
     return imported;
   }
+}
+
+function enrichPenpotPathFillRuleAssets(
+  imported: ExternalMigrationImportResult,
+  entries: Map<string, Buffer>
+): ExternalMigrationImportResult {
+  const fillRulesByAssetId = penpotPathFillRulesByAssetId(entries);
+  if (fillRulesByAssetId.size === 0) {
+    return imported;
+  }
+
+  for (const asset of imported.importedAssets) {
+    const fillRule = fillRulesByAssetId.get(asset.metadata.assetId);
+    if (!fillRule) {
+      continue;
+    }
+    const markup = asset.data.toString("utf8");
+    const updatedMarkup = addPathFillRuleToSvgMarkup(markup, fillRule);
+    if (updatedMarkup === markup) {
+      continue;
+    }
+    asset.data = Buffer.from(updatedMarkup, "utf8");
+    asset.metadata = {
+      ...asset.metadata,
+      byteLength: asset.data.length
+    };
+  }
+
+  return imported;
 }
 
 function enrichPenpotMaskedGroupClipSources(
@@ -129,6 +161,27 @@ function enrichPenpotPaintSources(
   }
 
   return imported;
+}
+
+function penpotPathFillRulesByAssetId(entries: Map<string, Buffer>): Map<string, PenpotPathFillRule> {
+  const fillRulesByAssetId = new Map<string, PenpotPathFillRule>();
+  for (const [entryPath, data] of entries.entries()) {
+    const match = entryPath.match(/^files\/[^/]+\/pages\/[^/]+\/([^/]+)\.json$/);
+    if (!match) {
+      continue;
+    }
+    const shape = parseJsonBuffer(data);
+    if (!isRecord(shape) || normalizeShapeType(stringValue(valueFor(shape, "type", "shapeType", "shape-type"))) !== "path") {
+      continue;
+    }
+    const fillRule = pathFillRuleForShape(shape);
+    if (fillRule !== "evenodd") {
+      continue;
+    }
+    const sourceId = stringValue(valueFor(shape, "id")) ?? match[1];
+    fillRulesByAssetId.set(pathAssetIdForSource(sourceId), fillRule);
+  }
+  return fillRulesByAssetId;
 }
 
 function penpotMaskedGroupClipSources(entries: Map<string, Buffer>): Map<string, NodeClip> {
@@ -298,6 +351,39 @@ function pointForGradient(gradient: JsonRecord, prefix: "start" | "end"): { x: n
   const x = finiteOptionalNumber(valueFor(gradient, dashedX, camelX));
   const y = finiteOptionalNumber(valueFor(gradient, dashedY, camelY));
   return x === undefined || y === undefined ? null : { x: roundGeometry(x), y: roundGeometry(y) };
+}
+
+function pathFillRuleForShape(shape: JsonRecord): PenpotPathFillRule | undefined {
+  const topLevel = stringValue(valueFor(shape, "fillRule", "fill-rule", "fill_rule"));
+  const content = recordValue(valueFor(shape, "content"));
+  const nested = content ? stringValue(valueFor(content, "fillRule", "fill-rule", "fill_rule")) : undefined;
+  return normalizePathFillRule(topLevel ?? nested);
+}
+
+function normalizePathFillRule(value: string | undefined): PenpotPathFillRule | undefined {
+  const normalized = value?.replace(/^:/, "").replace(/[\s_-]/g, "").toLowerCase();
+  if (normalized === "evenodd") {
+    return "evenodd";
+  }
+  if (normalized === "nonzero") {
+    return "nonzero";
+  }
+  return undefined;
+}
+
+function pathAssetIdForSource(sourceId: string): string {
+  return `penpot-asset-${storageIdSegment(`${sourceId}-path-svg`)}`;
+}
+
+function addPathFillRuleToSvgMarkup(markup: string, fillRule: PenpotPathFillRule): string {
+  if (fillRule !== "evenodd" || !markup.startsWith("<svg") || markup.includes("fill-rule=")) {
+    return markup;
+  }
+  const withFillAttribute = markup.replace(/(<path\b[^>]*\sfill="[^"]*")/, `$1 fill-rule="evenodd"`);
+  if (withFillAttribute !== markup) {
+    return withFillAttribute;
+  }
+  return markup.replace(/(<path\b[^>]*)(\/?\s*>)/, `$1 fill-rule="evenodd"$2`);
 }
 
 function opacityForPaintRecord(record: JsonRecord, kind: "fill" | "stroke"): number | undefined {
