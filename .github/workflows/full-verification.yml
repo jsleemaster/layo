@@ -1,7 +1,9 @@
 name: Full Verification
 
 on:
-  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/full-verification.yml"
 
 permissions:
   contents: write
