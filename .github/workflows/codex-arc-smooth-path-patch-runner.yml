@@ -42,7 +42,7 @@ jobs:
       - name: Focused GREEN test
         env:
           NODE_OPTIONS: --conditions=development
-        run: pnpm --filter @layo/web test apps/web/src/node-artifacts-arc-smooth.test.ts
+        run: pnpm --filter @layo/web test src/node-artifacts-arc-smooth.test.ts
 
       - name: Commit verified implementation
         run: |
