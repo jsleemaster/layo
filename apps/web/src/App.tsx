@@ -403,7 +403,7 @@ interface CanvasParsedGradientStop {
   a: number;
 }
 
-interface CanvasRadialFillGradient {
+interface CanvasRadialGradient {
   centerPoint: CanvasPoint;
   radius: number;
   width: number;
@@ -487,7 +487,7 @@ function canvasGradientColorAt(stops: CanvasParsedGradientStop[], offset: number
 
 function canvasEllipticalRadialFillPatternForNode(
   node: RendererNode,
-  gradient: CanvasRadialFillGradient
+  gradient: CanvasRadialGradient
 ): HTMLCanvasElement | null {
   if (Math.abs(gradient.width - 1) < 0.0005 || typeof document === "undefined") {
     return null;
@@ -570,13 +570,13 @@ function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke"
   };
 }
 
-function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialFillGradient | null {
+function canvasRadialGradientForNode(node: RendererNode, kind: "fill" | "stroke"): CanvasRadialGradient | null {
   if (node.kind === "group" || node.content.type === "text") {
     return null;
   }
 
   const paintSources = (node.style.paint_sources ?? [])
-    .filter((source) => source.kind === "fill")
+    .filter((source) => source.kind === kind)
     .sort((left, right) => left.index - right.index);
   if (paintSources.length !== 1) {
     return null;
@@ -623,39 +623,63 @@ function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialFillGr
   };
 }
 
-function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
-  const fillGradient = canvasLinearGradientForNode(node, "fill");
+function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialGradient | null {
+  return canvasRadialGradientForNode(node, "fill");
+}
+
+function canvasRadialStrokeGradientForNode(node: RendererNode): CanvasRadialGradient | null {
+  if (!node.style.stroke || node.style.stroke_width <= 0) {
+    return null;
+  }
+  return canvasRadialGradientForNode(node, "stroke");
+}
+
+function canvasRadialGradientFillPropsForNode(
+  node: RendererNode,
+  radialFillGradient: CanvasRadialGradient
+): CanvasLinearGradientProps {
+  const radialFillPattern = canvasEllipticalRadialFillPatternForNode(node, radialFillGradient);
+  return radialFillPattern
+    ? {
+        fillPriority: "pattern" as const,
+        fillPatternImage: radialFillPattern as unknown as HTMLImageElement,
+        fillPatternRepeat: "no-repeat" as const,
+        fillPatternX: 0,
+        fillPatternY: 0,
+        fillPatternScaleX: node.size.width / radialFillPattern.width,
+        fillPatternScaleY: node.size.height / radialFillPattern.height
+      }
+    : {
+        fillPriority: "radial-gradient" as const,
+        fillRadialGradientStartPoint: radialFillGradient.centerPoint,
+        fillRadialGradientStartRadius: 0,
+        fillRadialGradientEndPoint: radialFillGradient.centerPoint,
+        fillRadialGradientEndRadius: radialFillGradient.radius,
+        fillRadialGradientColorStops: radialFillGradient.colorStops
+      };
+}
+
+function canvasFillGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
   const radialFillGradient = canvasRadialFillGradientForNode(node);
-  const radialFillPattern = radialFillGradient ? canvasEllipticalRadialFillPatternForNode(node, radialFillGradient) : null;
+  if (radialFillGradient) {
+    return canvasRadialGradientFillPropsForNode(node, radialFillGradient);
+  }
+
+  const fillGradient = canvasLinearGradientForNode(node, "fill");
+  return fillGradient
+    ? {
+        fillPriority: "linear-gradient" as const,
+        fillLinearGradientStartPoint: fillGradient.startPoint,
+        fillLinearGradientEndPoint: fillGradient.endPoint,
+        fillLinearGradientColorStops: fillGradient.colorStops
+      }
+    : {};
+}
+
+function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
   const strokeGradient = canvasLinearGradientForNode(node, "stroke");
   return {
-    ...(radialFillPattern
-      ? {
-          fillPriority: "pattern" as const,
-          fillPatternImage: radialFillPattern as unknown as HTMLImageElement,
-          fillPatternRepeat: "no-repeat" as const,
-          fillPatternX: 0,
-          fillPatternY: 0,
-          fillPatternScaleX: node.size.width / radialFillPattern.width,
-          fillPatternScaleY: node.size.height / radialFillPattern.height
-        }
-      : radialFillGradient
-        ? {
-            fillPriority: "radial-gradient" as const,
-            fillRadialGradientStartPoint: radialFillGradient.centerPoint,
-            fillRadialGradientStartRadius: 0,
-            fillRadialGradientEndPoint: radialFillGradient.centerPoint,
-            fillRadialGradientEndRadius: radialFillGradient.radius,
-            fillRadialGradientColorStops: radialFillGradient.colorStops
-          }
-        : fillGradient
-          ? {
-              fillPriority: "linear-gradient" as const,
-              fillLinearGradientStartPoint: fillGradient.startPoint,
-              fillLinearGradientEndPoint: fillGradient.endPoint,
-              fillLinearGradientColorStops: fillGradient.colorStops
-            }
-          : {}),
+    ...canvasFillGradientPropsForNode(node),
     ...(strokeGradient
       ? {
           strokeLinearGradientStartPoint: strokeGradient.startPoint,
@@ -664,6 +688,36 @@ function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradi
         }
       : {})
   };
+}
+
+function CanvasRadialStrokeOverlay({ node, gradient }: { node: RendererNode; gradient: CanvasRadialGradient }) {
+  const strokeWidth = Math.max(0, node.style.stroke_width);
+  const inset = Math.min(strokeWidth, node.size.width / 2, node.size.height / 2);
+  const innerWidth = Math.max(0, node.size.width - inset * 2);
+  const innerHeight = Math.max(0, node.size.height - inset * 2);
+  const cornerRadius = node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none;
+  return (
+    <Group listening={false}>
+      <Rect
+        width={node.size.width}
+        height={node.size.height}
+        fill={node.style.stroke ?? "#000000"}
+        cornerRadius={cornerRadius}
+        {...canvasRadialGradientFillPropsForNode(node, gradient)}
+      />
+      {innerWidth > 0 && innerHeight > 0 ? (
+        <Rect
+          x={inset}
+          y={inset}
+          width={innerWidth}
+          height={innerHeight}
+          fill={node.style.fill}
+          cornerRadius={Math.max(0, cornerRadius - inset)}
+          {...canvasFillGradientPropsForNode(node)}
+        />
+      ) : null}
+    </Group>
+  );
 }
 
 function mergeLocalVisualBounds(a: LocalVisualBounds, b: LocalVisualBounds): LocalVisualBounds {
@@ -4091,19 +4145,40 @@ function renderNode({
           {...shadowProps}
         />
       )
-    ) : (
-      <Rect
-        width={node.size.width}
-        height={node.size.height}
-        fill={node.style.fill}
-        stroke={node.style.stroke ?? undefined}
-        strokeWidth={node.style.stroke_width}
-        opacity={node.style.opacity}
-        cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
-        {...canvasLinearGradientPropsForNode(node)}
-        {...shadowProps}
-      />
-    );
+    ) : (() => {
+      const radialStrokeGradient = canvasRadialStrokeGradientForNode(node);
+      if (radialStrokeGradient) {
+        return (
+          <Group opacity={node.style.opacity}>
+            <Rect
+              width={node.size.width}
+              height={node.size.height}
+              fill={node.style.fill}
+              stroke={undefined}
+              strokeWidth={0}
+              cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
+              {...canvasFillGradientPropsForNode(node)}
+              {...shadowProps}
+            />
+            <CanvasRadialStrokeOverlay node={node} gradient={radialStrokeGradient} />
+          </Group>
+        );
+      }
+
+      return (
+        <Rect
+          width={node.size.width}
+          height={node.size.height}
+          fill={node.style.fill}
+          stroke={node.style.stroke ?? undefined}
+          strokeWidth={node.style.stroke_width}
+          opacity={node.style.opacity}
+          cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
+          {...canvasLinearGradientPropsForNode(node)}
+          {...shadowProps}
+        />
+      );
+    })();
   const shadowBodies = effectShadowLayersForNode(node).map((layer, index) => (
     <Group key={`shadow-${index}`} listening={false}>
       {renderBody(konvaShadowPropsForLayer(layer))}
