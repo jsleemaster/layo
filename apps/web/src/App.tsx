@@ -327,10 +327,15 @@ function konvaShadowPropsForLayer(layer: ParsedEffectShadowLayer): Record<string
 type CanvasPoint = { x: number; y: number };
 
 type CanvasLinearGradientProps = {
-  fillPriority?: "linear-gradient";
+  fillPriority?: "linear-gradient" | "radial-gradient";
   fillLinearGradientStartPoint?: CanvasPoint;
   fillLinearGradientEndPoint?: CanvasPoint;
   fillLinearGradientColorStops?: Array<number | string>;
+  fillRadialGradientStartPoint?: CanvasPoint;
+  fillRadialGradientStartRadius?: number;
+  fillRadialGradientEndPoint?: CanvasPoint;
+  fillRadialGradientEndRadius?: number;
+  fillRadialGradientColorStops?: Array<number | string>;
   strokeLinearGradientStartPoint?: CanvasPoint;
   strokeLinearGradientEndPoint?: CanvasPoint;
   strokeLinearGradientColorStops?: Array<number | string>;
@@ -416,18 +421,63 @@ function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke"
   };
 }
 
+function canvasRadialFillGradientForNode(node: RendererNode) {
+  if (node.kind === "group" || node.content.type === "text") {
+    return null;
+  }
+
+  const paintSources = (node.style.paint_sources ?? [])
+    .filter((source) => source.kind === "fill")
+    .sort((left, right) => left.index - right.index);
+  if (paintSources.length !== 1) {
+    return null;
+  }
+
+  const source = paintSources[0];
+  if (!source) {
+    return null;
+  }
+
+  const gradient = source.gradient;
+  const type = gradient?.type?.replace(/^:/, "").toLowerCase() ?? "linear";
+  const blendMode = source.blendMode?.replace(/^:/, "").toLowerCase() ?? "normal";
+  const colorStops = canvasGradientColorStops(gradient?.stops);
+  if (source.paintType !== "gradient" || !type.includes("radial") || blendMode !== "normal" || !colorStops) {
+    return null;
+  }
+
+  const centerPoint = canvasGradientPoint(gradient?.start, node, { x: 0.5, y: 0.5 });
+  const endPoint = canvasGradientPoint(gradient?.end, node, { x: 1, y: 0.5 });
+  const radius = Math.hypot(endPoint.x - centerPoint.x, endPoint.y - centerPoint.y);
+  return {
+    centerPoint,
+    radius: radius > 0 ? radius : Math.max(node.size.width, node.size.height) / 2,
+    colorStops
+  };
+}
+
 function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
   const fillGradient = canvasLinearGradientForNode(node, "fill");
+  const radialFillGradient = canvasRadialFillGradientForNode(node);
   const strokeGradient = canvasLinearGradientForNode(node, "stroke");
   return {
-    ...(fillGradient
+    ...(radialFillGradient
       ? {
-          fillPriority: "linear-gradient" as const,
-          fillLinearGradientStartPoint: fillGradient.startPoint,
-          fillLinearGradientEndPoint: fillGradient.endPoint,
-          fillLinearGradientColorStops: fillGradient.colorStops
+          fillPriority: "radial-gradient" as const,
+          fillRadialGradientStartPoint: radialFillGradient.centerPoint,
+          fillRadialGradientStartRadius: 0,
+          fillRadialGradientEndPoint: radialFillGradient.centerPoint,
+          fillRadialGradientEndRadius: radialFillGradient.radius,
+          fillRadialGradientColorStops: radialFillGradient.colorStops
         }
-      : {}),
+      : fillGradient
+        ? {
+            fillPriority: "linear-gradient" as const,
+            fillLinearGradientStartPoint: fillGradient.startPoint,
+            fillLinearGradientEndPoint: fillGradient.endPoint,
+            fillLinearGradientColorStops: fillGradient.colorStops
+          }
+        : {}),
     ...(strokeGradient
       ? {
           strokeLinearGradientStartPoint: strokeGradient.startPoint,
