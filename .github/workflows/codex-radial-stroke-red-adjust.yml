@@ -1,0 +1,77 @@
+name: Codex radial stroke RED sample adjustment
+
+on:
+  push:
+    branches:
+      - codex/penpot-radial-stroke-raster-canvas
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-radial-stroke-raster-canvas
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Adjust radial stroke RED sample
+        run: |
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = 'apps/web/e2e/external-migration-penpot-stroke-gradient.spec.ts';
+          let current = readFileSync(path, 'utf8');
+          const fromFixture = [
+            '          name: "Radial stroke card",',
+            '          type: "rect",',
+            '          x: 64,',
+            '          y: 88,',
+            '          width: 96,',
+            '          height: 72,'
+          ].join('\n');
+          const toFixture = [
+            '          name: "Radial stroke card",',
+            '          type: "rect",',
+            '          x: 64,',
+            '          y: 88,',
+            '          width: 96,',
+            '          height: 24,'
+          ].join('\n');
+          if (!current.includes(fromFixture)) throw new Error('radial stroke fixture height anchor not found');
+          current = current.replace(fromFixture, toFixture);
+
+          const fromSample = [
+            '  const topInnerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), 32);',
+            '  const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));',
+            '',
+            '  expect(topInnerStroke.r).toBeGreaterThan(topInnerStroke.b + 40);',
+            '  expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);',
+            '  expect(topInnerStroke.a).toBeGreaterThan(200);',
+            '  expect(rightStroke.a).toBeGreaterThan(200);'
+          ].join('\n');
+          const toSample = [
+            '  const centerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), Math.floor(height / 2));',
+            '  const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));',
+            '',
+            '  expect(centerStroke.r).toBeGreaterThan(centerStroke.b + 40);',
+            '  expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);',
+            '  expect(centerStroke.a).toBeGreaterThan(200);',
+            '  expect(rightStroke.a).toBeGreaterThan(200);'
+          ].join('\n');
+          if (!current.includes(fromSample)) throw new Error('radial stroke sample anchor not found');
+          current = current.replace(fromSample, toSample);
+          writeFileSync(path, current, 'utf8');
+          NODE
+      - name: Remove temporary workflow
+        run: rm .github/workflows/codex-radial-stroke-red-adjust.yml
+      - name: Commit RED sample adjustment
+        run: |
+          git config user.name "codex"
+          git config user.email "codex@openai.com"
+          git add apps/web/e2e/external-migration-penpot-stroke-gradient.spec.ts .github/workflows/codex-radial-stroke-red-adjust.yml
+          git commit -m "Adjust RED radial stroke raster sample"
+          git push origin HEAD:codex/penpot-radial-stroke-raster-canvas
