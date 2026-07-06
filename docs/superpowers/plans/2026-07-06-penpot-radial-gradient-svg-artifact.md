@@ -28,7 +28,7 @@ Full Verification #28751033299 failed in Core tests on branch `codex/penpot-radi
 ## Verification
 
 - RED: Full Verification #28751033299 failed in `apps/web/src/node-artifacts-gradient.test.ts` before implementation.
-- GREEN: pending PR-head Full Verification after documentation and PR creation.
+- GREEN: PR-head Full Verification #28772353798 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e in 7m57s. Storage Restore Drill #28772353810 and Storage Backup Retention #28772353751 passed for the same head.
 - Browser/editor direct interaction: not applicable for this slice because the behavior is selected-layer artifact serialization, not a browser interaction change. Full Verification still runs the Playwright CLI e2e suite on the PR head.
 
 ## Remaining Gaps
