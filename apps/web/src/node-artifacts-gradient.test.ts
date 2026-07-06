@@ -38,7 +38,6 @@ const penpotGradientCard: RendererNode = {
   children: []
 };
 
-
 const penpotRadialGradientCard: RendererNode = {
   id: "penpot-radial-gradient-artifact-card",
   kind: "rectangle",
@@ -63,6 +62,42 @@ const penpotRadialGradientCard: RendererNode = {
           start: { x: 0.5, y: 0.5 },
           end: { x: 1, y: 0.5 },
           width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
+const penpotRadialWidthGradientCard: RendererNode = {
+  id: "penpot-radial-width-gradient-artifact-card",
+  kind: "rectangle",
+  name: "Penpot radial width gradient artifact card",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  style: {
+    fill: "#800080",
+    stroke: "#111827",
+    stroke_width: 2,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 0.5,
           stops: [
             { color: "#ff0000", opacity: 1, offset: 0 },
             { color: "#0000ff", opacity: 1, offset: 1 }
@@ -181,6 +216,17 @@ describe("Penpot gradient selected-layer SVG artifacts", () => {
     expect(svg).toContain("fill=\"url(#layo-gradient-penpot-radial-gradient-artifact-card-fill-0)\"");
     expect(svg).toContain("data-fallback-fill=\"#800080\"");
     expect(svg).toContain("stroke=\"#111827\"");
+  });
+
+  test("renders Penpot radial width geometry as an SVG gradient transform", () => {
+    const svg = svgForNode(penpotRadialWidthGradientCard);
+
+    expect(svg).toContain("<defs>");
+    expect(svg).toContain(
+      "<radialGradient id=\"layo-gradient-penpot-radial-width-gradient-artifact-card-fill-0\" cx=\"50%\" cy=\"50%\" r=\"50%\" gradientTransform=\"translate(50% 50%) rotate(90) scale(0.5 1) translate(-50% -50%)\">"
+    );
+    expect(svg).toContain("fill=\"url(#layo-gradient-penpot-radial-width-gradient-artifact-card-fill-0)\"");
+    expect(svg).toContain("data-fallback-fill=\"#800080\"");
   });
 
   test("renders preserved Penpot stroke gradients as SVG paint servers", () => {
