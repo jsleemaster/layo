@@ -4,11 +4,7 @@ on:
   push:
     branches:
       - codex/penpot-arc-smooth-path-artifacts
-    paths:
-      - ".github/workflows/full-verification.yml"
   pull_request:
-    paths:
-      - ".github/workflows/full-verification.yml"
 
 permissions:
   contents: write
