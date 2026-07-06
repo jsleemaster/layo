@@ -65,10 +65,22 @@ export interface NodePaintSource {
   gradient?: NodePaintGradient;
 }
 
+export interface NodeVectorSource {
+  origin: "penpot";
+  shapeId: string;
+  shapeType: "path";
+  bounds: NodeClipBounds;
+  pathData: string;
+  fillRule?: PenpotPathFillRule;
+}
+
 type PenpotPathFillRule = "nonzero" | "evenodd";
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
 type PaintSourceDesignNode = DesignNode & {
   style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
+};
+type VectorSourceDesignNode = DesignNode & {
+  content: Extract<DesignNode["content"], { type: "image" }> & { vector_source?: NodeVectorSource | null };
 };
 
 export function importExternalMigrationArchive(
@@ -82,12 +94,36 @@ export function importExternalMigrationArchive(
 
   try {
     const entries = readZipArchive(archive);
-    const withPathFillRules = enrichPenpotPathFillRuleAssets(imported, entries);
+    const withVectorSources = enrichPenpotPathVectorSources(imported, entries);
+    const withPathFillRules = enrichPenpotPathFillRuleAssets(withVectorSources, entries);
     const withClipSources = enrichPenpotMaskedGroupClipSources(withPathFillRules, entries);
     return enrichPenpotPaintSources(withClipSources, entries);
   } catch {
     return imported;
   }
+}
+
+function enrichPenpotPathVectorSources(
+  imported: ExternalMigrationImportResult,
+  entries: Map<string, Buffer>
+): ExternalMigrationImportResult {
+  const vectorSourcesByNodeId = penpotPathVectorSourcesByNodeId(entries);
+  if (vectorSourcesByNodeId.size === 0) {
+    return imported;
+  }
+
+  for (const [nodeId, vectorSource] of vectorSourcesByNodeId.entries()) {
+    const node = findDesignNodeById(imported.file, nodeId);
+    if (!node || node.content.type !== "image") {
+      continue;
+    }
+    (node as VectorSourceDesignNode).content = {
+      ...node.content,
+      vector_source: structuredClone(vectorSource)
+    };
+  }
+
+  return imported;
 }
 
 function enrichPenpotPathFillRuleAssets(
@@ -161,6 +197,35 @@ function enrichPenpotPaintSources(
   }
 
   return imported;
+}
+
+function penpotPathVectorSourcesByNodeId(entries: Map<string, Buffer>): Map<string, NodeVectorSource> {
+  const vectorSourcesByNodeId = new Map<string, NodeVectorSource>();
+  for (const [entryPath, data] of entries.entries()) {
+    const match = entryPath.match(/^files\/[^/]+\/pages\/[^/]+\/([^/]+)\.json$/);
+    if (!match) {
+      continue;
+    }
+    const shape = parseJsonBuffer(data);
+    if (!isRecord(shape) || normalizeShapeType(stringValue(valueFor(shape, "type", "shapeType", "shape-type"))) !== "path") {
+      continue;
+    }
+    const pathData = pathDataForShape(shape);
+    if (!pathData) {
+      continue;
+    }
+    const sourceId = stringValue(valueFor(shape, "id")) ?? match[1];
+    const fillRule = pathFillRuleForShape(shape);
+    vectorSourcesByNodeId.set(`penpot-${storageIdSegment(sourceId)}`, {
+      origin: "penpot",
+      shapeId: sourceId,
+      shapeType: "path",
+      bounds: boundsForPenpotShape(shape),
+      pathData,
+      ...(fillRule ? { fillRule } : {})
+    });
+  }
+  return vectorSourcesByNodeId;
 }
 
 function penpotPathFillRulesByAssetId(entries: Map<string, Buffer>): Map<string, PenpotPathFillRule> {
@@ -351,6 +416,21 @@ function pointForGradient(gradient: JsonRecord, prefix: "start" | "end"): { x: n
   const x = finiteOptionalNumber(valueFor(gradient, dashedX, camelX));
   const y = finiteOptionalNumber(valueFor(gradient, dashedY, camelY));
   return x === undefined || y === undefined ? null : { x: roundGeometry(x), y: roundGeometry(y) };
+}
+
+function pathDataForShape(shape: JsonRecord): string | undefined {
+  const direct = stringValue(valueFor(shape, "content", "path", "pathData", "path-data", "d"))?.trim();
+  if (direct && looksLikeSvgPathData(direct)) {
+    return direct;
+  }
+
+  const content = recordValue(valueFor(shape, "content"));
+  const nested = content ? stringValue(valueFor(content, "d", "path", "pathData", "path-data"))?.trim() : undefined;
+  return nested && looksLikeSvgPathData(nested) ? nested : undefined;
+}
+
+function looksLikeSvgPathData(value: string): boolean {
+  return /[Mm]/.test(value) && /^[MmZzLlHhVvCcSsQqTtAa0-9,.\-\s]+$/.test(value);
 }
 
 function pathFillRuleForShape(shape: JsonRecord): PenpotPathFillRule | undefined {
