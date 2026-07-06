@@ -33,23 +33,91 @@ jobs:
           }
 
           const artifactPath = 'apps/web/src/node-artifacts-gradient.test.ts';
-          replaceOnce(
-            artifactPath,
-            'const penpotDualGradientCard: RendererNode = {',
-            `const penpotRadialStrokeGradientCard: RendererNode = {\n  id: "penpot-radial-stroke-gradient-artifact-card",\n  kind: "rectangle",\n  name: "Penpot radial stroke gradient artifact card",\n  transform: { x: 0, y: 0, rotation: 0 },\n  size: { width: 120, height: 60 },\n  style: {\n    fill: "#ffffff",\n    stroke: "#800080",\n    stroke_width: 4,\n    opacity: 1,\n    paint_sources: [\n      {\n        origin: "penpot",\n        kind: "stroke",\n        paintType: "gradient",\n        index: 0,\n        opacity: 1,\n        blendMode: "normal",\n        gradient: {\n          type: "radial",\n          start: { x: 0.5, y: 0.5 },\n          end: { x: 1, y: 0.5 },\n          width: 1,\n          stops: [\n            { color: "#ff0000", opacity: 1, offset: 0 },\n            { color: "#0000ff", opacity: 1, offset: 1 }\n          ]\n        }\n      }\n    ]\n  },\n  content: { type: "empty" },\n  children: []\n};\n\nconst penpotDualGradientCard: RendererNode = {`
-          );
+          const radialStrokeCard = [
+            'const penpotRadialStrokeGradientCard: RendererNode = {',
+            '  id: "penpot-radial-stroke-gradient-artifact-card",',
+            '  kind: "rectangle",',
+            '  name: "Penpot radial stroke gradient artifact card",',
+            '  transform: { x: 0, y: 0, rotation: 0 },',
+            '  size: { width: 120, height: 60 },',
+            '  style: {',
+            '    fill: "#ffffff",',
+            '    stroke: "#800080",',
+            '    stroke_width: 4,',
+            '    opacity: 1,',
+            '    paint_sources: [',
+            '      {',
+            '        origin: "penpot",',
+            '        kind: "stroke",',
+            '        paintType: "gradient",',
+            '        index: 0,',
+            '        opacity: 1,',
+            '        blendMode: "normal",',
+            '        gradient: {',
+            '          type: "radial",',
+            '          start: { x: 0.5, y: 0.5 },',
+            '          end: { x: 1, y: 0.5 },',
+            '          width: 1,',
+            '          stops: [',
+            '            { color: "#ff0000", opacity: 1, offset: 0 },',
+            '            { color: "#0000ff", opacity: 1, offset: 1 }',
+            '          ]',
+            '        }',
+            '      }',
+            '    ]',
+            '  },',
+            '  content: { type: "empty" },',
+            '  children: []',
+            '};',
+            '',
+            'const penpotDualGradientCard: RendererNode = {'
+          ].join('\n');
+          replaceOnce(artifactPath, 'const penpotDualGradientCard: RendererNode = {', radialStrokeCard);
 
+          const radialSvgTest = [
+            '  test("renders preserved Penpot radial stroke gradients as SVG paint servers", () => {',
+            '    const svg = svgForNode(penpotRadialStrokeGradientCard);',
+            '',
+            '    expect(svg).toContain("<defs>");',
+            '    expect(svg).toContain(',
+            '      "<radialGradient id=\\\"layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0\\\" cx=\\\"50%\\\" cy=\\\"50%\\\" r=\\\"50%\\\">"',
+            '    );',
+            '    expect(svg).toContain("<stop offset=\\\"0%\\\" stop-color=\\\"#ff0000\\\" />");',
+            '    expect(svg).toContain("<stop offset=\\\"100%\\\" stop-color=\\\"#0000ff\\\" />");',
+            '    expect(svg).toContain("fill=\\\"#ffffff\\\"");',
+            '    expect(svg).toContain("stroke=\\\"url(#layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0)\\\"");',
+            '    expect(svg).toContain("data-fallback-stroke=\\\"#800080\\\"");',
+            '  });',
+            '',
+            '  test("uses distinct SVG paint server ids when Penpot fill and stroke gradients share an index", () => {'
+          ].join('\n');
           replaceOnce(
             artifactPath,
             '  test("uses distinct SVG paint server ids when Penpot fill and stroke gradients share an index", () => {',
-            `  test("renders preserved Penpot radial stroke gradients as SVG paint servers", () => {\n    const svg = svgForNode(penpotRadialStrokeGradientCard);\n\n    expect(svg).toContain("<defs>");\n    expect(svg).toContain(\n      "<radialGradient id=\\\"layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0\\\" cx=\\\"50%\\\" cy=\\\"50%\\\" r=\\\"50%\\\">"\n    );\n    expect(svg).toContain("<stop offset=\\\"0%\\\" stop-color=\\\"#ff0000\\\" />");\n    expect(svg).toContain("<stop offset=\\\"100%\\\" stop-color=\\\"#0000ff\\\" />");\n    expect(svg).toContain("fill=\\\"#ffffff\\\"");\n    expect(svg).toContain("stroke=\\\"url(#layo-gradient-penpot-radial-stroke-gradient-artifact-card-stroke-0)\\\"");\n    expect(svg).toContain("data-fallback-stroke=\\\"#800080\\\"");\n  });\n\n  test("uses distinct SVG paint server ids when Penpot fill and stroke gradients share an index", () => {`
+            radialSvgTest
           );
 
-          replaceOnce(
-            artifactPath,
-            '    expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));\n  });\n});',
-            `    expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));\n  });\n\n  test("renders preserved Penpot radial stroke gradients as radial shading resources", () => {\n    const pdf = pdfTextForNode(penpotRadialStrokeGradientCard);\n\n    expect(pdf).toContain("/Shading << /Sh1");\n    expect(pdf).toContain("/ShadingType 3");\n    expect(pdf).toContain("/ColorSpace /DeviceRGB");\n    expect(pdf).toContain("/Coords [60 30 0 60 30 60]");\n    expect(pdf).toContain("/FunctionType 2");\n    expect(pdf).toContain("/C0 [1 0 0]");\n    expect(pdf).toContain("/C1 [0 0 1]");\n    expect(pdf).toContain(["q", "0 0 120 60 re", "4 4 112 52 re", "W*", "n", "/Sh1 sh", "Q"].join("\\n"));\n    expect(pdf).not.toContain(["0.502 0 0.502 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));\n  });\n});`
-          );
+          const pdfAnchor = '    expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));\n  });\n});';
+          const pdfWithRadial = [
+            '    expect(pdf).not.toContain(["0 0.502 0 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));',
+            '  });',
+            '',
+            '  test("renders preserved Penpot radial stroke gradients as radial shading resources", () => {',
+            '    const pdf = pdfTextForNode(penpotRadialStrokeGradientCard);',
+            '',
+            '    expect(pdf).toContain("/Shading << /Sh1");',
+            '    expect(pdf).toContain("/ShadingType 3");',
+            '    expect(pdf).toContain("/ColorSpace /DeviceRGB");',
+            '    expect(pdf).toContain("/Coords [60 30 0 60 30 60]");',
+            '    expect(pdf).toContain("/FunctionType 2");',
+            '    expect(pdf).toContain("/C0 [1 0 0]");',
+            '    expect(pdf).toContain("/C1 [0 0 1]");',
+            '    expect(pdf).toContain(["q", "0 0 120 60 re", "4 4 112 52 re", "W*", "n", "/Sh1 sh", "Q"].join("\\n"));',
+            '    expect(pdf).not.toContain(["0.502 0 0.502 RG", "4 w", "0 0 120 60 re", "S"].join("\\n"));',
+            '  });',
+            '});'
+          ].join('\n');
+          replaceOnce(artifactPath, pdfAnchor, pdfWithRadial);
 
           const e2ePath = 'apps/web/e2e/external-migration-penpot-stroke-gradient.spec.ts';
           replaceOnce(
@@ -58,16 +126,133 @@ jobs:
             'const radialGradientWidthRectId = "b0b0b0b0-b0b0-b0b0-b0b0-b0b0b0b0b0b0";\nconst radialStrokeGradientRectId = "c0c0c0c0-c0c0-c0c0-c0c0-c0c0c0c0c0c0";\nconst expectedStrokeGradientColor = "#800080";'
           );
 
+          const radialStrokeArchive = [
+            'function createPenpotRadialStrokeGradientExportArchive(): Buffer {',
+            '  return createZipArchive([',
+            '    {',
+            '      path: "manifest.json",',
+            '      data: Buffer.from(',
+            '        JSON.stringify({',
+            '          type: "penpot/export-files",',
+            '          version: 1,',
+            '          files: [{ id: fileId, name: "Penpot Radial Stroke Board", features: [] }]',
+            '        }),',
+            '        "utf8"',
+            '      )',
+            '    },',
+            '    {',
+            '      path: `files/${fileId}.json`,',
+            '      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Radial Stroke Board" }), "utf8")',
+            '    },',
+            '    {',
+            '      path: `files/${fileId}/pages/${pageId}.json`,',
+            '      data: Buffer.from(JSON.stringify({ id: pageId, name: "Radial stroke gradients", index: 0, objects: {} }), "utf8")',
+            '    },',
+            '    {',
+            '      path: `files/${fileId}/pages/${pageId}/${frameId}.json`,',
+            '      data: Buffer.from(',
+            '        JSON.stringify({',
+            '          id: frameId,',
+            '          name: "Radial stroke frame",',
+            '          type: "frame",',
+            '          x: 40,',
+            '          y: 64,',
+            '          width: 240,',
+            '          height: 160,',
+            '          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],',
+            '          shapes: [radialStrokeGradientRectId]',
+            '        }),',
+            '        "utf8"',
+            '      )',
+            '    },',
+            '    {',
+            '      path: `files/${fileId}/pages/${pageId}/${radialStrokeGradientRectId}.json`,',
+            '      data: Buffer.from(',
+            '        JSON.stringify({',
+            '          id: radialStrokeGradientRectId,',
+            '          name: "Radial stroke card",',
+            '          type: "rect",',
+            '          x: 64,',
+            '          y: 88,',
+            '          width: 96,',
+            '          height: 72,',
+            '          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],',
+            '          strokes: [',
+            '            {',
+            '              "stroke-color-gradient": {',
+            '                type: "radial",',
+            '                "start-x": 0.5,',
+            '                "start-y": 0.5,',
+            '                "end-x": 1,',
+            '                "end-y": 0.5,',
+            '                width: 1,',
+            '                stops: [',
+            '                  { color: "#ff0000", opacity: 1, offset: 0 },',
+            '                  { color: "#0000ff", opacity: 1, offset: 1 }',
+            '                ]',
+            '              },',
+            '              "stroke-opacity": 1,',
+            '              "stroke-width": 24',
+            '            }',
+            '          ]',
+            '        }),',
+            '        "utf8"',
+            '      )',
+            '    }',
+            '  ]);',
+            '}',
+            '',
+            'test("file panel imports a Penpot stroke gradient as a flattened visible stroke", async ({ page }, testInfo) => {'
+          ].join('\n');
           replaceOnce(
             e2ePath,
             'test("file panel imports a Penpot stroke gradient as a flattened visible stroke", async ({ page }, testInfo) => {',
-            `function createPenpotRadialStrokeGradientExportArchive(): Buffer {\n  return createZipArchive([\n    {\n      path: "manifest.json",\n      data: Buffer.from(\n        JSON.stringify({\n          type: "penpot/export-files",\n          version: 1,\n          files: [{ id: fileId, name: "Penpot Radial Stroke Board", features: [] }]\n        }),\n        "utf8"\n      )\n    },\n    {\n      path: \\`files/\\${fileId}.json\\`,\n      data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Radial Stroke Board" }), "utf8")\n    },\n    {\n      path: \\`files/\\${fileId}/pages/\\${pageId}.json\\`,\n      data: Buffer.from(JSON.stringify({ id: pageId, name: "Radial stroke gradients", index: 0, objects: {} }), "utf8")\n    },\n    {\n      path: \\`files/\\${fileId}/pages/\\${pageId}/\\${frameId}.json\\`,\n      data: Buffer.from(\n        JSON.stringify({\n          id: frameId,\n          name: "Radial stroke frame",\n          type: "frame",\n          x: 40,\n          y: 64,\n          width: 240,\n          height: 160,\n          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],\n          shapes: [radialStrokeGradientRectId]\n        }),\n        "utf8"\n      )\n    },\n    {\n      path: \\`files/\\${fileId}/pages/\\${pageId}/\\${radialStrokeGradientRectId}.json\\`,\n      data: Buffer.from(\n        JSON.stringify({\n          id: radialStrokeGradientRectId,\n          name: "Radial stroke card",\n          type: "rect",\n          x: 64,\n          y: 88,\n          width: 96,\n          height: 72,\n          fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],\n          strokes: [\n            {\n              "stroke-color-gradient": {\n                type: "radial",\n                "start-x": 0.5,\n                "start-y": 0.5,\n                "end-x": 1,\n                "end-y": 0.5,\n                width: 1,\n                stops: [\n                  { color: "#ff0000", opacity: 1, offset: 0 },\n                  { color: "#0000ff", opacity: 1, offset: 1 }\n                ]\n              },\n              "stroke-opacity": 1,\n              "stroke-width": 24\n            }\n          ]\n        }),\n        "utf8"\n      )\n    }\n  ]);\n}\n\ntest("file panel imports a Penpot stroke gradient as a flattened visible stroke", async ({ page }, testInfo) => {`
+            radialStrokeArchive
           );
 
+          const radialStrokeE2e = [
+            'test("dev panel PNG raster artifact preserves the imported Penpot radial stroke gradient", async ({ page }, testInfo) => {',
+            '  await createProjectFromEmptyState(page);',
+            '  const penpotZipPath = testInfo.outputPath("radial-stroke-gradient-raster.penpot");',
+            '  await writeFile(penpotZipPath, createPenpotRadialStrokeGradientExportArchive());',
+            '',
+            '  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);',
+            '  await expect(page.getByTestId("external-migration-review")).toContainText("가져오기 가능");',
+            '  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();',
+            '  await expect(page.getByTestId("layer-panel")).toContainText("Radial stroke card");',
+            '',
+            '  await page.getByTestId("layer-panel").getByRole("button", { name: "Radial stroke card" }).click();',
+            '  await page.getByTestId("inspector-tab-dev").click();',
+            '',
+            '  const downloadPromise = page.waitForEvent("download");',
+            '  await page.getByTestId("dev-panel-download-png").click();',
+            '  const download = await downloadPromise;',
+            '  expect(download.suggestedFilename()).toBe(`penpot-${radialStrokeGradientRectId}.png`);',
+            '  const downloadPath = await download.path();',
+            '  if (!downloadPath) {',
+            '    throw new Error("radial stroke gradient raster png download path missing");',
+            '  }',
+            '',
+            '  const png = await readFile(downloadPath);',
+            '  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);',
+            '  const width = png.readUInt32BE(16);',
+            '  const height = png.readUInt32BE(20);',
+            '  const topInnerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), 32);',
+            '  const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));',
+            '',
+            '  expect(topInnerStroke.r).toBeGreaterThan(topInnerStroke.b + 40);',
+            '  expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);',
+            '  expect(topInnerStroke.a).toBeGreaterThan(200);',
+            '  expect(rightStroke.a).toBeGreaterThan(200);',
+            '  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("Radial stroke card PNG 다운로드됨");',
+            '});',
+            '',
+            'async function imagePixel(page: Page, image: Buffer, mimeType: "image/png", x: number, y: number) {'
+          ].join('\n');
           replaceOnce(
             e2ePath,
             'async function imagePixel(page: Page, image: Buffer, mimeType: "image/png", x: number, y: number) {',
-            `test("dev panel PNG raster artifact preserves the imported Penpot radial stroke gradient", async ({ page }, testInfo) => {\n  await createProjectFromEmptyState(page);\n  const penpotZipPath = testInfo.outputPath("radial-stroke-gradient-raster.penpot");\n  await writeFile(penpotZipPath, createPenpotRadialStrokeGradientExportArchive());\n\n  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);\n  await expect(page.getByTestId("external-migration-review")).toContainText("가져오기 가능");\n  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();\n  await expect(page.getByTestId("layer-panel")).toContainText("Radial stroke card");\n\n  await page.getByTestId("layer-panel").getByRole("button", { name: "Radial stroke card" }).click();\n  await page.getByTestId("inspector-tab-dev").click();\n\n  const downloadPromise = page.waitForEvent("download");\n  await page.getByTestId("dev-panel-download-png").click();\n  const download = await downloadPromise;\n  expect(download.suggestedFilename()).toBe(\\`penpot-\\${radialStrokeGradientRectId}.png\\`);\n  const downloadPath = await download.path();\n  if (!downloadPath) {\n    throw new Error("radial stroke gradient raster png download path missing");\n  }\n\n  const png = await readFile(downloadPath);\n  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);\n  const width = png.readUInt32BE(16);\n  const height = png.readUInt32BE(20);\n  const topInnerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), 32);\n  const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));\n\n  expect(topInnerStroke.r).toBeGreaterThan(topInnerStroke.b + 40);\n  expect(rightStroke.b).toBeGreaterThan(rightStroke.r + 40);\n  expect(topInnerStroke.a).toBeGreaterThan(200);\n  expect(rightStroke.a).toBeGreaterThan(200);\n  await expect(page.getByTestId("dev-panel-asset-status")).toContainText("Radial stroke card PNG 다운로드됨");\n});\n\nasync function imagePixel(page: Page, image: Buffer, mimeType: "image/png", x: number, y: number) {`
+            radialStrokeE2e
           );
           NODE
       - name: Remove temporary workflow
