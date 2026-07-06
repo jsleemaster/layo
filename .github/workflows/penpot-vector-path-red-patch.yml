@@ -1,0 +1,161 @@
+name: Penpot Vector Path Red Patch
+
+on:
+  push:
+    branches:
+      - codex/penpot-vector-path-artifacts
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[red-pipeline-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-vector-path-artifacts
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply RED coverage patch
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+
+          function replaceOnce(file, from, to) {
+            const current = fs.readFileSync(file, 'utf8');
+            if (!current.includes(from)) {
+              throw new Error(`Pattern not found in ${file}: ${from.slice(0, 80)}`);
+            }
+            fs.writeFileSync(file, current.replace(from, to));
+          }
+
+          replaceOnce(
+            'packages/renderer/src/index.ts',
+            '  opacity?: number;\n  points?: NodeClipPoint[];\n}',
+            '  opacity?: number;\n  points?: NodeClipPoint[];\n  pathData?: string;\n}'
+          );
+
+          replaceOnce(
+            'apps/web/src/node-artifacts-gradient.test.ts',
+            'import { pdfForNode, svgForNode } from "./node-artifacts";\n\nconst penpotGradientCard',
+            'import { pdfForNode, svgForNode } from "./node-artifacts";\n\nconst penpotPathData = "M 10 0 C 70 0 110 20 110 40 L 60 60 C 20 60 0 40 10 0 Z";\n\nconst penpotGradientCard'
+          );
+
+          replaceOnce(
+            'apps/web/src/node-artifacts-gradient.test.ts',
+            'const penpotStrokeGradientCard: RendererNode = {',
+            `const penpotRadialPathGradientShape: RendererNode = {
+  id: "penpot-radial-path-gradient-artifact-shape",
+  kind: "rectangle",
+  name: "Penpot radial path gradient artifact shape",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  clip: {
+    type: "bounds",
+    source: {
+      origin: "penpot",
+      shapeId: "penpot-source-path",
+      name: "Penpot source path",
+      shapeType: "path",
+      bounds: { x: 0, y: 0, width: 120, height: 60 },
+      pathData: penpotPathData
+    }
+  },
+  style: {
+    fill: "#800080",
+    stroke: "#111827",
+    stroke_width: 2,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
+const penpotStrokeGradientCard: RendererNode = {`
+          );
+
+          replaceOnce(
+            'apps/web/src/node-artifacts-gradient.test.ts',
+            '  test("renders preserved Penpot stroke gradients as SVG paint servers", () => {',
+            `  test("renders preserved Penpot path radial fill gradients as SVG path paint", () => {
+    const svg = svgForNode(penpotRadialPathGradientShape);
+
+    expect(svg).toContain("<defs>");
+    expect(svg).toContain(
+      \`<path d="\${penpotPathData}" />\`
+    );
+    expect(svg).toContain(
+      "<radialGradient id=\\"layo-gradient-penpot-radial-path-gradient-artifact-shape-fill-0\\" cx=\\"50%\\" cy=\\"50%\\" r=\\"50%\\">"
+    );
+    expect(svg).toContain(
+      \`<path data-node-id="penpot-radial-path-gradient-artifact-shape" data-node-name="Penpot radial path gradient artifact shape" data-node-kind="rectangle" d="\${penpotPathData}" fill="url(#layo-gradient-penpot-radial-path-gradient-artifact-shape-fill-0)" data-fallback-fill="#800080" stroke="#111827" stroke-width="2" />\`
+    );
+    expect(svg).not.toContain("<rect data-node-id=\\"penpot-radial-path-gradient-artifact-shape\\"");
+    expect(svg).not.toContain("<ellipse data-node-id=\\"penpot-radial-path-gradient-artifact-shape\\"");
+  });
+
+  test("renders preserved Penpot stroke gradients as SVG paint servers", () => {`
+          );
+
+          replaceOnce(
+            'apps/web/src/node-artifacts-gradient.test.ts',
+            '  test("renders preserved Penpot stroke gradients as axial shading resources", () => {',
+            `  test("renders preserved Penpot path radial fill gradients with path clip in PDF artifacts", () => {
+    const pdf = pdfTextForNode(penpotRadialPathGradientShape);
+
+    expect(pdf).toContain("/Shading << /Sh1");
+    expect(pdf).toContain("/ShadingType 3");
+    expect(pdf).toContain("/Coords [60 30 0 60 30 60]");
+    expect(pdf).toContain(
+      [
+        "q",
+        "10 60 m",
+        "70 60 110 40 110 20 c",
+        "60 0 l",
+        "20 0 0 20 10 60 c",
+        "h",
+        "W",
+        "n",
+        "/Sh1 sh",
+        "Q"
+      ].join("\\n")
+    );
+    expect(pdf).not.toContain(["q", "0 0 120 60 re", "W", "n", "/Sh1 sh", "Q"].join("\\n"));
+  });
+
+  test("renders preserved Penpot stroke gradients as axial shading resources", () => {`
+          );
+
+          fs.rmSync('.github/workflows/penpot-vector-path-red-patch.yml');
+          NODE
+      - name: Commit RED coverage
+        run: |
+          git config user.name "jsleemaster"
+          git config user.email "75053960+jsleemaster@users.noreply.github.com"
+          git add packages/renderer/src/index.ts apps/web/src/node-artifacts-gradient.test.ts .github/workflows/penpot-vector-path-red-patch.yml
+          git commit -m "Add Penpot path artifact red coverage [red-pipeline-patch]"
+          git push origin HEAD:codex/penpot-vector-path-artifacts
