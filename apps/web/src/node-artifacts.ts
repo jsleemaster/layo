@@ -162,6 +162,20 @@ function nodeClipsToBounds(node: RendererNode) {
   return Boolean(nodeClip(node));
 }
 
+function clipSourceShapeTypeForNode(node: RendererNode) {
+  const shapeType = nodeClip(node)?.source?.shapeType;
+  return typeof shapeType === "string" ? shapeType.replace(/^:/, "").toLowerCase() : null;
+}
+
+function nodeClipUsesEllipseShape(node: RendererNode) {
+  const shapeType = clipSourceShapeTypeForNode(node);
+  return shapeType === "ellipse" || shapeType === "circle";
+}
+
+function svgEllipseAttributes(width: number, height: number) {
+  return `cx="${formatNumber(width / 2)}" cy="${formatNumber(height / 2)}" rx="${formatNumber(width / 2)}" ry="${formatNumber(height / 2)}"`;
+}
+
 function clipPolygonPointsForNode(node: RendererNode) {
   const source = nodeClip(node)?.source;
   const points = source?.points;
@@ -604,7 +618,9 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
     const opacity = formatNumber(clipSourceOpacityForNode(node));
     const maskShape = polygonPoints
       ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`
-      : `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff" fill-opacity="${opacity}" />`;
+      : nodeClipUsesEllipseShape(node)
+        ? `<ellipse ${svgEllipseAttributes(width, height)} fill="#fff" fill-opacity="${opacity}" />`
+        : `<rect x="0" y="0" width="${width}" height="${height}" fill="#fff" fill-opacity="${opacity}" />`;
     return [
       indent(
         `<mask id="${maskIdForNode(node)}" x="0" y="0" width="${width}" height="${height}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">`,
@@ -617,7 +633,9 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
 
   const clipShape = polygonPoints
     ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
-    : `<rect x="0" y="0" width="${width}" height="${height}" />`;
+    : nodeClipUsesEllipseShape(node)
+      ? `<ellipse ${svgEllipseAttributes(width, height)} />`
+      : `<rect x="0" y="0" width="${width}" height="${height}" />`;
   return [
     indent(`<clipPath id="${clipPathIdForNode(node)}">`, depth),
     indent(clipShape, depth + 1),
@@ -730,6 +748,9 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
+  if (nodeClipUsesEllipseShape(node)) {
+    return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+  }
   return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
 }
 
@@ -1024,6 +1045,44 @@ function pdfGradientFillOpacity(entry: PdfGradientPaintEntry) {
   return opacity < 1 ? opacity : null;
 }
 
+const pdfEllipseKappa = 0.552284749831;
+
+function pdfEllipsePathCommands(x: number, y: number, width: number, height: number, pageHeight: number) {
+  const rx = width / 2;
+  const ry = height / 2;
+  const centerX = x + rx;
+  const centerY = pageHeight - y - ry;
+  const left = centerX - rx;
+  const right = centerX + rx;
+  const top = centerY + ry;
+  const bottom = centerY - ry;
+  const controlX = rx * pdfEllipseKappa;
+  const controlY = ry * pdfEllipseKappa;
+  return [
+    `${formatNumber(right)} ${formatNumber(centerY)} m`,
+    `${formatNumber(right)} ${formatNumber(centerY + controlY)} ${formatNumber(centerX + controlX)} ${formatNumber(top)} ${formatNumber(centerX)} ${formatNumber(top)} c`,
+    `${formatNumber(centerX - controlX)} ${formatNumber(top)} ${formatNumber(left)} ${formatNumber(centerY + controlY)} ${formatNumber(left)} ${formatNumber(centerY)} c`,
+    `${formatNumber(left)} ${formatNumber(centerY - controlY)} ${formatNumber(centerX - controlX)} ${formatNumber(bottom)} ${formatNumber(centerX)} ${formatNumber(bottom)} c`,
+    `${formatNumber(centerX + controlX)} ${formatNumber(bottom)} ${formatNumber(right)} ${formatNumber(centerY - controlY)} ${formatNumber(right)} ${formatNumber(centerY)} c`,
+    "h"
+  ];
+}
+
+function pdfShapePathCommandsForNode(node: RendererNode, pageHeight: number, x: number, y: number, inset = 0) {
+  const width = Math.max(0, Math.round(node.size.width) - inset * 2);
+  const height = Math.max(0, Math.round(node.size.height) - inset * 2);
+  if (width <= 0 || height <= 0) {
+    return [];
+  }
+  const pathX = x + inset;
+  const pathY = y + inset;
+  if (nodeClipUsesEllipseShape(node)) {
+    return pdfEllipsePathCommands(pathX, pathY, width, height, pageHeight);
+  }
+  const pdfY = pageHeight - pathY - height;
+  return [`${formatNumber(pathX)} ${formatNumber(pdfY)} ${formatNumber(width)} ${formatNumber(height)} re`];
+}
+
 function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: number, y: number) {
   if (!nodeClipsToBounds(node)) {
     return null;
@@ -1044,10 +1103,7 @@ function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: numbe
     ];
   }
 
-  const width = Math.max(1, Math.round(node.size.width));
-  const height = Math.max(1, Math.round(node.size.height));
-  const pdfY = pageHeight - y - height;
-  return ["q", `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "W", "n"];
+  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "W", "n"];
 }
 
 function pdfClipOpacityForNode(node: RendererNode) {
@@ -1060,24 +1116,18 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
     return [];
   }
 
-  const width = Math.max(1, Math.round(node.size.width));
-  const height = Math.max(1, Math.round(node.size.height));
-  const pdfY = pageHeight - y - height;
   return [
     "q",
     `${pdfColorOperands(node.style.stroke)} RG`,
     `${formatNumber(Math.max(0, node.style.stroke_width))} w`,
-    `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    ...pdfShapePathCommandsForNode(node, pageHeight, x, y),
     "S",
     "Q"
   ];
 }
 
 function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
-  const width = Math.max(1, Math.round(node.size.width));
-  const height = Math.max(1, Math.round(node.size.height));
-  const pdfY = pageHeight - y - height;
-  return ["q", `${pdfColorOperands(node.style.fill)} rg`, `${formatNumber(x)} ${formatNumber(pdfY)} ${width} ${height} re`, "f", "Q"];
+  return ["q", `${pdfColorOperands(node.style.fill)} rg`, ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "f", "Q"];
 }
 
 function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -1089,14 +1139,11 @@ function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
     return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
   }
 
-  const width = Math.max(1, Math.round(entry.node.size.width));
-  const height = Math.max(1, Math.round(entry.node.size.height));
-  const pdfY = entry.pageHeight - entry.y - height;
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
   const transform = pdfGradientTransformCommand(entry);
   return [
     "q",
-    `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
+    ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
     "W",
     "n",
     graphicsState,
@@ -1121,16 +1168,16 @@ function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
   const inset = Math.min(strokeWidth, width / 2, height / 2);
   const innerWidth = Math.max(0, width - inset * 2);
   const innerHeight = Math.max(0, height - inset * 2);
-  const pdfY = entry.pageHeight - entry.y - height;
+  const outerPath = pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y);
+  const innerPath =
+    innerWidth > 0 && innerHeight > 0 ? pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y, inset) : [];
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
   const transform = pdfGradientTransformCommand(entry);
   return [
     "q",
-    `${formatNumber(entry.x)} ${formatNumber(pdfY)} ${width} ${height} re`,
-    innerWidth > 0 && innerHeight > 0
-      ? `${formatNumber(entry.x + inset)} ${formatNumber(pdfY + inset)} ${formatNumber(innerWidth)} ${formatNumber(innerHeight)} re`
-      : "",
-    innerWidth > 0 && innerHeight > 0 ? "W*" : "W",
+    ...outerPath,
+    ...innerPath,
+    innerPath.length > 0 ? "W*" : "W",
     "n",
     graphicsState,
     transform,
