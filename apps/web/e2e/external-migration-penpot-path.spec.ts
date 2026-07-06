@@ -250,6 +250,27 @@ test("file panel preserves Penpot even-odd path fill rule in imported SVG asset"
     }
   });
 
+  const inspectResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${projectPayload.project.currentDocumentId}/agent/inspect`
+  );
+  expect(inspectResponse.ok()).toBeTruthy();
+  const inspectPayload = await inspectResponse.json();
+  const inspectedPathNode = inspectPayload.inspection.nodes.find(
+    (node: { id: string }) => node.id === `penpot-${evenOddPathId}`
+  );
+  expect(inspectedPathNode).toMatchObject({
+    id: `penpot-${evenOddPathId}`,
+    kind: "image",
+    vectorSource: {
+      origin: "penpot",
+      shapeId: evenOddPathId,
+      shapeType: "path",
+      pathData: evenOddPathData,
+      fillRule: "evenodd",
+      bounds: { x: 56, y: 80, width: 100, height: 100 }
+    }
+  });
+
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedEvenOddPathAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();
   expect(await assetResponse.body()).toEqual(expectedEvenOddPathSvgBytes);

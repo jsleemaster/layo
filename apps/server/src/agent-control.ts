@@ -63,14 +63,27 @@ export interface NodePaintSource {
   gradient?: NodePaintGradient;
 }
 
+export interface NodeVectorSource {
+  origin: "penpot";
+  shapeId: string;
+  shapeType: "path";
+  bounds: NodeClipBounds;
+  pathData: string;
+  fillRule?: "nonzero" | "evenodd";
+}
+
 type ClippedDesignNode = DesignNode & { clip?: NodeClip | null };
 type PaintSourceDesignNode = DesignNode & {
   style: DesignNode["style"] & { paint_sources?: NodePaintSource[] | null };
+};
+type VectorSourceDesignNode = DesignNode & {
+  content: Extract<DesignNode["content"], { type: "image" }> & { vector_source?: NodeVectorSource | null };
 };
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
   paintSources?: NodePaintSource[];
+  vectorSource?: NodeVectorSource;
 }
 
 export interface CanvasInspection extends Omit<BaseCanvasInspection, "nodes"> {
@@ -142,6 +155,7 @@ function summarizeNodes(document: DesignFile): AgentNodeSummary[] {
 
 function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummary[]) {
   const paintSources = nodePaintSources(node);
+  const vectorSource = nodeVectorSource(node);
   nodes.push({
     id: node.id,
     name: node.name,
@@ -157,6 +171,7 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     exportPresets: node.export_presets ? node.export_presets.map((preset) => ({ ...preset })) : undefined,
     clip: nodeClip(node),
     paintSources: paintSources.length > 0 ? paintSources : undefined,
+    ...(vectorSource ? { vectorSource: structuredClone(vectorSource) } : {}),
     bounds: {
       x: node.transform.x,
       y: node.transform.y,
@@ -178,6 +193,14 @@ function nodeClip(node: DesignNode): NodeClip | undefined {
 function nodePaintSources(node: DesignNode): NodePaintSource[] {
   const paintSources = (node as PaintSourceDesignNode).style.paint_sources;
   return Array.isArray(paintSources) ? paintSources.map((source) => structuredClone(source)) : [];
+}
+
+function nodeVectorSource(node: DesignNode): NodeVectorSource | undefined {
+  if (node.content.type !== "image") {
+    return undefined;
+  }
+  const vectorSource = (node as VectorSourceDesignNode).content.vector_source;
+  return vectorSource ?? undefined;
 }
 
 function cloneNodeClip(clip: NodeClip): NodeClip {
