@@ -99,6 +99,7 @@ export interface NodeClipSource {
   opacity?: number;
   points?: NodeClipPoint[];
   pathData?: string;
+  fillRule?: "nonzero" | "evenodd";
 }
 
 export interface NodeClip {
