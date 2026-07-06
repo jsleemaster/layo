@@ -1,0 +1,267 @@
+name: Codex Ellipse Artifact Implementation
+
+on:
+  push:
+    branches:
+      - codex/penpot-ellipse-radial-artifacts
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-ellipse-radial-artifacts
+      - name: Patch ellipse artifact support
+        run: |
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require('node:fs');
+          const path = 'apps/web/src/node-artifacts.ts';
+          let source = readFileSync(path, 'utf8');
+          function replaceOnce(needle, replacement) {
+            if (!source.includes(needle)) {
+              throw new Error(`missing patch target: ${needle.slice(0, 80)}`);
+            }
+            source = source.replace(needle, replacement);
+          }
+
+          replaceOnce(`function svgClipPolygonPointsForNode(node: RendererNode) {
+  const points = clipPolygonPointsForNode(node);
+  return points ? points.map((point) => \`${'${formatNumber(point.x)},${formatNumber(point.y)}'}\`).join(" ") : null;
+}
+`, `function svgClipPolygonPointsForNode(node: RendererNode) {
+  const points = clipPolygonPointsForNode(node);
+  return points ? points.map((point) => \`${'${formatNumber(point.x)},${formatNumber(point.y)}'}\`).join(" ") : null;
+}
+
+function penpotClipShapeTypeForNode(node: RendererNode) {
+  return nodeClip(node)?.source?.shapeType?.replace(/^:/, "").toLowerCase() ?? null;
+}
+
+function nodeUsesPenpotEllipseShape(node: RendererNode) {
+  const shapeType = penpotClipShapeTypeForNode(node);
+  return shapeType === "ellipse" || shapeType === "circle";
+}
+
+function svgEllipseAttributes(width: number, height: number) {
+  return \`cx="${'${formatNumber(width / 2)}'}" cy="${'${formatNumber(height / 2)}'}" rx="${'${formatNumber(width / 2)}'}" ry="${'${formatNumber(height / 2)}'}"\`;
+}
+`);
+
+          replaceOnce(`    const maskShape = polygonPoints
+      ? \`<polygon points="${'${escapeSvgText(polygonPoints)}'}" fill="#fff" fill-opacity="${'${opacity}'}" />\`
+      : \`<rect x="0" y="0" width="${'${width}'}" height="${'${height}'}" fill="#fff" fill-opacity="${'${opacity}'}" />\`;
+`, `    const maskShape = polygonPoints
+      ? \`<polygon points="${'${escapeSvgText(polygonPoints)}'}" fill="#fff" fill-opacity="${'${opacity}'}" />\`
+      : nodeUsesPenpotEllipseShape(node)
+        ? \`<ellipse ${'${svgEllipseAttributes(width, height)}'} fill="#fff" fill-opacity="${'${opacity}'}" />\`
+        : \`<rect x="0" y="0" width="${'${width}'}" height="${'${height}'}" fill="#fff" fill-opacity="${'${opacity}'}" />\`;
+`);
+
+          replaceOnce(`  const clipShape = polygonPoints
+    ? \`<polygon points="${'${escapeSvgText(polygonPoints)}'}" />\`
+    : \`<rect x="0" y="0" width="${'${width}'}" height="${'${height}'}" />\`;
+`, `  const clipShape = polygonPoints
+    ? \`<polygon points="${'${escapeSvgText(polygonPoints)}'}" />\`
+    : nodeUsesPenpotEllipseShape(node)
+      ? \`<ellipse ${'${svgEllipseAttributes(width, height)}'} />\`
+      : \`<rect x="0" y="0" width="${'${width}'}" height="${'${height}'}" />\`;
+`);
+
+          replaceOnce(`  const assetAttribute = node.content.type === "image" ? \` data-image-asset-id="${'${escapeSvgText(node.content.asset_id)}'}"\` : "";
+  return \`<rect ${'${svgNodeAttributes(node)}'}${'${assetAttribute}'} x="0" y="0" width="${'${width}'}" height="${'${height}'}" rx="0" ${'${fillAttribute}'} ${'${strokeAttribute}'} stroke-width="${'${Math.max(0, Math.round(node.style.stroke_width))}'}"${'${opacity}'}${'${filter}'} />\`;
+}
+`, `  const assetAttribute = node.content.type === "image" ? \` data-image-asset-id="${'${escapeSvgText(node.content.asset_id)}'}"\` : "";
+  if (nodeUsesPenpotEllipseShape(node)) {
+    return \`<ellipse ${'${svgNodeAttributes(node)}'}${'${assetAttribute}'} ${'${svgEllipseAttributes(width, height)}'} ${'${fillAttribute}'} ${'${strokeAttribute}'} stroke-width="${'${Math.max(0, Math.round(node.style.stroke_width))}'}"${'${opacity}'}${'${filter}'} />\`;
+  }
+  return \`<rect ${'${svgNodeAttributes(node)}'}${'${assetAttribute}'} x="0" y="0" width="${'${width}'}" height="${'${height}'}" rx="0" ${'${fillAttribute}'} ${'${strokeAttribute}'} stroke-width="${'${Math.max(0, Math.round(node.style.stroke_width))}'}"${'${opacity}'}${'${filter}'} />\`;
+}
+`);
+
+          replaceOnce(`function pdfClipOpacityForNode(node: RendererNode) {
+  const opacity = clipSourceOpacityForNode(node);
+  return opacity < 1 ? opacity : null;
+}
+
+function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+`, `function pdfClipOpacityForNode(node: RendererNode) {
+  const opacity = clipSourceOpacityForNode(node);
+  return opacity < 1 ? opacity : null;
+}
+
+const pdfEllipseKappa = 0.552284749831;
+
+function pdfEllipsePathCommands(width: number, height: number, pageHeight: number, x: number, y: number, inset = 0) {
+  const clampedInset = Math.max(0, Math.min(inset, width / 2, height / 2));
+  const rx = width / 2 - clampedInset;
+  const ry = height / 2 - clampedInset;
+  if (rx <= 0 || ry <= 0) {
+    return [];
+  }
+
+  const centerX = x + width / 2;
+  const centerY = pageHeight - y - height / 2;
+  const left = centerX - rx;
+  const right = centerX + rx;
+  const top = centerY + ry;
+  const bottom = centerY - ry;
+  const controlX = rx * pdfEllipseKappa;
+  const controlY = ry * pdfEllipseKappa;
+  return [
+    \`${'${formatNumber(right)}'} ${'${formatNumber(centerY)}'} m\`,
+    \`${'${formatNumber(right)}'} ${'${formatNumber(centerY + controlY)}'} ${'${formatNumber(centerX + controlX)}'} ${'${formatNumber(top)}'} ${'${formatNumber(centerX)}'} ${'${formatNumber(top)}'} c\`,
+    \`${'${formatNumber(centerX - controlX)}'} ${'${formatNumber(top)}'} ${'${formatNumber(left)}'} ${'${formatNumber(centerY + controlY)}'} ${'${formatNumber(left)}'} ${'${formatNumber(centerY)}'} c\`,
+    \`${'${formatNumber(left)}'} ${'${formatNumber(centerY - controlY)}'} ${'${formatNumber(centerX - controlX)}'} ${'${formatNumber(bottom)}'} ${'${formatNumber(centerX)}'} ${'${formatNumber(bottom)}'} c\`,
+    \`${'${formatNumber(centerX + controlX)}'} ${'${formatNumber(bottom)}'} ${'${formatNumber(right)}'} ${'${formatNumber(centerY - controlY)}'} ${'${formatNumber(right)}'} ${'${formatNumber(centerY)}'} c\`,
+    "h"
+  ];
+}
+
+function pdfShapePathCommandsForNode(node: RendererNode, pageHeight: number, x: number, y: number, inset = 0) {
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  if (nodeUsesPenpotEllipseShape(node)) {
+    return pdfEllipsePathCommands(width, height, pageHeight, x, y, inset);
+  }
+
+  const clampedInset = Math.max(0, Math.min(inset, width / 2, height / 2));
+  const rectWidth = Math.max(0, width - clampedInset * 2);
+  const rectHeight = Math.max(0, height - clampedInset * 2);
+  if (rectWidth <= 0 || rectHeight <= 0) {
+    return [];
+  }
+  const pdfY = pageHeight - y - height + clampedInset;
+  return [
+    \`${'${formatNumber(x + clampedInset)}'} ${'${formatNumber(pdfY)}'} ${'${formatNumber(rectWidth)}'} ${'${formatNumber(rectHeight)}'} re\`
+  ];
+}
+
+function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+`);
+
+          replaceOnce(`  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const pdfY = pageHeight - y - height;
+  return ["q", \`${'${formatNumber(x)}'} ${'${formatNumber(pdfY)}'} ${'${width}'} ${'${height}'} re\`, "W", "n"];
+}
+
+function pdfClipOpacityForNode(node: RendererNode) {
+`, `  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "W", "n"];
+}
+
+function pdfClipOpacityForNode(node: RendererNode) {
+`);
+
+          replaceOnce(`  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const pdfY = pageHeight - y - height;
+  return [
+    "q",
+    \`${'${pdfColorOperands(node.style.stroke)}'} RG\`,
+    \`${'${formatNumber(Math.max(0, node.style.stroke_width))}'} w\`,
+    \`${'${formatNumber(x)}'} ${'${formatNumber(pdfY)}'} ${'${width}'} ${'${height}'} re\`,
+    "S",
+    "Q"
+  ];
+}
+
+function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const pdfY = pageHeight - y - height;
+  return ["q", \`${'${pdfColorOperands(node.style.fill)}'} rg\`, \`${'${formatNumber(x)}'} ${'${formatNumber(pdfY)}'} ${'${width}'} ${'${height}'} re\`, "f", "Q"];
+}
+`, `  return [
+    "q",
+    \`${'${pdfColorOperands(node.style.stroke)}'} RG\`,
+    \`${'${formatNumber(Math.max(0, node.style.stroke_width))}'} w\`,
+    ...pdfShapePathCommandsForNode(node, pageHeight, x, y),
+    "S",
+    "Q"
+  ];
+}
+
+function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  return ["q", \`${'${pdfColorOperands(node.style.fill)}'} rg\`, ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "f", "Q"];
+}
+`);
+
+          const gradientFillStart = source.indexOf('function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {');
+          const gradientStrokeStart = source.indexOf('function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {');
+          if (gradientFillStart === -1 || gradientStrokeStart === -1 || gradientStrokeStart <= gradientFillStart) {
+            throw new Error('gradient command function boundaries not found');
+          }
+          const newGradientFill = `function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
+  if (!entry.shadingName) {
+    return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
+  }
+
+  const graphicsState = entry.graphicsStateName ? \`/${'${entry.graphicsStateName}'} gs\` : "";
+  const transform = pdfGradientTransformCommand(entry);
+  return [
+    "q",
+    ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
+    "W",
+    "n",
+    graphicsState,
+    transform,
+    \`/${'${entry.shadingName}'} sh\`,
+    "Q"
+  ].filter(Boolean);
+}
+
+`;
+          source = source.slice(0, gradientFillStart) + newGradientFill + source.slice(gradientStrokeStart);
+
+          const strokeStart = source.indexOf('function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {');
+          const textStart = source.indexOf('function pdfTextCommands(node: RendererNode, pageHeight: number, x: number, y: number) {');
+          if (strokeStart === -1 || textStart === -1 || textStart <= strokeStart) {
+            throw new Error('stroke command function boundaries not found');
+          }
+          const newStroke = `function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
+  if (!entry.shadingName) {
+    return pdfStrokeCommands(entry.node, entry.pageHeight, entry.x, entry.y);
+  }
+
+  const width = Math.max(1, Math.round(entry.node.size.width));
+  const height = Math.max(1, Math.round(entry.node.size.height));
+  const strokeWidth = Math.max(0, entry.node.style.stroke_width);
+  if (strokeWidth <= 0) {
+    return [];
+  }
+
+  const inset = Math.min(strokeWidth, width / 2, height / 2);
+  const innerWidth = Math.max(0, width - inset * 2);
+  const innerHeight = Math.max(0, height - inset * 2);
+  const graphicsState = entry.graphicsStateName ? \`/${'${entry.graphicsStateName}'} gs\` : "";
+  const transform = pdfGradientTransformCommand(entry);
+  return [
+    "q",
+    ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
+    ...(innerWidth > 0 && innerHeight > 0 ? pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y, inset) : []),
+    innerWidth > 0 && innerHeight > 0 ? "W*" : "W",
+    "n",
+    graphicsState,
+    transform,
+    \`/${'${entry.shadingName}'} sh\`,
+    "Q"
+  ].filter(Boolean);
+}
+
+`;
+          source = source.slice(0, strokeStart) + newStroke + source.slice(textStart);
+
+          writeFileSync(path, source);
+          NODE
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/node-artifacts.ts
+          git commit -m "Adapt Penpot ellipse artifact geometry" || exit 0
+          git push origin codex/penpot-ellipse-radial-artifacts
