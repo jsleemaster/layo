@@ -26,7 +26,7 @@ The repaired implementation keeps the RED coverage and integrates the shape-path
 
 - RED: Full Verification #28785734565 failed in Core tests after the ellipse radial artifact regression was added.
 - First GREEN but rejected in review: Full Verification #28786258033 passed, but the implementation used the wrapper/base bypass.
-- Repaired implementation: pending Full Verification on the PR head created after this documentation commit.
+- Repaired implementation: Full Verification #28786997967 passed Penpot maturity/design gates, typecheck, web build, Core tests, and Playwright CLI e2e on the in-pipeline exporter implementation.
 
 Deployment/Vercel is intentionally deferred for this product-maturity slice.
 
