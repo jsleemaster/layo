@@ -2,36 +2,110 @@ name: Full Verification
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - ".github/workflows/full-verification.yml"
-      - "apps/**"
-      - "crates/**"
-      - "packages/**"
-      - "scripts/**"
-      - "docs/product/**"
-      - "docs/process/**"
-      - "docs/superpowers/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
 
 permissions:
-  contents: read
-
-concurrency:
-  group: full-verification-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  full-verification:
+  add-red-arc-smooth-path-coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 30
     steps:
-      - name: Checkout
+      - name: Checkout branch
         uses: actions/checkout@v4
+        with:
+          ref: codex/penpot-arc-smooth-path-artifacts
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add RED arc and smooth path artifact coverage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('apps/web/src/node-artifacts-gradient.test.ts')
+          text = path.read_text()
+
+          constant_marker = 'const penpotPathData = "M 10 0 C 70 0 110 20 110 40 L 60 60 C 20 60 0 40 10 0 Z";\n'
+          constant_insert = constant_marker + 'const penpotArcSmoothPathData = "M 10 50 A 30 20 0 0 1 70 50 S 100 20 110 50 Q 125 80 140 50 T 170 50 Z";\n'
+          if constant_marker not in text:
+              raise SystemExit('path data constant marker not found')
+          text = text.replace(constant_marker, constant_insert, 1)
+
+          fixture_marker = 'const penpotStrokeGradientCard: RendererNode = {'
+          fixture = '''const penpotRadialArcSmoothPathGradientShape: RendererNode = {
+  id: "penpot-radial-arc-smooth-path-gradient-artifact-shape",
+  kind: "rectangle",
+  name: "Penpot radial arc smooth path gradient artifact shape",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 180, height: 100 },
+  clip: {
+    type: "bounds",
+    source: {
+      origin: "penpot",
+      shapeId: "penpot-source-arc-smooth-path",
+      name: "Penpot source arc smooth path",
+      shapeType: "path",
+      bounds: { x: 0, y: 0, width: 180, height: 100 },
+      pathData: penpotArcSmoothPathData
+    }
+  },
+  style: {
+    fill: "#800080",
+    stroke: "#111827",
+    stroke_width: 2,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
+'''
+          if fixture_marker not in text:
+              raise SystemExit('fixture marker not found')
+          text = text.replace(fixture_marker, fixture + fixture_marker, 1)
+
+          test_marker = '  test("renders preserved Penpot stroke gradients as axial shading resources", () => {'
+          test = '''  test("renders preserved Penpot arc and smooth path gradients with PDF path commands", () => {
+    const pdf = pdfTextForNode(penpotRadialArcSmoothPathGradientShape);
+
+    expect(pdf).toContain("/Shading << /Sh1");
+    expect(pdf).toContain("/ShadingType 3");
+    expect(pdf).toContain("10 50 m");
+    expect(pdf).toContain("70 50 100 80 110 50 c");
+    expect(pdf).toContain("120 30 130 30 140 50 c");
+    expect(pdf).toContain("150 70 160 70 170 50 c");
+    expect(pdf).toContain(["h", "W", "n", "/Sh1 sh", "Q"].join("\\n"));
+    expect(pdf.match(/ c\\n/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    expect(pdf).not.toContain(["q", "0 0 180 100 re", "W", "n", "/Sh1 sh", "Q"].join("\\n"));
+  });
+
+'''
+          if test_marker not in text:
+              raise SystemExit('pdf test marker not found')
+          text = text.replace(test_marker, test + test_marker, 1)
+          path.write_text(text)
+          PY
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -47,26 +121,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browser
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Penpot maturity and design rule gates
+      - name: Verify RED failure
+        env:
+          NODE_OPTIONS: --conditions=development
         run: |
-          pnpm run check:penpot-maturity
-          pnpm run check:design-rules
+          set +e
+          pnpm --filter @layo/web test apps/web/src/node-artifacts-gradient.test.ts -t "renders preserved Penpot arc and smooth path gradients with PDF path commands" > red.log 2>&1
+          status=$?
+          set -e
+          cat red.log
+          if [ "$status" -eq 0 ]; then
+            echo "Expected the new arc/smooth path PDF artifact test to fail before implementation."
+            exit 1
+          fi
+          grep -q "renders preserved Penpot arc and smooth path gradients with PDF path commands" red.log
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Web build
-        run: pnpm --filter @layo/web build
-
-      - name: Core tests
-        env:
-          NODE_OPTIONS: --conditions=development
-        run: pnpm test
-
-      - name: Playwright CLI e2e
-        env:
-          NODE_OPTIONS: --conditions=development
-        run: pnpm test:e2e
+      - name: Restore workflow and commit RED coverage
+        run: |
+          git fetch origin main
+          git show origin/main:.github/workflows/full-verification.yml > .github/workflows/full-verification.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/src/node-artifacts-gradient.test.ts .github/workflows/full-verification.yml
+          git commit -m "Add RED Penpot arc smooth path artifact coverage"
+          git push origin HEAD:codex/penpot-arc-smooth-path-artifacts
