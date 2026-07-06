@@ -43,7 +43,10 @@ A later implementation pass exposed a second miss: the SVG path-token regex was 
 
 - RED: Full Verification #28788526695 failed in Core tests after the path regression was added; the PDF artifact still contained rectangular `re` clipping instead of path commands.
 - GREEN repair run: Full Verification #28789473862 passed Penpot maturity/design gates, typecheck, web build, Core tests, Playwright CLI e2e, and committed the verified parser repair.
-- Head verification: workflow-dispatched Full Verification #28789935884 passed the restored original workflow on branch head `aa9bd3ca0c0d991e0a50fde6661817e7e36ec65d`.
+- Code-head verification: workflow-dispatched Full Verification #28789935884 passed the restored original workflow on code head `aa9bd3ca0c0d991e0a50fde6661817e7e36ec65d`.
+- Documentation gate: Full Verification #28790488425 passed the documentation update workflow, including `check:penpot-maturity` and `check:design-rules`, and restored the original workflow file.
+
+Final PR-head verification is tracked in the PR body because the last evidence line changes when this document is edited.
 
 ## Remaining Gaps
 
