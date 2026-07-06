@@ -327,7 +327,7 @@ function konvaShadowPropsForLayer(layer: ParsedEffectShadowLayer): Record<string
 type CanvasPoint = { x: number; y: number };
 
 type CanvasLinearGradientProps = {
-  fillPriority?: "linear-gradient" | "radial-gradient";
+  fillPriority?: "linear-gradient" | "radial-gradient" | "pattern";
   fillLinearGradientStartPoint?: CanvasPoint;
   fillLinearGradientEndPoint?: CanvasPoint;
   fillLinearGradientColorStops?: Array<number | string>;
@@ -336,6 +336,12 @@ type CanvasLinearGradientProps = {
   fillRadialGradientEndPoint?: CanvasPoint;
   fillRadialGradientEndRadius?: number;
   fillRadialGradientColorStops?: Array<number | string>;
+  fillPatternImage?: HTMLImageElement;
+  fillPatternRepeat?: "repeat" | "repeat-x" | "repeat-y" | "no-repeat";
+  fillPatternX?: number;
+  fillPatternY?: number;
+  fillPatternScaleX?: number;
+  fillPatternScaleY?: number;
   strokeLinearGradientStartPoint?: CanvasPoint;
   strokeLinearGradientEndPoint?: CanvasPoint;
   strokeLinearGradientColorStops?: Array<number | string>;
@@ -389,6 +395,149 @@ function canvasGradientColorStops(stops: NodePaintStop[] | undefined) {
   return normalizedStops.flatMap((stop) => [clampCanvasGradientUnit(stop.offset), canvasGradientStopColor(stop)]);
 }
 
+interface CanvasParsedGradientStop {
+  offset: number;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+interface CanvasRadialFillGradient {
+  centerPoint: CanvasPoint;
+  radius: number;
+  width: number;
+  angleRadians: number;
+  colorStops: Array<number | string>;
+}
+
+function canvasRadialGradientWidth(gradient: NodePaintGradient | undefined) {
+  return typeof gradient?.width === "number" && Number.isFinite(gradient.width) && gradient.width > 0
+    ? gradient.width
+    : 1;
+}
+
+function parseCanvasGradientStopColor(
+  context: CanvasRenderingContext2D,
+  color: string
+): Omit<CanvasParsedGradientStop, "offset"> | null {
+  const previousFillStyle = context.fillStyle;
+  try {
+    context.clearRect(0, 0, 1, 1);
+    context.fillStyle = color;
+    context.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = context.getImageData(0, 0, 1, 1).data;
+    return { r, g, b, a };
+  } catch {
+    return null;
+  } finally {
+    context.fillStyle = previousFillStyle;
+  }
+}
+
+function parseCanvasGradientColorStops(
+  context: CanvasRenderingContext2D,
+  colorStops: Array<number | string>
+): CanvasParsedGradientStop[] {
+  const parsedStops: CanvasParsedGradientStop[] = [];
+  for (let index = 0; index < colorStops.length - 1; index += 2) {
+    const offset = colorStops[index];
+    const color = colorStops[index + 1];
+    if (typeof offset !== "number" || typeof color !== "string" || !Number.isFinite(offset)) {
+      continue;
+    }
+    const parsedColor = parseCanvasGradientStopColor(context, color);
+    if (parsedColor) {
+      parsedStops.push({ offset: clampCanvasGradientUnit(offset), ...parsedColor });
+    }
+  }
+  return parsedStops.sort((left, right) => left.offset - right.offset);
+}
+
+function canvasGradientColorAt(stops: CanvasParsedGradientStop[], offset: number): CanvasParsedGradientStop {
+  const first = stops[0];
+  if (!first) {
+    return { offset: 0, r: 0, g: 0, b: 0, a: 0 };
+  }
+  if (offset <= first.offset) {
+    return first;
+  }
+
+  for (let index = 0; index < stops.length - 1; index += 1) {
+    const left = stops[index];
+    const right = stops[index + 1];
+    if (!left || !right) {
+      continue;
+    }
+    if (offset <= right.offset) {
+      const span = Math.max(0.0001, right.offset - left.offset);
+      const ratio = (offset - left.offset) / span;
+      return {
+        offset,
+        r: left.r + (right.r - left.r) * ratio,
+        g: left.g + (right.g - left.g) * ratio,
+        b: left.b + (right.b - left.b) * ratio,
+        a: left.a + (right.a - left.a) * ratio
+      };
+    }
+  }
+
+  return stops[stops.length - 1] ?? first;
+}
+
+function canvasEllipticalRadialFillPatternForNode(
+  node: RendererNode,
+  gradient: CanvasRadialFillGradient
+): HTMLCanvasElement | null {
+  if (Math.abs(gradient.width - 1) < 0.0005 || typeof document === "undefined") {
+    return null;
+  }
+
+  const patternWidth = Math.max(1, Math.round(node.size.width));
+  const patternHeight = Math.max(1, Math.round(node.size.height));
+  const nodeWidth = Math.max(1, node.size.width);
+  const nodeHeight = Math.max(1, node.size.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = patternWidth;
+  canvas.height = patternHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return null;
+  }
+
+  const stops = parseCanvasGradientColorStops(context, gradient.colorStops);
+  if (stops.length < 2) {
+    return null;
+  }
+
+  const imageData = context.createImageData(patternWidth, patternHeight);
+  const data = imageData.data;
+  const cos = Math.cos(gradient.angleRadians);
+  const sin = Math.sin(gradient.angleRadians);
+  const width = Math.max(0.0001, gradient.width);
+  const radius = Math.max(0.0001, gradient.radius);
+
+  for (let y = 0; y < patternHeight; y += 1) {
+    const nodeY = ((y + 0.5) / patternHeight) * nodeHeight;
+    for (let x = 0; x < patternWidth; x += 1) {
+      const nodeX = ((x + 0.5) / patternWidth) * nodeWidth;
+      const dx = nodeX - gradient.centerPoint.x;
+      const dy = nodeY - gradient.centerPoint.y;
+      const radialX = (cos * dx + sin * dy) / width;
+      const radialY = -sin * dx + cos * dy;
+      const color = canvasGradientColorAt(stops, Math.hypot(radialX, radialY) / radius);
+      const pixelIndex = (y * patternWidth + x) * 4;
+      data[pixelIndex] = Math.round(color.r);
+      data[pixelIndex + 1] = Math.round(color.g);
+      data[pixelIndex + 2] = Math.round(color.b);
+      data[pixelIndex + 3] = Math.round(color.a);
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
 function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke") {
   if (node.kind === "group" || node.content.type === "text") {
     return null;
@@ -421,7 +570,7 @@ function canvasLinearGradientForNode(node: RendererNode, kind: "fill" | "stroke"
   };
 }
 
-function canvasRadialFillGradientForNode(node: RendererNode) {
+function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialFillGradient | null {
   if (node.kind === "group" || node.content.type === "text") {
     return null;
   }
@@ -446,12 +595,30 @@ function canvasRadialFillGradientForNode(node: RendererNode) {
     return null;
   }
 
-  const centerPoint = canvasGradientPoint(gradient?.start, node, { x: 0.5, y: 0.5 });
-  const endPoint = canvasGradientPoint(gradient?.end, node, { x: 1, y: 0.5 });
+  const start = gradient?.start;
+  const end = gradient?.end;
+  const startUnit = {
+    x: canvasGradientCoordinate(start?.x, 0.5),
+    y: canvasGradientCoordinate(start?.y, 0.5)
+  };
+  const endUnit = {
+    x: canvasGradientCoordinate(end?.x, 1),
+    y: canvasGradientCoordinate(end?.y, 0.5)
+  };
+  const centerPoint = {
+    x: node.size.width * startUnit.x,
+    y: node.size.height * startUnit.y
+  };
+  const endPoint = {
+    x: node.size.width * endUnit.x,
+    y: node.size.height * endUnit.y
+  };
   const radius = Math.hypot(endPoint.x - centerPoint.x, endPoint.y - centerPoint.y);
   return {
     centerPoint,
     radius: radius > 0 ? radius : Math.max(node.size.width, node.size.height) / 2,
+    width: canvasRadialGradientWidth(gradient),
+    angleRadians: Math.atan2(endUnit.y - startUnit.y, endUnit.x - startUnit.x) + Math.PI / 2,
     colorStops
   };
 }
@@ -459,25 +626,36 @@ function canvasRadialFillGradientForNode(node: RendererNode) {
 function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradientProps {
   const fillGradient = canvasLinearGradientForNode(node, "fill");
   const radialFillGradient = canvasRadialFillGradientForNode(node);
+  const radialFillPattern = radialFillGradient ? canvasEllipticalRadialFillPatternForNode(node, radialFillGradient) : null;
   const strokeGradient = canvasLinearGradientForNode(node, "stroke");
   return {
-    ...(radialFillGradient
+    ...(radialFillPattern
       ? {
-          fillPriority: "radial-gradient" as const,
-          fillRadialGradientStartPoint: radialFillGradient.centerPoint,
-          fillRadialGradientStartRadius: 0,
-          fillRadialGradientEndPoint: radialFillGradient.centerPoint,
-          fillRadialGradientEndRadius: radialFillGradient.radius,
-          fillRadialGradientColorStops: radialFillGradient.colorStops
+          fillPriority: "pattern" as const,
+          fillPatternImage: radialFillPattern as unknown as HTMLImageElement,
+          fillPatternRepeat: "no-repeat" as const,
+          fillPatternX: 0,
+          fillPatternY: 0,
+          fillPatternScaleX: node.size.width / radialFillPattern.width,
+          fillPatternScaleY: node.size.height / radialFillPattern.height
         }
-      : fillGradient
+      : radialFillGradient
         ? {
-            fillPriority: "linear-gradient" as const,
-            fillLinearGradientStartPoint: fillGradient.startPoint,
-            fillLinearGradientEndPoint: fillGradient.endPoint,
-            fillLinearGradientColorStops: fillGradient.colorStops
+            fillPriority: "radial-gradient" as const,
+            fillRadialGradientStartPoint: radialFillGradient.centerPoint,
+            fillRadialGradientStartRadius: 0,
+            fillRadialGradientEndPoint: radialFillGradient.centerPoint,
+            fillRadialGradientEndRadius: radialFillGradient.radius,
+            fillRadialGradientColorStops: radialFillGradient.colorStops
           }
-        : {}),
+        : fillGradient
+          ? {
+              fillPriority: "linear-gradient" as const,
+              fillLinearGradientStartPoint: fillGradient.startPoint,
+              fillLinearGradientEndPoint: fillGradient.endPoint,
+              fillLinearGradientColorStops: fillGradient.colorStops
+            }
+          : {}),
     ...(strokeGradient
       ? {
           strokeLinearGradientStartPoint: strokeGradient.startPoint,
