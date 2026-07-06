@@ -29,6 +29,7 @@ describe("node artifact fill-rule exports", () => {
   test("preserves Penpot even-odd compound path semantics in selected-layer artifacts", () => {
     const svg = svgForNode(evenOddCompoundPathNode);
 
+    expect(svg).toContain('data-node-id="compound-path"');
     expect(svg).toContain('d="M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z"');
     expect(svg).toContain('fill-rule="evenodd"');
     expect(svg).toContain('clip-rule="evenodd"');
