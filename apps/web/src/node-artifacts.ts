@@ -181,6 +181,31 @@ function clipSourcePathDataForNode(node: RendererNode) {
   return typeof pathData === "string" && pathData.trim() ? pathData.trim() : null;
 }
 
+function clipSourceFillRuleForNode(node: RendererNode) {
+  const fillRule = nodeClip(node)?.source?.fillRule;
+  return fillRule === "evenodd" ? "evenodd" : "nonzero";
+}
+
+function clipSourceUsesEvenOddFillRule(node: RendererNode) {
+  return clipSourceFillRuleForNode(node) === "evenodd";
+}
+
+function svgFillRuleAttributeForNode(node: RendererNode) {
+  return clipSourceUsesEvenOddFillRule(node) ? ' fill-rule="evenodd"' : "";
+}
+
+function svgClipRuleAttributeForNode(node: RendererNode) {
+  return clipSourceUsesEvenOddFillRule(node) ? ' clip-rule="evenodd"' : "";
+}
+
+function pdfFillOperatorForNode(node: RendererNode) {
+  return clipSourceUsesEvenOddFillRule(node) ? "f*" : "f";
+}
+
+function pdfClipOperatorForNode(node: RendererNode) {
+  return clipSourceUsesEvenOddFillRule(node) ? "W*" : "W";
+}
+
 function svgPathElement(pathData: string, attributes = "") {
   return "<path d=\"" + escapeSvgText(pathData) + "\"" + attributes + " />";
 }
@@ -627,7 +652,7 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   if (nodeClipUsesAlphaMask(node)) {
     const opacity = formatNumber(clipSourceOpacityForNode(node));
     const maskShape = pathData
-      ? svgPathElement(pathData, " fill=\"#fff\" fill-opacity=\"" + opacity + "\"")
+      ? svgPathElement(pathData, " fill=\"#fff\" fill-opacity=\"" + opacity + "\"" + svgFillRuleAttributeForNode(node))
       : polygonPoints
         ? `<polygon points="${escapeSvgText(polygonPoints)}" fill="#fff" fill-opacity="${opacity}" />`
         : nodeClipUsesEllipseShape(node)
@@ -644,7 +669,7 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   }
 
   const clipShape = pathData
-    ? svgPathElement(pathData)
+    ? svgPathElement(pathData, svgClipRuleAttributeForNode(node))
     : polygonPoints
       ? `<polygon points="${escapeSvgText(polygonPoints)}" />`
       : nodeClipUsesEllipseShape(node)
@@ -764,7 +789,8 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
   const pathData = clipSourcePathDataForNode(node);
   if (pathData) {
-    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + opacity + filter + " />";
+    const fillRuleAttribute = svgFillRuleAttributeForNode(node);
+    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + opacity + filter + " />";
   }
   if (nodeClipUsesEllipseShape(node)) {
     return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
@@ -1430,12 +1456,12 @@ function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: numbe
         (point) => `${formatNumber(x + point.x)} ${formatNumber(pageHeight - y - point.y)} l`
       ),
       "h",
-      "W",
+      pdfClipOperatorForNode(node),
       "n"
     ];
   }
 
-  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "W", "n"];
+  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfClipOperatorForNode(node), "n"];
 }
 
 function pdfClipOpacityForNode(node: RendererNode) {
@@ -1459,7 +1485,7 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
 }
 
 function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
-  return ["q", `${pdfColorOperands(node.style.fill)} rg`, ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "f", "Q"];
+  return ["q", `${pdfColorOperands(node.style.fill)} rg`, ...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfFillOperatorForNode(node), "Q"];
 }
 
 function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -1476,7 +1502,7 @@ function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   return [
     "q",
     ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
-    "W",
+    pdfClipOperatorForNode(entry.node),
     "n",
     graphicsState,
     transform,
