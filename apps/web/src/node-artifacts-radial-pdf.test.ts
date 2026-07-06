@@ -38,6 +38,35 @@ const penpotRadialPdfCard: RendererNode = {
   children: []
 };
 
+const penpotRadialWidthPdfCard: RendererNode = {
+  ...penpotRadialPdfCard,
+  id: "penpot-radial-width-pdf-artifact-card",
+  name: "Penpot radial width PDF artifact card",
+  style: {
+    ...penpotRadialPdfCard.style,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 0.5,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  }
+};
+
 function pdfTextForNode(node: RendererNode) {
   return new TextDecoder().decode(pdfForNode(node));
 }
@@ -55,6 +84,16 @@ describe("Penpot radial selected-layer PDF artifacts", () => {
     expect(pdf).toContain("/C1 [0 0 1]");
     expect(pdf).toContain(["q", "0 0 120 60 re", "W", "n", "/Sh1 sh", "Q"].join("\n"));
     expect(pdf).toContain("0.067 0.094 0.153 RG");
+    expect(pdf).not.toContain(["0.502 0 0.502 rg", "0 0 120 60 re", "f"].join("\n"));
+  });
+
+  test("renders Penpot radial width geometry as a transformed radial shading resource", () => {
+    const pdf = pdfTextForNode(penpotRadialWidthPdfCard);
+
+    expect(pdf).toContain("/Shading << /Sh1");
+    expect(pdf).toContain("/ShadingType 3");
+    expect(pdf).toContain("/Coords [0 0 0 0 0 60]");
+    expect(pdf).toContain(["q", "0 0 120 60 re", "W", "n", "0 0.5 -1 0 60 30 cm", "/Sh1 sh", "Q"].join("\n"));
     expect(pdf).not.toContain(["0.502 0 0.502 rg", "0 0 120 60 re", "f"].join("\n"));
   });
 });
