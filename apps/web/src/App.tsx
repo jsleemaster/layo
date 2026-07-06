@@ -701,7 +701,7 @@ function CanvasRadialStrokeOverlay({ node, gradient }: { node: RendererNode; gra
       <Rect
         width={node.size.width}
         height={node.size.height}
-        fill={node.style.stroke ?? "#000000"}
+        fill={node.style.stroke ?? editorKonvaTokens.selection.stroke}
         cornerRadius={cornerRadius}
         {...canvasRadialGradientFillPropsForNode(node, gradient)}
       />
