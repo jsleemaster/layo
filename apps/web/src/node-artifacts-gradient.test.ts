@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { RendererNode } from "@layo/renderer";
 import { pdfForNode, svgForNode } from "./node-artifacts";
 
+const penpotPathData = "M 10 0 C 70 0 110 20 110 40 L 60 60 C 20 60 0 40 10 0 Z";
+
 const penpotGradientCard: RendererNode = {
   id: "penpot-gradient-artifact-card",
   kind: "rectangle",
@@ -124,6 +126,53 @@ const penpotRadialEllipseGradientShape: RendererNode = {
       name: "Penpot source ellipse",
       shapeType: "ellipse",
       bounds: { x: 0, y: 0, width: 120, height: 60 }
+    }
+  },
+  style: {
+    fill: "#800080",
+    stroke: "#111827",
+    stroke_width: 2,
+    opacity: 1,
+    paint_sources: [
+      {
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        opacity: 1,
+        blendMode: "normal",
+        gradient: {
+          type: "radial",
+          start: { x: 0.5, y: 0.5 },
+          end: { x: 1, y: 0.5 },
+          width: 1,
+          stops: [
+            { color: "#ff0000", opacity: 1, offset: 0 },
+            { color: "#0000ff", opacity: 1, offset: 1 }
+          ]
+        }
+      }
+    ]
+  },
+  content: { type: "empty" },
+  children: []
+};
+
+const penpotRadialPathGradientShape: RendererNode = {
+  id: "penpot-radial-path-gradient-artifact-shape",
+  kind: "rectangle",
+  name: "Penpot radial path gradient artifact shape",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 120, height: 60 },
+  clip: {
+    type: "bounds",
+    source: {
+      origin: "penpot",
+      shapeId: "penpot-source-path",
+      name: "Penpot source path",
+      shapeType: "path",
+      bounds: { x: 0, y: 0, width: 120, height: 60 },
+      pathData: penpotPathData
     }
   },
   style: {
@@ -325,6 +374,21 @@ describe("Penpot gradient selected-layer SVG artifacts", () => {
     expect(svg).not.toContain("<rect data-node-id=\"penpot-radial-ellipse-gradient-artifact-shape\"");
   });
 
+  test("renders preserved Penpot path radial fill gradients as SVG path paint", () => {
+    const svg = svgForNode(penpotRadialPathGradientShape);
+
+    expect(svg).toContain("<defs>");
+    expect(svg).toContain(`<path d="${penpotPathData}" />`);
+    expect(svg).toContain(
+      "<radialGradient id=\"layo-gradient-penpot-radial-path-gradient-artifact-shape-fill-0\" cx=\"50%\" cy=\"50%\" r=\"50%\">"
+    );
+    expect(svg).toContain(
+      `<path data-node-id="penpot-radial-path-gradient-artifact-shape" data-node-name="Penpot radial path gradient artifact shape" data-node-kind="rectangle" d="${penpotPathData}" fill="url(#layo-gradient-penpot-radial-path-gradient-artifact-shape-fill-0)" data-fallback-fill="#800080" stroke="#111827" stroke-width="2" />`
+    );
+    expect(svg).not.toContain("<rect data-node-id=\"penpot-radial-path-gradient-artifact-shape\"");
+    expect(svg).not.toContain("<ellipse data-node-id=\"penpot-radial-path-gradient-artifact-shape\"");
+  });
+
   test("renders preserved Penpot stroke gradients as SVG paint servers", () => {
     const svg = svgForNode(penpotStrokeGradientCard);
 
@@ -398,6 +462,29 @@ describe("Penpot gradient selected-layer PDF artifacts", () => {
         "26.863 60 0 46.569 0 30 c",
         "0 13.431 26.863 0 60 0 c",
         "93.137 0 120 13.431 120 30 c",
+        "h",
+        "W",
+        "n",
+        "/Sh1 sh",
+        "Q"
+      ].join("\n")
+    );
+    expect(pdf).not.toContain(["q", "0 0 120 60 re", "W", "n", "/Sh1 sh", "Q"].join("\n"));
+  });
+
+  test("renders preserved Penpot path radial fill gradients with path clip in PDF artifacts", () => {
+    const pdf = pdfTextForNode(penpotRadialPathGradientShape);
+
+    expect(pdf).toContain("/Shading << /Sh1");
+    expect(pdf).toContain("/ShadingType 3");
+    expect(pdf).toContain("/Coords [60 30 0 60 30 60]");
+    expect(pdf).toContain(
+      [
+        "q",
+        "10 60 m",
+        "70 60 110 40 110 20 c",
+        "60 0 l",
+        "20 0 0 20 10 60 c",
         "h",
         "W",
         "n",
