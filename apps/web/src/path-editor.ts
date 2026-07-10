@@ -173,7 +173,7 @@ export function editablePathAnchors(path: EditablePath): EditablePathAnchor[] {
 }
 
 export function editablePathControls(path: EditablePath): EditablePathControl[] {
-  return path.commands.flatMap((command, commandIndex) => {
+  return path.commands.flatMap<EditablePathControl>((command, commandIndex) => {
     if (command.type === "C") {
       return [
         { commandIndex, role: "control1" as const, ...command.control1 },
@@ -253,7 +253,10 @@ export function serializeEditablePath(path: EditablePath): string {
       if (command.type === "C") {
         return `C${formatPathPoint(command.control1)} ${formatPathPoint(command.control2)} ${formatPathNumber(command.x)} ${formatPathNumber(command.y)}`;
       }
-      return `Q${formatPathPoint(command.control)} ${formatPathNumber(command.x)} ${formatPathNumber(command.y)}`;
+      if (command.type === "Q") {
+        return `Q${formatPathPoint(command.control)} ${formatPathNumber(command.x)} ${formatPathNumber(command.y)}`;
+      }
+      return "";
     })
     .join(" ");
 }
