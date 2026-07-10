@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Stage as KonvaStage } from "konva/lib/Stage";
-import { Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import { Group, Image as KonvaImage, Layer, Path as KonvaPath, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
   type DesignStyle,
@@ -4122,6 +4122,17 @@ function renderNode({
         naturalWidth={node.content.natural_width}
         naturalHeight={node.content.natural_height}
         shadowProps={shadowProps}
+      />
+    ) : node.kind === "path" && node.content.type === "path" ? (
+      <KonvaPath
+        data={node.content.path_data}
+        fill={node.style.fill}
+        fillRule={node.content.fill_rule}
+        stroke={node.style.stroke ?? undefined}
+        strokeWidth={node.style.stroke_width}
+        opacity={node.style.opacity}
+        {...canvasLinearGradientPropsForNode(node)}
+        {...shadowProps}
       />
     ) : node.kind === "text" && node.content.type === "text" ? (
       isVerticalCanvasTextMode(node.content.writing_mode) ? (
