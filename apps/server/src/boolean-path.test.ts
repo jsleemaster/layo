@@ -61,6 +61,45 @@ describe("non-destructive boolean path commands", () => {
     expect(detached.document.pages[0].children.map((node) => node.transform.x)).toEqual([0, 50]);
   });
 
+  test("recomputes rotated boolean bounds in parent coordinates", () => {
+    const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "create_boolean_path",
+      nodeId: "boolean-rotated",
+      name: "Rotated union",
+      operation: "union",
+      sourceNodeIds: ["path-left", "path-right"]
+    }]).document;
+    created.pages[0].children[0].transform = { x: 10, y: 20, rotation: 90 };
+
+    const updated = applyAgentCommandsToDocument(created, [{
+      type: "set_boolean_path_operation",
+      nodeId: "boolean-rotated",
+      operation: "intersection"
+    }]).document.pages[0].children[0];
+
+    expect(updated.transform.x).toBeCloseTo(10);
+    expect(updated.transform.y).toBeCloseTo(70);
+    expect(updated.size).toEqual({ width: 50, height: 100 });
+  });
+
+  test("rejects open source geometry", () => {
+    const source = createBooleanFixture();
+    const left = source.pages[0].children[0];
+    if (left.content.type === "path") {
+      left.content.path_data = "M0 0 H100 V100";
+    }
+
+    expect(() =>
+      applyAgentCommandsToDocument(source, [{
+        type: "create_boolean_path",
+        nodeId: "boolean-open",
+        name: "Open",
+        operation: "union",
+        sourceNodeIds: ["path-left", "path-right"]
+      }])
+    ).toThrow("closed geometry");
+  });
+
   test("validates missing boolean operands and empty evaluated geometry", () => {
     const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
       type: "create_boolean_path",
