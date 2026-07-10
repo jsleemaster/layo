@@ -31,7 +31,8 @@
 - Type repair: Full Verification #463, run `29085935775`, failed at typecheck on one nullable path ID and two path-command union narrowing errors.
 - GREEN direct editing foundation: Full Verification #465, run `29086037029`, attempt 2 passed maturity/design gates, typecheck, web build, core tests, and all 183 Playwright cases.
 - Verified direct actions: select the compound path, press `Enter`, inspect eight anchors, drag one anchor, poll persisted `path_data`, undo and poll restoration, then press `Escape`.
-- Current exact gap: add/delete, corner/curve, join/merge/separate, explicit redo persistence, and Bezier-handle browser drag proof remain active before this plan is complete.
+- GREEN path topology: Full Verification #478, run `29089414317`, passed maturity/design gates, typecheck, web build, core tests, and all Playwright cases after line/Bezier insert, topology controls, redo, and Bezier browser coverage.
+- Completion: first-class path import, deterministic mutation, canvas/artifact fidelity, direct anchor/control editing, topology commands, undo/redo, and keyboard access are complete. Non-destructive boolean paths are routed to `2026-07-10-penpot-nondestructive-boolean-paths.md`.
 
 ### Task 1: First-Class Path Document Contract
 
@@ -304,27 +305,27 @@ git commit -m "feat: render and export first-class paths"
 - Produces: drag anchors/handles, add node with `Shift++`, delete with `Delete`, corner with `X`, curve with `C`, join with `J`, merge with `Meta/Ctrl+J`, separate with `K`, move mode with `M`.
 - Persists each completed interaction through `set_path_data` and records one undo entry.
 
-- [ ] **Step 1: Write RED parser and interaction tests**
+- [x] **Step 1: Write RED parser and interaction tests**
 
 Cover M/L/H/V/C/Q/Z parsing, anchor movement, cubic control movement, close/open path state, command serialization, one undo/redo cycle, and keyboard focus behavior.
 
 Run: `pnpm --filter @layo/web test -- path-editor.test.ts`
 Expected: FAIL because the path editor module does not exist.
 
-- [ ] **Step 2: Implement path editor state and geometry**
+- [x] **Step 2: Implement path editor state and geometry**
 
 Use structured command arrays internally and serialize to SVG path data only at persistence boundaries. Keep unsupported A/S/T commands renderable but read-only until converted by an explicit edit action.
 
-- [ ] **Step 3: Add Korean-first viewport controls**
+- [x] **Step 3: Add Korean-first viewport controls**
 
 Use icon buttons with tooltips for corner, curve, join, merge, and separate. Do not add explanatory feature text. Keep handles stable-size and keyboard focusable.
 
-- [ ] **Step 4: Run direct Playwright CLI interaction proof**
+- [x] **Step 4: Run direct Playwright CLI interaction proof**
 
 Run: `pnpm exec playwright test apps/web/e2e/path-editing.spec.ts --reporter=line`
 Expected: PASS after clicking a path, pressing `Enter`, dragging an anchor and a bezier handle, pressing `Delete`, undoing and redoing, and verifying visible geometry plus persisted `path_data`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src apps/web/e2e/path-editing.spec.ts
@@ -341,7 +342,7 @@ git commit -m "feat: add direct path node editing"
 **Interfaces:**
 - Records: Penpot reference, adopt decision, gate mapping, RED/GREEN run IDs, direct Playwright actions, and remaining boolean-operation gap.
 
-- [ ] **Step 1: Run complete verification**
+- [x] **Step 1: Run complete verification**
 
 Run:
 
@@ -355,11 +356,11 @@ pnpm exec playwright test apps/web/e2e/external-migration-penpot-path.spec.ts ap
 
 Expected: all commands exit 0 with zero failed tests.
 
-- [ ] **Step 2: Perform completion audit**
+- [x] **Step 2: Perform completion audit**
 
 Verify first-class path import, no path SVG asset synthesis, inspect/dry-run/apply/validate/change summary, MCP/HTTP parity, undo/redo, keyboard path editing, canvas rendering, and SVG/PDF/raster output from current main-compatible state.
 
-- [ ] **Step 3: Update maturity docs and commit**
+- [x] **Step 3: Update maturity docs and commit**
 
 ```bash
 git add docs/product docs/superpowers
