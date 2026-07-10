@@ -24,6 +24,47 @@ afterEach(async () => {
 });
 
 describe("MCP first-class path agent command", () => {
+  test("inspects non-destructive boolean path relation and evaluated geometry", async () => {
+    const { client, storage } = await connectMcpClient();
+    const file = createPathFile();
+    file.pages[0].children[0] = {
+      ...file.pages[0].children[0],
+      id: "boolean-path-1",
+      name: "Boolean difference",
+      content: {
+        type: "boolean_path",
+        relation: {
+          operation: "difference",
+          source_node_ids: ["path-base", "path-cutout"]
+        },
+        path_data: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+        fill_rule: "evenodd"
+      }
+    };
+    await storage.writeFile("path-file", file);
+
+    const inspection = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "path-file" }
+      })
+    );
+    expect(inspection.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-path-1",
+          kind: "path",
+          pathData: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+          fillRule: "evenodd",
+          booleanRelation: {
+            operation: "difference",
+            source_node_ids: ["path-base", "path-cutout"]
+          }
+        })
+      ])
+    );
+  });
+
   test("dry-runs and persists path geometry with inspect and validation evidence", async () => {
     const { client, storage } = await connectMcpClient();
     await storage.writeFile("path-file", createPathFile());
