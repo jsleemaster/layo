@@ -142,7 +142,7 @@ export interface NodeExportPreset {
 
 export interface DesignNode {
   id: string;
-  kind: "frame" | "group" | "rectangle" | "text" | "image" | "component" | "component_instance";
+  kind: "frame" | "group" | "rectangle" | "text" | "image" | "path" | "component" | "component_instance";
   name: string;
   component_instance?: ComponentInstance | null;
   layout?: NodeLayout | null;
@@ -183,6 +183,11 @@ export interface DesignNode {
         natural_width?: number;
         natural_height?: number;
         fit_mode?: ImageFitMode;
+      }
+    | {
+        type: "path";
+        path_data: string;
+        fill_rule: "nonzero" | "evenodd";
       };
   children: DesignNode[];
 }
