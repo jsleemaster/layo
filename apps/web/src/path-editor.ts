@@ -90,7 +90,7 @@ export function parseEditablePath(pathData: string): EditablePath | null {
       if (!point) {
         return null;
       }
-      const type = upper === "M" && !commands.length ? "M" : "L";
+      const type = upper === "M" ? "M" : "L";
       commands.push({ type, ...point });
       current = point;
       if (type === "M") {
