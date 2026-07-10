@@ -1607,6 +1607,8 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
       node.component_instance = null;
       return node.id;
     }
+    default:
+      throw new Error("unsupported agent command");
   }
 }
 
