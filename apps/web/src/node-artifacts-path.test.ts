@@ -1,0 +1,36 @@
+import { describe, expect, test } from "vitest";
+import type { RendererNode } from "@layo/renderer";
+import { pdfForNode, svgForNode } from "./node-artifacts";
+
+const firstClassPathNode: RendererNode = {
+  id: "first-class-path",
+  kind: "path",
+  name: "Editable compound path",
+  transform: { x: 0, y: 0, rotation: 0 },
+  size: { width: 100, height: 100 },
+  style: { fill: "#0ea5e9", stroke: "#0f172a", stroke_width: 2, opacity: 0.8 },
+  content: {
+    type: "path",
+    path_data: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+    fill_rule: "evenodd"
+  },
+  children: []
+};
+
+describe("first-class path artifacts", () => {
+  test("renders path geometry and even-odd winding in SVG and PDF", () => {
+    const svg = svgForNode(firstClassPathNode);
+
+    expect(svg).toContain('data-node-kind="path"');
+    expect(svg).toContain('d="M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z"');
+    expect(svg).toContain('fill-rule="evenodd"');
+    expect(svg).not.toContain('<rect data-node-id="first-class-path"');
+
+    const pdf = pdfForNode(firstClassPathNode);
+    const pdfText = new TextDecoder().decode(pdf);
+
+    expect(pdfText).toContain("0 100 m");
+    expect(pdfText).toContain("100 100 l");
+    expect(pdfText).toMatch(/\nf\*\nQ/);
+  });
+});
