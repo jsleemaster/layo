@@ -1646,6 +1646,8 @@ function nodeKindLabel(kind: RendererNode["kind"]): string {
       return "텍스트";
     case "image":
       return "이미지";
+    case "path":
+      return "경로";
     case "component":
       return "컴포넌트";
     case "component_instance":
