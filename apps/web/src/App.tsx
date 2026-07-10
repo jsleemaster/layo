@@ -10198,12 +10198,15 @@ export function App() {
         return;
       }
       if (isCommand && event.altKey) {
+        const booleanShortcutKey = event.code.startsWith("Key")
+          ? event.code.slice(3).toLowerCase()
+          : event.key.toLowerCase();
         const booleanOperation = {
           u: "union",
           d: "difference",
           i: "intersection",
           e: "exclusion"
-        }[event.key.toLowerCase()] as BooleanPathOperation | undefined;
+        }[booleanShortcutKey] as BooleanPathOperation | undefined;
         if (booleanOperation) {
           event.preventDefault();
           applyBooleanPathOperation(booleanOperation);
