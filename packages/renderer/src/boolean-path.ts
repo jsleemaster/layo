@@ -65,16 +65,17 @@ export function evaluateBooleanPath(
   if (!(result instanceof scope.Path) && !(result instanceof scope.CompoundPath)) {
     throw new Error("boolean path evaluation did not produce path geometry");
   }
-  const bounds = result.bounds;
+  const bounds = {
+    x: normalizeNumber(result.bounds.x),
+    y: normalizeNumber(result.bounds.y),
+    width: normalizeNumber(result.bounds.width),
+    height: normalizeNumber(result.bounds.height)
+  };
+  result.translate(new scope.Point(-bounds.x, -bounds.y));
   const evaluation = {
     pathData: result.pathData,
     area: filledPathArea(result, scope),
-    bounds: {
-      x: normalizeNumber(bounds.x),
-      y: normalizeNumber(bounds.y),
-      width: normalizeNumber(bounds.width),
-      height: normalizeNumber(bounds.height)
-    }
+    bounds
   };
   scope.project.clear();
   return evaluation;
