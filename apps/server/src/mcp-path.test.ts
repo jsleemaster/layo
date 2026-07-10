@@ -68,11 +68,7 @@ describe("MCP first-class path agent command", () => {
   test("creates, updates, and detaches boolean paths through the shared MCP batch", async () => {
     const { client, storage } = await connectMcpClient();
     const file = createPathFile();
-    const first = file.pages[0].children[0];
-    file.pages[0].children = [
-      { ...structuredClone(first), id: "path-left", transform: { x: 0, y: 0, rotation: 0 } },
-      { ...structuredClone(first), id: "path-right", transform: { x: 50, y: 0, rotation: 0 } }
-    ];
+    file.pages[0].children = [];
     await storage.writeFile("path-file", file);
 
     const created = parseToolJson(
@@ -81,21 +77,45 @@ describe("MCP first-class path agent command", () => {
         arguments: {
           fileId: "path-file",
           dryRun: false,
-          commands: [{
-            type: "create_boolean_path",
-            nodeId: "boolean-1",
-            name: "Union",
-            operation: "union",
-            sourceNodeIds: ["path-left", "path-right"]
-          }]
+          commands: [
+            {
+              type: "create_path",
+              parentId: "page-1",
+              id: "path-left",
+              name: "Left",
+              pathData: "M0 0 H100 V100 H0 Z",
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100
+            },
+            {
+              type: "create_path",
+              parentId: "page-1",
+              id: "path-right",
+              name: "Right",
+              pathData: "M0 0 H100 V100 H0 Z",
+              x: 50,
+              y: 0,
+              width: 100,
+              height: 100
+            },
+            {
+              type: "create_boolean_path",
+              nodeId: "boolean-1",
+              name: "Union",
+              operation: "union",
+              sourceNodeIds: ["path-left", "path-right"]
+            }
+          ]
         }
       })
     );
     expect(created.result).toMatchObject({
       persisted: true,
       audit: {
-        commandTypes: ["create_boolean_path"],
-        changedNodeIds: ["boolean-1", "path-left", "path-right"]
+        commandTypes: ["create_path", "create_path", "create_boolean_path"],
+        changedNodeIds: ["path-left", "path-right", "boolean-1"]
       },
       validation: { ok: true }
     });
