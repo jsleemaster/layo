@@ -251,6 +251,15 @@ function collectBooleanValidationIssues(
   issues: Array<{ code: string; message: string; nodeId?: string; path?: string[] }>
 ) {
   if (node.content.type === "boolean_path") {
+    const operation = node.content.relation.operation as string;
+    if (!["union", "difference", "intersection", "exclusion"].includes(operation)) {
+      issues.push({
+        code: "invalid_boolean_path_operation",
+        message: `boolean path operation is invalid: ${node.id} -> ${operation}`,
+        nodeId: node.id,
+        path
+      });
+    }
     const sourceIds = node.content.relation.source_node_ids;
     if (sourceIds.length < 2 || new Set(sourceIds).size !== sourceIds.length) {
       issues.push({
@@ -260,12 +269,22 @@ function collectBooleanValidationIssues(
         path
       });
     }
-    const childIds = new Set(node.children.map((child) => child.id));
     for (const sourceId of sourceIds) {
-      if (!childIds.has(sourceId)) {
+      const source = node.children.find((child) => child.id === sourceId);
+      if (!source) {
         issues.push({
           code: "missing_boolean_path_source",
           message: `boolean path source is missing: ${node.id} -> ${sourceId}`,
+          nodeId: node.id,
+          path
+        });
+      } else if (
+        source.kind !== "path" ||
+        (source.content.type !== "path" && source.content.type !== "boolean_path")
+      ) {
+        issues.push({
+          code: "invalid_boolean_path_source_geometry",
+          message: `boolean path source is not path geometry: ${node.id} -> ${sourceId}`,
           nodeId: node.id,
           path
         });
