@@ -794,7 +794,28 @@ impl Node {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeContent, PathFillRule};
+    use super::{BooleanPathOperation, NodeContent, PathBooleanRelation, PathFillRule};
+
+    #[test]
+    fn boolean_path_relation_round_trip() {
+        let relation = PathBooleanRelation {
+            operation: BooleanPathOperation::Difference,
+            source_node_ids: vec!["path-base".to_string(), "path-cutout".to_string()],
+        };
+
+        let json = serde_json::to_value(&relation).expect("boolean path relation should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "operation": "difference",
+                "source_node_ids": ["path-base", "path-cutout"]
+            })
+        );
+
+        let restored: PathBooleanRelation =
+            serde_json::from_value(json).expect("boolean path relation should deserialize");
+        assert_eq!(restored, relation);
+    }
 
     #[test]
     fn path_node_round_trip() {
