@@ -33,6 +33,32 @@ async function createProjectFromEmptyState(page: Page) {
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
 }
 
+async function countCanvasPixelsNearColor(
+  page: Page,
+  color: { r: number; g: number; b: number }
+) {
+  return page.evaluate((target) => {
+    let count = 0;
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        continue;
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const distance =
+          Math.abs(pixels[index] - target.r) +
+          Math.abs(pixels[index + 1] - target.g) +
+          Math.abs(pixels[index + 2] - target.b);
+        if (pixels[index + 3] >= 200 && distance <= 12) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }, color);
+}
+
 function createPenpotPathExportArchive(input: {
   sourceId: string;
   name: string;
@@ -193,6 +219,8 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
     style: { fill: "#0ea5e9", stroke: null, stroke_width: 0, opacity: 1 },
     content: { type: "path", path_data: evenOddPathData, fill_rule: "evenodd" }
   });
+
+  await expect.poll(() => countCanvasPixelsNearColor(page, { r: 14, g: 165, b: 233 })).toBeGreaterThan(500);
 
   const inspectResponse = await page.request.get(
     `http://127.0.0.1:4317/files/${imported.fileId}/agent/inspect`
