@@ -334,3 +334,5 @@ export function flattenRendererNodes(document: RendererDocument): RendererNode[]
   document.pages.forEach((page) => page.children.forEach(visit));
   return nodes;
 }
+
+export * from "./boolean-path";
