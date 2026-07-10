@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 
 test.beforeEach(async () => {
   await rm(".layo", { recursive: true, force: true });
@@ -71,12 +71,72 @@ test("non-destructive boolean controls preserve operands through every operation
   await page.keyboard.press("Control+Shift+z");
   await expect.poll(readOperation).toBe("exclusion");
 
+  const visibleBounds = await findCanvasColorBounds(page, { r: 14, g: 165, b: 233 });
+  await page.mouse.click(visibleBounds.left + 8, (visibleBounds.top + visibleBounds.bottom) / 2, {
+    button: "right"
+  });
+  const contextMenu = page.getByTestId("object-context-menu");
+  await expect(contextMenu).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await contextMenu.getByRole("menuitem", { name: "PNG로 내보내기" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.png$/);
+  const png = await readFile(await download.path() as string);
+  expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(png.byteLength).toBeGreaterThan(100);
+
   await page.getByRole("button", { name: "불리언 분리" }).click();
   await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).toEqual([
     "path-left",
     "path-right"
   ]);
 });
+
+async function findCanvasColorBounds(
+  page: Page,
+  color: { r: number; g: number; b: number }
+) {
+  return page.evaluate((target) => {
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context || canvas.width === 0 || canvas.height === 0) {
+        continue;
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+          const index = (y * canvas.width + x) * 4;
+          if (
+            pixels[index + 3] > 200 &&
+            Math.abs(pixels[index] - target.r) +
+              Math.abs(pixels[index + 1] - target.g) +
+              Math.abs(pixels[index + 2] - target.b) <=
+              8
+          ) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+          }
+        }
+      }
+      if (Number.isFinite(minX)) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          left: rect.left + minX / (canvas.width / rect.width),
+          top: rect.top + minY / (canvas.height / rect.height),
+          right: rect.left + maxX / (canvas.width / rect.width),
+          bottom: rect.top + maxY / (canvas.height / rect.height)
+        };
+      }
+    }
+    throw new Error("boolean path pixels were not visible");
+  }, color);
+}
 
 async function openFilePanel(page: Page) {
   await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
