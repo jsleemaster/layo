@@ -204,9 +204,15 @@ import { calculateImageDrawConfig } from "./image-fit";
 import {
   editablePathAnchors,
   editablePathControls,
+  convertEditablePathAnchor,
+  deleteEditablePathAnchor,
+  insertEditablePathAnchor,
+  joinEditablePathSubpaths,
+  mergeEditablePathAnchors,
   moveEditablePathAnchor,
   moveEditablePathControl,
   parseEditablePath,
+  separateEditablePathAtAnchor,
   serializeEditablePath,
   type EditablePath,
   type EditablePathControl
@@ -8306,6 +8312,7 @@ export function App() {
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [inlineTextEditingNodeId, setInlineTextEditingNodeId] = useState<string | null>(null);
   const [pathEditingNodeId, setPathEditingNodeId] = useState<string | null>(null);
+  const [selectedPathAnchorIndices, setSelectedPathAnchorIndices] = useState<number[]>([]);
   const [objectContextMenu, setObjectContextMenu] = useState<ObjectContextMenuState | null>(null);
   const [gridTrackContextMenu, setGridTrackContextMenu] = useState<GridTrackContextMenuState | null>(null);
   const [gridCellContextMenu, setGridCellContextMenu] = useState<GridCellContextMenuState | null>(null);
@@ -8318,6 +8325,7 @@ export function App() {
   const editorRef = useRef<EditorState | null>(null);
   const currentProjectRef = useRef<ProjectManifest | null>(null);
   const pathEditingNodeIdRef = useRef<string | null>(null);
+  const selectedPathAnchorIndicesRef = useRef<number[]>([]);
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
@@ -8544,6 +8552,10 @@ export function App() {
   useEffect(() => {
     pathEditingNodeIdRef.current = pathEditingNodeId;
   }, [pathEditingNodeId]);
+
+  useEffect(() => {
+    selectedPathAnchorIndicesRef.current = selectedPathAnchorIndices;
+  }, [selectedPathAnchorIndices]);
 
   const refreshLibraryRegistryUpdates = async (fileId?: string) => {
     if (!fileId) {
@@ -10173,9 +10185,53 @@ export function App() {
         ) {
           event.preventDefault();
           setInlineTextEditingNodeId(null);
+          setSelectedPathAnchorIndices([0]);
           setPathEditingNodeId(node.id);
         }
         return;
+      }
+      if (pathEditingNodeIdRef.current) {
+        const key = event.key.toLowerCase();
+        if (!isCommand && event.shiftKey && (event.key === "+" || event.key === "=")) {
+          event.preventDefault();
+          applyPathTopologyEdit("insert");
+          return;
+        }
+        if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
+          event.preventDefault();
+          applyPathTopologyEdit("delete");
+          return;
+        }
+        if (!isCommand && key === "x") {
+          event.preventDefault();
+          applyPathTopologyEdit("corner");
+          return;
+        }
+        if (!isCommand && key === "c") {
+          event.preventDefault();
+          applyPathTopologyEdit("curve");
+          return;
+        }
+        if (isCommand && key === "j") {
+          event.preventDefault();
+          applyPathTopologyEdit("merge");
+          return;
+        }
+        if (!isCommand && key === "j") {
+          event.preventDefault();
+          applyPathTopologyEdit("join");
+          return;
+        }
+        if (!isCommand && key === "k") {
+          event.preventDefault();
+          applyPathTopologyEdit("separate");
+          return;
+        }
+        if (!isCommand && key === "m") {
+          event.preventDefault();
+          setProjectStatus("경로 이동 모드");
+          return;
+        }
       }
       if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
@@ -10195,6 +10251,7 @@ export function App() {
       if (event.key === "Escape") {
         event.preventDefault();
         if (pathEditingNodeIdRef.current) {
+          setSelectedPathAnchorIndices([]);
           setPathEditingNodeId(null);
         } else {
           clearSelectionFromInteraction();
@@ -10565,6 +10622,7 @@ export function App() {
 
     setInlineTextEditingNodeId(null);
     setMeasurementTargetNodeId(null);
+    setSelectedPathAnchorIndices([0]);
     setPathEditingNodeId(nodeId);
   };
 
@@ -10588,6 +10646,49 @@ export function App() {
       });
   };
 
+  const applyPathTopologyEdit = (
+    action: "insert" | "delete" | "corner" | "curve" | "join" | "merge" | "separate"
+  ) => {
+    const currentEditor = editorRef.current;
+    const nodeId = pathEditingNodeIdRef.current;
+    const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+    if (!node || node.kind !== "path" || node.content.type !== "path") {
+      return;
+    }
+
+    const path = parseEditablePath(node.content.path_data);
+    if (!path) {
+      return;
+    }
+    const selected = selectedPathAnchorIndicesRef.current;
+    let nextPath = path;
+    if (action === "insert" && selected[0] !== undefined) {
+      nextPath = insertEditablePathAnchor(path, selected[0]);
+      setSelectedPathAnchorIndices([selected[0] + 1]);
+    } else if (action === "delete" && selected.length) {
+      nextPath = [...selected]
+        .sort((a, b) => b - a)
+        .reduce((current, anchorIndex) => deleteEditablePathAnchor(current, anchorIndex), path);
+      setSelectedPathAnchorIndices([Math.max(0, Math.min(selected[0], editablePathAnchors(nextPath).length - 1))]);
+    } else if ((action === "corner" || action === "curve") && selected.length) {
+      nextPath = selected.reduce(
+        (current, anchorIndex) => convertEditablePathAnchor(current, anchorIndex, action),
+        path
+      );
+    } else if (action === "join") {
+      nextPath = joinEditablePathSubpaths(path);
+    } else if (action === "merge" && selected.length === 2) {
+      nextPath = mergeEditablePathAnchors(path, selected[0], selected[1]);
+      setSelectedPathAnchorIndices([Math.min(selected[0], selected[1])]);
+    } else if (action === "separate" && selected[0] !== undefined) {
+      nextPath = separateEditablePathAtAnchor(path, selected[0]);
+    }
+
+    if (serializeEditablePath(nextPath) !== serializeEditablePath(path)) {
+      commitPathEdit(node.id, nextPath, node.content.fill_rule);
+    }
+  };
+
   const startPathPointDrag = (
     point: PathEditorOverlayPoint,
     event: React.PointerEvent<HTMLButtonElement>
@@ -10598,6 +10699,15 @@ export function App() {
 
     event.preventDefault();
     event.stopPropagation();
+    if (point.anchorIndex !== undefined) {
+      setSelectedPathAnchorIndices((current) =>
+        event.shiftKey
+          ? current.includes(point.anchorIndex!)
+            ? current.filter((anchorIndex) => anchorIndex !== point.anchorIndex)
+            : [...current, point.anchorIndex!].slice(-2)
+          : [point.anchorIndex!]
+      );
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     const node = editorRef.current
       ? findNodeById(editorRef.current.document, pathEditorOverlay.nodeId)
@@ -15227,6 +15337,15 @@ export function App() {
                 data-testid="path-editor-overlay"
                 aria-label="경로 노드 편집"
               >
+                <div className="path-editor-toolbar" data-testid="path-editor-toolbar">
+                  <button type="button" aria-label="경로 점 추가" title="경로 점 추가" onClick={() => applyPathTopologyEdit("insert")}>+</button>
+                  <button type="button" aria-label="경로 점 삭제" title="경로 점 삭제" onClick={() => applyPathTopologyEdit("delete")}>−</button>
+                  <button type="button" aria-label="모서리로 변환" title="모서리로 변환" onClick={() => applyPathTopologyEdit("corner")}>X</button>
+                  <button type="button" aria-label="곡선으로 변환" title="곡선으로 변환" onClick={() => applyPathTopologyEdit("curve")}>C</button>
+                  <button type="button" aria-label="경로 연결" title="경로 연결" onClick={() => applyPathTopologyEdit("join")}>J</button>
+                  <button type="button" aria-label="점 병합" title="점 병합" disabled={selectedPathAnchorIndices.length !== 2} onClick={() => applyPathTopologyEdit("merge")}>⌘J</button>
+                  <button type="button" aria-label="경로 분리" title="경로 분리" onClick={() => applyPathTopologyEdit("separate")}>K</button>
+                </div>
                 {pathEditorOverlay.controls.map((point, index) => (
                   <button
                     key={point.id}
@@ -15244,7 +15363,7 @@ export function App() {
                   <button
                     key={point.id}
                     type="button"
-                    className="path-editor-anchor"
+                    className={`path-editor-anchor${point.anchorIndex !== undefined && selectedPathAnchorIndices.includes(point.anchorIndex) ? " is-selected" : ""}`}
                     data-testid={point.id}
                     aria-label={`경로 점 ${index + 1}`}
                     title={`경로 점 ${index + 1}`}

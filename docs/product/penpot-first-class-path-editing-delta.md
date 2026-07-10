@@ -1,7 +1,7 @@
 # Penpot First-Class Path Editing Delta
 
 Date: 2026-07-10
-Status: First-class path foundation and direct anchor editing verified on PR #272; advanced topology remains active
+Status: Complete across PR #272 and PR #273
 
 ## Penpot Reference
 
@@ -26,6 +26,9 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 - The browser enters path editing by double-click or `Enter`, exposes keyboard-focusable anchors and Bezier handles, and exits with `Escape`.
 - Completed anchor/control drags serialize through `set_path_data` as one editor command; undo persists the restored path data.
 - Compound SVG paths preserve later `M` subpath commands instead of converting them to `L`.
+- Path topology controls add and delete anchors, convert corners and curves, join and separate subpaths, and merge two selected anchors.
+- Anchor insertion preserves line geometry and splits cubic/quadratic Bezier segments with De Casteljau subdivision.
+- Explicit redo persistence and direct Bezier-handle dragging are covered in the browser workflow.
 
 ## Failure Loop Evidence
 
@@ -39,10 +42,11 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 - Repair attempt: Full Verification #463, run `29085935775`, stopped at typecheck on one nullable path ID and two command-union narrowing errors.
 - GREEN direct editing: Full Verification #465, run `29086037029`, attempt 2 passed Penpot maturity/design gates, typecheck, web build, core tests, and all 183 Playwright cases.
 - Direct Playwright actions: select `Compound even odd path`, press `Enter`, verify eight focusable anchors, drag the first anchor by 12 x 8 screen pixels, poll persisted `path_data`, press `Control+z`, verify persisted restoration, and press `Escape`.
+- RED topology semantics: Full Verification #474, run `29088078626`, exposed the incorrect raw `H/V` string-preservation assumption after semantic path normalization.
+- GREEN topology baseline: Full Verification #475, run `29088716522`, passed all gates and Playwright cases after asserting normalized geometry.
+- Review repair: Full Verification #477, run `29089270502`, failed typecheck while adding cubic/quadratic subdivision; the command union was narrowed explicitly.
+- GREEN completed path editing: Full Verification #478, run `29089414317`, passed maturity/design gates, typecheck, web build, core tests, and full Playwright.
 
-## Remaining Completion Gates
+## Next Penpot Gap
 
-- Add/delete anchors and corner/curve conversion remain the next exact failed capability.
-- Join, merge, separate, and move-mode keyboard commands still need focused unit and Playwright proof.
-- Add explicit redo persistence coverage and a Bezier-handle browser drag fixture.
-- Follow with a separate non-destructive union/difference/intersection/exclusion plan after path topology editing is complete.
+First-class path editing is complete for this plan. The next active plan is `docs/superpowers/plans/2026-07-10-penpot-nondestructive-boolean-paths.md`: preserve editable source operands while evaluating union, difference, intersection, and exclusion through the same local-first document, agent, undo/redo, canvas, and artifact contracts.

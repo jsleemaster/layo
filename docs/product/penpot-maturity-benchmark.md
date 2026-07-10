@@ -235,11 +235,11 @@ For each comparison:
 6. If verification fails, feed the failing case into
    `docs/process/penpot-maturity-loop.md`.
 
-## Active First-Class Path Loop
+## Active Boolean Path Loop
 
-PR #272 adopts Penpot-style first-class path content while adapting persistence to Layo's Rust-owned local document and deterministic MCP/HTTP command architecture. Full Verification #465 run `29086037029` attempt 2 proves asset-free Penpot path import, inspect/validate/change-summary parity, canvas and artifact fidelity, keyboard entry/exit, direct anchor drag, persisted geometry, and undo across all 183 Playwright cases.
+PR #272 and PR #273 complete the first-class path editing plan: asset-free Penpot import, deterministic MCP/HTTP mutation, inspect/validation/change summaries, canvas and artifact fidelity, line and Bezier anchor insertion, delete, corner/curve conversion, join/merge/separate, direct anchor/control dragging, and persisted undo/redo. Full Verification #478 run `29089414317` is the completed topology GREEN.
 
-This does not close path parity. The active next failed capability is topology editing: add/delete anchors, corner/curve conversion, join/merge/separate, explicit redo persistence, and Bezier-handle browser drag proof. Non-destructive union, difference, intersection, and exclusion remain the next path-system loop after topology editing.
+The active next Penpot gap is non-destructive union, difference, intersection, and exclusion. Layo must preserve editable source operands and operation order while exposing the evaluated result through the local-first document model, agent commands, canvas, undo/redo, and artifacts. The implementation plan is `docs/superpowers/plans/2026-07-10-penpot-nondestructive-boolean-paths.md`.
 
 ## Current Highest-Risk Gaps
 

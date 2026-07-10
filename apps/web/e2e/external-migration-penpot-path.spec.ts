@@ -250,8 +250,56 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
     return payload.file.pages[0].children[0].children[0].content.path_data as string;
   };
   await expect.poll(readPersistedPathData).not.toBe(evenOddPathData);
+  const draggedPathData = await readPersistedPathData();
   await page.keyboard.press("Control+z");
   await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+  await page.keyboard.press("Control+Shift+z");
+  await expect.poll(readPersistedPathData).toBe(draggedPathData);
+  await page.keyboard.press("Control+z");
+  await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+
+  await anchors.nth(1).click();
+  await page.getByRole("button", { name: "곡선으로 변환" }).click();
+  await expect(page.locator('[data-testid^="path-control-"]')).toHaveCount(2);
+  const curvedPathData = await readPersistedPathData();
+  expect(curvedPathData).not.toBe(evenOddPathData);
+
+  const firstControl = page.locator('[data-testid^="path-control-"]').first();
+  const controlBounds = await firstControl.boundingBox();
+  expect(controlBounds).not.toBeNull();
+  await page.mouse.move(
+    (controlBounds?.x ?? 0) + (controlBounds?.width ?? 0) / 2,
+    (controlBounds?.y ?? 0) + (controlBounds?.height ?? 0) / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    (controlBounds?.x ?? 0) + (controlBounds?.width ?? 0) / 2 + 8,
+    (controlBounds?.y ?? 0) + (controlBounds?.height ?? 0) / 2 + 6
+  );
+  await page.mouse.up();
+  await expect.poll(readPersistedPathData).not.toBe(curvedPathData);
+  await page.keyboard.press("Control+z");
+  await expect.poll(readPersistedPathData).toBe(curvedPathData);
+  await page.keyboard.press("Control+z");
+  await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+
+  const normalizedEvenOddPathData =
+    "M0 0 L100 0 L100 100 L0 100 Z M25 25 L75 25 L75 75 L25 75 Z";
+  await anchors.first().click();
+  await page.getByRole("button", { name: "경로 점 추가" }).click();
+  await expect(anchors).toHaveCount(9);
+  await page.getByRole("button", { name: "경로 점 삭제" }).click();
+  await expect(anchors).toHaveCount(8);
+  await expect.poll(readPersistedPathData).toBe(normalizedEvenOddPathData);
+
+  await anchors.first().click();
+  await anchors.nth(1).click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: "점 병합" }).click();
+  await expect(anchors).toHaveCount(7);
+  await page.keyboard.press("Control+z");
+  await expect(anchors).toHaveCount(8);
+  await expect.poll(readPersistedPathData).toBe(normalizedEvenOddPathData);
+
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("path-editor-overlay")).toBeHidden();
 
