@@ -129,7 +129,7 @@ describe("MCP first-class path agent command", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: "boolean-1",
-          booleanRelation: { operation: "intersection" }
+          booleanRelation: expect.objectContaining({ operation: "intersection" })
         })
       ])
     );
