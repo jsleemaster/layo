@@ -222,6 +222,39 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
 
   await expect.poll(() => countCanvasPixelsNearColor(page, { r: 14, g: 165, b: 233 })).toBeGreaterThan(500);
 
+  await page.getByTestId("layer-panel").getByRole("button", { name: /Compound even odd path/ }).click();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("path-editor-overlay")).toBeVisible();
+  const anchors = page.locator('[data-testid^="path-anchor-"]');
+  await expect(anchors).toHaveCount(8);
+
+  const firstAnchor = anchors.first();
+  const anchorBounds = await firstAnchor.boundingBox();
+  expect(anchorBounds).not.toBeNull();
+  await page.mouse.move(
+    (anchorBounds?.x ?? 0) + (anchorBounds?.width ?? 0) / 2,
+    (anchorBounds?.y ?? 0) + (anchorBounds?.height ?? 0) / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    (anchorBounds?.x ?? 0) + (anchorBounds?.width ?? 0) / 2 + 12,
+    (anchorBounds?.y ?? 0) + (anchorBounds?.height ?? 0) / 2 + 8
+  );
+  await page.mouse.up();
+
+  const readPersistedPathData = async () => {
+    const response = await page.request.get(
+      `http://127.0.0.1:4317/files/${imported.fileId}`
+    );
+    const payload = await response.json();
+    return payload.file.pages[0].children[0].children[0].content.path_data as string;
+  };
+  await expect.poll(readPersistedPathData).not.toBe(evenOddPathData);
+  await page.keyboard.press("Control+z");
+  await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("path-editor-overlay")).toBeHidden();
+
   const inspectResponse = await page.request.get(
     `http://127.0.0.1:4317/files/${imported.fileId}/agent/inspect`
   );
