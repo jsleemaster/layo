@@ -10184,6 +10184,19 @@ export function App() {
         updateViewportFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
         return;
       }
+      if (isCommand && event.altKey) {
+        const booleanOperation = {
+          u: "union",
+          d: "difference",
+          i: "intersection",
+          e: "exclusion"
+        }[event.key.toLowerCase()] as BooleanPathOperation | undefined;
+        if (booleanOperation) {
+          event.preventDefault();
+          applyBooleanPathOperation(booleanOperation);
+          return;
+        }
+      }
       if (isCommand && event.altKey && event.key.toLowerCase() === "c") {
         const currentEditor = editorRef.current;
         const nodeId = currentEditor?.selection.nodeId ?? null;
