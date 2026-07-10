@@ -1,7 +1,7 @@
 # Penpot First-Class Path Editing Delta
 
 Date: 2026-07-10
-Status: In progress on PR #272
+Status: First-class path foundation and direct anchor editing verified on PR #272; advanced topology remains active
 
 ## Penpot Reference
 
@@ -23,6 +23,9 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 - The browser canvas renders first-class paths through `Konva.Path`.
 - SVG and PDF artifacts emit path geometry and even-odd fill operators directly from first-class content.
 - Playwright checks visible canvas pixels for an imported even-odd path.
+- The browser enters path editing by double-click or `Enter`, exposes keyboard-focusable anchors and Bezier handles, and exits with `Escape`.
+- Completed anchor/control drags serialize through `set_path_data` as one editor command; undo persists the restored path data.
+- Compound SVG paths preserve later `M` subpath commands instead of converting them to `L`.
 
 ## Failure Loop Evidence
 
@@ -33,11 +36,13 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 - RED artifacts: Full Verification #438, run `29083054678`, SVG emitted a rectangle instead of path geometry.
 - GREEN canvas/artifacts/pixels: Full Verification #443, run `29084105892`.
 - RED direct editing: Full Verification #447, run `29084575601`, passed 182 Playwright cases and failed only because selecting a path and pressing Enter did not create `path-editor-overlay`.
+- Repair attempt: Full Verification #463, run `29085935775`, stopped at typecheck on one nullable path ID and two command-union narrowing errors.
+- GREEN direct editing: Full Verification #465, run `29086037029`, attempt 2 passed Penpot maturity/design gates, typecheck, web build, core tests, and all 183 Playwright cases.
+- Direct Playwright actions: select `Compound even odd path`, press `Enter`, verify eight focusable anchors, drag the first anchor by 12 x 8 screen pixels, poll persisted `path_data`, press `Control+z`, verify persisted restoration, and press `Escape`.
 
 ## Remaining Completion Gates
 
-- Parse path data into editable anchors and control handles.
-- Support direct anchor/control dragging and node add/delete/corner/curve/join/merge/separate commands.
-- Persist completed interactions through `set_path_data` with one undo entry per interaction.
-- Verify keyboard focus, undo/redo, geometry persistence, and visible changes through dedicated Playwright CLI interaction coverage.
-- Follow with a separate non-destructive boolean path operations plan after direct path editing is complete.
+- Add/delete anchors and corner/curve conversion remain the next exact failed capability.
+- Join, merge, separate, and move-mode keyboard commands still need focused unit and Playwright proof.
+- Add explicit redo persistence coverage and a Bezier-handle browser drag fixture.
+- Follow with a separate non-destructive union/difference/intersection/exclusion plan after path topology editing is complete.
