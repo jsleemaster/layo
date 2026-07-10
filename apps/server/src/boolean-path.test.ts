@@ -3,6 +3,40 @@ import { applyAgentCommandsToDocument, validateDocument } from "./agent-control"
 import type { DesignFile, DesignNode } from "./storage";
 
 describe("non-destructive boolean path commands", () => {
+  test("creates first-class path sources and rejects unknown commands", () => {
+    const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "create_path",
+      parentId: "page-1",
+      id: "path-created",
+      name: "Created path",
+      pathData: "M0 0 H40 V30 H0 Z",
+      fillRule: "evenodd",
+      x: 12,
+      y: 18,
+      width: 40,
+      height: 30,
+      fill: "#0ea5e9"
+    }]);
+
+    expect(created.changedNodeIds).toEqual(["path-created"]);
+    expect(created.document.pages[0].children.at(-1)).toMatchObject({
+      id: "path-created",
+      kind: "path",
+      transform: { x: 12, y: 18, rotation: 0 },
+      size: { width: 40, height: 30 },
+      content: {
+        type: "path",
+        path_data: "M0 0 H40 V30 H0 Z",
+        fill_rule: "evenodd"
+      }
+    });
+    expect(() =>
+      applyAgentCommandsToDocument(createBooleanFixture(), [
+        { type: "create_node" } as never
+      ])
+    ).toThrow("unsupported agent command");
+  });
+
   test("creates, updates, and detaches a boolean path without losing operands", () => {
     const source = createBooleanFixture();
 
