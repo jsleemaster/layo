@@ -237,7 +237,7 @@ export function insertEditablePathAnchor(
         y: nextAnchor.y
       }
     );
-  } else {
+  } else if (nextCommand.type === "Q") {
     const startToControl = midpoint(anchor, nextCommand.control);
     const controlToEnd = midpoint(nextCommand.control, nextAnchor);
     const splitPoint = midpoint(startToControl, controlToEnd);
@@ -256,6 +256,8 @@ export function insertEditablePathAnchor(
         y: nextAnchor.y
       }
     );
+  } else {
+    return path;
   }
   return { commands, closed: path.closed };
 }
