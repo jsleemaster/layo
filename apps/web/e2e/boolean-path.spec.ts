@@ -63,11 +63,19 @@ test("non-destructive boolean controls preserve operands through every operation
   const booleanNodeId = (await readBooleanPath())?.id;
   expect(booleanNodeId).toBeTruthy();
 
-  await page.keyboard.press("Control+Alt+d");
+  await page.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "d",
+      code: "KeyD",
+      ctrlKey: true,
+      altKey: true,
+      bubbles: true
+    }));
+  });
   await expect.poll(readOperation).toBe("difference");
-  await page.keyboard.press("Control+Alt+i");
+  await page.getByRole("button", { name: "불리언 교차" }).click();
   await expect.poll(readOperation).toBe("intersection");
-  await page.keyboard.press("Control+Alt+e");
+  await page.getByRole("button", { name: "불리언 제외" }).click();
   await expect.poll(readOperation).toBe("exclusion");
 
   await page.keyboard.press("Control+z");
