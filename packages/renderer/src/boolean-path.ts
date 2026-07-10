@@ -68,7 +68,7 @@ export function evaluateBooleanPath(
   const bounds = result.bounds;
   const evaluation = {
     pathData: result.pathData,
-    area: Math.abs(result.area),
+    area: filledPathArea(result, scope),
     bounds: {
       x: normalizeNumber(bounds.x),
       y: normalizeNumber(bounds.y),
@@ -83,4 +83,27 @@ export function evaluateBooleanPath(
 function normalizeNumber(value: number) {
   const rounded = Math.round(value * 1000) / 1000;
   return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+function filledPathArea(
+  result: paper.Path | paper.CompoundPath,
+  scope: paper.PaperScope
+) {
+  if (result instanceof scope.Path) {
+    return Math.abs(result.area);
+  }
+
+  const paths = result.children.filter(
+    (child): child is paper.Path => child instanceof scope.Path
+  );
+  return paths.reduce((area, path) => {
+    const containmentDepth = paths.filter(
+      (candidate) =>
+        candidate !== path &&
+        Math.abs(candidate.area) > Math.abs(path.area) &&
+        candidate.contains(path.interiorPoint)
+    ).length;
+    const contribution = Math.abs(path.area);
+    return area + (containmentDepth % 2 === 0 ? contribution : -contribution);
+  }, 0);
 }
