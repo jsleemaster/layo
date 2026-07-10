@@ -186,24 +186,32 @@ function clipSourceFillRuleForNode(node: RendererNode) {
   return fillRule === "evenodd" ? "evenodd" : "nonzero";
 }
 
-function clipSourceUsesEvenOddFillRule(node: RendererNode) {
-  return clipSourceFillRuleForNode(node) === "evenodd";
+function pathDataForNode(node: RendererNode) {
+  if (node.content.type === "path") {
+    const pathData = node.content.path_data.trim();
+    return pathData || null;
+  }
+  return clipSourcePathDataForNode(node);
+}
+
+function pathFillRuleForNode(node: RendererNode) {
+  return node.content.type === "path" ? node.content.fill_rule : clipSourceFillRuleForNode(node);
 }
 
 function svgFillRuleAttributeForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? ' fill-rule="evenodd"' : "";
+  return pathFillRuleForNode(node) === "evenodd" ? ' fill-rule="evenodd"' : "";
 }
 
 function svgClipRuleAttributeForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? ' clip-rule="evenodd"' : "";
+  return clipSourceFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
 }
 
 function pdfFillOperatorForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? "f*" : "f";
+  return pathFillRuleForNode(node) === "evenodd" ? "f*" : "f";
 }
 
 function pdfClipOperatorForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? "W*" : "W";
+  return clipSourceFillRuleForNode(node) === "evenodd" ? "W*" : "W";
 }
 
 function svgPathElement(pathData: string, attributes = "") {
@@ -787,7 +795,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
-  const pathData = clipSourcePathDataForNode(node);
+  const pathData = pathDataForNode(node);
   if (pathData) {
     const fillRuleAttribute = svgFillRuleAttributeForNode(node);
     return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + opacity + filter + " />";
@@ -1428,7 +1436,7 @@ function pdfShapePathCommandsForNode(node: RendererNode, pageHeight: number, x: 
   const pathX = x + inset;
   const pathY = y + inset;
   if (inset === 0) {
-    const pathData = clipSourcePathDataForNode(node);
+    const pathData = pathDataForNode(node);
     const pathCommands = pathData ? pdfPathCommandsFromSvgPathData(pathData, pageHeight, pathX, pathY) : null;
     if (pathCommands) {
       return pathCommands;

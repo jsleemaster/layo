@@ -13,10 +13,7 @@ const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
 const frameId = "33333333-3333-3333-3333-333333333333";
 const pathId = "55555555-5555-5555-5555-555555555555";
-const expectedPathAssetId = `penpot-asset-${pathId}-path-svg`;
 const pathData = "M4 20L16 4l12 16Z";
-const expectedPathSvgMarkup = '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="24" viewBox="0 0 32 24"><path d="M4 20L16 4l12 16Z" fill="#14b8a6" stroke="#0f172a" stroke-width="2" opacity="0.8"/></svg>';
-const expectedPathSvgBytes = Buffer.from(expectedPathSvgMarkup, "utf8");
 
 function createPenpotPathExportArchive(): Buffer {
   return createZipArchive([
@@ -86,7 +83,7 @@ afterEach(async () => {
   }
 });
 
-test("imports Penpot path shapes as local SVG image assets", () => {
+test("imports Penpot path shapes as first-class path nodes", () => {
   const archive = createPenpotPathExportArchive();
 
   const review = reviewExternalMigrationArchive(archive, { fileName: "path.penpot" });
@@ -111,37 +108,27 @@ test("imports Penpot path shapes as local SVG image assets", () => {
     mappedNodeCount: 2,
     skippedNodeCount: 0
   });
-  expect(imported.importedAssets).toHaveLength(1);
-  expect(imported.importedAssets[0]?.metadata).toMatchObject({
-    assetId: expectedPathAssetId,
-    name: "Vector triangle.svg",
-    mimeType: "image/svg+xml",
-    byteLength: expectedPathSvgBytes.length,
-    url: `/assets/${expectedPathAssetId}`
-  });
-  expect(imported.importedAssets[0]?.data).toEqual(expectedPathSvgBytes);
+  expect(imported.importedAssets).toEqual([]);
 
   const frame = imported.file.pages[0].children[0];
   expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Path frame" });
   expect(frame.children).toHaveLength(1);
   expect(frame.children[0]).toMatchObject({
     id: `penpot-${pathId}`,
-    kind: "image",
+    kind: "path",
     name: "Vector triangle",
     transform: { x: 16, y: 16, rotation: 0 },
     size: { width: 32, height: 24 },
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.8 },
+    style: { fill: "#14b8a6", stroke: "#0f172a", stroke_width: 2, opacity: 0.8 },
     content: {
-      type: "image",
-      asset_id: expectedPathAssetId,
-      natural_width: 32,
-      natural_height: 24,
-      fit_mode: "fill"
+      type: "path",
+      path_data: pathData,
+      fill_rule: "nonzero"
     }
   });
 });
 
-test("reviews imports and persists Penpot path assets through HTTP", async () => {
+test("reviews imports and persists first-class Penpot paths through HTTP", async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const storage = new FileStorage(tempRoot);
   const server = createHttpServer(storage);
@@ -160,7 +147,7 @@ test("reviews imports and persists Penpot path assets through HTTP", async () =>
   expect(imported.json().imported).toMatchObject({
     source: "penpot",
     sourceLabel: "Penpot",
-    assetCount: 1,
+    assetCount: 0,
     mappedNodeCount: 2,
     skippedNodeCount: 0,
     project: { name: "Penpot Path Board" },
@@ -169,30 +156,16 @@ test("reviews imports and persists Penpot path assets through HTTP", async () =>
 
   const projects = await storage.listProjects();
   const persisted = await storage.readFile(projects[0].currentDocumentId);
-  const frame = persisted.pages[0].children[0];
-  const pathNode = frame.children[0];
+  const pathNode = persisted.pages[0].children[0].children[0];
   expect(pathNode).toMatchObject({
     id: `penpot-${pathId}`,
-    kind: "image",
+    kind: "path",
     name: "Vector triangle",
+    style: { fill: "#14b8a6", stroke: "#0f172a", stroke_width: 2, opacity: 0.8 },
     content: {
-      type: "image",
-      asset_id: expectedPathAssetId,
-      natural_width: 32,
-      natural_height: 24,
-      fit_mode: "fill"
+      type: "path",
+      path_data: pathData,
+      fill_rule: "nonzero"
     }
   });
-  if (pathNode.content.type !== "image") {
-    throw new Error("expected Penpot path import to persist an image node");
-  }
-  const asset = await storage.readAsset(pathNode.content.asset_id);
-  expect(asset).toMatchObject({
-    assetId: expectedPathAssetId,
-    name: "Vector triangle.svg",
-    mimeType: "image/svg+xml",
-    byteLength: expectedPathSvgBytes.length,
-    url: `/assets/${expectedPathAssetId}`
-  });
-  expect(asset.data).toEqual(expectedPathSvgBytes);
 });

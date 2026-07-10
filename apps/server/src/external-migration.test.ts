@@ -433,4 +433,94 @@ describe("external design migration preflight", () => {
     expect(review.warnings.join(" ")).toContain("binary");
     expect(review.nextSteps.join(" ")).toContain("GET /v1/files/:key");
   });
+  test("imports Penpot paths as first-class editable nodes without synthesizing image assets", () => {
+    const fileId = "11111111-1111-1111-1111-111111111111";
+    const pageId = "22222222-2222-2222-2222-222222222222";
+    const frameId = "33333333-3333-3333-3333-333333333333";
+    const pathId = "55555555-5555-5555-5555-555555555555";
+    const pathData = "M4 20L16 4l12 16Z";
+    const archive = createZipArchive([
+      {
+        path: "manifest.json",
+        data: Buffer.from(
+          JSON.stringify({
+            type: "penpot/export-files",
+            version: 1,
+            files: [{ id: fileId, name: "Penpot Path Board", features: [] }]
+          }),
+          "utf8"
+        )
+      },
+      {
+        path: `files/${fileId}.json`,
+        data: Buffer.from(JSON.stringify({ id: fileId, name: "Penpot Path Board" }), "utf8")
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}.json`,
+        data: Buffer.from(JSON.stringify({ id: pageId, name: "Path import", index: 0, objects: {} }), "utf8")
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${frameId}.json`,
+        data: Buffer.from(
+          JSON.stringify({
+            id: frameId,
+            name: "Path frame",
+            type: "frame",
+            x: 40,
+            y: 64,
+            width: 160,
+            height: 96,
+            fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+            shapes: [pathId]
+          }),
+          "utf8"
+        )
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${pathId}.json`,
+        data: Buffer.from(
+          JSON.stringify({
+            id: pathId,
+            name: "Vector triangle",
+            type: "path",
+            x: 56,
+            y: 80,
+            width: 32,
+            height: 24,
+            opacity: 0.8,
+            content: pathData,
+            fills: [{ fillColor: "#14b8a6", fillOpacity: 1 }],
+            strokes: [{ strokeColor: "#0f172a", strokeOpacity: 1, strokeWidth: 2 }]
+          }),
+          "utf8"
+        )
+      }
+    ]);
+
+    const imported = importExternalMigrationArchive(archive, {
+      fileName: "path.penpot",
+      sourceHint: "penpot"
+    });
+    const frame = imported.file.pages[0].children[0];
+
+    expect(frame.children).toHaveLength(1);
+    expect(frame.children[0]).toMatchObject({
+      id: `penpot-${pathId}`,
+      kind: "path",
+      name: "Vector triangle",
+      style: {
+        fill: "#14b8a6",
+        stroke: "#0f172a",
+        stroke_width: 2,
+        opacity: 0.8
+      },
+      content: {
+        type: "path",
+        path_data: pathData,
+        fill_rule: "nonzero"
+      }
+    });
+    expect(imported.importedAssets).toEqual([]);
+  });
+
 });

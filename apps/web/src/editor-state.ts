@@ -233,6 +233,12 @@ export type EditorCommand =
       value: string;
     }
   | {
+      type: "set_path_data";
+      nodeId: string;
+      pathData: string;
+      fillRule: "nonzero" | "evenodd";
+    }
+  | {
       type: "set_text_writing_mode";
       nodeId: string;
       writingMode: TextWritingMode;
@@ -2433,6 +2439,38 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           style: previousStyle
         }
       };
+    }
+    case "set_path_data": {
+      const node = findNodeById(next, command.nodeId);
+      const pathData = command.pathData.trim();
+      if (
+        !node ||
+        isNodeLocked(node) ||
+        node.content.type !== "path" ||
+        !pathData ||
+        (command.fillRule !== "nonzero" && command.fillRule !== "evenodd")
+      ) {
+        return { document, inverse: null };
+      }
+      if (
+        node.content.path_data === pathData &&
+        node.content.fill_rule === command.fillRule
+      ) {
+        return { document, inverse: null };
+      }
+
+      const inverse: EditorCommand = {
+        type: "set_path_data",
+        nodeId: command.nodeId,
+        pathData: node.content.path_data,
+        fillRule: node.content.fill_rule
+      };
+      node.content = {
+        type: "path",
+        path_data: pathData,
+        fill_rule: command.fillRule
+      };
+      return { document: next, inverse };
     }
     case "update_text": {
       const node = findNodeById(next, command.nodeId);

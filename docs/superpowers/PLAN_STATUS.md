@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-06
+Last audited: 2026-07-10
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| _None_ | Idle | No active plan. Latest completed Penpot maturity-loop slice is `2026-07-06-penpot-radial-stroke-raster-canvas.md`; deployment remains intentionally deferred. |
+| `2026-07-10-penpot-first-class-path-editing.md` | Active | PR #272 establishes the Rust/TypeScript path contract, asset-free Penpot import, MCP/HTTP mutation, inspect/validation/change summaries, canvas/artifact fidelity, and direct anchor/control drag with persisted undo. Full Verification #465 run `29086037029` attempt 2 passed all gates and 183 Playwright cases. The active next failed capability is path topology editing: add/delete, corner/curve, join/merge/separate, redo, and Bezier-handle browser proof; boolean operations follow after that. Deployment remains deferred. |
 
 ## Completed Plans
 

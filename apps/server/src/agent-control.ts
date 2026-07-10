@@ -79,7 +79,8 @@ export interface NodeVectorSource {
 
 export type AgentCommand =
   | BaseAgentCommand
-  | { type: "set_vector_source"; nodeId: string; vectorSource: NodeVectorSource | null };
+  | { type: "set_vector_source"; nodeId: string; vectorSource: NodeVectorSource | null }
+  | { type: "set_path_data"; nodeId: string; pathData: string; fillRule: "nonzero" | "evenodd" };
 
 export type AgentBatchInput = Omit<BaseAgentBatchInput, "commands"> & { commands: AgentCommand[] };
 
@@ -94,11 +95,14 @@ type ImageContentWithVectorSource = Extract<DesignNode["content"], { type: "imag
   vector_source?: NodeVectorSource | null;
 };
 type SetVectorSourceCommand = Extract<AgentCommand, { type: "set_vector_source" }>;
+type SetPathDataCommand = Extract<AgentCommand, { type: "set_path_data" }>;
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
   paintSources?: NodePaintSource[];
   vectorSource?: NodeVectorSource;
+  pathData?: string;
+  fillRule?: "nonzero" | "evenodd";
 }
 
 export interface CanvasInspection extends Omit<BaseCanvasInspection, "nodes"> {
@@ -151,6 +155,10 @@ export function applyAgentCommandsToDocument(
   for (const command of commands) {
     if (command.type === "set_vector_source") {
       changedNodeIds.push(applyVectorSourceCommand(draft, command));
+      continue;
+    }
+    if (command.type === "set_path_data") {
+      changedNodeIds.push(applyPathDataCommand(draft, command));
       continue;
     }
 
@@ -218,6 +226,9 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     clip: nodeClip(node),
     paintSources: paintSources.length > 0 ? paintSources : undefined,
     ...(vectorSource ? { vectorSource: structuredClone(vectorSource) } : {}),
+    ...(node.content.type === "path"
+      ? { pathData: node.content.path_data, fillRule: node.content.fill_rule }
+      : {}),
     bounds: {
       x: node.transform.x,
       y: node.transform.y,
@@ -229,6 +240,31 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
   for (const child of node.children) {
     collectSummary(child, [...path, child.id], nodes);
   }
+}
+
+function applyPathDataCommand(document: DesignFile, command: SetPathDataCommand): string {
+  const node = findNodeById(document, command.nodeId);
+  if (!node) {
+    throw new Error(`node not found: ${command.nodeId}`);
+  }
+  if (node.content.type !== "path") {
+    throw new Error(`node is not path: ${command.nodeId}`);
+  }
+
+  const pathData = command.pathData.trim();
+  if (!pathData) {
+    throw new Error("path data is required");
+  }
+  if (command.fillRule !== "nonzero" && command.fillRule !== "evenodd") {
+    throw new Error("path fill rule must be nonzero or evenodd");
+  }
+
+  node.content = {
+    type: "path",
+    path_data: pathData,
+    fill_rule: command.fillRule
+  };
+  return node.id;
 }
 
 function applyVectorSourceCommand(document: DesignFile, command: SetVectorSourceCommand): string {

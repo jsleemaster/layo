@@ -12,7 +12,7 @@ const agentFindSchema = {
   id: z.string().optional().describe("Node id substring to match"),
   name: z.string().optional().describe("Node name substring to match"),
   kind: z
-    .enum(["frame", "rectangle", "text", "image", "component", "component_instance"])
+    .enum(["frame", "rectangle", "text", "image", "path", "component", "component_instance"])
     .optional()
     .describe("Node kind to match"),
   text: z.string().optional().describe("Text content substring to match"),
@@ -373,6 +373,12 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("set_vector_source"),
     nodeId: z.string(),
     vectorSource: nodeVectorSourceSchema.nullable()
+  }),
+  z.object({
+    type: z.literal("set_path_data"),
+    nodeId: z.string(),
+    pathData: z.string().min(1),
+    fillRule: z.enum(["nonzero", "evenodd"])
   }),
   z.object({
     type: z.literal("set_layout"),
