@@ -14,6 +14,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Group, Image as KonvaImage, Layer, Path as KonvaPath, Rect, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  type BooleanPathOperation,
   type DesignStyle,
   type DesignToken,
   type DesignTokenSet,
@@ -1976,6 +1977,82 @@ async function persistComponentVariantArea(fileId: string, componentId: string, 
   if (!response.ok) {
     throw new Error(`컴포넌트 변형 영역 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
+}
+
+type BooleanPathAgentCommand =
+  | {
+      type: "create_boolean_path";
+      nodeId: string;
+      name: string;
+      operation: BooleanPathOperation;
+      sourceNodeIds: string[];
+    }
+  | {
+      type: "set_boolean_path_operation";
+      nodeId: string;
+      operation: BooleanPathOperation;
+    }
+  | { type: "detach_boolean_path"; nodeId: string };
+
+async function persistBooleanPathCommand(
+  fileId: string,
+  command: BooleanPathAgentCommand
+) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dryRun: false, commands: [command] })
+  });
+  if (!response.ok) {
+    throw new Error(`불리언 경로 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+function booleanPathCommandForTransition(
+  current: RendererDocument,
+  next: RendererDocument
+): BooleanPathAgentCommand | null {
+  const currentBooleanNodes = new Map(
+    flattenRendererNodes(current)
+      .filter((node) => node.content.type === "boolean_path")
+      .map((node) => [node.id, node])
+  );
+  const nextBooleanNodes = new Map(
+    flattenRendererNodes(next)
+      .filter((node) => node.content.type === "boolean_path")
+      .map((node) => [node.id, node])
+  );
+
+  for (const [nodeId, node] of currentBooleanNodes) {
+    if (!nextBooleanNodes.has(nodeId)) {
+      return { type: "detach_boolean_path", nodeId };
+    }
+    const nextNode = nextBooleanNodes.get(nodeId);
+    if (
+      node.content.type === "boolean_path" &&
+      nextNode?.content.type === "boolean_path" &&
+      node.content.relation.operation !== nextNode.content.relation.operation
+    ) {
+      return {
+        type: "set_boolean_path_operation",
+        nodeId,
+        operation: nextNode.content.relation.operation
+      };
+    }
+  }
+
+  for (const [nodeId, node] of nextBooleanNodes) {
+    if (!currentBooleanNodes.has(nodeId) && node.content.type === "boolean_path") {
+      return {
+        type: "create_boolean_path",
+        nodeId,
+        name: node.name,
+        operation: node.content.relation.operation,
+        sourceNodeIds: [...node.content.relation.source_node_ids]
+      };
+    }
+  }
+  return null;
 }
 
 async function persistPathChange(
@@ -10074,6 +10151,19 @@ export function App() {
               setProjectStatus(message);
             });
           }
+          const booleanCommand = booleanPathCommandForTransition(
+            current.document,
+            nextState.document
+          );
+          if (currentProjectRef.current && booleanCommand) {
+            void persistBooleanPathCommand(
+              currentProjectRef.current.currentDocumentId,
+              booleanCommand
+            ).catch((error) => {
+              const message = error instanceof Error ? error.message : "불리언 경로를 저장하지 못했습니다";
+              setProjectStatus(message);
+            });
+          }
           publishEditorPresence(nextState);
           return nextState;
         });
@@ -10605,6 +10695,95 @@ export function App() {
     activeSession.transact("editor-command", () => nextState.document);
     publishEditorPresence(nextState);
     setEditor(nextState);
+  };
+
+  const applyBooleanPathOperation = (operation: BooleanPathOperation) => {
+    const currentEditor = editorRef.current;
+    const project = currentProjectRef.current;
+    if (!currentEditor || !project) {
+      return;
+    }
+
+    const selectedIds = currentEditor.selection.nodeIds;
+    const selected = selectedIds.flatMap((nodeId) => {
+      const node = findNodeById(currentEditor.document, nodeId);
+      return node ? [node] : [];
+    });
+    const selectedBoolean =
+      selected.length === 1 && selected[0]?.content.type === "boolean_path"
+        ? selected[0]
+        : null;
+
+    let command: BooleanPathAgentCommand;
+    if (selectedBoolean) {
+      command = {
+        type: "set_boolean_path_operation",
+        nodeId: selectedBoolean.id,
+        operation
+      };
+      dispatch({
+        type: "set_boolean_path_operation",
+        nodeId: selectedBoolean.id,
+        operation
+      });
+    } else {
+      if (
+        selected.length < 2 ||
+        selected.some(
+          (node) =>
+            isNodeLocked(node) ||
+            node.kind !== "path" ||
+            (node.content.type !== "path" && node.content.type !== "boolean_path")
+        )
+      ) {
+        return;
+      }
+      let sequence = flattenRendererNodes(currentEditor.document).length + 1;
+      let nodeId = `boolean-${sequence}`;
+      while (findNodeById(currentEditor.document, nodeId)) {
+        sequence += 1;
+        nodeId = `boolean-${sequence}`;
+      }
+      command = {
+        type: "create_boolean_path",
+        nodeId,
+        name: "불리언 경로",
+        operation,
+        sourceNodeIds: selectedIds
+      };
+      dispatch({
+        type: "create_boolean_path",
+        nodeId,
+        name: command.name,
+        operation,
+        sourceNodeIds: selectedIds
+      });
+    }
+
+    void persistBooleanPathCommand(project.currentDocumentId, command)
+      .then(() => setProjectStatus("불리언 경로 저장됨"))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "불리언 경로를 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const detachSelectedBooleanPath = () => {
+    const currentEditor = editorRef.current;
+    const project = currentProjectRef.current;
+    const nodeId = currentEditor?.selection.nodeId ?? null;
+    const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+    if (!project || !node || node.content.type !== "boolean_path" || isNodeLocked(node)) {
+      return;
+    }
+    const command: BooleanPathAgentCommand = { type: "detach_boolean_path", nodeId: node.id };
+    dispatch(command);
+    void persistBooleanPathCommand(project.currentDocumentId, command)
+      .then(() => setProjectStatus("불리언 경로 분리됨"))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "불리언 경로를 분리하지 못했습니다";
+        setProjectStatus(message);
+      });
   };
 
   const startPathEdit = (nodeId: string) => {
@@ -15196,6 +15375,77 @@ export function App() {
             <span className="toolbar-icon toolbar-icon-detach" aria-hidden="true">
               ◇
             </span>
+          </button>
+          <button
+            type="button"
+            aria-label="불리언 합치기"
+            title="불리언 합치기"
+            disabled={
+              !(
+                (selectedNodes.length >= 2 &&
+                  selectedNodes.every(
+                    (node) =>
+                      !isNodeLocked(node) &&
+                      node.kind === "path" &&
+                      (node.content.type === "path" || node.content.type === "boolean_path")
+                  )) ||
+                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
+              )
+            }
+            onClick={() => applyBooleanPathOperation("union")}
+          >
+            ∪
+          </button>
+          <button
+            type="button"
+            aria-label="불리언 빼기"
+            title="불리언 빼기"
+            disabled={
+              !(
+                selectedNodes.length >= 2 ||
+                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
+              )
+            }
+            onClick={() => applyBooleanPathOperation("difference")}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="불리언 교차"
+            title="불리언 교차"
+            disabled={
+              !(
+                selectedNodes.length >= 2 ||
+                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
+              )
+            }
+            onClick={() => applyBooleanPathOperation("intersection")}
+          >
+            ∩
+          </button>
+          <button
+            type="button"
+            aria-label="불리언 제외"
+            title="불리언 제외"
+            disabled={
+              !(
+                selectedNodes.length >= 2 ||
+                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
+              )
+            }
+            onClick={() => applyBooleanPathOperation("exclusion")}
+          >
+            ⊕
+          </button>
+          <button
+            type="button"
+            aria-label="불리언 분리"
+            title="불리언 분리"
+            disabled={selectedNodes.length !== 1 || selectedNodes[0]?.content.type !== "boolean_path"}
+            onClick={detachSelectedBooleanPath}
+          >
+            ⧉
           </button>
           <button
             type="button"
