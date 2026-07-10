@@ -116,6 +116,18 @@ describe("editable path geometry", () => {
     expect(serializeEditablePath(deleted)).toBe("M0 0 L100 0 L100 100 Z");
   });
 
+  test("splits cubic and quadratic curves without changing their geometry", () => {
+    const cubic = parseEditablePath("M0 0 C30 0 60 0 90 0")!;
+    expect(serializeEditablePath(insertEditablePathAnchor(cubic, 0))).toBe(
+      "M0 0 C15 0 30 0 45 0 C60 0 75 0 90 0"
+    );
+
+    const quadratic = parseEditablePath("M0 0 Q45 90 90 0")!;
+    expect(serializeEditablePath(insertEditablePathAnchor(quadratic, 0))).toBe(
+      "M0 0 Q22.5 45 45 45 Q67.5 45 90 0"
+    );
+  });
+
   test("converts a line anchor to a curve and back to a corner", () => {
     const path = parseEditablePath("M0 0 L90 0 L90 90")!;
 
