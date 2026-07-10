@@ -4191,7 +4191,8 @@ function renderNode({
         naturalHeight={node.content.natural_height}
         shadowProps={shadowProps}
       />
-    ) : node.kind === "path" && node.content.type === "path" ? (
+    ) : node.kind === "path" &&
+      (node.content.type === "path" || node.content.type === "boolean_path") ? (
       <KonvaPath
         data={node.content.path_data}
         fill={node.style.fill}
@@ -4329,7 +4330,7 @@ function renderNode({
           ) : null}
         </>
       ) : null}
-      {orderedAppChildrenForPaint(node.children).map((child) =>
+      {orderedAppChildrenForPaint(node.content.type === "boolean_path" ? [] : node.children).map((child) =>
         renderNode({
           node: child,
           selectedNodeId,
