@@ -129,6 +129,28 @@ describe("non-destructive boolean path commands", () => {
     });
   });
 
+  test("validates invalid relation operations and non-path source children", () => {
+    const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "create_boolean_path",
+      nodeId: "boolean-invalid-relation",
+      name: "Invalid relation",
+      operation: "union",
+      sourceNodeIds: ["path-left", "path-right"]
+    }]).document;
+    const booleanNode = created.pages[0].children[0];
+    if (booleanNode.content.type !== "boolean_path") {
+      throw new Error("boolean fixture was not created");
+    }
+    booleanNode.content.relation.operation = "invalid" as never;
+    booleanNode.children[0].kind = "rectangle";
+    booleanNode.children[0].content = { type: "empty" };
+
+    expect(validateDocument(created).issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "invalid_boolean_path_operation" }),
+      expect.objectContaining({ code: "invalid_boolean_path_source_geometry" })
+    ]));
+  });
+
   test("rejects missing, duplicate, and non-path operands", () => {
     const source = createBooleanFixture();
     source.pages[0].children.push({
