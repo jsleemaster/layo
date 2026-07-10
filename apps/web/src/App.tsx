@@ -1971,6 +1971,26 @@ async function persistComponentVariantArea(fileId: string, componentId: string, 
   }
 }
 
+async function persistPathChange(
+  fileId: string,
+  nodeId: string,
+  pathData: string,
+  fillRule: "nonzero" | "evenodd"
+) {
+  const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      dryRun: false,
+      commands: [{ type: "set_path_data", nodeId, pathData, fillRule }]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`경로 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
 async function persistTextChange(fileId: string, nodeId: string, value: string) {
   const response = await fetch(apiUrl(`/files/${fileId}/agent/commands`), {
     method: "POST",
