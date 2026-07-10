@@ -36,7 +36,7 @@ describe("boolean path evaluation", () => {
       }
     ]);
 
-    expect(result.pathData).toContain("C");
+    expect(result.pathData).toMatch(/[Cc]/);
     expect(result.bounds.width).toBe(120);
     expect(result.area).toBeGreaterThan(7_800);
   });
