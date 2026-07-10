@@ -2505,6 +2505,10 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
             node.content.type === "path" || node.content.type === "boolean_path"
               ? node.content.path_data
               : "",
+          fillRule:
+            node.content.type === "path" || node.content.type === "boolean_path"
+              ? node.content.fill_rule
+              : "nonzero",
           transform: node.transform
         }))
       );
@@ -2530,10 +2534,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
             source_node_ids: sourceNodeIds
           },
           path_data: evaluation.pathData,
-          fill_rule:
-            firstSource.content.type === "path" || firstSource.content.type === "boolean_path"
-              ? firstSource.content.fill_rule
-              : "nonzero"
+          fill_rule: evaluation.fillRule
         },
         children: sources.map((node) => ({
           ...structuredClone(node),
@@ -2574,11 +2575,20 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
             source.content.type === "path" || source.content.type === "boolean_path"
               ? source.content.path_data
               : "",
+          fillRule:
+            source.content.type === "path" || source.content.type === "boolean_path"
+              ? source.content.fill_rule
+              : "nonzero",
           transform: source.transform
         }))
       );
-      node.transform.x += evaluation.bounds.x;
-      node.transform.y += evaluation.bounds.y;
+      const rotation = (node.transform.rotation * Math.PI) / 180;
+      const offsetX =
+        evaluation.bounds.x * Math.cos(rotation) - evaluation.bounds.y * Math.sin(rotation);
+      const offsetY =
+        evaluation.bounds.x * Math.sin(rotation) + evaluation.bounds.y * Math.cos(rotation);
+      node.transform.x += offsetX;
+      node.transform.y += offsetY;
       node.size = { width: evaluation.bounds.width, height: evaluation.bounds.height };
       node.children = node.children.map((child) => ({
         ...child,
@@ -2594,7 +2604,8 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           operation: command.operation,
           source_node_ids: [...node.content.relation.source_node_ids]
         },
-        path_data: evaluation.pathData
+        path_data: evaluation.pathData,
+        fill_rule: evaluation.fillRule
       };
       return {
         document: next,
