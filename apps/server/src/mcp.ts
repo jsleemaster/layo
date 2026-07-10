@@ -151,6 +151,20 @@ const nodeExportPresetSchema = z.object({
   suffix: z.string().default("")
 });
 
+const nodeVectorSourceSchema = z.object({
+  origin: z.literal("penpot"),
+  shapeId: z.string().min(1),
+  shapeType: z.literal("path"),
+  bounds: z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number().positive(),
+    height: z.number().positive()
+  }),
+  pathData: z.string().min(1),
+  fillRule: z.enum(["nonzero", "evenodd"]).optional()
+});
+
 const codeComponentMappingPropSchema = z.object({
   name: z.string().describe("Code prop name, for example title or label"),
   type: z.literal("string"),
@@ -354,6 +368,11 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("set_export_presets"),
     nodeId: z.string(),
     presets: z.array(nodeExportPresetSchema)
+  }),
+  z.object({
+    type: z.literal("set_vector_source"),
+    nodeId: z.string(),
+    vectorSource: nodeVectorSourceSchema.nullable()
   }),
   z.object({
     type: z.literal("set_layout"),
