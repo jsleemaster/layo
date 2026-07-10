@@ -51,13 +51,17 @@ test("non-destructive boolean controls preserve operands through every operation
       children: Array<{ id: string }>;
     }>;
   };
-  const readOperation = async () => (await readParentChildren())[0]?.content.relation?.operation;
+  const readBooleanPath = async () =>
+    (await readParentChildren()).find((node) => node.content.type === "boolean_path");
+  const readOperation = async () => (await readBooleanPath())?.content.relation?.operation;
 
   await expect.poll(readOperation).toBe("union");
-  await expect.poll(async () => (await readParentChildren())[0]?.children.map((node) => node.id)).toEqual([
+  await expect.poll(async () => (await readBooleanPath())?.children.map((node) => node.id)).toEqual([
     "path-left",
     "path-right"
   ]);
+  const booleanNodeId = (await readBooleanPath())?.id;
+  expect(booleanNodeId).toBeTruthy();
 
   await page.keyboard.press("Control+Alt+d");
   await expect.poll(readOperation).toBe("difference");
@@ -86,10 +90,12 @@ test("non-destructive boolean controls preserve operands through every operation
   expect(png.byteLength).toBeGreaterThan(100);
 
   await page.getByRole("button", { name: "불리언 분리" }).click();
-  await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).toEqual([
-    "path-left",
-    "path-right"
-  ]);
+  await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).toEqual(
+    expect.arrayContaining(["path-left", "path-right"])
+  );
+  await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).not.toContain(
+    booleanNodeId
+  );
 });
 
 async function findCanvasColorBounds(
