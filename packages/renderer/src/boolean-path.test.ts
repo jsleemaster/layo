@@ -20,8 +20,38 @@ describe("boolean path evaluation", () => {
     const result = evaluateBooleanPath(operation, [base, overlap]);
 
     expect(result.pathData).toMatch(/^M/);
+    expect(result.fillRule).toBe("nonzero");
     expect(Math.abs(result.area)).toBeCloseTo(area, 3);
     expect(result.bounds).toEqual(bounds);
+  });
+
+  test("honors even-odd holes before normalizing the result fill rule", () => {
+    const result = evaluateBooleanPath("union", [
+      {
+        pathData: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+        fillRule: "evenodd",
+        transform: { x: 0, y: 0, rotation: 0 }
+      },
+      {
+        pathData: "M0 0 H10 V10 H0 Z",
+        transform: { x: 200, y: 0, rotation: 0 }
+      }
+    ]);
+
+    expect(result.area).toBeCloseTo(7_600, 3);
+    expect(result.fillRule).toBe("nonzero");
+  });
+
+  test("rejects open operands instead of guessing their fill geometry", () => {
+    expect(() =>
+      evaluateBooleanPath("union", [
+        {
+          pathData: "M0 0 H100 V100",
+          transform: { x: 0, y: 0, rotation: 0 }
+        },
+        overlap
+      ])
+    ).toThrow("closed geometry");
   });
 
   test("preserves curved geometry instead of flattening it to polygon-only output", () => {
