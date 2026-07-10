@@ -65,6 +65,93 @@ describe("MCP first-class path agent command", () => {
     );
   });
 
+  test("creates, updates, and detaches boolean paths through the shared MCP batch", async () => {
+    const { client, storage } = await connectMcpClient();
+    const file = createPathFile();
+    const first = file.pages[0].children[0];
+    file.pages[0].children = [
+      { ...structuredClone(first), id: "path-left", transform: { x: 0, y: 0, rotation: 0 } },
+      { ...structuredClone(first), id: "path-right", transform: { x: 50, y: 0, rotation: 0 } }
+    ];
+    await storage.writeFile("path-file", file);
+
+    const created = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [{
+            type: "create_boolean_path",
+            nodeId: "boolean-1",
+            name: "Union",
+            operation: "union",
+            sourceNodeIds: ["path-left", "path-right"]
+          }]
+        }
+      })
+    );
+    expect(created.result).toMatchObject({
+      persisted: true,
+      audit: {
+        commandTypes: ["create_boolean_path"],
+        changedNodeIds: ["boolean-1", "path-left", "path-right"]
+      },
+      validation: { ok: true }
+    });
+    expect(created.result.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-1",
+          booleanRelation: {
+            operation: "union",
+            source_node_ids: ["path-left", "path-right"]
+          }
+        })
+      ])
+    );
+
+    const updated = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [{
+            type: "set_boolean_path_operation",
+            nodeId: "boolean-1",
+            operation: "intersection"
+          }]
+        }
+      })
+    );
+    expect(updated.result.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-1",
+          booleanRelation: { operation: "intersection" }
+        })
+      ])
+    );
+
+    const detached = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [{ type: "detach_boolean_path", nodeId: "boolean-1" }]
+        }
+      })
+    );
+    expect(detached.result.inspection.nodes.map((node: { id: string }) => node.id)).toEqual(
+      expect.arrayContaining(["path-left", "path-right"])
+    );
+    expect(detached.result.inspection.nodes.map((node: { id: string }) => node.id)).not.toContain(
+      "boolean-1"
+    );
+  });
+
   test("dry-runs and persists path geometry with inspect and validation evidence", async () => {
     const { client, storage } = await connectMcpClient();
     await storage.writeFile("path-file", createPathFile());
