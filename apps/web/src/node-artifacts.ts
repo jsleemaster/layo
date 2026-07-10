@@ -654,7 +654,7 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   }
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
-  const pathData = pathDataForNode(node);
+  const pathData = clipSourcePathDataForNode(node);
   const polygonPoints = svgClipPolygonPointsForNode(node);
 
   if (nodeClipUsesAlphaMask(node)) {
