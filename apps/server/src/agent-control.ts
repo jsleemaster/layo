@@ -84,6 +84,21 @@ export type AgentCommand =
   | { type: "set_vector_source"; nodeId: string; vectorSource: NodeVectorSource | null }
   | { type: "set_path_data"; nodeId: string; pathData: string; fillRule: "nonzero" | "evenodd" }
   | {
+      type: "create_path";
+      parentId: string;
+      id: string;
+      name?: string;
+      pathData: string;
+      fillRule?: "nonzero" | "evenodd";
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      fill?: string;
+      stroke?: string | null;
+      strokeWidth?: number;
+    }
+  | {
       type: "create_boolean_path";
       nodeId: string;
       name: string;
@@ -111,6 +126,7 @@ type ImageContentWithVectorSource = Extract<DesignNode["content"], { type: "imag
 };
 type SetVectorSourceCommand = Extract<AgentCommand, { type: "set_vector_source" }>;
 type SetPathDataCommand = Extract<AgentCommand, { type: "set_path_data" }>;
+type CreatePathCommand = Extract<AgentCommand, { type: "create_path" }>;
 type CreateBooleanPathCommand = Extract<AgentCommand, { type: "create_boolean_path" }>;
 type SetBooleanPathOperationCommand = Extract<AgentCommand, { type: "set_boolean_path_operation" }>;
 type DetachBooleanPathCommand = Extract<AgentCommand, { type: "detach_boolean_path" }>;
@@ -196,6 +212,10 @@ export function applyAgentCommandsToDocument(
     }
     if (command.type === "set_path_data") {
       changedNodeIds.push(applyPathDataCommand(draft, command));
+      continue;
+    }
+    if (command.type === "create_path") {
+      changedNodeIds.push(applyCreatePathCommand(draft, command));
       continue;
     }
     if (command.type === "create_boolean_path") {
@@ -357,6 +377,60 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
 
 interface NodeContainer {
   children: DesignNode[];
+}
+
+function applyCreatePathCommand(
+  document: DesignFile,
+  command: CreatePathCommand
+): string {
+  const id = command.id.trim();
+  const pathData = command.pathData.trim();
+  if (!id || !pathData) {
+    throw new Error("path id and path data are required");
+  }
+  if (findNodeById(document, id)) {
+    throw new Error(`node already exists: ${id}`);
+  }
+  const parent =
+    document.pages.find((page) => page.id === command.parentId) ??
+    findNodeById(document, command.parentId);
+  if (!parent) {
+    throw new Error(`parent not found: ${command.parentId}`);
+  }
+  const fillRule = command.fillRule ?? "nonzero";
+  if (fillRule !== "nonzero" && fillRule !== "evenodd") {
+    throw new Error("path fill rule must be nonzero or evenodd");
+  }
+  const width = command.width ?? 100;
+  const height = command.height ?? 100;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error("path size must be positive");
+  }
+  const node: DesignNode = {
+    id,
+    kind: "path",
+    name: command.name?.trim() || "경로",
+    transform: {
+      x: command.x ?? 0,
+      y: command.y ?? 0,
+      rotation: 0
+    },
+    size: { width, height },
+    style: {
+      fill: command.fill ?? "#0ea5e9",
+      stroke: command.stroke ?? null,
+      stroke_width: Math.max(0, command.strokeWidth ?? 0),
+      opacity: 1
+    },
+    content: {
+      type: "path",
+      path_data: pathData,
+      fill_rule: fillRule
+    },
+    children: []
+  };
+  parent.children.push(node);
+  return node.id;
 }
 
 function applyCreateBooleanPathCommand(
