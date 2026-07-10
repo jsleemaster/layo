@@ -11,7 +11,7 @@ import type {
   AgentNodeSummary as BaseAgentNodeSummary,
   CanvasInspection as BaseCanvasInspection
 } from "./agent-control-base.js";
-import type { DesignFile, DesignNode } from "./storage";
+import type { DesignFile, DesignNode, PathBooleanRelation } from "./storage";
 
 export * from "./agent-control-base.js";
 
@@ -103,6 +103,7 @@ export interface AgentNodeSummary extends BaseAgentNodeSummary {
   vectorSource?: NodeVectorSource;
   pathData?: string;
   fillRule?: "nonzero" | "evenodd";
+  booleanRelation?: PathBooleanRelation;
 }
 
 export interface CanvasInspection extends Omit<BaseCanvasInspection, "nodes"> {
@@ -226,8 +227,11 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     clip: nodeClip(node),
     paintSources: paintSources.length > 0 ? paintSources : undefined,
     ...(vectorSource ? { vectorSource: structuredClone(vectorSource) } : {}),
-    ...(node.content.type === "path"
+    ...(node.content.type === "path" || node.content.type === "boolean_path"
       ? { pathData: node.content.path_data, fillRule: node.content.fill_rule }
+      : {}),
+    ...(node.content.type === "boolean_path"
+      ? { booleanRelation: structuredClone(node.content.relation) }
       : {}),
     bounds: {
       x: node.transform.x,
