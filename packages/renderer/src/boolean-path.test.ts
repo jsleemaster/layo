@@ -42,6 +42,12 @@ describe("boolean path evaluation", () => {
     expect(result.fillRule).toBe("nonzero");
   });
 
+  test("rejects unknown runtime operations instead of treating them as exclusion", () => {
+    expect(() => evaluateBooleanPath("invalid" as never, [base, overlap])).toThrow(
+      "unsupported boolean path operation"
+    );
+  });
+
   test("rejects open operands instead of guessing their fill geometry", () => {
     expect(() =>
       evaluateBooleanPath("union", [
