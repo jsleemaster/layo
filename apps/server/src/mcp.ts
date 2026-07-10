@@ -381,6 +381,21 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     fillRule: z.enum(["nonzero", "evenodd"])
   }),
   z.object({
+    type: z.literal("create_path"),
+    parentId: z.string().min(1),
+    id: z.string().min(1),
+    name: z.string().optional(),
+    pathData: z.string().min(1),
+    fillRule: z.enum(["nonzero", "evenodd"]).optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+    fill: z.string().optional(),
+    stroke: z.string().nullable().optional(),
+    strokeWidth: z.number().nonnegative().optional()
+  }),
+  z.object({
     type: z.literal("create_boolean_path"),
     nodeId: z.string().min(1),
     name: z.string().min(1),
