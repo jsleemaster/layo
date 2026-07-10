@@ -27,7 +27,7 @@
 - RED import contract: Full Verification #424, run `29081308006`, failed only because Penpot paths still arrived as image nodes.
 - RED MCP mutation contract: Full Verification #435, run `29082394587`, failed only because MCP rejected `set_path_data`.
 - RED artifact contract: Full Verification #438, run `29083054678`, failed only because first-class path content exported as a rectangle.
-- Remaining before completion: explicit Rust path JSON round-trip regression, direct anchor/control editing, undo/redo, keyboard access, and dedicated path-editing Playwright interaction proof.
+- RED direct editing: Full Verification #447, run `29084575601`, passed 182 e2e cases and failed only because `path-editor-overlay` does not exist after selecting a path and pressing Enter.\n- Remaining before completion: direct anchor/control editing, undo/redo, keyboard access, and dedicated GREEN path-editing Playwright interaction proof.
 
 ### Task 1: First-Class Path Document Contract
 
@@ -45,7 +45,7 @@
 - Produces: `NodeContent::Path { path_data: String, fill_rule: PathFillRule }`.
 - Produces: `PathFillRule = "nonzero" | "evenodd"`.
 
-- [ ] **Step 1: Write RED Rust and renderer round-trip tests**
+- [x] **Step 1: Write RED Rust and renderer round-trip tests**
 
 Assert that this JSON round-trips without field loss:
 
