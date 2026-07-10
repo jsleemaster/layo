@@ -654,7 +654,7 @@ function svgClipPathLinesForNode(node: RendererNode, depth: number): string[] {
   }
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
-  const pathData = clipSourcePathDataForNode(node);
+  const pathData = pathDataForNode(node);
   const polygonPoints = svgClipPolygonPointsForNode(node);
 
   if (nodeClipUsesAlphaMask(node)) {
@@ -795,7 +795,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
-  const pathData = clipSourcePathDataForNode(node);
+  const pathData = pathDataForNode(node);
   if (pathData) {
     const fillRuleAttribute = svgFillRuleAttributeForNode(node);
     return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + opacity + filter + " />";
@@ -1436,7 +1436,7 @@ function pdfShapePathCommandsForNode(node: RendererNode, pageHeight: number, x: 
   const pathX = x + inset;
   const pathY = y + inset;
   if (inset === 0) {
-    const pathData = clipSourcePathDataForNode(node);
+    const pathData = pathDataForNode(node);
     const pathCommands = pathData ? pdfPathCommandsFromSvgPathData(pathData, pageHeight, pathX, pathY) : null;
     if (pathCommands) {
       return pathCommands;
