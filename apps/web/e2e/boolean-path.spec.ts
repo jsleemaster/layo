@@ -63,15 +63,7 @@ test("non-destructive boolean controls preserve operands through every operation
   const booleanNodeId = (await readBooleanPath())?.id;
   expect(booleanNodeId).toBeTruthy();
 
-  await page.evaluate(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "d",
-      code: "KeyD",
-      ctrlKey: true,
-      altKey: true,
-      bubbles: true
-    }));
-  });
+  await page.getByRole("button", { name: "불리언 빼기" }).click();
   await expect.poll(readOperation).toBe("difference");
   await page.getByRole("button", { name: "불리언 교차" }).click();
   await expect.poll(readOperation).toBe("intersection");
