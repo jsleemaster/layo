@@ -8905,6 +8905,19 @@ export function App() {
       return node ? [node] : [];
     });
   }, [editor, selectedNodeIds]);
+  const selectedBooleanPath =
+    selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path"
+      ? selectedNodes[0]
+      : null;
+  const canApplyBooleanPath =
+    (selectedNodes.length >= 2 &&
+      selectedNodes.every(
+        (node) =>
+          !isNodeLocked(node) &&
+          node.kind === "path" &&
+          (node.content.type === "path" || node.content.type === "boolean_path")
+      )) ||
+    Boolean(selectedBooleanPath && !isNodeLocked(selectedBooleanPath));
   const contextMenuNodeIsLocked = isNodeLocked(contextMenuNode);
   const contextMenuNodeIsHidden = contextMenuNode ? !isNodeVisible(contextMenuNode) : false;
   const canMutateContextMenuNode = Boolean(contextMenuNode && !contextMenuNodeIsLocked);
@@ -15389,77 +15402,55 @@ export function App() {
               ◇
             </span>
           </button>
-          <button
-            type="button"
-            aria-label="불리언 합치기"
-            title="불리언 합치기"
-            disabled={
-              !(
-                (selectedNodes.length >= 2 &&
-                  selectedNodes.every(
-                    (node) =>
-                      !isNodeLocked(node) &&
-                      node.kind === "path" &&
-                      (node.content.type === "path" || node.content.type === "boolean_path")
-                  )) ||
-                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
-              )
-            }
-            onClick={() => applyBooleanPathOperation("union")}
-          >
-            ∪
-          </button>
-          <button
-            type="button"
-            aria-label="불리언 빼기"
-            title="불리언 빼기"
-            disabled={
-              !(
-                selectedNodes.length >= 2 ||
-                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
-              )
-            }
-            onClick={() => applyBooleanPathOperation("difference")}
-          >
-            −
-          </button>
-          <button
-            type="button"
-            aria-label="불리언 교차"
-            title="불리언 교차"
-            disabled={
-              !(
-                selectedNodes.length >= 2 ||
-                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
-              )
-            }
-            onClick={() => applyBooleanPathOperation("intersection")}
-          >
-            ∩
-          </button>
-          <button
-            type="button"
-            aria-label="불리언 제외"
-            title="불리언 제외"
-            disabled={
-              !(
-                selectedNodes.length >= 2 ||
-                (selectedNodes.length === 1 && selectedNodes[0]?.content.type === "boolean_path")
-              )
-            }
-            onClick={() => applyBooleanPathOperation("exclusion")}
-          >
-            ⊕
-          </button>
-          <button
-            type="button"
-            aria-label="불리언 분리"
-            title="불리언 분리"
-            disabled={selectedNodes.length !== 1 || selectedNodes[0]?.content.type !== "boolean_path"}
-            onClick={detachSelectedBooleanPath}
-          >
-            ⧉
-          </button>
+          {canApplyBooleanPath || selectedBooleanPath ? (
+            <>
+              <button
+                type="button"
+                aria-label="불리언 합치기"
+                title="불리언 합치기"
+                disabled={!canApplyBooleanPath}
+                onClick={() => applyBooleanPathOperation("union")}
+              >
+                ∪
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 빼기"
+                title="불리언 빼기"
+                disabled={!canApplyBooleanPath}
+                onClick={() => applyBooleanPathOperation("difference")}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 교차"
+                title="불리언 교차"
+                disabled={!canApplyBooleanPath}
+                onClick={() => applyBooleanPathOperation("intersection")}
+              >
+                ∩
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 제외"
+                title="불리언 제외"
+                disabled={!canApplyBooleanPath}
+                onClick={() => applyBooleanPathOperation("exclusion")}
+              >
+                ⊕
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 분리"
+                title="불리언 분리"
+                disabled={!selectedBooleanPath || isNodeLocked(selectedBooleanPath)}
+                onClick={detachSelectedBooleanPath}
+              >
+                ⧉
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             aria-label="왼쪽으로 이동"
