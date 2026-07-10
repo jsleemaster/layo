@@ -791,3 +791,30 @@ impl Node {
         1 + self.children.iter().map(Node::subtree_count).sum::<usize>()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{NodeContent, PathFillRule};
+
+    #[test]
+    fn path_node_round_trip() {
+        let content = NodeContent::Path {
+            path_data: "M0 0 H100 V100 H0 Z".to_string(),
+            fill_rule: PathFillRule::Evenodd,
+        };
+
+        let json = serde_json::to_value(&content).expect("path content should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "path",
+                "path_data": "M0 0 H100 V100 H0 Z",
+                "fill_rule": "evenodd"
+            })
+        );
+
+        let restored: NodeContent =
+            serde_json::from_value(json).expect("path content should deserialize");
+        assert_eq!(restored, content);
+    }
+}
