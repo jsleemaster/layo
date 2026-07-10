@@ -31,7 +31,7 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 - RED MCP mutation: Full Verification #435, run `29082394587`, MCP rejected `set_path_data`.
 - GREEN MCP mutation: Full Verification #436, run `29082543002`.
 - RED artifacts: Full Verification #438, run `29083054678`, SVG emitted a rectangle instead of path geometry.
-- GREEN canvas/artifacts/pixels: Full Verification #443, run `29084105892`.
+- GREEN canvas/artifacts/pixels: Full Verification #443, run `29084105892`.\n- RED direct editing: Full Verification #447, run `29084575601`, passed 182 Playwright cases and failed only because selecting a path and pressing Enter did not create `path-editor-overlay`.
 
 ## Remaining Completion Gates
 
