@@ -35,7 +35,6 @@ Adopt first-class editable path nodes. Layo adapts persistence through its Rust-
 
 ## Remaining Completion Gates
 
-- Add an explicit Rust JSON round-trip regression for path content.
 - Parse path data into editable anchors and control handles.
 - Support direct anchor/control dragging and node add/delete/corner/curve/join/merge/separate commands.
 - Persist completed interactions through `set_path_data` with one undo entry per interaction.
