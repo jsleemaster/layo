@@ -1436,6 +1436,31 @@ interface InlineTextEditorOverlay {
   color: string;
 }
 
+interface PathEditorOverlayPoint {
+  id: string;
+  left: number;
+  top: number;
+  anchorIndex?: number;
+  control?: Pick<EditablePathControl, "commandIndex" | "role">;
+}
+
+interface PathEditorOverlay {
+  nodeId: string;
+  path: EditablePath;
+  fillRule: "nonzero" | "evenodd";
+  anchors: PathEditorOverlayPoint[];
+  controls: PathEditorOverlayPoint[];
+}
+
+interface PathEditorDragSession {
+  nodeId: string;
+  startClientPoint: { x: number; y: number };
+  startPath: EditablePath;
+  viewportScale: number;
+  anchorIndex?: number;
+  control?: Pick<EditablePathControl, "commandIndex" | "role">;
+}
+
 type FrameSpacingControl =
   | { type: "padding"; side: keyof NodeLayout["padding"] }
   | { type: "gap"; axis: "horizontal" | "vertical" };
