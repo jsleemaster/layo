@@ -8944,6 +8944,77 @@ export function App() {
       color: node.style.fill
     };
   }, [editor, inlineTextEditingNodeId]);
+  const pathEditorOverlay = useMemo<PathEditorOverlay | null>(() => {
+    if (!editor || !pathEditingNodeId) {
+      return null;
+    }
+
+    const node = findNodeById(editor.document, pathEditingNodeId);
+    const absolutePosition = getNodeAbsolutePosition(editor.document, pathEditingNodeId);
+    if (
+      !node ||
+      !absolutePosition ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      node.kind !== "path" ||
+      node.content.type !== "path"
+    ) {
+      return null;
+    }
+
+    const path = parseEditablePath(node.content.path_data);
+    if (!path) {
+      return null;
+    }
+
+    const rotation = (node.transform.rotation * Math.PI) / 180;
+    const toViewportPoint = (point: { x: number; y: number }) => {
+      const rotatedX = point.x * Math.cos(rotation) - point.y * Math.sin(rotation);
+      const rotatedY = point.x * Math.sin(rotation) + point.y * Math.cos(rotation);
+      return documentPointToViewport(
+        {
+          x: absolutePosition.x + rotatedX,
+          y: absolutePosition.y + rotatedY,
+          space: "document"
+        },
+        editor.viewport
+      );
+    };
+
+    return {
+      nodeId: node.id,
+      path,
+      fillRule: node.content.fill_rule,
+      anchors: editablePathAnchors(path).map((anchorPoint) => {
+        const point = toViewportPoint(anchorPoint);
+        return {
+          id: `path-anchor-${anchorPoint.anchorIndex}`,
+          anchorIndex: anchorPoint.anchorIndex,
+          left: point.x,
+          top: point.y
+        };
+      }),
+      controls: editablePathControls(path).map((controlPoint) => {
+        const point = toViewportPoint(controlPoint);
+        return {
+          id: `path-control-${controlPoint.commandIndex}-${controlPoint.role}`,
+          control: {
+            commandIndex: controlPoint.commandIndex,
+            role: controlPoint.role
+          },
+          left: point.x,
+          top: point.y
+        };
+      })
+    };
+  }, [editor, pathEditingNodeId]);
+
+  useEffect(() => {
+    if (pathEditingNodeId && !pathEditorOverlay) {
+      setPathEditingNodeId(null);
+    }
+  }, [pathEditingNodeId, pathEditorOverlay]);
+
   const frameSpacingOverlay = useMemo(() => {
     if (!editor || selectedNodeIds.length !== 1 || !selectedNode || selectedNode.kind !== "frame") {
       return null;
