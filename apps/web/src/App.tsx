@@ -8297,6 +8297,7 @@ export function App() {
   const [dragPreview, setDragPreview] = useState<NodeDragPreview | null>(null);
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
   const [inlineTextEditingNodeId, setInlineTextEditingNodeId] = useState<string | null>(null);
+  const [pathEditingNodeId, setPathEditingNodeId] = useState<string | null>(null);
   const [objectContextMenu, setObjectContextMenu] = useState<ObjectContextMenuState | null>(null);
   const [gridTrackContextMenu, setGridTrackContextMenu] = useState<GridTrackContextMenuState | null>(null);
   const [gridCellContextMenu, setGridCellContextMenu] = useState<GridCellContextMenuState | null>(null);
@@ -8307,6 +8308,9 @@ export function App() {
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
+  const currentProjectRef = useRef<ProjectManifest | null>(null);
+  const pathEditingNodeIdRef = useRef<string | null>(null);
+  const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
@@ -8524,6 +8528,14 @@ export function App() {
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  useEffect(() => {
+    currentProjectRef.current = currentProject;
+  }, [currentProject]);
+
+  useEffect(() => {
+    pathEditingNodeIdRef.current = pathEditingNodeId;
+  }, [pathEditingNodeId]);
 
   const refreshLibraryRegistryUpdates = async (fileId?: string) => {
     if (!fileId) {
