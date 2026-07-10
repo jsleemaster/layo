@@ -186,24 +186,32 @@ function clipSourceFillRuleForNode(node: RendererNode) {
   return fillRule === "evenodd" ? "evenodd" : "nonzero";
 }
 
-function clipSourceUsesEvenOddFillRule(node: RendererNode) {
-  return clipSourceFillRuleForNode(node) === "evenodd";
+function pathDataForNode(node: RendererNode) {
+  if (node.content.type === "path") {
+    const pathData = node.content.path_data.trim();
+    return pathData || null;
+  }
+  return clipSourcePathDataForNode(node);
+}
+
+function pathFillRuleForNode(node: RendererNode) {
+  return node.content.type === "path" ? node.content.fill_rule : clipSourceFillRuleForNode(node);
 }
 
 function svgFillRuleAttributeForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? ' fill-rule="evenodd"' : "";
+  return pathFillRuleForNode(node) === "evenodd" ? ' fill-rule="evenodd"' : "";
 }
 
 function svgClipRuleAttributeForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? ' clip-rule="evenodd"' : "";
+  return clipSourceFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
 }
 
 function pdfFillOperatorForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? "f*" : "f";
+  return pathFillRuleForNode(node) === "evenodd" ? "f*" : "f";
 }
 
 function pdfClipOperatorForNode(node: RendererNode) {
-  return clipSourceUsesEvenOddFillRule(node) ? "W*" : "W";
+  return clipSourceFillRuleForNode(node) === "evenodd" ? "W*" : "W";
 }
 
 function svgPathElement(pathData: string, attributes = "") {
