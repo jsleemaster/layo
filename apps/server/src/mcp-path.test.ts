@@ -24,6 +24,154 @@ afterEach(async () => {
 });
 
 describe("MCP first-class path agent command", () => {
+  test("inspects non-destructive boolean path relation and evaluated geometry", async () => {
+    const { client, storage } = await connectMcpClient();
+    const file = createPathFile();
+    file.pages[0].children[0] = {
+      ...file.pages[0].children[0],
+      id: "boolean-path-1",
+      name: "Boolean difference",
+      content: {
+        type: "boolean_path",
+        relation: {
+          operation: "difference",
+          source_node_ids: ["path-base", "path-cutout"]
+        },
+        path_data: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+        fill_rule: "evenodd"
+      }
+    };
+    await storage.writeFile("path-file", file);
+
+    const inspection = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "path-file" }
+      })
+    );
+    expect(inspection.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-path-1",
+          kind: "path",
+          pathData: "M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z",
+          fillRule: "evenodd",
+          booleanRelation: {
+            operation: "difference",
+            source_node_ids: ["path-base", "path-cutout"]
+          }
+        })
+      ])
+    );
+  });
+
+  test("creates, updates, and detaches boolean paths through the shared MCP batch", async () => {
+    const { client, storage } = await connectMcpClient();
+    const file = createPathFile();
+    file.pages[0].children = [];
+    await storage.writeFile("path-file", file);
+
+    const created = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [
+            {
+              type: "create_path",
+              parentId: "page-1",
+              id: "path-left",
+              name: "Left",
+              pathData: "M0 0 H100 V100 H0 Z",
+              x: 0,
+              y: 0,
+              width: 100,
+              height: 100
+            },
+            {
+              type: "create_path",
+              parentId: "page-1",
+              id: "path-right",
+              name: "Right",
+              pathData: "M0 0 H100 V100 H0 Z",
+              x: 50,
+              y: 0,
+              width: 100,
+              height: 100
+            },
+            {
+              type: "create_boolean_path",
+              nodeId: "boolean-1",
+              name: "Union",
+              operation: "union",
+              sourceNodeIds: ["path-left", "path-right"]
+            }
+          ]
+        }
+      })
+    );
+    expect(created.result).toMatchObject({
+      persisted: true,
+      audit: {
+        commandTypes: ["create_path", "create_path", "create_boolean_path"],
+        changedNodeIds: ["path-left", "path-right", "boolean-1"]
+      },
+      validation: { ok: true }
+    });
+    expect(created.result.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-1",
+          booleanRelation: {
+            operation: "union",
+            source_node_ids: ["path-left", "path-right"]
+          }
+        })
+      ])
+    );
+
+    const updated = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [{
+            type: "set_boolean_path_operation",
+            nodeId: "boolean-1",
+            operation: "intersection"
+          }]
+        }
+      })
+    );
+    expect(updated.result.inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "boolean-1",
+          booleanRelation: expect.objectContaining({ operation: "intersection" })
+        })
+      ])
+    );
+
+    const detached = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "path-file",
+          dryRun: false,
+          commands: [{ type: "detach_boolean_path", nodeId: "boolean-1" }]
+        }
+      })
+    );
+    expect(detached.result.inspection.nodes.map((node: { id: string }) => node.id)).toEqual(
+      expect.arrayContaining(["path-left", "path-right"])
+    );
+    expect(detached.result.inspection.nodes.map((node: { id: string }) => node.id)).not.toContain(
+      "boolean-1"
+    );
+  });
+
   test("dry-runs and persists path geometry with inspect and validation evidence", async () => {
     const { client, storage } = await connectMcpClient();
     await storage.writeFile("path-file", createPathFile());

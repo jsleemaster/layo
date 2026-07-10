@@ -632,6 +632,23 @@ pub struct Style {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
+pub enum BooleanPathOperation {
+    Union,
+    Difference,
+    Intersection,
+    Exclusion,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PathBooleanRelation {
+    pub operation: BooleanPathOperation,
+    pub source_node_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum PathFillRule {
     Nonzero,
     Evenodd,
@@ -665,6 +682,11 @@ pub enum NodeContent {
         fit_mode: Option<String>,
     },
     Path {
+        path_data: String,
+        fill_rule: PathFillRule,
+    },
+    BooleanPath {
+        relation: PathBooleanRelation,
         path_data: String,
         fill_rule: PathFillRule,
     },
@@ -794,7 +816,58 @@ impl Node {
 
 #[cfg(test)]
 mod tests {
-    use super::{NodeContent, PathFillRule};
+    use super::{BooleanPathOperation, NodeContent, PathBooleanRelation, PathFillRule};
+
+    #[test]
+    fn boolean_path_relation_round_trip() {
+        let relation = PathBooleanRelation {
+            operation: BooleanPathOperation::Difference,
+            source_node_ids: vec!["path-base".to_string(), "path-cutout".to_string()],
+        };
+
+        let json = serde_json::to_value(&relation).expect("boolean path relation should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "operation": "difference",
+                "source_node_ids": ["path-base", "path-cutout"]
+            })
+        );
+
+        let restored: PathBooleanRelation =
+            serde_json::from_value(json).expect("boolean path relation should deserialize");
+        assert_eq!(restored, relation);
+    }
+
+    #[test]
+    fn boolean_path_content_round_trip() {
+        let content = NodeContent::BooleanPath {
+            relation: PathBooleanRelation {
+                operation: BooleanPathOperation::Union,
+                source_node_ids: vec!["path-left".to_string(), "path-right".to_string()],
+            },
+            path_data: "M0 0 H150 V100 H0 Z".to_string(),
+            fill_rule: PathFillRule::Nonzero,
+        };
+
+        let json = serde_json::to_value(&content).expect("boolean path content should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "boolean_path",
+                "relation": {
+                    "operation": "union",
+                    "source_node_ids": ["path-left", "path-right"]
+                },
+                "path_data": "M0 0 H150 V100 H0 Z",
+                "fill_rule": "nonzero"
+            })
+        );
+
+        let restored: NodeContent =
+            serde_json::from_value(json).expect("boolean path content should deserialize");
+        assert_eq!(restored, content);
+    }
 
     #[test]
     fn path_node_round_trip() {

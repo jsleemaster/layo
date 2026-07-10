@@ -187,7 +187,7 @@ function clipSourceFillRuleForNode(node: RendererNode) {
 }
 
 function pathDataForNode(node: RendererNode) {
-  if (node.content.type === "path") {
+  if (node.content.type === "path" || node.content.type === "boolean_path") {
     const pathData = node.content.path_data.trim();
     return pathData || null;
   }
@@ -195,7 +195,9 @@ function pathDataForNode(node: RendererNode) {
 }
 
 function pathFillRuleForNode(node: RendererNode) {
-  return node.content.type === "path" ? node.content.fill_rule : clipSourceFillRuleForNode(node);
+  return node.content.type === "path" || node.content.type === "boolean_path"
+    ? node.content.fill_rule
+    : clipSourceFillRuleForNode(node);
 }
 
 function svgFillRuleAttributeForNode(node: RendererNode) {

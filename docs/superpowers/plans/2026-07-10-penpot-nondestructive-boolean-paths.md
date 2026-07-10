@@ -15,25 +15,33 @@
 
 ## Task 1: RED document and evaluation contract
 
-- [ ] Add Rust/TypeScript round-trip tests for a boolean path relationship with operation `union | difference | intersection | exclusion` and ordered source node IDs.
-- [ ] Add geometry evaluator tests using overlapping closed paths, including even-odd operands and disjoint results.
-- [ ] Record the exact failing contract before implementation.
+- [x] Add Rust/TypeScript round-trip tests for a boolean path relationship with operation `union | difference | intersection | exclusion` and ordered source node IDs.
+- [x] Add geometry evaluator tests using overlapping closed paths, including even-odd operands and disjoint results.
+- [x] Record the exact failing contract before implementation.
 
 ## Task 2: Deterministic agent mutations
 
-- [ ] Add create/update/detach boolean relationship commands through the shared MCP/HTTP batch.
-- [ ] Verify dry-run leaves storage unchanged and apply returns validation, inspect, and change-summary evidence.
-- [ ] Add one-command undo/redo persistence tests.
+- [x] Add create/update/detach boolean relationship commands through the shared MCP/HTTP batch.
+- [x] Verify dry-run leaves storage unchanged and apply returns validation, inspect, and change-summary evidence.
+- [x] Add one-command undo/redo persistence tests.
 
 ## Task 3: Canvas, direct controls, and artifacts
 
-- [ ] Add Korean-first boolean operation controls for multi-selected closed paths.
-- [ ] Render evaluated boolean geometry on canvas without deleting source operands.
-- [ ] Export the evaluated result to SVG/PDF/raster artifacts.
-- [ ] Add direct Playwright CLI proof for union, difference, intersection, exclusion, detach, undo, and redo.
+- [x] Add Korean-first boolean operation controls for multi-selected closed paths.
+- [x] Render evaluated boolean geometry on canvas without deleting source operands.
+- [x] Export the evaluated result to SVG/PDF/raster artifacts.
+- [x] Add direct Playwright CLI proof for union, difference, intersection, exclusion, detach, undo, and redo.
 
 ## Task 4: Full verification and maturity evidence
 
-- [ ] Run maturity/design gates, typecheck, web build, core tests, and the full Playwright suite.
-- [ ] Update `docs/product/penpot-maturity-benchmark.md`, the boolean delta document, and `PLAN_STATUS.md`.
-- [ ] Review, merge, and perform post-merge cleanup before selecting the next Penpot gap.
+- [x] Run maturity/design gates, typecheck, web build, core tests, and the full Playwright suite.
+- [x] Update `docs/product/penpot-maturity-benchmark.md`, the boolean delta document, and `PLAN_STATUS.md`.
+- [x] Review, merge, and perform post-merge cleanup before selecting the next Penpot gap.
+
+
+## Completion Evidence
+
+- Final GREEN: Full Verification #546, run `29100227669`.
+- Gates, typecheck, web build, Core tests, and the full Playwright CLI suite passed.
+- Product evidence: `docs/product/penpot-nondestructive-boolean-paths-delta.md`.
+- Failure loop closed the missing deterministic path creation command, silent unknown-command acceptance, fixed-width toolbar input regression, rotated bounds, fill-rule, open-path, runtime relation validation, and persisted browser lifecycle cases.

@@ -1,7 +1,9 @@
+import { evaluateBooleanPath } from "@layo/renderer";
 import {
   applyAgentCommandsToDocument as applyBaseAgentCommandsToDocument,
   createAgentBatchResult as createBaseAgentBatchResult,
-  inspectCanvas as inspectBaseCanvas
+  inspectCanvas as inspectBaseCanvas,
+  validateDocument as validateBaseDocument
 } from "./agent-control-base.js";
 import type {
   AgentBatchInput as BaseAgentBatchInput,
@@ -11,7 +13,7 @@ import type {
   AgentNodeSummary as BaseAgentNodeSummary,
   CanvasInspection as BaseCanvasInspection
 } from "./agent-control-base.js";
-import type { DesignFile, DesignNode } from "./storage";
+import type { DesignFile, DesignNode, PathBooleanRelation } from "./storage";
 
 export * from "./agent-control-base.js";
 
@@ -80,7 +82,35 @@ export interface NodeVectorSource {
 export type AgentCommand =
   | BaseAgentCommand
   | { type: "set_vector_source"; nodeId: string; vectorSource: NodeVectorSource | null }
-  | { type: "set_path_data"; nodeId: string; pathData: string; fillRule: "nonzero" | "evenodd" };
+  | { type: "set_path_data"; nodeId: string; pathData: string; fillRule: "nonzero" | "evenodd" }
+  | {
+      type: "create_path";
+      parentId: string;
+      id: string;
+      name?: string;
+      pathData: string;
+      fillRule?: "nonzero" | "evenodd";
+      x?: number;
+      y?: number;
+      width?: number;
+      height?: number;
+      fill?: string;
+      stroke?: string | null;
+      strokeWidth?: number;
+    }
+  | {
+      type: "create_boolean_path";
+      nodeId: string;
+      name: string;
+      operation: "union" | "difference" | "intersection" | "exclusion";
+      sourceNodeIds: string[];
+    }
+  | {
+      type: "set_boolean_path_operation";
+      nodeId: string;
+      operation: "union" | "difference" | "intersection" | "exclusion";
+    }
+  | { type: "detach_boolean_path"; nodeId: string };
 
 export type AgentBatchInput = Omit<BaseAgentBatchInput, "commands"> & { commands: AgentCommand[] };
 
@@ -96,6 +126,10 @@ type ImageContentWithVectorSource = Extract<DesignNode["content"], { type: "imag
 };
 type SetVectorSourceCommand = Extract<AgentCommand, { type: "set_vector_source" }>;
 type SetPathDataCommand = Extract<AgentCommand, { type: "set_path_data" }>;
+type CreatePathCommand = Extract<AgentCommand, { type: "create_path" }>;
+type CreateBooleanPathCommand = Extract<AgentCommand, { type: "create_boolean_path" }>;
+type SetBooleanPathOperationCommand = Extract<AgentCommand, { type: "set_boolean_path_operation" }>;
+type DetachBooleanPathCommand = Extract<AgentCommand, { type: "detach_boolean_path" }>;
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
@@ -103,6 +137,7 @@ export interface AgentNodeSummary extends BaseAgentNodeSummary {
   vectorSource?: NodeVectorSource;
   pathData?: string;
   fillRule?: "nonzero" | "evenodd";
+  booleanRelation?: PathBooleanRelation;
 }
 
 export interface CanvasInspection extends Omit<BaseCanvasInspection, "nodes"> {
@@ -115,7 +150,25 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
   const inspection = inspectBaseCanvas(document);
   return {
     ...inspection,
+    validation: validateDocument(document),
     nodes: summarizeNodes(document)
+  };
+}
+
+export function validateDocument(document: DesignFile) {
+  const base = validateBaseDocument(document);
+  const issues = [...base.issues];
+
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectBooleanValidationIssues(node, [page.id, node.id], issues);
+    }
+  }
+
+  return {
+    ok: issues.length === 0,
+    issueCount: issues.length,
+    issues
   };
 }
 
@@ -161,6 +214,22 @@ export function applyAgentCommandsToDocument(
       changedNodeIds.push(applyPathDataCommand(draft, command));
       continue;
     }
+    if (command.type === "create_path") {
+      changedNodeIds.push(applyCreatePathCommand(draft, command));
+      continue;
+    }
+    if (command.type === "create_boolean_path") {
+      changedNodeIds.push(...applyCreateBooleanPathCommand(draft, command));
+      continue;
+    }
+    if (command.type === "set_boolean_path_operation") {
+      changedNodeIds.push(...applySetBooleanPathOperationCommand(draft, command));
+      continue;
+    }
+    if (command.type === "detach_boolean_path") {
+      changedNodeIds.push(...applyDetachBooleanPathCommand(draft, command));
+      continue;
+    }
 
     const result = applyBaseAgentCommandsToDocument(draft, [command]);
     draft = result.document;
@@ -191,8 +260,69 @@ export function createAgentBatchResult(
   );
   return {
     ...result,
+    validation: validateDocument(preview),
     inspection: inspectCanvas(preview)
   };
+}
+
+function collectBooleanValidationIssues(
+  node: DesignNode,
+  path: string[],
+  issues: Array<{ code: string; message: string; nodeId?: string; path?: string[] }>
+) {
+  if (node.content.type === "boolean_path") {
+    const operation = node.content.relation.operation as string;
+    if (!["union", "difference", "intersection", "exclusion"].includes(operation)) {
+      issues.push({
+        code: "invalid_boolean_path_operation",
+        message: `boolean path operation is invalid: ${node.id} -> ${operation}`,
+        nodeId: node.id,
+        path
+      });
+    }
+    const sourceIds = node.content.relation.source_node_ids;
+    if (sourceIds.length < 2 || new Set(sourceIds).size !== sourceIds.length) {
+      issues.push({
+        code: "invalid_boolean_path_sources",
+        message: `boolean path requires at least two unique sources: ${node.id}`,
+        nodeId: node.id,
+        path
+      });
+    }
+    for (const sourceId of sourceIds) {
+      const source = node.children.find((child) => child.id === sourceId);
+      if (!source) {
+        issues.push({
+          code: "missing_boolean_path_source",
+          message: `boolean path source is missing: ${node.id} -> ${sourceId}`,
+          nodeId: node.id,
+          path
+        });
+      } else if (
+        source.kind !== "path" ||
+        (source.content.type !== "path" && source.content.type !== "boolean_path")
+      ) {
+        issues.push({
+          code: "invalid_boolean_path_source_geometry",
+          message: `boolean path source is not path geometry: ${node.id} -> ${sourceId}`,
+          nodeId: node.id,
+          path
+        });
+      }
+    }
+    if (!node.content.path_data.trim()) {
+      issues.push({
+        code: "empty_boolean_path_result",
+        message: `boolean path evaluated geometry is empty: ${node.id}`,
+        nodeId: node.id,
+        path
+      });
+    }
+  }
+
+  for (const child of node.children) {
+    collectBooleanValidationIssues(child, [...path, child.id], issues);
+  }
 }
 
 function summarizeNodes(document: DesignFile): AgentNodeSummary[] {
@@ -226,8 +356,11 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     clip: nodeClip(node),
     paintSources: paintSources.length > 0 ? paintSources : undefined,
     ...(vectorSource ? { vectorSource: structuredClone(vectorSource) } : {}),
-    ...(node.content.type === "path"
+    ...(node.content.type === "path" || node.content.type === "boolean_path"
       ? { pathData: node.content.path_data, fillRule: node.content.fill_rule }
+      : {}),
+    ...(node.content.type === "boolean_path"
+      ? { booleanRelation: structuredClone(node.content.relation) }
       : {}),
     bounds: {
       x: node.transform.x,
@@ -240,6 +373,285 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
   for (const child of node.children) {
     collectSummary(child, [...path, child.id], nodes);
   }
+}
+
+interface NodeContainer {
+  children: DesignNode[];
+}
+
+function applyCreatePathCommand(
+  document: DesignFile,
+  command: CreatePathCommand
+): string {
+  const id = command.id.trim();
+  const pathData = command.pathData.trim();
+  if (!id || !pathData) {
+    throw new Error("path id and path data are required");
+  }
+  if (findNodeById(document, id)) {
+    throw new Error(`node already exists: ${id}`);
+  }
+  const parent =
+    document.pages.find((page) => page.id === command.parentId) ??
+    findNodeById(document, command.parentId);
+  if (!parent) {
+    throw new Error(`parent not found: ${command.parentId}`);
+  }
+  const fillRule = command.fillRule ?? "nonzero";
+  if (fillRule !== "nonzero" && fillRule !== "evenodd") {
+    throw new Error("path fill rule must be nonzero or evenodd");
+  }
+  const width = command.width ?? 100;
+  const height = command.height ?? 100;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error("path size must be positive");
+  }
+  const node: DesignNode = {
+    id,
+    kind: "path",
+    name: command.name?.trim() || "경로",
+    transform: {
+      x: command.x ?? 0,
+      y: command.y ?? 0,
+      rotation: 0
+    },
+    size: { width, height },
+    style: {
+      fill: command.fill ?? "#0ea5e9",
+      stroke: command.stroke ?? null,
+      stroke_width: Math.max(0, command.strokeWidth ?? 0),
+      opacity: 1
+    },
+    content: {
+      type: "path",
+      path_data: pathData,
+      fill_rule: fillRule
+    },
+    children: []
+  };
+  parent.children.push(node);
+  return node.id;
+}
+
+function applyCreateBooleanPathCommand(
+  document: DesignFile,
+  command: CreateBooleanPathCommand
+): string[] {
+  if (findNodeById(document, command.nodeId)) {
+    throw new Error(`node already exists: ${command.nodeId}`);
+  }
+  const sourceNodeIds = normalizeBooleanSourceIds(command.sourceNodeIds);
+  const sourceContainer = findNodeContainer(document, sourceNodeIds[0]);
+  if (!sourceContainer) {
+    throw new Error(`boolean path source not found: ${sourceNodeIds[0]}`);
+  }
+
+  const sourceEntries = sourceNodeIds.map((nodeId) => {
+    const index = sourceContainer.children.findIndex((node) => node.id === nodeId);
+    if (index < 0) {
+      if (findNodeById(document, nodeId)) {
+        throw new Error("boolean path sources must share one parent");
+      }
+      throw new Error(`boolean path source not found: ${nodeId}`);
+    }
+    const node = sourceContainer.children[index];
+    assertBooleanPathSource(node);
+    return { index, node };
+  });
+  const evaluation = evaluateBooleanPath(
+    command.operation,
+    sourceEntries.map(({ node }) => ({
+      pathData: pathDataFromBooleanSource(node),
+      fillRule: booleanSourceFillRule(node),
+      transform: node.transform
+    }))
+  );
+  const firstSource = sourceEntries[0].node;
+  const children = sourceEntries.map(({ node }) => ({
+    ...structuredClone(node),
+    transform: {
+      ...node.transform,
+      x: node.transform.x - evaluation.bounds.x,
+      y: node.transform.y - evaluation.bounds.y
+    }
+  }));
+  const booleanNode: DesignNode = {
+    id: command.nodeId.trim(),
+    kind: "path",
+    name: command.name.trim() || "Boolean path",
+    transform: {
+      x: evaluation.bounds.x,
+      y: evaluation.bounds.y,
+      rotation: 0
+    },
+    size: {
+      width: evaluation.bounds.width,
+      height: evaluation.bounds.height
+    },
+    style: structuredClone(firstSource.style),
+    content: {
+      type: "boolean_path",
+      relation: {
+        operation: command.operation,
+        source_node_ids: sourceNodeIds
+      },
+      path_data: evaluation.pathData,
+      fill_rule: evaluation.fillRule
+    },
+    children
+  };
+
+  const insertionIndex = Math.min(...sourceEntries.map(({ index }) => index));
+  const sourceIdSet = new Set(sourceNodeIds);
+  sourceContainer.children = sourceContainer.children.filter((node) => !sourceIdSet.has(node.id));
+  sourceContainer.children.splice(insertionIndex, 0, booleanNode);
+  return [booleanNode.id, ...sourceNodeIds];
+}
+
+function applySetBooleanPathOperationCommand(
+  document: DesignFile,
+  command: SetBooleanPathOperationCommand
+): string[] {
+  const node = findNodeById(document, command.nodeId);
+  if (!node || node.content.type !== "boolean_path") {
+    throw new Error(`node is not boolean path: ${command.nodeId}`);
+  }
+  const sources = node.content.relation.source_node_ids.map((sourceId) => {
+    const source = node.children.find((child) => child.id === sourceId);
+    if (!source) {
+      throw new Error(`boolean path source not found: ${sourceId}`);
+    }
+    assertBooleanPathSource(source);
+    return source;
+  });
+  const evaluation = evaluateBooleanPath(
+    command.operation,
+    sources.map((source) => ({
+      pathData: pathDataFromBooleanSource(source),
+      fillRule: booleanSourceFillRule(source),
+      transform: source.transform
+    }))
+  );
+  const rotation = (node.transform.rotation * Math.PI) / 180;
+  const offsetX =
+    evaluation.bounds.x * Math.cos(rotation) - evaluation.bounds.y * Math.sin(rotation);
+  const offsetY =
+    evaluation.bounds.x * Math.sin(rotation) + evaluation.bounds.y * Math.cos(rotation);
+  node.transform.x += offsetX;
+  node.transform.y += offsetY;
+  node.size = {
+    width: evaluation.bounds.width,
+    height: evaluation.bounds.height
+  };
+  node.children = node.children.map((child) => ({
+    ...child,
+    transform: {
+      ...child.transform,
+      x: child.transform.x - evaluation.bounds.x,
+      y: child.transform.y - evaluation.bounds.y
+    }
+  }));
+  node.content = {
+    ...node.content,
+    relation: {
+      operation: command.operation,
+      source_node_ids: [...node.content.relation.source_node_ids]
+    },
+    path_data: evaluation.pathData,
+    fill_rule: evaluation.fillRule
+  };
+  return [node.id, ...node.content.relation.source_node_ids];
+}
+
+function applyDetachBooleanPathCommand(
+  document: DesignFile,
+  command: DetachBooleanPathCommand
+): string[] {
+  const container = findNodeContainer(document, command.nodeId);
+  const index = container?.children.findIndex((node) => node.id === command.nodeId) ?? -1;
+  const node = index >= 0 ? container?.children[index] : null;
+  if (!container || !node || node.content.type !== "boolean_path") {
+    throw new Error(`node is not boolean path: ${command.nodeId}`);
+  }
+
+  const rotation = (node.transform.rotation * Math.PI) / 180;
+  const children = node.children.map((child) => {
+    const x = child.transform.x * Math.cos(rotation) - child.transform.y * Math.sin(rotation);
+    const y = child.transform.x * Math.sin(rotation) + child.transform.y * Math.cos(rotation);
+    return {
+      ...structuredClone(child),
+      transform: {
+        ...child.transform,
+        x: node.transform.x + x,
+        y: node.transform.y + y,
+        rotation: node.transform.rotation + child.transform.rotation
+      }
+    };
+  });
+  container.children.splice(index, 1, ...children);
+  return [node.id, ...children.map((child) => child.id)];
+}
+
+function normalizeBooleanSourceIds(sourceNodeIds: string[]) {
+  const normalized = sourceNodeIds.map((nodeId) => nodeId.trim()).filter(Boolean);
+  if (normalized.length < 2) {
+    throw new Error("boolean paths require at least two sources");
+  }
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("boolean path sources must be unique");
+  }
+  return normalized;
+}
+
+function assertBooleanPathSource(node: DesignNode) {
+  if (
+    node.kind !== "path" ||
+    (node.content.type !== "path" && node.content.type !== "boolean_path")
+  ) {
+    throw new Error(`boolean path source must be path geometry: ${node.id}`);
+  }
+}
+
+function pathDataFromBooleanSource(node: DesignNode) {
+  assertBooleanPathSource(node);
+  return node.content.type === "path" || node.content.type === "boolean_path"
+    ? node.content.path_data
+    : "";
+}
+
+function booleanSourceFillRule(node: DesignNode) {
+  assertBooleanPathSource(node);
+  return node.content.type === "path" || node.content.type === "boolean_path"
+    ? node.content.fill_rule
+    : "nonzero";
+}
+
+function findNodeContainer(document: DesignFile, nodeId: string): NodeContainer | null {
+  for (const page of document.pages) {
+    if (page.children.some((node) => node.id === nodeId)) {
+      return page;
+    }
+    for (const node of page.children) {
+      const container = findNodeContainerInNode(node, nodeId);
+      if (container) {
+        return container;
+      }
+    }
+  }
+  return null;
+}
+
+function findNodeContainerInNode(node: DesignNode, nodeId: string): NodeContainer | null {
+  if (node.children.some((child) => child.id === nodeId)) {
+    return node;
+  }
+  for (const child of node.children) {
+    const container = findNodeContainerInNode(child, nodeId);
+    if (container) {
+      return container;
+    }
+  }
+  return null;
 }
 
 function applyPathDataCommand(document: DesignFile, command: SetPathDataCommand): string {

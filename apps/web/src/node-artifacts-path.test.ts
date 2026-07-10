@@ -17,7 +17,34 @@ const firstClassPathNode: RendererNode = {
   children: []
 };
 
+const booleanPathNode: RendererNode = {
+  ...firstClassPathNode,
+  id: "boolean-path",
+  name: "Non-destructive union",
+  content: {
+    type: "boolean_path",
+    relation: {
+      operation: "union",
+      source_node_ids: ["path-left", "path-right"]
+    },
+    path_data: "M0 0 H150 V100 H0 Z",
+    fill_rule: "nonzero"
+  },
+  children: []
+};
+
 describe("first-class path artifacts", () => {
+  test("exports the evaluated boolean result while retaining relation metadata", () => {
+    const svg = svgForNode(booleanPathNode);
+
+    expect(svg).toContain('data-node-kind="path"');
+    expect(svg).toContain('d="M0 0 H150 V100 H0 Z"');
+    expect(svg).not.toContain('data-node-id="path-left"');
+
+    const pdfText = new TextDecoder().decode(pdfForNode(booleanPathNode));
+    expect(pdfText).toContain("150 100 l");
+  });
+
   test("renders path geometry and even-odd winding in SVG and PDF", () => {
     const svg = svgForNode(firstClassPathNode);
 

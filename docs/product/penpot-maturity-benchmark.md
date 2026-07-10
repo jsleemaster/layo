@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-07-06
+Last checked: 2026-07-10
 
 ## Product Target
 
@@ -235,11 +235,11 @@ For each comparison:
 6. If verification fails, feed the failing case into
    `docs/process/penpot-maturity-loop.md`.
 
-## Active Boolean Path Loop
+## Active Path Maturity Loop
 
-PR #272 and PR #273 complete the first-class path editing plan: asset-free Penpot import, deterministic MCP/HTTP mutation, inspect/validation/change summaries, canvas and artifact fidelity, line and Bezier anchor insertion, delete, corner/curve conversion, join/merge/separate, direct anchor/control dragging, and persisted undo/redo. Full Verification #478 run `29089414317` is the completed topology GREEN.
+PR #272 and PR #273 complete first-class path import, editing, topology, and direct Bezier interaction. PR #274 adds non-destructive union, difference, intersection, and exclusion with ordered recoverable operands, deterministic path/boolean MCP and HTTP commands, curved and even-odd evaluation, undo/redo, canvas, and SVG/PDF/PNG output. Full Verification #546 run `29100227669` is the completed boolean-path GREEN.
 
-The active next Penpot gap is non-destructive union, difference, intersection, and exclusion. Layo must preserve editable source operands and operation order while exposing the evaluated result through the local-first document model, agent commands, canvas, undo/redo, and artifacts. The implementation plan is `docs/superpowers/plans/2026-07-10-penpot-nondestructive-boolean-paths.md`.
+The active next Penpot gap is destructive Flatten. Layo must convert selected closed shapes or a boolean relationship into one standalone first-class path while preserving visible geometry, curves, fill semantics, world bounds, deterministic agent review, and reversible history. The implementation plan is `docs/superpowers/plans/2026-07-10-penpot-path-flattening.md`.
 
 ## Current Highest-Risk Gaps
 

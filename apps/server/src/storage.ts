@@ -133,6 +133,13 @@ export type TextWritingMode = "horizontal_tb" | "vertical_rl" | "vertical_lr";
 export type TextOrientation = "mixed" | "upright" | "sideways";
 export type ExportPresetFormat = "png" | "jpeg" | "webp" | "svg" | "pdf";
 
+export type BooleanPathOperation = "union" | "difference" | "intersection" | "exclusion";
+
+export interface PathBooleanRelation {
+  operation: BooleanPathOperation;
+  source_node_ids: string[];
+}
+
 export interface NodeExportPreset {
   id: string;
   format: ExportPresetFormat;
@@ -186,6 +193,12 @@ export interface DesignNode {
       }
     | {
         type: "path";
+        path_data: string;
+        fill_rule: "nonzero" | "evenodd";
+      }
+    | {
+        type: "boolean_path";
+        relation: PathBooleanRelation;
         path_data: string;
         fill_rule: "nonzero" | "evenodd";
       };

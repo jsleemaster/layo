@@ -1,4 +1,6 @@
+import { evaluateBooleanPath } from "@layo/renderer";
 import type {
+  BooleanPathOperation,
   ComponentDefinition,
   ComponentVariantArea,
   ComponentVariant,
@@ -237,6 +239,27 @@ export type EditorCommand =
       nodeId: string;
       pathData: string;
       fillRule: "nonzero" | "evenodd";
+    }
+  | {
+      type: "create_boolean_path";
+      nodeId: string;
+      name: string;
+      operation: BooleanPathOperation;
+      sourceNodeIds: string[];
+    }
+  | {
+      type: "set_boolean_path_operation";
+      nodeId: string;
+      operation: BooleanPathOperation;
+    }
+  | {
+      type: "detach_boolean_path";
+      nodeId: string;
+    }
+  | {
+      type: "replace_document_snapshot";
+      document: RendererDocument;
+      selectedNodeId?: string | null;
     }
   | {
       type: "set_text_writing_mode";
@@ -2438,6 +2461,191 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           nodeId: command.nodeId,
           style: previousStyle
         }
+      };
+    }
+    case "replace_document_snapshot": {
+      return {
+        document: structuredClone(command.document),
+        inverse: {
+          type: "replace_document_snapshot",
+          document: structuredClone(document)
+        },
+        selectedNodeId: command.selectedNodeId
+      };
+    }
+    case "create_boolean_path": {
+      const sourceNodeIds = command.sourceNodeIds.map((nodeId) => nodeId.trim()).filter(Boolean);
+      const siblings = findSiblingSelection(next, sourceNodeIds);
+      const parent = siblings ? findParentChildren(next, siblings.parentId) : null;
+      if (
+        !siblings ||
+        !parent ||
+        sourceNodeIds.length < 2 ||
+        new Set(sourceNodeIds).size !== sourceNodeIds.length ||
+        findNodeById(next, command.nodeId) ||
+        siblings.nodes.some(
+          (node) =>
+            isNodeLocked(node) ||
+            node.kind !== "path" ||
+            (node.content.type !== "path" && node.content.type !== "boolean_path")
+        )
+      ) {
+        return { document, inverse: null };
+      }
+
+      const nodesById = new Map(siblings.nodes.map((node) => [node.id, node]));
+      const sources = sourceNodeIds.flatMap((nodeId) => {
+        const node = nodesById.get(nodeId);
+        return node ? [node] : [];
+      });
+      const evaluation = evaluateBooleanPath(
+        command.operation,
+        sources.map((node) => ({
+          pathData:
+            node.content.type === "path" || node.content.type === "boolean_path"
+              ? node.content.path_data
+              : "",
+          fillRule:
+            node.content.type === "path" || node.content.type === "boolean_path"
+              ? node.content.fill_rule
+              : "nonzero",
+          transform: node.transform
+        }))
+      );
+      const firstSource = sources[0];
+      if (!firstSource) {
+        return { document, inverse: null };
+      }
+      const sourceIdSet = new Set(sourceNodeIds);
+      const insertionIndex = Math.min(
+        ...parent.children.flatMap((node, index) => (sourceIdSet.has(node.id) ? [index] : []))
+      );
+      const booleanNode: RendererNode = {
+        id: command.nodeId.trim(),
+        kind: "path",
+        name: command.name.trim() || "Boolean path",
+        transform: { x: evaluation.bounds.x, y: evaluation.bounds.y, rotation: 0 },
+        size: { width: evaluation.bounds.width, height: evaluation.bounds.height },
+        style: structuredClone(firstSource.style),
+        content: {
+          type: "boolean_path",
+          relation: {
+            operation: command.operation,
+            source_node_ids: sourceNodeIds
+          },
+          path_data: evaluation.pathData,
+          fill_rule: evaluation.fillRule
+        },
+        children: sources.map((node) => ({
+          ...structuredClone(node),
+          transform: {
+            ...node.transform,
+            x: node.transform.x - evaluation.bounds.x,
+            y: node.transform.y - evaluation.bounds.y
+          }
+        }))
+      };
+      parent.children = parent.children.filter((node) => !sourceIdSet.has(node.id));
+      parent.children.splice(insertionIndex, 0, booleanNode);
+      return {
+        document: next,
+        inverse: {
+          type: "replace_document_snapshot",
+          document: structuredClone(document)
+        },
+        selectedNodeId: booleanNode.id
+      };
+    }
+    case "set_boolean_path_operation": {
+      const node = findNodeById(next, command.nodeId);
+      if (!node || isNodeLocked(node) || node.content.type !== "boolean_path") {
+        return { document, inverse: null };
+      }
+      const sources = node.content.relation.source_node_ids.flatMap((sourceId) => {
+        const source = node.children.find((child) => child.id === sourceId);
+        return source ? [source] : [];
+      });
+      if (sources.length !== node.content.relation.source_node_ids.length) {
+        return { document, inverse: null };
+      }
+      const evaluation = evaluateBooleanPath(
+        command.operation,
+        sources.map((source) => ({
+          pathData:
+            source.content.type === "path" || source.content.type === "boolean_path"
+              ? source.content.path_data
+              : "",
+          fillRule:
+            source.content.type === "path" || source.content.type === "boolean_path"
+              ? source.content.fill_rule
+              : "nonzero",
+          transform: source.transform
+        }))
+      );
+      const rotation = (node.transform.rotation * Math.PI) / 180;
+      const offsetX =
+        evaluation.bounds.x * Math.cos(rotation) - evaluation.bounds.y * Math.sin(rotation);
+      const offsetY =
+        evaluation.bounds.x * Math.sin(rotation) + evaluation.bounds.y * Math.cos(rotation);
+      node.transform.x += offsetX;
+      node.transform.y += offsetY;
+      node.size = { width: evaluation.bounds.width, height: evaluation.bounds.height };
+      node.children = node.children.map((child) => ({
+        ...child,
+        transform: {
+          ...child.transform,
+          x: child.transform.x - evaluation.bounds.x,
+          y: child.transform.y - evaluation.bounds.y
+        }
+      }));
+      node.content = {
+        ...node.content,
+        relation: {
+          operation: command.operation,
+          source_node_ids: [...node.content.relation.source_node_ids]
+        },
+        path_data: evaluation.pathData,
+        fill_rule: evaluation.fillRule
+      };
+      return {
+        document: next,
+        inverse: {
+          type: "replace_document_snapshot",
+          document: structuredClone(document)
+        },
+        selectedNodeId: node.id
+      };
+    }
+    case "detach_boolean_path": {
+      const selected = findNodeWithParent(next, command.nodeId);
+      const parent = selected ? findParentChildren(next, selected.parentId) : null;
+      const node = selected?.node;
+      if (!parent || !node || isNodeLocked(node) || node.content.type !== "boolean_path") {
+        return { document, inverse: null };
+      }
+      const index = parent.children.findIndex((child) => child.id === node.id);
+      const rotation = (node.transform.rotation * Math.PI) / 180;
+      const children = node.children.map((child) => {
+        const x = child.transform.x * Math.cos(rotation) - child.transform.y * Math.sin(rotation);
+        const y = child.transform.x * Math.sin(rotation) + child.transform.y * Math.cos(rotation);
+        return {
+          ...structuredClone(child),
+          transform: {
+            ...child.transform,
+            x: node.transform.x + x,
+            y: node.transform.y + y,
+            rotation: node.transform.rotation + child.transform.rotation
+          }
+        };
+      });
+      parent.children.splice(index, 1, ...children);
+      return {
+        document: next,
+        inverse: {
+          type: "replace_document_snapshot",
+          document: structuredClone(document)
+        },
+        selectedNodeId: children.at(-1)?.id ?? null
       };
     }
     case "set_path_data": {
