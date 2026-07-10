@@ -199,16 +199,64 @@ export function insertEditablePathAnchor(
   }
 
   const nextCommand = path.commands[nextAnchor.commandIndex];
-  if (!nextCommand || nextCommand.type !== "L") {
+  if (!nextCommand || nextCommand.type === "M" || nextCommand.type === "Z") {
     return path;
   }
 
-  const commands = structuredClone(path.commands);
-  commands.splice(nextAnchor.commandIndex, 0, {
-    type: "L",
-    x: (anchor.x + nextAnchor.x) / 2,
-    y: (anchor.y + nextAnchor.y) / 2
+  const midpoint = (start: EditablePathPoint, end: EditablePathPoint) => ({
+    x: (start.x + end.x) / 2,
+    y: (start.y + end.y) / 2
   });
+  const commands = structuredClone(path.commands);
+  if (nextCommand.type === "L") {
+    commands.splice(nextAnchor.commandIndex, 0, {
+      type: "L",
+      ...midpoint(anchor, nextAnchor)
+    });
+  } else if (nextCommand.type === "C") {
+    const startToControl = midpoint(anchor, nextCommand.control1);
+    const controlsMidpoint = midpoint(nextCommand.control1, nextCommand.control2);
+    const controlToEnd = midpoint(nextCommand.control2, nextAnchor);
+    const firstControl2 = midpoint(startToControl, controlsMidpoint);
+    const secondControl1 = midpoint(controlsMidpoint, controlToEnd);
+    const splitPoint = midpoint(firstControl2, secondControl1);
+    commands.splice(
+      nextAnchor.commandIndex,
+      1,
+      {
+        type: "C",
+        control1: startToControl,
+        control2: firstControl2,
+        ...splitPoint
+      },
+      {
+        type: "C",
+        control1: secondControl1,
+        control2: controlToEnd,
+        x: nextAnchor.x,
+        y: nextAnchor.y
+      }
+    );
+  } else {
+    const startToControl = midpoint(anchor, nextCommand.control);
+    const controlToEnd = midpoint(nextCommand.control, nextAnchor);
+    const splitPoint = midpoint(startToControl, controlToEnd);
+    commands.splice(
+      nextAnchor.commandIndex,
+      1,
+      {
+        type: "Q",
+        control: startToControl,
+        ...splitPoint
+      },
+      {
+        type: "Q",
+        control: controlToEnd,
+        x: nextAnchor.x,
+        y: nextAnchor.y
+      }
+    );
+  }
   return { commands, closed: path.closed };
 }
 
