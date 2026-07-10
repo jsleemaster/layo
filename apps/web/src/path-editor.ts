@@ -187,6 +187,155 @@ export function editablePathControls(path: EditablePath): EditablePathControl[] 
   });
 }
 
+export function insertEditablePathAnchor(
+  path: EditablePath,
+  afterAnchorIndex: number
+): EditablePath {
+  const anchors = editablePathAnchors(path);
+  const anchor = anchors[afterAnchorIndex];
+  const nextAnchor = anchors[afterAnchorIndex + 1];
+  if (!anchor || !nextAnchor) {
+    return path;
+  }
+
+  const nextCommand = path.commands[nextAnchor.commandIndex];
+  if (!nextCommand || nextCommand.type !== "L") {
+    return path;
+  }
+
+  const commands = structuredClone(path.commands);
+  commands.splice(nextAnchor.commandIndex, 0, {
+    type: "L",
+    x: (anchor.x + nextAnchor.x) / 2,
+    y: (anchor.y + nextAnchor.y) / 2
+  });
+  return { commands, closed: path.closed };
+}
+
+export function deleteEditablePathAnchor(
+  path: EditablePath,
+  anchorIndex: number
+): EditablePath {
+  const anchors = editablePathAnchors(path);
+  if (anchors.length <= 2) {
+    return path;
+  }
+
+  const anchor = anchors[anchorIndex];
+  if (!anchor) {
+    return path;
+  }
+
+  const commands = structuredClone(path.commands);
+  const removed = commands.splice(anchor.commandIndex, 1)[0];
+  if (removed?.type === "M") {
+    const next = commands[anchor.commandIndex];
+    if (next && next.type !== "Z") {
+      commands[anchor.commandIndex] = { type: "M", x: next.x, y: next.y };
+    }
+  }
+  return { commands, closed: commands.some((command) => command.type === "Z") };
+}
+
+export function convertEditablePathAnchor(
+  path: EditablePath,
+  anchorIndex: number,
+  mode: "corner" | "curve"
+): EditablePath {
+  const anchors = editablePathAnchors(path);
+  const anchor = anchors[anchorIndex];
+  const previous = anchors[anchorIndex - 1];
+  if (!anchor || !previous) {
+    return path;
+  }
+
+  const command = path.commands[anchor.commandIndex];
+  if (!command || command.type === "M" || command.type === "Z") {
+    return path;
+  }
+
+  const commands = structuredClone(path.commands);
+  if (mode === "corner") {
+    commands[anchor.commandIndex] = { type: "L", x: anchor.x, y: anchor.y };
+  } else if (command.type === "L") {
+    commands[anchor.commandIndex] = {
+      type: "C",
+      control1: {
+        x: previous.x + (anchor.x - previous.x) / 3,
+        y: previous.y + (anchor.y - previous.y) / 3
+      },
+      control2: {
+        x: previous.x + ((anchor.x - previous.x) * 2) / 3,
+        y: previous.y + ((anchor.y - previous.y) * 2) / 3
+      },
+      x: anchor.x,
+      y: anchor.y
+    };
+  } else {
+    return path;
+  }
+  return { commands, closed: path.closed };
+}
+
+export function separateEditablePathAtAnchor(
+  path: EditablePath,
+  anchorIndex: number
+): EditablePath {
+  const anchor = editablePathAnchors(path)[anchorIndex];
+  if (!anchor || anchor.commandIndex === 0) {
+    return path;
+  }
+
+  const command = path.commands[anchor.commandIndex];
+  if (!command || command.type === "M" || command.type === "Z") {
+    return path;
+  }
+
+  const commands = structuredClone(path.commands);
+  commands[anchor.commandIndex] = { type: "M", x: anchor.x, y: anchor.y };
+  return { commands, closed: commands.some((candidate) => candidate.type === "Z") };
+}
+
+export function joinEditablePathSubpaths(path: EditablePath): EditablePath {
+  let sawInitialMove = false;
+  const commands = path.commands.map((command) => {
+    if (command.type !== "M") {
+      return structuredClone(command);
+    }
+    if (!sawInitialMove) {
+      sawInitialMove = true;
+      return structuredClone(command);
+    }
+    return { type: "L" as const, x: command.x, y: command.y };
+  });
+  return { commands, closed: path.closed };
+}
+
+export function mergeEditablePathAnchors(
+  path: EditablePath,
+  firstAnchorIndex: number,
+  secondAnchorIndex: number
+): EditablePath {
+  if (firstAnchorIndex === secondAnchorIndex) {
+    return path;
+  }
+
+  const anchors = editablePathAnchors(path);
+  const first = anchors[firstAnchorIndex];
+  const second = anchors[secondAnchorIndex];
+  if (!first || !second) {
+    return path;
+  }
+
+  const keepIndex = Math.min(firstAnchorIndex, secondAnchorIndex);
+  const removeIndex = Math.max(firstAnchorIndex, secondAnchorIndex);
+  const moved = moveEditablePathAnchor(path, keepIndex, {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2
+  });
+  return deleteEditablePathAnchor(moved, removeIndex);
+}
+
 export function moveEditablePathAnchor(
   path: EditablePath,
   anchorIndex: number,
