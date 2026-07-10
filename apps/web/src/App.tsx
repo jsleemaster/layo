@@ -10053,7 +10053,7 @@ export function App() {
           ) {
             void persistPathChange(
               currentProjectRef.current.currentDocumentId,
-              nodeId,
+              nextNode.id,
               nextNode.content.path_data,
               nextNode.content.fill_rule
             ).catch((error) => {
