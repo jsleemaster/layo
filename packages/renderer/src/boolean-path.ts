@@ -3,6 +3,7 @@ import type { BooleanPathOperation } from "./index";
 
 export interface BooleanPathOperand {
   pathData: string;
+  fillRule?: "nonzero" | "evenodd";
   transform: {
     x: number;
     y: number;
@@ -12,6 +13,7 @@ export interface BooleanPathOperand {
 
 export interface BooleanPathEvaluation {
   pathData: string;
+  fillRule: "nonzero";
   area: number;
   bounds: {
     x: number;
@@ -36,9 +38,13 @@ export function evaluateBooleanPath(
       pathData: operand.pathData,
       insert: false
     });
-    if (item.isEmpty()) {
+    const paths = item.children.filter(
+      (child): child is paper.Path => child instanceof scope.Path
+    );
+    if (item.isEmpty() || paths.length === 0 || paths.some((path) => !path.closed)) {
       throw new Error("boolean path operand must contain closed geometry");
     }
+    item.fillRule = operand.fillRule === "evenodd" ? "evenodd" : "nonzero";
     if (operand.transform.rotation) {
       item.rotate(operand.transform.rotation, new scope.Point(0, 0));
     }
@@ -74,6 +80,7 @@ export function evaluateBooleanPath(
   result.translate(new scope.Point(-bounds.x, -bounds.y));
   const evaluation = {
     pathData: result.pathData,
+    fillRule: "nonzero" as const,
     area: filledPathArea(result, scope),
     bounds
   };
