@@ -603,6 +603,7 @@ pub enum NodeKind {
     Rectangle,
     Text,
     Image,
+    Path,
     Component,
     ComponentInstance,
 }
@@ -626,6 +627,14 @@ pub struct Style {
     pub effect_shadow_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_shadow_style: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PathFillRule {
+    Nonzero,
+    Evenodd,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
@@ -654,6 +663,10 @@ pub enum NodeContent {
         natural_height: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fit_mode: Option<String>,
+    },
+    Path {
+        path_data: String,
+        fill_rule: PathFillRule,
     },
 }
 
