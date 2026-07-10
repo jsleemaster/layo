@@ -6,7 +6,7 @@ test.beforeEach(async () => {
   await rm("apps/server/.layo", { recursive: true, force: true });
 });
 
-test("non-destructive boolean controls preserve operands through undo redo and detach", async ({ page }) => {
+test("non-destructive boolean controls preserve operands through every operation, undo, redo, and detach", async ({ page }) => {
   await createProjectFromEmptyState(page);
   const projectId = await page.getByTestId("project-switcher").inputValue();
   const projectResponse = await page.request.get("http://127.0.0.1:4317/projects/" + projectId);
@@ -31,6 +31,7 @@ test("non-destructive boolean controls preserve operands through undo redo and d
   expect(createResponse.ok()).toBeTruthy();
 
   await page.reload();
+  await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "왼쪽 경로" }).click();
   await page
     .getByTestId("layer-panel")
@@ -50,30 +51,25 @@ test("non-destructive boolean controls preserve operands through undo redo and d
       children: Array<{ id: string }>;
     }>;
   };
+  const readOperation = async () => (await readParentChildren())[0]?.content.relation?.operation;
 
-  await expect.poll(async () => (await readParentChildren())[0]?.content).toMatchObject({
-    type: "boolean_path",
-    relation: {
-      operation: "union",
-      source_node_ids: ["path-left", "path-right"]
-    }
-  });
+  await expect.poll(readOperation).toBe("union");
   await expect.poll(async () => (await readParentChildren())[0]?.children.map((node) => node.id)).toEqual([
     "path-left",
     "path-right"
   ]);
 
+  await page.keyboard.press("Control+Alt+d");
+  await expect.poll(readOperation).toBe("difference");
   await page.keyboard.press("Control+Alt+i");
-  await expect.poll(async () => (await readParentChildren())[0]?.content.relation?.operation).toBe(
-    "intersection"
-  );
+  await expect.poll(readOperation).toBe("intersection");
+  await page.keyboard.press("Control+Alt+e");
+  await expect.poll(readOperation).toBe("exclusion");
 
   await page.keyboard.press("Control+z");
-  await expect.poll(async () => (await readParentChildren())[0]?.content.relation?.operation).toBe("union");
+  await expect.poll(readOperation).toBe("intersection");
   await page.keyboard.press("Control+Shift+z");
-  await expect.poll(async () => (await readParentChildren())[0]?.content.relation?.operation).toBe(
-    "intersection"
-  );
+  await expect.poll(readOperation).toBe("exclusion");
 
   await page.getByRole("button", { name: "불리언 분리" }).click();
   await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).toEqual([
@@ -82,9 +78,14 @@ test("non-destructive boolean controls preserve operands through undo redo and d
   ]);
 });
 
+async function openFilePanel(page: Page) {
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
+  await expect(page.getByTestId("layer-panel")).toBeVisible();
+}
+
 async function createProjectFromEmptyState(page: Page) {
   await page.goto("http://127.0.0.1:5173/");
-  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
+  await openFilePanel(page);
   await expect(page.getByTestId("project-switcher")).toHaveValue("");
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
