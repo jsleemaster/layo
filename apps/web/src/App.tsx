@@ -202,6 +202,16 @@ import {
 } from "./editor-state";
 import { calculateImageDrawConfig } from "./image-fit";
 import {
+  editablePathAnchors,
+  editablePathControls,
+  moveEditablePathAnchor,
+  moveEditablePathControl,
+  parseEditablePath,
+  serializeEditablePath,
+  type EditablePath,
+  type EditablePathControl
+} from "./path-editor";
+import {
   documentPointToViewport,
   getRemotePresence,
   getSelectedNodeBounds,
