@@ -27,6 +27,9 @@ export function evaluateBooleanPath(
   operation: BooleanPathOperation,
   operands: BooleanPathOperand[]
 ): BooleanPathEvaluation {
+  if (!["union", "difference", "intersection", "exclusion"].includes(operation)) {
+    throw new Error(`unsupported boolean path operation: ${String(operation)}`);
+  }
   if (operands.length < 2) {
     throw new Error("boolean paths require at least two operands");
   }
