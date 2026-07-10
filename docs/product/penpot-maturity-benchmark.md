@@ -235,6 +235,12 @@ For each comparison:
 6. If verification fails, feed the failing case into
    `docs/process/penpot-maturity-loop.md`.
 
+## Active First-Class Path Loop
+
+PR #272 adopts Penpot-style first-class path content while adapting persistence to Layo's Rust-owned local document and deterministic MCP/HTTP command architecture. Full Verification #465 run `29086037029` attempt 2 proves asset-free Penpot path import, inspect/validate/change-summary parity, canvas and artifact fidelity, keyboard entry/exit, direct anchor drag, persisted geometry, and undo across all 183 Playwright cases.
+
+This does not close path parity. The active next failed capability is topology editing: add/delete anchors, corner/curve conversion, join/merge/separate, explicit redo persistence, and Bezier-handle browser drag proof. Non-destructive union, difference, intersection, and exclusion remain the next path-system loop after topology editing.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
