@@ -62,13 +62,23 @@ test("non-destructive boolean controls preserve operands through every operation
   ]);
   const booleanNodeId = (await readBooleanPath())?.id;
   expect(booleanNodeId).toBeTruthy();
+  const selectBooleanLayer = async () => {
+    await page
+      .getByTestId("layer-panel")
+      .getByRole("button", { name: "불리언 경로" })
+      .click();
+  };
 
+  await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 빼기" }).click();
   await expect.poll(readOperation).toBe("difference");
+  await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 교차" }).click();
   await expect.poll(readOperation).toBe("intersection");
+  await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 제외" }).click();
   await expect.poll(readOperation).toBe("exclusion");
+  await selectBooleanLayer();
 
   await page.keyboard.press("Control+z");
   await expect.poll(readOperation).toBe("intersection");
