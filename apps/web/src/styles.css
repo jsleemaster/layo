@@ -1096,6 +1096,50 @@ button:disabled {
   outline: none;
 }
 
+.path-editor-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.path-editor-anchor,
+.path-editor-control {
+  position: absolute;
+  box-sizing: border-box;
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  pointer-events: auto;
+  outline: none;
+}
+
+.path-editor-anchor {
+  width: 10px;
+  border: var(--editor-border-hairline) solid var(--editor-color-selection);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-panel);
+}
+
+.path-editor-control {
+  width: 8px;
+  border: var(--editor-border-hairline) solid var(--editor-color-mcp);
+  border-radius: var(--editor-radius-pill);
+  background: var(--editor-color-panel);
+}
+
+.path-editor-anchor:hover,
+.path-editor-anchor:focus-visible {
+  background: var(--editor-color-selection-soft);
+  box-shadow: 0 0 0 2px var(--editor-color-selection-soft);
+}
+
+.path-editor-control:hover,
+.path-editor-control:focus-visible {
+  background: var(--editor-color-mcp-soft);
+  box-shadow: 0 0 0 2px var(--editor-color-mcp-soft);
+}
+
 .frame-spacing-overlay {
   position: absolute;
   inset: 0;
