@@ -632,6 +632,23 @@ pub struct Style {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
+pub enum BooleanPathOperation {
+    Union,
+    Difference,
+    Intersection,
+    Exclusion,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct PathBooleanRelation {
+    pub operation: BooleanPathOperation,
+    pub source_node_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
 pub enum PathFillRule {
     Nonzero,
     Evenodd,
