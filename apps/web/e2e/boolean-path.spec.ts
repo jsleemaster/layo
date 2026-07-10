@@ -63,6 +63,8 @@ test("non-destructive boolean controls preserve operands through every operation
   const booleanNodeId = (await readBooleanPath())?.id;
   expect(booleanNodeId).toBeTruthy();
   const selectBooleanLayer = async () => {
+    await page.reload();
+    await openFilePanel(page);
     await page
       .getByTestId("layer-panel")
       .getByRole("button", { name: "불리언 경로" })
@@ -72,6 +74,12 @@ test("non-destructive boolean controls preserve operands through every operation
   await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 빼기" }).click();
   await expect.poll(readOperation).toBe("difference");
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(readOperation).toBe("union");
+  await page.keyboard.press("Control+Shift+z");
+  await expect.poll(readOperation).toBe("difference");
+
   await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 교차" }).click();
   await expect.poll(readOperation).toBe("intersection");
@@ -79,11 +87,6 @@ test("non-destructive boolean controls preserve operands through every operation
   await page.getByRole("button", { name: "불리언 제외" }).click();
   await expect.poll(readOperation).toBe("exclusion");
   await selectBooleanLayer();
-
-  await page.keyboard.press("Control+z");
-  await expect.poll(readOperation).toBe("intersection");
-  await page.keyboard.press("Control+Shift+z");
-  await expect.poll(readOperation).toBe("exclusion");
 
   const visibleBounds = await findCanvasColorBounds(page, { r: 14, g: 165, b: 233 });
   await page.mouse.click(visibleBounds.left + 8, (visibleBounds.top + visibleBounds.bottom) / 2, {
