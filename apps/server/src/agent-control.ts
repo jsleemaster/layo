@@ -2,7 +2,8 @@ import { evaluateBooleanPath } from "@layo/renderer";
 import {
   applyAgentCommandsToDocument as applyBaseAgentCommandsToDocument,
   createAgentBatchResult as createBaseAgentBatchResult,
-  inspectCanvas as inspectBaseCanvas
+  inspectCanvas as inspectBaseCanvas,
+  validateDocument as validateBaseDocument
 } from "./agent-control-base.js";
 import type {
   AgentBatchInput as BaseAgentBatchInput,
@@ -133,7 +134,25 @@ export function inspectCanvas(document: DesignFile): CanvasInspection {
   const inspection = inspectBaseCanvas(document);
   return {
     ...inspection,
+    validation: validateDocument(document),
     nodes: summarizeNodes(document)
+  };
+}
+
+export function validateDocument(document: DesignFile) {
+  const base = validateBaseDocument(document);
+  const issues = [...base.issues];
+
+  for (const page of document.pages) {
+    for (const node of page.children) {
+      collectBooleanValidationIssues(node, [page.id, node.id], issues);
+    }
+  }
+
+  return {
+    ok: issues.length === 0,
+    issueCount: issues.length,
+    issues
   };
 }
 
@@ -221,8 +240,50 @@ export function createAgentBatchResult(
   );
   return {
     ...result,
+    validation: validateDocument(preview),
     inspection: inspectCanvas(preview)
   };
+}
+
+function collectBooleanValidationIssues(
+  node: DesignNode,
+  path: string[],
+  issues: Array<{ code: string; message: string; nodeId?: string; path?: string[] }>
+) {
+  if (node.content.type === "boolean_path") {
+    const sourceIds = node.content.relation.source_node_ids;
+    if (sourceIds.length < 2 || new Set(sourceIds).size !== sourceIds.length) {
+      issues.push({
+        code: "invalid_boolean_path_sources",
+        message: `boolean path requires at least two unique sources: ${node.id}`,
+        nodeId: node.id,
+        path
+      });
+    }
+    const childIds = new Set(node.children.map((child) => child.id));
+    for (const sourceId of sourceIds) {
+      if (!childIds.has(sourceId)) {
+        issues.push({
+          code: "missing_boolean_path_source",
+          message: `boolean path source is missing: ${node.id} -> ${sourceId}`,
+          nodeId: node.id,
+          path
+        });
+      }
+    }
+    if (!node.content.path_data.trim()) {
+      issues.push({
+        code: "empty_boolean_path_result",
+        message: `boolean path evaluated geometry is empty: ${node.id}`,
+        nodeId: node.id,
+        path
+      });
+    }
+  }
+
+  for (const child of node.children) {
+    collectBooleanValidationIssues(child, [...path, child.id], issues);
+  }
 }
 
 function summarizeNodes(document: DesignFile): AgentNodeSummary[] {
