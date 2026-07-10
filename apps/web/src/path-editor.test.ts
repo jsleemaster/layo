@@ -86,6 +86,20 @@ describe("editable path geometry", () => {
     });
   });
 
+  test("preserves each move command when a path has multiple subpaths", () => {
+    const path = parseEditablePath("M0 0 L20 0 Z M40 40 L60 40 Z");
+
+    expect(path?.commands).toEqual([
+      { type: "M", x: 0, y: 0 },
+      { type: "L", x: 20, y: 0 },
+      { type: "Z" },
+      { type: "M", x: 40, y: 40 },
+      { type: "L", x: 60, y: 40 },
+      { type: "Z" }
+    ]);
+    expect(serializeEditablePath(path!)).toBe("M0 0 L20 0 Z M40 40 L60 40 Z");
+  });
+
   test("keeps unsupported arc and smooth commands read-only", () => {
     expect(parseEditablePath("M0 0 A10 10 0 0 1 20 20")).toBeNull();
     expect(parseEditablePath("M0 0 S10 10 20 20")).toBeNull();
