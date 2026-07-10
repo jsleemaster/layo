@@ -28,7 +28,10 @@
 - RED MCP mutation contract: Full Verification #435, run `29082394587`, failed only because MCP rejected `set_path_data`.
 - RED artifact contract: Full Verification #438, run `29083054678`, failed only because first-class path content exported as a rectangle.
 - RED direct editing: Full Verification #447, run `29084575601`, passed 182 e2e cases and failed only because `path-editor-overlay` does not exist after selecting a path and pressing Enter.
-- Remaining before completion: direct anchor/control editing, undo/redo, keyboard access, and dedicated GREEN path-editing Playwright interaction proof.
+- Type repair: Full Verification #463, run `29085935775`, failed at typecheck on one nullable path ID and two path-command union narrowing errors.
+- GREEN direct editing foundation: Full Verification #465, run `29086037029`, attempt 2 passed maturity/design gates, typecheck, web build, core tests, and all 183 Playwright cases.
+- Verified direct actions: select the compound path, press `Enter`, inspect eight anchors, drag one anchor, poll persisted `path_data`, undo and poll restoration, then press `Escape`.
+- Current exact gap: add/delete, corner/curve, join/merge/separate, explicit redo persistence, and Bezier-handle browser drag proof remain active before this plan is complete.
 
 ### Task 1: First-Class Path Document Contract
 
@@ -292,7 +295,7 @@ git commit -m "feat: render and export first-class paths"
 - Create: `apps/web/src/path-editor.test.ts`
 - Modify: `apps/web/src/editor-state.ts`
 - Modify: `apps/web/src/App.tsx`
-- Modify: `apps/web/src/app.css`
+- Modify: `apps/web/src/styles.css`
 - Test: `apps/web/e2e/path-editing.spec.ts`
 
 **Interfaces:**
