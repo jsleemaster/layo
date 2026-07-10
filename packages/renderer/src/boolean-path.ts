@@ -62,6 +62,9 @@ export function evaluateBooleanPath(
     result = next;
   }
 
+  if (!(result instanceof scope.Path) && !(result instanceof scope.CompoundPath)) {
+    throw new Error("boolean path evaluation did not produce path geometry");
+  }
   const bounds = result.bounds;
   const evaluation = {
     pathData: result.pathData,
