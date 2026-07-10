@@ -1136,8 +1136,8 @@ button:disabled {
 
 .path-editor-control:hover,
 .path-editor-control:focus-visible {
-  background: var(--editor-color-mcp-soft);
-  box-shadow: 0 0 0 2px var(--editor-color-mcp-soft);
+  background: var(--editor-color-selection-soft);
+  box-shadow: 0 0 0 2px var(--editor-color-selection-soft);
 }
 
 .frame-spacing-overlay {
