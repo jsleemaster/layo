@@ -2,9 +2,15 @@ import { describe, expect, test } from "vitest";
 import {
   editablePathAnchors,
   editablePathControls,
+  convertEditablePathAnchor,
+  deleteEditablePathAnchor,
+  insertEditablePathAnchor,
+  joinEditablePathSubpaths,
+  mergeEditablePathAnchors,
   moveEditablePathAnchor,
   moveEditablePathControl,
   parseEditablePath,
+  separateEditablePathAtAnchor,
   serializeEditablePath
 } from "./path-editor";
 
@@ -98,6 +104,38 @@ describe("editable path geometry", () => {
       { type: "Z" }
     ]);
     expect(serializeEditablePath(path!)).toBe("M0 0 L20 0 Z M40 40 L60 40 Z");
+  });
+
+  test("inserts and deletes line anchors without flattening the remaining path", () => {
+    const path = parseEditablePath("M0 0 L100 0 L100 100 Z")!;
+
+    const inserted = insertEditablePathAnchor(path, 0);
+    expect(serializeEditablePath(inserted)).toBe("M0 0 L50 0 L100 0 L100 100 Z");
+
+    const deleted = deleteEditablePathAnchor(inserted, 1);
+    expect(serializeEditablePath(deleted)).toBe("M0 0 L100 0 L100 100 Z");
+  });
+
+  test("converts a line anchor to a curve and back to a corner", () => {
+    const path = parseEditablePath("M0 0 L90 0 L90 90")!;
+
+    const curved = convertEditablePathAnchor(path, 1, "curve");
+    expect(serializeEditablePath(curved)).toBe("M0 0 C30 0 60 0 90 0 L90 90");
+
+    const corner = convertEditablePathAnchor(curved, 1, "corner");
+    expect(serializeEditablePath(corner)).toBe("M0 0 L90 0 L90 90");
+  });
+
+  test("separates, joins, and merges path topology deterministically", () => {
+    const path = parseEditablePath("M0 0 L20 0 L40 0 L60 0")!;
+    const separated = separateEditablePathAtAnchor(path, 2);
+    expect(serializeEditablePath(separated)).toBe("M0 0 L20 0 M40 0 L60 0");
+
+    const joined = joinEditablePathSubpaths(separated);
+    expect(serializeEditablePath(joined)).toBe("M0 0 L20 0 L40 0 L60 0");
+
+    const merged = mergeEditablePathAnchors(joined, 1, 2);
+    expect(serializeEditablePath(merged)).toBe("M0 0 L30 0 L60 0");
   });
 
   test("keeps unsupported arc and smooth commands read-only", () => {
