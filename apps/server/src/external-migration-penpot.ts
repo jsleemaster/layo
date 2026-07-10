@@ -376,9 +376,9 @@ function mapPenpotShape(
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   const fillImageAsset = fillImageMediaId ? state.assetsById.get(fillImageMediaId) : undefined;
   const strokeImageAsset = strokeImageMediaId ? state.assetsById.get(strokeImageMediaId) : undefined;
-  const pathAsset = shape.type === 'path' ? pathAssetForShape(shape) : undefined;
+  const pathData = shape.type === 'path' ? pathDataForShape(shape) : undefined;
   const svgRawAsset = shape.type === 'svg-raw' ? svgRawAssetForShape(shape, shapesById) : undefined;
-  if (shape.type === 'path' && !pathAsset) {
+  if (shape.type === 'path' && !pathData) {
     state.skippedNodeCount += 1;
     state.warnings.push(`Skipped Penpot path shape ${shape.name} because its path content was not readable.`);
     return null;
@@ -420,7 +420,7 @@ function mapPenpotShape(
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const renderedImageAsset = pathAsset ?? svgRawAsset ?? imageAsset;
+  const renderedImageAsset = svgRawAsset ?? imageAsset;
   const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
   const fill = mapsAsImage
@@ -442,7 +442,7 @@ function mapPenpotShape(
 
   const mapped: DesignNode = {
     id: nodeId,
-    kind: mapsAsImage ? 'image' : shape.type === 'frame' ? 'frame' : shape.type === 'group' ? 'group' : shape.type === 'text' ? 'text' : 'rectangle',
+    kind: mapsAsImage ? 'image' : shape.type === 'frame' ? 'frame' : shape.type === 'group' ? 'group' : shape.type === 'text' ? 'text' : shape.type === 'path' ? 'path' : 'rectangle',
     name: shape.name,
     transform,
     size: {
@@ -457,6 +457,12 @@ function mapPenpotShape(
     },
     content: mapsAsImage && renderedImageAsset
       ? imageContentForAsset(renderedImageAsset, 'fill')
+      : shape.type === 'path' && pathData
+      ? {
+          type: 'path',
+          path_data: pathData,
+          fill_rule: penpotPathFillRule(shape.json)
+        }
       : shape.type === 'text'
       ? {
           type: 'text',
@@ -715,6 +721,11 @@ function pathDataForShape(shape: PenpotShape): string | undefined {
   }
 
   return undefined;
+}
+
+function penpotPathFillRule(shape: JsonRecord): "nonzero" | "evenodd" {
+  const value = stringValue(valueFor(shape, 'fillRule', 'fill-rule'))?.trim().toLowerCase();
+  return value === 'evenodd' || value === 'even-odd' ? 'evenodd' : 'nonzero';
 }
 
 function looksLikeSvgPathData(value: string): boolean {
