@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { applyAgentCommandsToDocument } from "./agent-control";
+import { applyAgentCommandsToDocument, validateDocument } from "./agent-control";
 import type { DesignFile, DesignNode } from "./storage";
 
 describe("non-destructive boolean path commands", () => {
@@ -59,6 +59,35 @@ describe("non-destructive boolean path commands", () => {
       "path-right"
     ]);
     expect(detached.document.pages[0].children.map((node) => node.transform.x)).toEqual([0, 50]);
+  });
+
+  test("validates missing boolean operands and empty evaluated geometry", () => {
+    const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "create_boolean_path",
+      nodeId: "boolean-1",
+      name: "Union",
+      operation: "union",
+      sourceNodeIds: ["path-left", "path-right"]
+    }]).document;
+    const booleanNode = created.pages[0].children[0];
+    booleanNode.children.pop();
+    if (booleanNode.content.type === "boolean_path") {
+      booleanNode.content.path_data = "";
+    }
+
+    expect(validateDocument(created)).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: "missing_boolean_path_source",
+          nodeId: "boolean-1"
+        }),
+        expect.objectContaining({
+          code: "empty_boolean_path_result",
+          nodeId: "boolean-1"
+        })
+      ])
+    });
   });
 
   test("rejects missing, duplicate, and non-path operands", () => {
