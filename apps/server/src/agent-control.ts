@@ -369,6 +369,7 @@ function applyCreateBooleanPathCommand(
     command.operation,
     sourceEntries.map(({ node }) => ({
       pathData: pathDataFromBooleanSource(node),
+      fillRule: booleanSourceFillRule(node),
       transform: node.transform
     }))
   );
@@ -402,7 +403,7 @@ function applyCreateBooleanPathCommand(
         source_node_ids: sourceNodeIds
       },
       path_data: evaluation.pathData,
-      fill_rule: booleanSourceFillRule(firstSource)
+      fill_rule: evaluation.fillRule
     },
     children
   };
@@ -434,11 +435,17 @@ function applySetBooleanPathOperationCommand(
     command.operation,
     sources.map((source) => ({
       pathData: pathDataFromBooleanSource(source),
+      fillRule: booleanSourceFillRule(source),
       transform: source.transform
     }))
   );
-  node.transform.x += evaluation.bounds.x;
-  node.transform.y += evaluation.bounds.y;
+  const rotation = (node.transform.rotation * Math.PI) / 180;
+  const offsetX =
+    evaluation.bounds.x * Math.cos(rotation) - evaluation.bounds.y * Math.sin(rotation);
+  const offsetY =
+    evaluation.bounds.x * Math.sin(rotation) + evaluation.bounds.y * Math.cos(rotation);
+  node.transform.x += offsetX;
+  node.transform.y += offsetY;
   node.size = {
     width: evaluation.bounds.width,
     height: evaluation.bounds.height
@@ -457,7 +464,8 @@ function applySetBooleanPathOperationCommand(
       operation: command.operation,
       source_node_ids: [...node.content.relation.source_node_ids]
     },
-    path_data: evaluation.pathData
+    path_data: evaluation.pathData,
+    fill_rule: evaluation.fillRule
   };
   return [node.id, ...node.content.relation.source_node_ids];
 }
