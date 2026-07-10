@@ -20,6 +20,15 @@
 
 ---
 
+## Progress Evidence
+
+- GREEN import/model/agent/canvas/artifact batch: Full Verification #443, run `29084105892`.
+- Passed gates: Penpot maturity/design rules, typecheck, web build, core tests including `cargo test --workspace`, and full Playwright CLI e2e.
+- RED import contract: Full Verification #424, run `29081308006`, failed only because Penpot paths still arrived as image nodes.
+- RED MCP mutation contract: Full Verification #435, run `29082394587`, failed only because MCP rejected `set_path_data`.
+- RED artifact contract: Full Verification #438, run `29083054678`, failed only because first-class path content exported as a rectangle.
+- Remaining before completion: explicit Rust path JSON round-trip regression, direct anchor/control editing, undo/redo, keyboard access, and dedicated path-editing Playwright interaction proof.
+
 ### Task 1: First-Class Path Document Contract
 
 **Files:**
@@ -57,7 +66,7 @@ Expected: FAIL because `NodeKind::Path` and `NodeContent::Path` do not exist.
 Run: `pnpm --filter @layo/renderer test -- path`
 Expected: FAIL because `RendererNode` rejects `kind: "path"`.
 
-- [ ] **Step 2: Add the path model types**
+- [x] **Step 2: Add the path model types**
 
 Add these serde/ts-rs contracts and include `Path` in `NodeKind`:
 
@@ -92,7 +101,7 @@ Mirror the contract in `RendererNode["content"]`:
   }
 ```
 
-- [ ] **Step 3: Validate and regenerate bindings**
+- [x] **Step 3: Validate and regenerate bindings**
 
 Run: `cargo test -p editor-core`
 Expected: PASS and ts-rs binding tests regenerate `NodeKind.ts`, `NodeContent.ts`, and `PathFillRule.ts`.
@@ -100,7 +109,7 @@ Expected: PASS and ts-rs binding tests regenerate `NodeKind.ts`, `NodeContent.ts
 Run: `pnpm --filter @layo/renderer test && pnpm typecheck`
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/editor-core packages/renderer
@@ -120,7 +129,7 @@ git commit -m "feat: add first-class path document nodes"
 - Produces: imported Penpot path nodes with source fill, stroke, opacity, bounds, path data, and fill rule.
 - Produces: zero imported assets for path-only Penpot files.
 
-- [ ] **Step 1: Write the focused RED import test**
+- [x] **Step 1: Write the focused RED import test**
 
 Create a Penpot ZIP fixture with one frame and one path. Assert:
 
@@ -146,7 +155,7 @@ expect(imported.importedAssets).toEqual([]);
 Run: `pnpm --filter @layo/server test -- external-migration.test.ts`
 Expected: FAIL because the mapper returns `kind: "image"` and a synthesized SVG asset.
 
-- [ ] **Step 2: Map Penpot paths directly**
+- [x] **Step 2: Map Penpot paths directly**
 
 In the Penpot shape mapper, return:
 
@@ -174,7 +183,7 @@ In the Penpot shape mapper, return:
 
 Remove only path-specific synthesized asset creation. Keep old saved image nodes readable.
 
-- [ ] **Step 3: Update browser import proof**
+- [x] **Step 3: Update browser import proof**
 
 Change both simple and even-odd path e2e expectations from generic image nodes to first-class path nodes. Assert no `/assets/penpot-asset-*-path-svg` dependency and verify the layer remains visible.
 
@@ -202,7 +211,7 @@ git commit -m "feat: import Penpot paths as editable nodes"
 - Produces: inspect `pathData` and `fillRule` on path summaries.
 - Produces: code-export structure content `{ type: "path", pathData, fillRule }`.
 
-- [ ] **Step 1: Write RED dry-run/apply and MCP tests**
+- [x] **Step 1: Write RED dry-run/apply and MCP tests**
 
 Use this command:
 
@@ -220,11 +229,11 @@ Assert dry-run leaves storage unchanged, apply persists, validation is `ok`, `ch
 Run: `pnpm --filter @layo/server test -- agent-control.test.ts mcp-path.test.ts`
 Expected: FAIL because the command and MCP schema do not exist.
 
-- [ ] **Step 2: Implement one normalized command path**
+- [x] **Step 2: Implement one normalized command path**
 
 Trim `pathData`, reject empty data, reject non-path nodes, normalize `fillRule` to the two enum values, and reuse the existing batch clone/validate/change-summary transaction.
 
-- [ ] **Step 3: Verify server surfaces**
+- [x] **Step 3: Verify server surfaces**
 
 Run: `pnpm --filter @layo/server test && pnpm --filter @layo/server typecheck`
 Expected: PASS.
@@ -249,18 +258,18 @@ git commit -m "feat: edit path data through agent commands"
 - Produces: `Konva.Path` rendering using `data`, fill, stroke, strokeWidth, opacity, and even-odd fill.
 - Produces: SVG/PDF/PNG/JPEG/WEBP export directly from path content.
 
-- [ ] **Step 1: Write RED artifact and visible canvas tests**
+- [x] **Step 1: Write RED artifact and visible canvas tests**
 
 Assert SVG emits `<path d="...">` with `fill-rule="evenodd"`; PDF emits path commands plus `f*`; browser canvas shows non-empty pixels inside the path and background pixels outside it.
 
 Run: `pnpm --filter @layo/web test -- node-artifacts-path.test.ts`
 Expected: FAIL because artifacts only discover path data through old image vector metadata.
 
-- [ ] **Step 2: Render and export first-class paths**
+- [x] **Step 2: Render and export first-class paths**
 
 Import `Path as KonvaPath` from `react-konva`. Render first-class path nodes before rectangle fallback, and teach `node-artifacts.ts` to read path data from `node.content.type === "path"`.
 
-- [ ] **Step 3: Verify canvas and artifact behavior**
+- [x] **Step 3: Verify canvas and artifact behavior**
 
 Run: `pnpm --filter @layo/web test && pnpm --filter @layo/web build`
 Expected: PASS.
