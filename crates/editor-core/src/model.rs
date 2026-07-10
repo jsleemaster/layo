@@ -835,6 +835,36 @@ mod tests {
     }
 
     #[test]
+    fn boolean_path_content_round_trip() {
+        let content = NodeContent::BooleanPath {
+            relation: PathBooleanRelation {
+                operation: BooleanPathOperation::Union,
+                source_node_ids: vec!["path-left".to_string(), "path-right".to_string()],
+            },
+            path_data: "M0 0 H150 V100 H0 Z".to_string(),
+            fill_rule: PathFillRule::Nonzero,
+        };
+
+        let json = serde_json::to_value(&content).expect("boolean path content should serialize");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "boolean_path",
+                "relation": {
+                    "operation": "union",
+                    "source_node_ids": ["path-left", "path-right"]
+                },
+                "path_data": "M0 0 H150 V100 H0 Z",
+                "fill_rule": "nonzero"
+            })
+        );
+
+        let restored: NodeContent =
+            serde_json::from_value(json).expect("boolean path content should deserialize");
+        assert_eq!(restored, content);
+    }
+
+    #[test]
     fn path_node_round_trip() {
         let content = NodeContent::Path {
             path_data: "M0 0 H100 V100 H0 Z".to_string(),
