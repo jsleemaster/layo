@@ -1457,6 +1457,7 @@ interface PathEditorDragSession {
   startClientPoint: { x: number; y: number };
   startPath: EditablePath;
   viewportScale: number;
+  rotation: number;
   anchorIndex?: number;
   control?: Pick<EditablePathControl, "commandIndex" | "role">;
 }
@@ -4050,6 +4051,7 @@ function renderNode({
   onGeometryChange,
   onResizeStart,
   onTextEditStart,
+  onPathEditStart,
   onDragStart,
   onDragMove,
   onDragEnd
@@ -4065,6 +4067,7 @@ function renderNode({
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
   onResizeStart: (nodeId: string, handle: ResizeHandle) => void;
   onTextEditStart: (nodeId: string) => void;
+  onPathEditStart: (nodeId: string) => void;
   onDragStart: (
     nodeId: string,
     event: KonvaEventObject<MouseEvent | TouchEvent | DragEvent>
@@ -4148,22 +4151,26 @@ function renderNode({
     const additive = "shiftKey" in event.evt ? event.evt.shiftKey : false;
     onSelect(node.id, additive, !additive && isSelected);
   };
-  const startTextEditFromDoubleClick = (
+  const startDirectEditFromDoubleClick = (
     event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>
   ) => {
-    if (
-      isCanvasPanning ||
-      nodeIsLocked ||
-      shouldDeferToAncestor ||
-      node.kind !== "text" ||
-      node.content.type !== "text"
-    ) {
+    if (isCanvasPanning || nodeIsLocked || shouldDeferToAncestor) {
+      return;
+    }
+
+    const isEditableText = node.kind === "text" && node.content.type === "text";
+    const isEditablePath = node.kind === "path" && node.content.type === "path";
+    if (!isEditableText && !isEditablePath) {
       return;
     }
 
     event.cancelBubble = true;
     onSelect(node.id, false, true);
-    onTextEditStart(node.id);
+    if (isEditableText) {
+      onTextEditStart(node.id);
+    } else {
+      onPathEditStart(node.id);
+    }
   };
 
   const renderBody = (shadowProps: Record<string, number | string> = {}): ReactNode =>
@@ -4265,8 +4272,8 @@ function renderNode({
       onTouchStart={selectAndPrimeDrag}
       onClick={selectFromClick}
       onTap={selectFromClick}
-      onDblClick={startTextEditFromDoubleClick}
-      onDblTap={startTextEditFromDoubleClick}
+      onDblClick={startDirectEditFromDoubleClick}
+      onDblTap={startDirectEditFromDoubleClick}
       onDragStart={(event) => onDragStart(node.id, event)}
       onDragMove={(event) => onDragMove(node.id, event)}
       onDragEnd={(event) => onDragEnd(node.id, event)}
@@ -4329,6 +4336,7 @@ function renderNode({
           onGeometryChange,
           onResizeStart,
           onTextEditStart,
+          onPathEditStart,
           onDragStart,
           onDragMove,
           onDragEnd
@@ -10031,6 +10039,28 @@ export function App() {
           }
 
           const nextState = event.shiftKey ? redo(current) : undo(current);
+          const nodeId = current.selection.nodeId;
+          const currentNode = nodeId ? findNodeById(current.document, nodeId) : null;
+          const nextNode = nodeId ? findNodeById(nextState.document, nodeId) : null;
+          if (
+            currentProjectRef.current &&
+            currentNode?.kind === "path" &&
+            currentNode.content.type === "path" &&
+            nextNode?.kind === "path" &&
+            nextNode.content.type === "path" &&
+            (currentNode.content.path_data !== nextNode.content.path_data ||
+              currentNode.content.fill_rule !== nextNode.content.fill_rule)
+          ) {
+            void persistPathChange(
+              currentProjectRef.current.currentDocumentId,
+              nodeId,
+              nextNode.content.path_data,
+              nextNode.content.fill_rule
+            ).catch((error) => {
+              const message = error instanceof Error ? error.message : "경로를 저장하지 못했습니다";
+              setProjectStatus(message);
+            });
+          }
           publishEditorPresence(nextState);
           return nextState;
         });
@@ -10129,6 +10159,24 @@ export function App() {
         });
         return;
       }
+      if (!isCommand && event.key === "Enter") {
+        const currentEditor = editorRef.current;
+        const nodeId = currentEditor?.selection.nodeId ?? null;
+        const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+        if (
+          node &&
+          !isNodeLocked(node) &&
+          isNodeVisible(node) &&
+          node.kind === "path" &&
+          node.content.type === "path" &&
+          parseEditablePath(node.content.path_data)
+        ) {
+          event.preventDefault();
+          setInlineTextEditingNodeId(null);
+          setPathEditingNodeId(node.id);
+        }
+        return;
+      }
       if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
         updateViewportFromInteraction(deleteSelectedNode);
@@ -10146,7 +10194,11 @@ export function App() {
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        clearSelectionFromInteraction();
+        if (pathEditingNodeIdRef.current) {
+          setPathEditingNodeId(null);
+        } else {
+          clearSelectionFromInteraction();
+        }
         return;
       }
 
@@ -10495,6 +10547,118 @@ export function App() {
     activeSession.transact("editor-command", () => nextState.document);
     publishEditorPresence(nextState);
     setEditor(nextState);
+  };
+
+  const startPathEdit = (nodeId: string) => {
+    const currentEditor = editorRef.current;
+    const node = currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
+    if (
+      !node ||
+      isNodeLocked(node) ||
+      !isNodeVisible(node) ||
+      node.kind !== "path" ||
+      node.content.type !== "path" ||
+      !parseEditablePath(node.content.path_data)
+    ) {
+      return;
+    }
+
+    setInlineTextEditingNodeId(null);
+    setMeasurementTargetNodeId(null);
+    setPathEditingNodeId(nodeId);
+  };
+
+  const commitPathEdit = (
+    nodeId: string,
+    path: EditablePath,
+    fillRule: "nonzero" | "evenodd"
+  ) => {
+    const pathData = serializeEditablePath(path);
+    dispatch({ type: "set_path_data", nodeId, pathData, fillRule });
+    const project = currentProjectRef.current;
+    if (!project) {
+      return;
+    }
+
+    void persistPathChange(project.currentDocumentId, nodeId, pathData, fillRule)
+      .then(() => setProjectStatus("경로 편집 저장됨"))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "경로를 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+  const startPathPointDrag = (
+    point: PathEditorOverlayPoint,
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    if (!pathEditorOverlay || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const node = editorRef.current
+      ? findNodeById(editorRef.current.document, pathEditorOverlay.nodeId)
+      : null;
+    pathEditorDragSessionRef.current = {
+      nodeId: pathEditorOverlay.nodeId,
+      startClientPoint: { x: event.clientX, y: event.clientY },
+      startPath: pathEditorOverlay.path,
+      viewportScale: editorRef.current?.viewport.scale ?? 1,
+      rotation: node?.transform.rotation ?? 0,
+      anchorIndex: point.anchorIndex,
+      control: point.control
+    };
+  };
+
+  const finishPathPointDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const session = pathEditorDragSessionRef.current;
+    pathEditorDragSessionRef.current = null;
+    if (!session || session.nodeId !== pathEditorOverlay?.nodeId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const screenDelta = {
+      x: (event.clientX - session.startClientPoint.x) / session.viewportScale,
+      y: (event.clientY - session.startClientPoint.y) / session.viewportScale
+    };
+    const rotation = (-session.rotation * Math.PI) / 180;
+    const delta = {
+      x: screenDelta.x * Math.cos(rotation) - screenDelta.y * Math.sin(rotation),
+      y: screenDelta.x * Math.sin(rotation) + screenDelta.y * Math.cos(rotation)
+    };
+    let nextPath = session.startPath;
+    if (session.anchorIndex !== undefined) {
+      const anchor = editablePathAnchors(session.startPath).find(
+        (candidate) => candidate.anchorIndex === session.anchorIndex
+      );
+      if (anchor) {
+        nextPath = moveEditablePathAnchor(session.startPath, session.anchorIndex, {
+          x: anchor.x + delta.x,
+          y: anchor.y + delta.y
+        });
+      }
+    } else if (session.control) {
+      const control = editablePathControls(session.startPath).find(
+        (candidate) =>
+          candidate.commandIndex === session.control?.commandIndex &&
+          candidate.role === session.control?.role
+      );
+      if (control) {
+        nextPath = moveEditablePathControl(session.startPath, session.control, {
+          x: control.x + delta.x,
+          y: control.y + delta.y
+        });
+      }
+    }
+
+    if (serializeEditablePath(nextPath) !== serializeEditablePath(session.startPath)) {
+      commitPathEdit(session.nodeId, nextPath, pathEditorOverlay.fillRule);
+    }
   };
 
   const startInlineTextEdit = (nodeId: string) => {
@@ -15049,6 +15213,7 @@ export function App() {
                       setResizeSession(nextResizeSession);
                     },
                     onTextEditStart: startInlineTextEdit,
+                    onPathEditStart: startPathEdit,
                     onDragStart: startNodeDrag,
                     onDragMove: updateNodeDragPreview,
                     onDragEnd: finishNodeDrag
@@ -15056,6 +15221,40 @@ export function App() {
                 )}
               </Layer>
             </Stage>
+            {pathEditorOverlay ? (
+              <div
+                className="path-editor-overlay"
+                data-testid="path-editor-overlay"
+                aria-label="경로 노드 편집"
+              >
+                {pathEditorOverlay.controls.map((point, index) => (
+                  <button
+                    key={point.id}
+                    type="button"
+                    className="path-editor-control"
+                    data-testid={point.id}
+                    aria-label={`베지어 조절점 ${index + 1}`}
+                    title={`베지어 조절점 ${index + 1}`}
+                    style={{ left: point.left, top: point.top }}
+                    onPointerDown={(event) => startPathPointDrag(point, event)}
+                    onPointerUp={finishPathPointDrag}
+                  />
+                ))}
+                {pathEditorOverlay.anchors.map((point, index) => (
+                  <button
+                    key={point.id}
+                    type="button"
+                    className="path-editor-anchor"
+                    data-testid={point.id}
+                    aria-label={`경로 점 ${index + 1}`}
+                    title={`경로 점 ${index + 1}`}
+                    style={{ left: point.left, top: point.top }}
+                    onPointerDown={(event) => startPathPointDrag(point, event)}
+                    onPointerUp={finishPathPointDrag}
+                  />
+                ))}
+              </div>
+            ) : null}
             {inlineTextEditorOverlay ? (
               <textarea
                 ref={inlineTextEditorRef}
