@@ -102,6 +102,7 @@ test("non-destructive boolean controls preserve operands through every operation
   expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   expect(png.byteLength).toBeGreaterThan(100);
 
+  await selectBooleanLayer();
   await page.getByRole("button", { name: "불리언 분리" }).click();
   await expect.poll(async () => (await readParentChildren()).map((node) => node.id)).toEqual(
     expect.arrayContaining(["path-left", "path-right"])
