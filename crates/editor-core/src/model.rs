@@ -685,6 +685,11 @@ pub enum NodeContent {
         path_data: String,
         fill_rule: PathFillRule,
     },
+    BooleanPath {
+        relation: PathBooleanRelation,
+        path_data: String,
+        fill_rule: PathFillRule,
+    },
 }
 
 impl DesignFile {
