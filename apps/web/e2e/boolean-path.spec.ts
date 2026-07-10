@@ -22,8 +22,8 @@ test("non-destructive boolean controls preserve operands through every operation
       data: {
         dryRun: false,
         commands: [
-          { type: "create_node", parentId, node: pathNode("path-left", "왼쪽 경로", 40) },
-          { type: "create_node", parentId, node: pathNode("path-right", "오른쪽 경로", 90) }
+          { type: "create_path", parentId, ...pathCommand("path-left", "왼쪽 경로", 40) },
+          { type: "create_path", parentId, ...pathCommand("path-right", "오른쪽 경로", 90) }
         ]
       }
     }
@@ -151,24 +151,18 @@ async function createProjectFromEmptyState(page: Page) {
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
 }
 
-function pathNode(id: string, name: string, x: number) {
+function pathCommand(id: string, name: string, x: number) {
   return {
     id,
-    kind: "path",
     name,
-    transform: { x, y: 40, rotation: 0 },
-    size: { width: 100, height: 100 },
-    style: {
-      fill: "#0ea5e9",
-      stroke: "#0f172a",
-      stroke_width: 1,
-      opacity: 1
-    },
-    content: {
-      type: "path",
-      path_data: "M0 0 H100 V100 H0 Z",
-      fill_rule: "nonzero"
-    },
-    children: []
+    x,
+    y: 40,
+    width: 100,
+    height: 100,
+    fill: "#0ea5e9",
+    stroke: "#0f172a",
+    strokeWidth: 1,
+    pathData: "M0 0 H100 V100 H0 Z",
+    fillRule: "nonzero" as const
   };
 }
