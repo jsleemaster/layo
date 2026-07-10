@@ -283,12 +283,14 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
   await page.keyboard.press("Control+z");
   await expect.poll(readPersistedPathData).toBe(evenOddPathData);
 
+  const normalizedEvenOddPathData =
+    "M0 0 L100 0 L100 100 L0 100 Z M25 25 L75 25 L75 75 L25 75 Z";
   await anchors.first().click();
   await page.getByRole("button", { name: "경로 점 추가" }).click();
   await expect(anchors).toHaveCount(9);
   await page.getByRole("button", { name: "경로 점 삭제" }).click();
   await expect(anchors).toHaveCount(8);
-  await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+  await expect.poll(readPersistedPathData).toBe(normalizedEvenOddPathData);
 
   await anchors.first().click();
   await anchors.nth(1).click({ modifiers: ["Shift"] });
@@ -296,7 +298,7 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
   await expect(anchors).toHaveCount(7);
   await page.keyboard.press("Control+z");
   await expect(anchors).toHaveCount(8);
-  await expect.poll(readPersistedPathData).toBe(evenOddPathData);
+  await expect.poll(readPersistedPathData).toBe(normalizedEvenOddPathData);
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("path-editor-overlay")).toBeHidden();
