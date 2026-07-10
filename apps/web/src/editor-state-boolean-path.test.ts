@@ -60,6 +60,30 @@ describe("boolean path editor history", () => {
     ]);
     expect(undo(detached).document.pages[0].children[0].id).toBe("boolean-1");
   });
+
+  test("moves recomputed bounds in the rotated parent coordinate system", () => {
+    const created = executeEditorCommand(createEditorState(documentFixture()), {
+      type: "create_boolean_path",
+      nodeId: "boolean-rotated",
+      name: "Rotated union",
+      operation: "union",
+      sourceNodeIds: ["path-left", "path-right"]
+    });
+    const booleanNode = created.document.pages[0].children[0];
+    booleanNode.transform = { x: 10, y: 20, rotation: 90 };
+
+    const intersected = executeEditorCommand(created, {
+      type: "set_boolean_path_operation",
+      nodeId: "boolean-rotated",
+      operation: "intersection"
+    });
+    const result = intersected.document.pages[0].children[0];
+
+    expect(result.transform.x).toBeCloseTo(10);
+    expect(result.transform.y).toBeCloseTo(70);
+    expect(result.size).toEqual({ width: 50, height: 100 });
+    expect(result.children.map((node) => node.transform.x)).toEqual([-50, 0]);
+  });
 });
 
 function documentFixture(): RendererDocument {
