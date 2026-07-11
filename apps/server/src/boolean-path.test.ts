@@ -147,20 +147,67 @@ describe("non-destructive boolean path commands", () => {
     });
   });
 
-  test("rejects open flatten geometry before replacing any source", () => {
+  test("flattens open stroke geometry while preserving cap join dash and markers", () => {
     const source = createBooleanFixture();
-    if (source.pages[0].children[0].content.type === "path") {
-      source.pages[0].children[0].content.path_data = "M0 0 H100 V100";
+    const open = source.pages[0].children[0];
+    open.size = { width: 100, height: 50 };
+    open.style = {
+      ...open.style,
+      fill: "transparent",
+      stroke: "#0f172a",
+      stroke_width: 8,
+      stroke_cap: "round",
+      stroke_join: "bevel",
+      stroke_dasharray: [12, 6],
+      stroke_start_marker: "circle",
+      stroke_end_marker: "triangle"
+    };
+    if (open.content.type === "path") {
+      open.content.path_data = "M0 25 C25 0 75 50 100 25";
     }
+
+    const flattened = applyAgentCommandsToDocument(source, [{
+      type: "flatten_path",
+      nodeId: "flattened-open",
+      sourceNodeIds: ["path-left"],
+      name: "Open stroke"
+    }]);
+    expect(flattened.document.pages[0].children[0]).toMatchObject({
+      id: "flattened-open",
+      size: { width: 100, height: 28.868 },
+      style: {
+        fill: "transparent",
+        stroke: "#0f172a",
+        stroke_width: 8,
+        stroke_cap: "round",
+        stroke_join: "bevel",
+        stroke_dasharray: [12, 6],
+        stroke_start_marker: "circle",
+        stroke_end_marker: "triangle"
+      },
+      content: { type: "path" },
+      children: []
+    });
+  });
+
+  test("rejects multi-source open flatten when stroke contracts differ", () => {
+    const source = createBooleanFixture();
+    for (const node of source.pages[0].children) {
+      if (node.content.type === "path") {
+        node.content.path_data = "M0 0 L100 0";
+      }
+    }
+    source.pages[0].children[0].style.stroke_cap = "round";
+    source.pages[0].children[1].style.stroke_cap = "square";
 
     expect(() =>
       applyAgentCommandsToDocument(source, [{
         type: "flatten_path",
-        nodeId: "flattened-open",
-        sourceNodeIds: ["path-left"],
-        name: "Open"
+        nodeId: "flattened-mismatch",
+        sourceNodeIds: ["path-left", "path-right"],
+        name: "Mismatch"
       }])
-    ).toThrow("closed geometry");
+    ).toThrow("stroke contracts must match");
     expect(source.pages[0].children.map((node) => node.id)).toEqual(["path-left", "path-right"]);
   });
 
