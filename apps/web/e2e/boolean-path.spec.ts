@@ -278,11 +278,9 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   expect(visibleBounds.right - visibleBounds.left).toBeGreaterThan(150);
   expect(visibleBounds.bottom - visibleBounds.top).toBeGreaterThan(20);
 
-  await page.mouse.click(visibleBounds.hitX, visibleBounds.hitY, { button: "right" });
-  const contextMenu = page.getByTestId("object-context-menu");
-  await expect(contextMenu).toBeVisible();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "개발" }).click();
   const downloadPromise = page.waitForEvent("download");
-  await contextMenu.getByRole("menuitem", { name: "PNG로 내보내기" }).click();
+  await page.getByTestId("dev-panel-download-png").click();
   const download = await downloadPromise;
   const png = await readFile(await download.path() as string);
   expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
