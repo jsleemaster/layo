@@ -20,7 +20,7 @@ References:
 - Boolean relation metadata and source children are removed from the persisted standalone path.
 - The web editor exposes Korean-first `경로 평탄화` and `Ctrl/Cmd+E`.
 - Editor history restores the full boolean relationship and source children on undo and reapplies the standalone path on redo.
-- Playwright CLI verifies dry-run isolation, direct control, persistence, reload, and flattened SVG/PDF/PNG downloads.
+- Playwright CLI verifies dry-run isolation, direct control, persistence, reload, and flattened PNG download. The standalone first-class path output continues through the existing SVG/PDF path artifact pipeline.
 
 ## Failure learning
 
