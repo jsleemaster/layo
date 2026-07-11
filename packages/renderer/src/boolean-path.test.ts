@@ -136,6 +136,6 @@ describe("path flattening", () => {
     expect(result.pathData).toMatch(/[Cc]/);
     expect(result.pathData).not.toMatch(/[Zz]/);
     expect(result.bounds).toEqual({ x: 20, y: 30, width: 100, height: 87.5 });
-    expect(result.area).toBe(0);
+    expect(result.closed).toBe(false);
   });
 });
