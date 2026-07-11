@@ -23,6 +23,47 @@ export interface BooleanPathEvaluation {
   };
 }
 
+
+export function flattenPathGeometry(
+  operands: BooleanPathOperand[]
+): BooleanPathEvaluation {
+  if (operands.length === 0) {
+    throw new Error("path flattening requires at least one operand");
+  }
+
+  const scope = new paper.PaperScope();
+  scope.setup(new scope.Size(1, 1));
+  const result = new scope.CompoundPath({ insert: false });
+  for (const operand of operands) {
+    const item = createClosedPathItem(scope, operand, "path flatten source");
+    if (operand.fillRule === "evenodd") {
+      item.reorient(true, true);
+    }
+    result.addChildren(item.removeChildren());
+    item.remove();
+  }
+
+  if (result.isEmpty()) {
+    throw new Error("path flattening did not produce path geometry");
+  }
+  const bounds = {
+    x: normalizeNumber(result.bounds.x),
+    y: normalizeNumber(result.bounds.y),
+    width: normalizeNumber(result.bounds.width),
+    height: normalizeNumber(result.bounds.height)
+  };
+  result.translate(new scope.Point(-bounds.x, -bounds.y));
+  result.fillRule = "nonzero";
+  const evaluation = {
+    pathData: result.pathData,
+    fillRule: "nonzero" as const,
+    area: filledPathArea(result, scope),
+    bounds
+  };
+  scope.project.clear();
+  return evaluation;
+}
+
 export function evaluateBooleanPath(
   operation: BooleanPathOperation,
   operands: BooleanPathOperand[]
@@ -36,24 +77,9 @@ export function evaluateBooleanPath(
 
   const scope = new paper.PaperScope();
   scope.setup(new scope.Size(1, 1));
-  const items = operands.map((operand) => {
-    const item = new scope.CompoundPath({
-      pathData: operand.pathData,
-      insert: false
-    });
-    const paths = item.children.filter(
-      (child): child is paper.Path => child instanceof scope.Path
-    );
-    if (item.isEmpty() || paths.length === 0 || paths.some((path) => !path.closed)) {
-      throw new Error("boolean path operand must contain closed geometry");
-    }
-    item.fillRule = operand.fillRule === "evenodd" ? "evenodd" : "nonzero";
-    if (operand.transform.rotation) {
-      item.rotate(operand.transform.rotation, new scope.Point(0, 0));
-    }
-    item.translate(new scope.Point(operand.transform.x, operand.transform.y));
-    return item;
-  });
+  const items = operands.map((operand) =>
+    createClosedPathItem(scope, operand, "boolean path operand")
+  );
 
   let result: paper.PathItem = items[0];
   for (const operand of items.slice(1)) {
@@ -89,6 +115,30 @@ export function evaluateBooleanPath(
   };
   scope.project.clear();
   return evaluation;
+}
+
+
+function createClosedPathItem(
+  scope: paper.PaperScope,
+  operand: BooleanPathOperand,
+  label: string
+) {
+  const item = new scope.CompoundPath({
+    pathData: operand.pathData,
+    insert: false
+  });
+  const paths = item.children.filter(
+    (child): child is paper.Path => child instanceof scope.Path
+  );
+  if (item.isEmpty() || paths.length === 0 || paths.some((path) => !path.closed)) {
+    throw new Error(`${label} must contain closed geometry`);
+  }
+  item.fillRule = operand.fillRule === "evenodd" ? "evenodd" : "nonzero";
+  if (operand.transform.rotation) {
+    item.rotate(operand.transform.rotation, new scope.Point(0, 0));
+  }
+  item.translate(new scope.Point(operand.transform.x, operand.transform.y));
+  return item;
 }
 
 function normalizeNumber(value: number) {

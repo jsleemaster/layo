@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-07-10
+Last checked: 2026-07-11
 
 ## Product Target
 
@@ -239,7 +239,9 @@ For each comparison:
 
 PR #272 and PR #273 complete first-class path import, editing, topology, and direct Bezier interaction. PR #274 adds non-destructive union, difference, intersection, and exclusion with ordered recoverable operands, deterministic path/boolean MCP and HTTP commands, curved and even-odd evaluation, undo/redo, canvas, and SVG/PDF/PNG output. Full Verification #546 run `29100227669` is the completed boolean-path GREEN.
 
-The active next Penpot gap is destructive Flatten. Layo must convert selected closed shapes or a boolean relationship into one standalone first-class path while preserving visible geometry, curves, fill semantics, world bounds, deterministic agent review, and reversible history. The implementation plan is `docs/superpowers/plans/2026-07-10-penpot-path-flattening.md`.
+PR #275 adds destructive Flatten for selected closed paths and boolean relationships. The result is one standalone first-class path with normalized curved/compound geometry, even-odd hole handling, world-space bounds, dry-run/apply MCP and HTTP parity, Korean direct control, `Ctrl/Cmd+E`, reversible history, reload persistence, and SVG/PDF/PNG proof. Code-head Full Verification run `29150553848` passed all gates and 185 Playwright tests; final PR-head verification remains the merge gate.
+
+The active next Penpot gap is open-path Flatten with stroke appearance fidelity. Layo currently rejects open geometry before writes; the next plan must preserve stroke width, dash/style, caps, joins, and endpoint markers without silently closing paths or inventing fill geometry. The implementation plan is `docs/superpowers/plans/2026-07-11-penpot-open-path-flattening.md`.
 
 ## Current Highest-Risk Gaps
 

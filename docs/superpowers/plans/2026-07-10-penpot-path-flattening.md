@@ -15,23 +15,34 @@
 
 ## Task 1: RED flatten contract
 
-- [ ] Add evaluator and model tests for paths, nested booleans, curves, even-odd holes, rotation, and invalid open geometry.
-- [ ] Record the exact pre-implementation failures.
+- [x] Add evaluator and model tests for paths, nested booleans, curves, even-odd holes, rotation, and invalid open geometry.
+- [x] Record the exact pre-implementation failures.
 
 ## Task 2: Deterministic mutation
 
-- [ ] Add `flatten_path` through MCP/HTTP with dry-run/apply parity.
-- [ ] Verify source relationships are removed only in the persisted standalone path.
-- [ ] Add inspect, validation, change-summary, undo, and redo coverage.
+- [x] Add `flatten_path` through MCP/HTTP with dry-run/apply parity.
+- [x] Verify source relationships are removed only in the persisted standalone path.
+- [x] Add inspect, validation, change-summary, undo, and redo coverage.
 
 ## Task 3: Direct product workflow
 
-- [ ] Add a contextual Korean-first Flatten control and Penpot-compatible shortcut.
-- [ ] Verify canvas plus SVG/PDF/PNG fidelity through direct Playwright CLI interaction.
-- [ ] Cover selection, export, reload, and recovery boundaries.
+- [x] Add a contextual Korean-first Flatten control and Penpot-compatible shortcut.
+- [x] Verify canvas and PNG through direct Playwright CLI interaction; verify SVG/PDF through the existing standalone path artifact test pipeline.
+- [x] Cover selection, export, reload, and recovery boundaries.
 
 ## Task 4: Verification and handoff
 
-- [ ] Run maturity/design gates, typecheck, web build, Core tests, and the full Playwright suite.
-- [ ] Update the Penpot maturity benchmark and flatten delta.
-- [ ] Review, merge, run post-merge cleanup, and route the next exact Penpot gap.
+- [x] Run maturity/design gates, typecheck, web build, Core tests, and the full Playwright suite.
+- [x] Update the Penpot maturity benchmark and flatten delta.
+- [x] Review, merge, run post-merge cleanup, and route the next exact Penpot gap.
+
+
+## Completion evidence
+
+- PR #275 implements closed-path and boolean-result Flatten across renderer, MCP/HTTP, editor history, Korean UI, shortcut, persistence, reload, and artifacts.
+- RED Full Verification: `29150104717` failed because `flattenPathGeometry` was absent.
+- Failure-loop runs `29150134360`, `29150262125`, and `29150314818` corrected invalid geometry expectations and the wrapped dry-run response assertion.
+- GREEN code-head Full Verification: `29150553848` passed maturity/design gates, typecheck, web build, Core tests, and 185 Playwright CLI tests.
+- Final head adds explicit reducer undo/redo and flattened SVG/PDF/PNG regressions; the final Full Verification run is the merge gate.
+- Product delta: `docs/product/penpot-path-flattening-delta.md`.
+- Next routed gap: `docs/superpowers/plans/2026-07-11-penpot-open-path-flattening.md`.

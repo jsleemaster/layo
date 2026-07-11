@@ -95,6 +95,75 @@ describe("non-destructive boolean path commands", () => {
     expect(detached.document.pages[0].children.map((node) => node.transform.x)).toEqual([0, 50]);
   });
 
+  test("flattens a boolean relation into one standalone path without source children", () => {
+    const booleanDocument = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "create_boolean_path",
+      nodeId: "boolean-1",
+      name: "Union",
+      operation: "union",
+      sourceNodeIds: ["path-left", "path-right"]
+    }]).document;
+
+    const flattened = applyAgentCommandsToDocument(booleanDocument, [{
+      type: "flatten_path",
+      nodeId: "boolean-1",
+      sourceNodeIds: ["boolean-1"],
+      name: "Flattened union"
+    }]);
+    const node = flattened.document.pages[0].children[0];
+
+    expect(flattened.changedNodeIds).toEqual(["boolean-1"]);
+    expect(node).toMatchObject({
+      id: "boolean-1",
+      kind: "path",
+      name: "Flattened union",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 150, height: 100 },
+      content: { type: "path", fill_rule: "nonzero" },
+      children: []
+    });
+    expect(node.content.type === "path" && node.content.path_data).toMatch(/^M/);
+    expect(validateDocument(flattened.document).ok).toBe(true);
+  });
+
+  test("flattens sibling closed paths into one deterministic standalone compound path", () => {
+    const flattened = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "flatten_path",
+      nodeId: "flattened-1",
+      sourceNodeIds: ["path-left", "path-right"],
+      name: "Flattened paths"
+    }]);
+    const node = flattened.document.pages[0].children[0];
+
+    expect(flattened.document.pages[0].children).toHaveLength(1);
+    expect(flattened.changedNodeIds).toEqual(["flattened-1", "path-left", "path-right"]);
+    expect(node).toMatchObject({
+      id: "flattened-1",
+      name: "Flattened paths",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 150, height: 100 },
+      content: { type: "path", fill_rule: "nonzero" },
+      children: []
+    });
+  });
+
+  test("rejects open flatten geometry before replacing any source", () => {
+    const source = createBooleanFixture();
+    if (source.pages[0].children[0].content.type === "path") {
+      source.pages[0].children[0].content.path_data = "M0 0 H100 V100";
+    }
+
+    expect(() =>
+      applyAgentCommandsToDocument(source, [{
+        type: "flatten_path",
+        nodeId: "flattened-open",
+        sourceNodeIds: ["path-left"],
+        name: "Open"
+      }])
+    ).toThrow("closed geometry");
+    expect(source.pages[0].children.map((node) => node.id)).toEqual(["path-left", "path-right"]);
+  });
+
   test("recomputes rotated boolean bounds in parent coordinates", () => {
     const created = applyAgentCommandsToDocument(createBooleanFixture(), [{
       type: "create_boolean_path",

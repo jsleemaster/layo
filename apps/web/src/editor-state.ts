@@ -1,4 +1,4 @@
-import { evaluateBooleanPath } from "@layo/renderer";
+import { evaluateBooleanPath, flattenPathGeometry } from "@layo/renderer";
 import type {
   BooleanPathOperation,
   ComponentDefinition,
@@ -255,6 +255,12 @@ export type EditorCommand =
   | {
       type: "detach_boolean_path";
       nodeId: string;
+    }
+  | {
+      type: "flatten_path";
+      nodeId: string;
+      sourceNodeIds: string[];
+      name?: string;
     }
   | {
       type: "replace_document_snapshot";
@@ -2614,6 +2620,70 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           document: structuredClone(document)
         },
         selectedNodeId: node.id
+      };
+    }
+    case "flatten_path": {
+      const sourceNodeIds = [...new Set(command.sourceNodeIds.map((nodeId) => nodeId.trim()).filter(Boolean))];
+      const first = sourceNodeIds[0] ? findNodeWithParent(next, sourceNodeIds[0]) : null;
+      const parent = first ? findParentChildren(next, first.parentId) : null;
+      if (!parent || sourceNodeIds.length === 0) {
+        return { document, inverse: null };
+      }
+      const sources = sourceNodeIds.flatMap((nodeId) => {
+        const node = parent.children.find((child) => child.id === nodeId);
+        return node ? [node] : [];
+      });
+      if (
+        sources.length !== sourceNodeIds.length ||
+        sources.some(
+          (node) =>
+            isNodeLocked(node) ||
+            node.kind !== "path" ||
+            (node.content.type !== "path" && node.content.type !== "boolean_path")
+        )
+      ) {
+        return { document, inverse: null };
+      }
+      const evaluation = flattenPathGeometry(
+        sources.map((node) => ({
+          pathData:
+            node.content.type === "path" || node.content.type === "boolean_path"
+              ? node.content.path_data
+              : "",
+          fillRule:
+            node.content.type === "path" || node.content.type === "boolean_path"
+              ? node.content.fill_rule
+              : "nonzero",
+          transform: node.transform
+        }))
+      );
+      const sourceIdSet = new Set(sourceNodeIds);
+      const insertionIndex = Math.min(
+        ...parent.children.flatMap((node, index) => (sourceIdSet.has(node.id) ? [index] : []))
+      );
+      const flattenedNode: RendererNode = {
+        ...structuredClone(sources[0]),
+        id: command.nodeId.trim(),
+        kind: "path",
+        name: command.name?.trim() || sources[0].name,
+        transform: { x: evaluation.bounds.x, y: evaluation.bounds.y, rotation: 0 },
+        size: { width: evaluation.bounds.width, height: evaluation.bounds.height },
+        content: {
+          type: "path",
+          path_data: evaluation.pathData,
+          fill_rule: evaluation.fillRule
+        },
+        children: []
+      };
+      parent.children = parent.children.filter((node) => !sourceIdSet.has(node.id));
+      parent.children.splice(insertionIndex, 0, flattenedNode);
+      return {
+        document: next,
+        inverse: {
+          type: "replace_document_snapshot",
+          document: structuredClone(document)
+        },
+        selectedNodeId: flattenedNode.id
       };
     }
     case "detach_boolean_path": {

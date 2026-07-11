@@ -1,4 +1,4 @@
-import { evaluateBooleanPath } from "@layo/renderer";
+import { evaluateBooleanPath, flattenPathGeometry } from "@layo/renderer";
 import {
   applyAgentCommandsToDocument as applyBaseAgentCommandsToDocument,
   createAgentBatchResult as createBaseAgentBatchResult,
@@ -110,7 +110,13 @@ export type AgentCommand =
       nodeId: string;
       operation: "union" | "difference" | "intersection" | "exclusion";
     }
-  | { type: "detach_boolean_path"; nodeId: string };
+  | { type: "detach_boolean_path"; nodeId: string }
+  | {
+      type: "flatten_path";
+      nodeId: string;
+      sourceNodeIds: string[];
+      name?: string;
+    };
 
 export type AgentBatchInput = Omit<BaseAgentBatchInput, "commands"> & { commands: AgentCommand[] };
 
@@ -130,6 +136,7 @@ type CreatePathCommand = Extract<AgentCommand, { type: "create_path" }>;
 type CreateBooleanPathCommand = Extract<AgentCommand, { type: "create_boolean_path" }>;
 type SetBooleanPathOperationCommand = Extract<AgentCommand, { type: "set_boolean_path_operation" }>;
 type DetachBooleanPathCommand = Extract<AgentCommand, { type: "detach_boolean_path" }>;
+type FlattenPathCommand = Extract<AgentCommand, { type: "flatten_path" }>;
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
@@ -228,6 +235,10 @@ export function applyAgentCommandsToDocument(
     }
     if (command.type === "detach_boolean_path") {
       changedNodeIds.push(...applyDetachBooleanPathCommand(draft, command));
+      continue;
+    }
+    if (command.type === "flatten_path") {
+      changedNodeIds.push(...applyFlattenPathCommand(draft, command));
       continue;
     }
 
@@ -590,6 +601,77 @@ function applyDetachBooleanPathCommand(
   });
   container.children.splice(index, 1, ...children);
   return [node.id, ...children.map((child) => child.id)];
+}
+
+
+function applyFlattenPathCommand(
+  document: DesignFile,
+  command: FlattenPathCommand
+): string[] {
+  const sourceNodeIds = command.sourceNodeIds.map((nodeId) => nodeId.trim()).filter(Boolean);
+  if (sourceNodeIds.length === 0 || new Set(sourceNodeIds).size !== sourceNodeIds.length) {
+    throw new Error("path flatten sources must contain at least one unique node");
+  }
+  const resultNodeId = command.nodeId.trim();
+  if (!resultNodeId) {
+    throw new Error("flattened path node id is required");
+  }
+  const existingResult = findNodeById(document, resultNodeId);
+  if (existingResult && !(sourceNodeIds.length === 1 && sourceNodeIds[0] === resultNodeId)) {
+    throw new Error(`node already exists: ${resultNodeId}`);
+  }
+
+  const sourceContainer = findNodeContainer(document, sourceNodeIds[0]);
+  if (!sourceContainer) {
+    throw new Error(`path flatten source not found: ${sourceNodeIds[0]}`);
+  }
+  const sourceEntries = sourceNodeIds.map((nodeId) => {
+    const index = sourceContainer.children.findIndex((node) => node.id === nodeId);
+    if (index < 0) {
+      if (findNodeById(document, nodeId)) {
+        throw new Error("path flatten sources must share one parent");
+      }
+      throw new Error(`path flatten source not found: ${nodeId}`);
+    }
+    const node = sourceContainer.children[index];
+    assertBooleanPathSource(node);
+    return { index, node };
+  });
+  const evaluation = flattenPathGeometry(
+    sourceEntries.map(({ node }) => ({
+      pathData: pathDataFromBooleanSource(node),
+      fillRule: booleanSourceFillRule(node),
+      transform: node.transform
+    }))
+  );
+  const firstSource = sourceEntries[0].node;
+  const flattenedNode: DesignNode = {
+    ...structuredClone(firstSource),
+    id: resultNodeId,
+    kind: "path",
+    name: command.name?.trim() || firstSource.name,
+    transform: {
+      x: evaluation.bounds.x,
+      y: evaluation.bounds.y,
+      rotation: 0
+    },
+    size: {
+      width: evaluation.bounds.width,
+      height: evaluation.bounds.height
+    },
+    content: {
+      type: "path",
+      path_data: evaluation.pathData,
+      fill_rule: evaluation.fillRule
+    },
+    children: []
+  };
+
+  const insertionIndex = Math.min(...sourceEntries.map(({ index }) => index));
+  const sourceIdSet = new Set(sourceNodeIds);
+  sourceContainer.children = sourceContainer.children.filter((node) => !sourceIdSet.has(node.id));
+  sourceContainer.children.splice(insertionIndex, 0, flattenedNode);
+  return [flattenedNode.id, ...sourceNodeIds.filter((nodeId) => nodeId !== flattenedNode.id)];
 }
 
 function normalizeBooleanSourceIds(sourceNodeIds: string[]) {
