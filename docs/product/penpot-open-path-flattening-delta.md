@@ -29,7 +29,7 @@ References:
 
 ## Verification
 
-Full Verification run is recorded in `PLAN_STATUS.md` after the final PR-head gate. The focused browser case covers the Korean `경로 평탄화` control, persistence, reload, visible stroke pixels, and PNG bytes.
+Full Verification `29154359661` passed maturity/design gates, typecheck, web build, Core tests, and all 186 Playwright cases. Storage Restore Drill `29153711191` also passed. The focused browser case covers the Korean `경로 평탄화` control, persistence, reload, visible stroke pixels, and PNG bytes.
 
 ## Next exact gap
 
