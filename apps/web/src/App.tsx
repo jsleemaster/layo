@@ -4134,7 +4134,7 @@ function openPathMarkerGeometry(pathData: string) {
   const next = commands[1];
   const end = commands.at(-1);
   const previous = commands.at(-2);
-  if (!start || start.type !== "M" || !next || !end || end.type === "Z") {
+  if (!start || start.type !== "M" || !next || !end) {
     return null;
   }
   const nextPoint =
@@ -4144,7 +4144,7 @@ function openPathMarkerGeometry(pathData: string) {
       ? end.control2
       : end.type === "Q"
         ? end.control
-        : previous && previous.type !== "Z"
+        : previous
           ? previous
           : start;
   return {
