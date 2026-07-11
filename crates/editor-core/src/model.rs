@@ -609,6 +609,36 @@ pub enum NodeKind {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StrokeCap {
+    Butt,
+    Round,
+    Square,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StrokeJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StrokeMarker {
+    None,
+    LineArrow,
+    Triangle,
+    Square,
+    Circle,
+    Diamond,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct Style {
     pub fill: String,
@@ -618,6 +648,16 @@ pub struct Style {
     pub fill_style: Option<String>,
     pub stroke: Option<String>,
     pub stroke_width: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_cap: Option<StrokeCap>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_join: Option<StrokeJoin>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_dasharray: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_start_marker: Option<StrokeMarker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stroke_end_marker: Option<StrokeMarker>,
     pub opacity: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_shadow: Option<String>,
