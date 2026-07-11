@@ -278,9 +278,7 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   expect(visibleBounds.right - visibleBounds.left).toBeGreaterThan(150);
   expect(visibleBounds.bottom - visibleBounds.top).toBeGreaterThan(20);
 
-  await page.mouse.click((visibleBounds.left + visibleBounds.right) / 2, (visibleBounds.top + visibleBounds.bottom) / 2, {
-    button: "right"
-  });
+  await page.mouse.click(visibleBounds.hitX, visibleBounds.hitY, { button: "right" });
   const contextMenu = page.getByTestId("object-context-menu");
   await expect(contextMenu).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
@@ -306,6 +304,8 @@ async function findCanvasColorBounds(
       let minY = Number.POSITIVE_INFINITY;
       let maxX = Number.NEGATIVE_INFINITY;
       let maxY = Number.NEGATIVE_INFINITY;
+      let hitX = Number.NaN;
+      let hitY = Number.NaN;
       for (let y = 0; y < canvas.height; y += 1) {
         for (let x = 0; x < canvas.width; x += 1) {
           const index = (y * canvas.width + x) * 4;
@@ -316,6 +316,10 @@ async function findCanvasColorBounds(
               Math.abs(pixels[index + 2] - target.b) <=
               8
           ) {
+            if (!Number.isFinite(hitX)) {
+              hitX = x;
+              hitY = y;
+            }
             minX = Math.min(minX, x);
             minY = Math.min(minY, y);
             maxX = Math.max(maxX, x);
@@ -329,7 +333,9 @@ async function findCanvasColorBounds(
           left: rect.left + minX / (canvas.width / rect.width),
           top: rect.top + minY / (canvas.height / rect.height),
           right: rect.left + maxX / (canvas.width / rect.width),
-          bottom: rect.top + maxY / (canvas.height / rect.height)
+          bottom: rect.top + maxY / (canvas.height / rect.height),
+          hitX: rect.left + hitX / (canvas.width / rect.width),
+          hitY: rect.top + hitY / (canvas.height / rect.height)
         };
       }
     }
