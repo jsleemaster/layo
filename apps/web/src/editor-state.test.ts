@@ -4719,3 +4719,83 @@ describe("editor state commands", () => {
     });
   });
 });
+
+
+describe("path flatten editor history", () => {
+  test("restores a boolean relationship on undo and reapplies standalone geometry on redo", () => {
+    const document: RendererDocument = {
+      id: "flatten-history",
+      name: "Flatten history",
+      pages: [{
+        id: "page-1",
+        name: "Page 1",
+        children: [{
+          id: "boolean-1",
+          kind: "path",
+          name: "Boolean result",
+          transform: { x: 20, y: 30, rotation: 0 },
+          size: { width: 150, height: 100 },
+          style: { fill: "#2563eb", stroke: null, stroke_width: 0, opacity: 1 },
+          content: {
+            type: "boolean_path",
+            relation: {
+              operation: "union",
+              source_node_ids: ["path-left", "path-right"]
+            },
+            path_data: "M0 0 H150 V100 H0 Z",
+            fill_rule: "nonzero"
+          },
+          children: [
+            {
+              id: "path-left",
+              kind: "path",
+              name: "Left",
+              transform: { x: 0, y: 0, rotation: 0 },
+              size: { width: 100, height: 100 },
+              style: { fill: "#2563eb", stroke: null, stroke_width: 0, opacity: 1 },
+              content: { type: "path", path_data: "M0 0 H100 V100 H0 Z", fill_rule: "nonzero" },
+              children: []
+            },
+            {
+              id: "path-right",
+              kind: "path",
+              name: "Right",
+              transform: { x: 50, y: 0, rotation: 0 },
+              size: { width: 100, height: 100 },
+              style: { fill: "#2563eb", stroke: null, stroke_width: 0, opacity: 1 },
+              content: { type: "path", path_data: "M0 0 H100 V100 H0 Z", fill_rule: "nonzero" },
+              children: []
+            }
+          ]
+        }]
+      }]
+    };
+
+    const selected = setSelection(createEditorState(document), "boolean-1");
+    const flattened = executeEditorCommand(selected, {
+      type: "flatten_path",
+      nodeId: "boolean-1",
+      sourceNodeIds: ["boolean-1"],
+      name: "Boolean result"
+    });
+    expect(findNodeById(flattened.document, "boolean-1")).toMatchObject({
+      content: { type: "path" },
+      children: []
+    });
+
+    const undone = undo(flattened);
+    expect(findNodeById(undone.document, "boolean-1")).toMatchObject({
+      content: {
+        type: "boolean_path",
+        relation: { source_node_ids: ["path-left", "path-right"] }
+      },
+      children: [{ id: "path-left" }, { id: "path-right" }]
+    });
+
+    const redone = redo(undone);
+    expect(findNodeById(redone.document, "boolean-1")).toMatchObject({
+      content: { type: "path" },
+      children: []
+    });
+  });
+});
