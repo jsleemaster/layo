@@ -642,8 +642,8 @@ function svgStrokePresentationAttributes(node: RendererNode) {
   const startMarker = node.style.stroke_start_marker ?? "none";
   const endMarker = node.style.stroke_end_marker ?? "none";
   return [
-    ` stroke-linecap="${cap}"`,
-    ` stroke-linejoin="${join}"`,
+    node.style.stroke_cap ? ` stroke-linecap="${cap}"` : "",
+    node.style.stroke_join ? ` stroke-linejoin="${join}"` : "",
     dasharray.length > 0 ? ` stroke-dasharray="${dasharray.map(formatNumber).join(" ")}"` : "",
     startMarker !== "none"
       ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker)})"`
