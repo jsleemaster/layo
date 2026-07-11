@@ -200,6 +200,97 @@ test("flattens a boolean result through dry-run, direct control, persistence, an
   }
 });
 
+
+test("preserves an open path stroke contract through Flatten, reload, canvas, and PNG export", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const projectId = await page.getByTestId("project-switcher").inputValue();
+  const project = (await (await page.request.get("http://127.0.0.1:4317/projects/" + projectId)).json()).project;
+  const fileId = project.currentDocumentId as string;
+  const initialFile = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
+  const parentId = initialFile.pages[0].children[0].id as string;
+
+  const seeded = await page.request.post(
+    "http://127.0.0.1:4317/files/" + fileId + "/agent/commands",
+    {
+      data: {
+        dryRun: false,
+        commands: [{
+          type: "create_path",
+          parentId,
+          id: "open-stroke",
+          name: "열린 경로",
+          x: 80,
+          y: 80,
+          width: 180,
+          height: 80,
+          fill: "transparent",
+          stroke: "#0f172a",
+          strokeWidth: 8,
+          strokeCap: "round",
+          strokeJoin: "bevel",
+          strokeDasharray: [12, 6],
+          strokeStartMarker: "circle",
+          strokeEndMarker: "triangle",
+          pathData: "M0 40 C45 0 135 80 180 40",
+          fillRule: "nonzero"
+        }]
+      }
+    }
+  );
+  expect(seeded.ok()).toBeTruthy();
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
+  await page.getByRole("button", { name: "경로 평탄화" }).click();
+
+  const readOpenPath = async () => {
+    const file = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
+    return file.pages[0].children[0].children.find((node: { id: string }) => node.id === "open-stroke");
+  };
+  await expect.poll(async () => {
+    const node = await readOpenPath();
+    return {
+      type: node?.content.type,
+      childCount: node?.children.length,
+      closed: /[Zz]/.test(node?.content.path_data ?? ""),
+      cap: node?.style.stroke_cap,
+      join: node?.style.stroke_join,
+      dash: node?.style.stroke_dasharray,
+      start: node?.style.stroke_start_marker,
+      end: node?.style.stroke_end_marker
+    };
+  }).toEqual({
+    type: "path",
+    childCount: 0,
+    closed: false,
+    cap: "round",
+    join: "bevel",
+    dash: [12, 6],
+    start: "circle",
+    end: "triangle"
+  });
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
+  const visibleBounds = await findCanvasColorBounds(page, { r: 15, g: 23, b: 42 });
+  expect(visibleBounds.right - visibleBounds.left).toBeGreaterThan(150);
+  expect(visibleBounds.bottom - visibleBounds.top).toBeGreaterThan(20);
+
+  await page.mouse.click((visibleBounds.left + visibleBounds.right) / 2, (visibleBounds.top + visibleBounds.bottom) / 2, {
+    button: "right"
+  });
+  const contextMenu = page.getByTestId("object-context-menu");
+  await expect(contextMenu).toBeVisible();
+  const downloadPromise = page.waitForEvent("download");
+  await contextMenu.getByRole("menuitem", { name: "PNG로 내보내기" }).click();
+  const download = await downloadPromise;
+  const png = await readFile(await download.path() as string);
+  expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect(png.byteLength).toBeGreaterThan(100);
+});
+
 async function findCanvasColorBounds(
   page: Page,
   color: { r: number; g: number; b: number }
