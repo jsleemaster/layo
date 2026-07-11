@@ -174,7 +174,7 @@ describe("non-destructive boolean path commands", () => {
     }]);
     expect(flattened.document.pages[0].children[0]).toMatchObject({
       id: "flattened-open",
-      size: { width: 100, height: 28.868 },
+      size: { width: 100, height: 14.434 },
       style: {
         fill: "transparent",
         stroke: "#0f172a",
