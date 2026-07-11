@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Stage as KonvaStage } from "konva/lib/Stage";
-import { Group, Image as KonvaImage, Layer, Path as KonvaPath, Rect, Stage, Text } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Path as KonvaPath, Rect, RegularPolygon, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
   type BooleanPathOperation,
@@ -4123,6 +4123,105 @@ function VerticalCanvasText({
   );
 }
 
+
+function openPathMarkerGeometry(pathData: string) {
+  const path = parseEditablePath(pathData);
+  if (!path || path.closed) {
+    return null;
+  }
+  const commands = path.commands.filter((command) => command.type !== "Z");
+  const start = commands[0];
+  const next = commands[1];
+  const end = commands.at(-1);
+  const previous = commands.at(-2);
+  if (!start || start.type !== "M" || !next || !end || end.type === "Z") {
+    return null;
+  }
+  const nextPoint =
+    next.type === "C" ? next.control1 : next.type === "Q" ? next.control : next;
+  const previousPoint =
+    end.type === "C"
+      ? end.control2
+      : end.type === "Q"
+        ? end.control
+        : previous && previous.type !== "Z"
+          ? previous
+          : start;
+  return {
+    start: {
+      x: start.x,
+      y: start.y,
+      angle: (Math.atan2(start.y - nextPoint.y, start.x - nextPoint.x) * 180) / Math.PI
+    },
+    end: {
+      x: end.x,
+      y: end.y,
+      angle: (Math.atan2(end.y - previousPoint.y, end.x - previousPoint.x) * 180) / Math.PI
+    }
+  };
+}
+
+function CanvasStrokeMarker({
+  marker,
+  point,
+  stroke,
+  strokeWidth
+}: {
+  marker: NonNullable<RendererNode["style"]["stroke_start_marker"]>;
+  point: { x: number; y: number; angle: number };
+  stroke: string;
+  strokeWidth: number;
+}) {
+  if (marker === "none") {
+    return null;
+  }
+  const size = Math.max(4, strokeWidth * 2.5);
+  if (marker === "circle") {
+    return <Circle x={point.x} y={point.y} radius={size / 2} fill={stroke} listening={false} />;
+  }
+  if (marker === "square" || marker === "diamond") {
+    return (
+      <Rect
+        x={point.x - size / 2}
+        y={point.y - size / 2}
+        width={size}
+        height={size}
+        fill={stroke}
+        rotation={marker === "diamond" ? 45 : point.angle}
+        offsetX={marker === "diamond" ? -size / 4 : 0}
+        offsetY={marker === "diamond" ? -size / 4 : 0}
+        listening={false}
+      />
+    );
+  }
+  if (marker === "line_arrow") {
+    return (
+      <Line
+        x={point.x}
+        y={point.y}
+        points={[-size, -size / 2, 0, 0, -size, size / 2]}
+        stroke={stroke}
+        strokeWidth={Math.max(1, strokeWidth / 2)}
+        rotation={point.angle}
+        lineCap="round"
+        lineJoin="round"
+        listening={false}
+      />
+    );
+  }
+  return (
+    <RegularPolygon
+      x={point.x}
+      y={point.y}
+      sides={3}
+      radius={size}
+      fill={stroke}
+      rotation={point.angle + 90}
+      listening={false}
+    />
+  );
+}
+
 function renderNode({
   node,
   selectedNodeId,
@@ -4277,6 +4376,9 @@ function renderNode({
         fillRule={node.content.fill_rule}
         stroke={node.style.stroke ?? undefined}
         strokeWidth={node.style.stroke_width}
+        lineCap={node.style.stroke_cap ?? "butt"}
+        lineJoin={node.style.stroke_join ?? "miter"}
+        dash={node.style.stroke_dasharray ?? []}
         opacity={node.style.opacity}
         {...canvasLinearGradientPropsForNode(node)}
         {...shadowProps}
@@ -4345,6 +4447,29 @@ function renderNode({
     </Group>
   ));
   const body = renderBody();
+  const markerGeometry =
+    node.kind === "path" && node.content.type === "path"
+      ? openPathMarkerGeometry(node.content.path_data)
+      : null;
+  const markerBodies =
+    markerGeometry && node.style.stroke && node.style.stroke_width > 0
+      ? [
+          <CanvasStrokeMarker
+            key="start-marker"
+            marker={node.style.stroke_start_marker ?? "none"}
+            point={markerGeometry.start}
+            stroke={node.style.stroke}
+            strokeWidth={node.style.stroke_width}
+          />,
+          <CanvasStrokeMarker
+            key="end-marker"
+            marker={node.style.stroke_end_marker ?? "none"}
+            point={markerGeometry.end}
+            stroke={node.style.stroke}
+            strokeWidth={node.style.stroke_width}
+          />
+        ]
+      : [];
 
   return (
     <Group
@@ -4365,6 +4490,7 @@ function renderNode({
     >
       {shadowBodies}
       {body}
+      {markerBodies}
       {isSelected ? (
         <>
           <Rect
