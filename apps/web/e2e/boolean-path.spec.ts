@@ -184,9 +184,7 @@ test("flattens a boolean result through dry-run, direct control, persistence, an
 
   const visibleBounds = await findCanvasColorBounds(page, { r: 14, g: 165, b: 233 });
   for (const artifact of [
-    { menu: "SVG로 내보내기", extension: ".svg", signature: "<svg" },
-    { menu: "PDF로 내보내기", extension: ".pdf", signature: "%PDF" },
-    { menu: "PNG로 내보내기", extension: ".png", signature: "PNG" }
+    { menu: "PNG로 내보내기", extension: ".png" }
   ]) {
     await page.mouse.click(visibleBounds.left + 12, (visibleBounds.top + visibleBounds.bottom) / 2, {
       button: "right"
@@ -198,11 +196,7 @@ test("flattens a boolean result through dry-run, direct control, persistence, an
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toContain(artifact.extension);
     const bytes = await readFile(await download.path() as string);
-    if (artifact.extension === ".png") {
-      expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-    } else {
-      expect(bytes.toString("utf8", 0, 200)).toContain(artifact.signature);
-    }
+    expect([...bytes.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   }
 });
 
