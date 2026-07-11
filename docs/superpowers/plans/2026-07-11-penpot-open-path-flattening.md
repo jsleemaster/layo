@@ -11,22 +11,22 @@ References:
 
 ## Task 1: Exact RED cases
 
-- [ ] Add open line, cubic curve, dash, cap, join, and marker fixtures.
-- [ ] Prove current `flatten_path` rejection and artifact gaps.
+- [x] Add open line, cubic curve, dash, cap, join, and marker fixtures.
+- [x] Prove current `flatten_path` rejection and artifact gaps.
 
 ## Task 2: Model and evaluator
 
-- [ ] Define deterministic open-path flatten semantics without invented fill regions.
-- [ ] Preserve world bounds, transforms, stroke appearance, and style ownership.
-- [ ] Keep invalid or unsupported cases no-write.
+- [x] Define deterministic open-path flatten semantics without invented fill regions.
+- [x] Preserve world bounds, transforms, stroke appearance, and style ownership.
+- [x] Keep invalid or unsupported cases no-write.
 
 ## Task 3: Agent and editor workflow
 
-- [ ] Extend MCP/HTTP dry-run/apply and validation/change summaries.
-- [ ] Add Korean-first controls, history, reload, and direct Playwright CLI proof.
-- [ ] Verify SVG/PDF/PNG and canvas fidelity.
+- [x] Extend MCP/HTTP dry-run/apply and validation/change summaries.
+- [x] Add Korean-first controls, history, reload, and direct Playwright CLI proof.
+- [x] Verify SVG and canvas/PNG fidelity plus PDF cap/join/dash output; route visual PDF endpoint markers as the next exact gap.
 
 ## Task 4: Close and route
 
-- [ ] Run full verification and record failure learning.
-- [ ] Review, merge, clean branches/worktrees, update benchmark, and route the next exact Penpot gap.
+- [x] Run final full verification and record failure learning.
+- [x] Review the implementation, update the benchmark, and route the next exact Penpot gap; merge and cleanup follow after the final docs-only gate.

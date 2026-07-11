@@ -597,6 +597,20 @@ function isVerticalTextWritingMode(mode: TextWritingMode | undefined): boolean {
   return mode ? VERTICAL_TEXT_WRITING_MODES.has(mode) : false;
 }
 
+
+function openStrokeContractKey(node: RendererNode) {
+  return JSON.stringify({
+    stroke: node.style.stroke,
+    stroke_width: node.style.stroke_width,
+    stroke_cap: node.style.stroke_cap ?? "butt",
+    stroke_join: node.style.stroke_join ?? "miter",
+    stroke_dasharray: node.style.stroke_dasharray ?? [],
+    stroke_start_marker: node.style.stroke_start_marker ?? "none",
+    stroke_end_marker: node.style.stroke_end_marker ?? "none",
+    opacity: node.style.opacity
+  });
+}
+
 export function createEditorState(document: RendererDocument): EditorState {
   return {
     document,
@@ -2657,6 +2671,12 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
           transform: node.transform
         }))
       );
+      if (
+        !evaluation.closed &&
+        sources.some((node) => openStrokeContractKey(node) !== openStrokeContractKey(sources[0]))
+      ) {
+        return { document, inverse: null };
+      }
       const sourceIdSet = new Set(sourceNodeIds);
       const insertionIndex = Math.min(
         ...parent.children.flatMap((node, index) => (sourceIdSet.has(node.id) ? [index] : []))

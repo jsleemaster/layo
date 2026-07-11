@@ -177,6 +177,11 @@ export interface RendererNode {
     fill_style?: string | null;
     stroke: string | null;
     stroke_width: number;
+    stroke_cap?: "butt" | "round" | "square";
+    stroke_join?: "miter" | "round" | "bevel";
+    stroke_dasharray?: number[];
+    stroke_start_marker?: "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
+    stroke_end_marker?: "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
     opacity: number;
     effect_shadow?: string | null;
     effect_shadows?: string[] | null;

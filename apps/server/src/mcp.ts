@@ -192,12 +192,21 @@ const codeComponentMappingSchema = z.object({
   docs_url: z.string().optional().describe("Optional component documentation URL")
 });
 
+const strokeCapSchema = z.enum(["butt", "round", "square"]);
+const strokeJoinSchema = z.enum(["miter", "round", "bevel"]);
+const strokeMarkerSchema = z.enum(["none", "line_arrow", "triangle", "square", "circle", "diamond"]);
+
 const nodeStyleSchema = z.object({
   fill: z.string().describe("CSS fill color"),
   fill_token: z.string().nullable().optional().describe("Optional fill token binding"),
   fill_style: z.string().nullable().optional().describe("Optional reusable fill style binding"),
   stroke: z.string().nullable().describe("CSS stroke color or null for no stroke"),
   stroke_width: z.number().min(0).describe("Stroke width in pixels"),
+  stroke_cap: strokeCapSchema.optional(),
+  stroke_join: strokeJoinSchema.optional(),
+  stroke_dasharray: z.array(z.number().nonnegative()).optional(),
+  stroke_start_marker: strokeMarkerSchema.optional(),
+  stroke_end_marker: strokeMarkerSchema.optional(),
 	  opacity: z.number().min(0).max(1).describe("Layer opacity from 0 to 1"),
 	  effect_shadow: z.string().nullable().optional().describe("Optional CSS box-shadow value"),
 	  effect_shadows: z.array(z.string()).nullable().optional().describe("Optional ordered CSS box-shadow layers"),
@@ -393,7 +402,12 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     height: z.number().positive().optional(),
     fill: z.string().optional(),
     stroke: z.string().nullable().optional(),
-    strokeWidth: z.number().nonnegative().optional()
+    strokeWidth: z.number().nonnegative().optional(),
+    strokeCap: strokeCapSchema.optional(),
+    strokeJoin: strokeJoinSchema.optional(),
+    strokeDasharray: z.array(z.number().nonnegative()).optional(),
+    strokeStartMarker: strokeMarkerSchema.optional(),
+    strokeEndMarker: strokeMarkerSchema.optional()
   }),
   z.object({
     type: z.literal("create_boolean_path"),

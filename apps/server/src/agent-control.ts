@@ -97,6 +97,11 @@ export type AgentCommand =
       fill?: string;
       stroke?: string | null;
       strokeWidth?: number;
+      strokeCap?: "butt" | "round" | "square";
+      strokeJoin?: "miter" | "round" | "bevel";
+      strokeDasharray?: number[];
+      strokeStartMarker?: "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
+      strokeEndMarker?: "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
     }
   | {
       type: "create_boolean_path";
@@ -431,6 +436,11 @@ function applyCreatePathCommand(
       fill: command.fill ?? "#0ea5e9",
       stroke: command.stroke ?? null,
       stroke_width: Math.max(0, command.strokeWidth ?? 0),
+      ...(command.strokeCap ? { stroke_cap: command.strokeCap } : {}),
+      ...(command.strokeJoin ? { stroke_join: command.strokeJoin } : {}),
+      ...(command.strokeDasharray ? { stroke_dasharray: normalizeStrokeDasharray(command.strokeDasharray) } : {}),
+      ...(command.strokeStartMarker ? { stroke_start_marker: command.strokeStartMarker } : {}),
+      ...(command.strokeEndMarker ? { stroke_end_marker: command.strokeEndMarker } : {}),
       opacity: 1
     },
     content: {
@@ -645,6 +655,12 @@ function applyFlattenPathCommand(
     }))
   );
   const firstSource = sourceEntries[0].node;
+  if (
+    !evaluation.closed &&
+    sourceEntries.some(({ node }) => strokeContractKey(node) !== strokeContractKey(firstSource))
+  ) {
+    throw new Error("open path flatten stroke contracts must match");
+  }
   const flattenedNode: DesignNode = {
     ...structuredClone(firstSource),
     id: resultNodeId,
@@ -672,6 +688,28 @@ function applyFlattenPathCommand(
   sourceContainer.children = sourceContainer.children.filter((node) => !sourceIdSet.has(node.id));
   sourceContainer.children.splice(insertionIndex, 0, flattenedNode);
   return [flattenedNode.id, ...sourceNodeIds.filter((nodeId) => nodeId !== flattenedNode.id)];
+}
+
+
+function normalizeStrokeDasharray(values: number[]) {
+  const normalized = values.filter((value) => Number.isFinite(value) && value >= 0);
+  if (normalized.length !== values.length || normalized.every((value) => value === 0)) {
+    throw new Error("stroke dasharray must contain non-negative finite values and one positive value");
+  }
+  return normalized;
+}
+
+function strokeContractKey(node: DesignNode) {
+  return JSON.stringify({
+    stroke: node.style.stroke,
+    stroke_width: node.style.stroke_width,
+    stroke_cap: node.style.stroke_cap ?? "butt",
+    stroke_join: node.style.stroke_join ?? "miter",
+    stroke_dasharray: node.style.stroke_dasharray ?? [],
+    stroke_start_marker: node.style.stroke_start_marker ?? "none",
+    stroke_end_marker: node.style.stroke_end_marker ?? "none",
+    opacity: node.style.opacity
+  });
 }
 
 function normalizeBooleanSourceIds(sourceNodeIds: string[]) {
