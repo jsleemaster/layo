@@ -28,5 +28,5 @@ References:
 
 ## Task 4: Close and route
 
-- [ ] Run final full verification and record failure learning.
-- [ ] Review, merge, clean branches/worktrees, update benchmark, and route the next exact Penpot gap.
+- [x] Run final full verification and record failure learning.
+- [x] Review the implementation, update the benchmark, and route the next exact Penpot gap; merge and cleanup follow after the final docs-only gate.
