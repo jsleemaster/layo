@@ -35,8 +35,8 @@ export function flattenPathGeometry(
   scope.setup(new scope.Size(1, 1));
   const result = new scope.CompoundPath({ insert: false });
   for (const operand of operands) {
-    const item = createClosedPathItem(scope, operand, "path flatten source");
-    if (operand.fillRule === "evenodd") {
+    const item = createPathItem(scope, operand, "path flatten source", false);
+    if (operand.fillRule === "evenodd" && item.children.every((path) => path.closed)) {
       item.reorient(true, true);
     }
     result.addChildren(item.removeChildren());
@@ -78,7 +78,7 @@ export function evaluateBooleanPath(
   const scope = new paper.PaperScope();
   scope.setup(new scope.Size(1, 1));
   const items = operands.map((operand) =>
-    createClosedPathItem(scope, operand, "boolean path operand")
+    createPathItem(scope, operand, "boolean path operand", true)
   );
 
   let result: paper.PathItem = items[0];
@@ -118,10 +118,11 @@ export function evaluateBooleanPath(
 }
 
 
-function createClosedPathItem(
+function createPathItem(
   scope: paper.PaperScope,
   operand: BooleanPathOperand,
-  label: string
+  label: string,
+  requireClosed: boolean
 ) {
   const item = new scope.CompoundPath({
     pathData: operand.pathData,
@@ -130,7 +131,7 @@ function createClosedPathItem(
   const paths = item.children.filter(
     (child): child is paper.Path => child instanceof scope.Path
   );
-  if (item.isEmpty() || paths.length === 0 || paths.some((path) => !path.closed)) {
+  if (item.isEmpty() || paths.length === 0 || (requireClosed && paths.some((path) => !path.closed))) {
     throw new Error(`${label} must contain closed geometry`);
   }
   item.fillRule = operand.fillRule === "evenodd" ? "evenodd" : "nonzero";
