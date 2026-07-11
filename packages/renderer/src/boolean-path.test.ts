@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { evaluateBooleanPath } from "./boolean-path";
+import { evaluateBooleanPath, flattenPathGeometry } from "./boolean-path";
 
 const base = {
   pathData: "M0 0 H100 V100 H0 Z",
@@ -75,5 +75,58 @@ describe("boolean path evaluation", () => {
     expect(result.pathData).toMatch(/[Cc]/);
     expect(result.bounds.width).toBe(120);
     expect(result.area).toBeGreaterThan(7_800);
+  });
+});
+
+
+describe("path flattening", () => {
+  test("normalizes one closed path into standalone local geometry", () => {
+    const result = flattenPathGeometry([
+      {
+        pathData: "M0 0 H100 V100 H0 Z",
+        transform: { x: 40, y: 25, rotation: 0 }
+      }
+    ]);
+
+    expect(result.pathData).toMatch(/^M/);
+    expect(result.bounds).toEqual({ x: 40, y: 25, width: 100, height: 100 });
+    expect(result.fillRule).toBe("nonzero");
+    expect(result.area).toBeCloseTo(10_000, 3);
+  });
+
+  test("preserves curves, even-odd holes, and rotated world bounds", () => {
+    const result = flattenPathGeometry([
+      {
+        pathData:
+          "M50 0 C77.614 0 100 22.386 100 50 C100 77.614 77.614 100 50 100 C22.386 100 0 77.614 0 50 C0 22.386 22.386 0 50 0 Z M35 35 H65 V65 H35 Z",
+        fillRule: "evenodd",
+        transform: { x: 120, y: 80, rotation: 45 }
+      }
+    ]);
+
+    expect(result.pathData).toMatch(/[Cc]/);
+    expect(result.fillRule).toBe("nonzero");
+    expect(result.bounds.width).toBeCloseTo(141.421, 3);
+    expect(result.bounds.height).toBeCloseTo(141.421, 3);
+    expect(result.area).toBeGreaterThan(6_900);
+  });
+
+  test("keeps multiple closed sources as one compound standalone path", () => {
+    const result = flattenPathGeometry([base, overlap]);
+
+    expect(result.pathData.match(/[Mm]/g)).toHaveLength(2);
+    expect(result.bounds).toEqual({ x: 0, y: 0, width: 150, height: 100 });
+    expect(result.area).toBeCloseTo(20_000, 3);
+  });
+
+  test("rejects open source geometry before destructive replacement", () => {
+    expect(() =>
+      flattenPathGeometry([
+        {
+          pathData: "M0 0 H100 V100",
+          transform: { x: 0, y: 0, rotation: 0 }
+        }
+      ])
+    ).toThrow("closed geometry");
   });
 });
