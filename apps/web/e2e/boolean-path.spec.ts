@@ -112,6 +112,77 @@ test("non-destructive boolean controls preserve operands through every operation
   );
 });
 
+
+test("flattens a boolean result through dry-run, direct control, persistence, and reload", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+  const projectId = await page.getByTestId("project-switcher").inputValue();
+  const project = (await (await page.request.get("http://127.0.0.1:4317/projects/" + projectId)).json()).project;
+  const fileId = project.currentDocumentId as string;
+  const initialFile = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
+  const parentId = initialFile.pages[0].children[0].id as string;
+
+  const seeded = await page.request.post(
+    "http://127.0.0.1:4317/files/" + fileId + "/agent/commands",
+    {
+      data: {
+        dryRun: false,
+        commands: [
+          { type: "create_path", parentId, ...pathCommand("flatten-left", "평탄화 왼쪽", 40) },
+          { type: "create_path", parentId, ...pathCommand("flatten-right", "평탄화 오른쪽", 90) },
+          {
+            type: "create_boolean_path",
+            nodeId: "flatten-boolean",
+            name: "평탄화 대상",
+            operation: "union",
+            sourceNodeIds: ["flatten-left", "flatten-right"]
+          }
+        ]
+      }
+    }
+  );
+  expect(seeded.ok()).toBeTruthy();
+
+  const dryRun = await page.request.post(
+    "http://127.0.0.1:4317/files/" + fileId + "/agent/commands",
+    {
+      data: {
+        dryRun: true,
+        commands: [{
+          type: "flatten_path",
+          nodeId: "flatten-boolean",
+          sourceNodeIds: ["flatten-boolean"],
+          name: "평탄화 대상"
+        }]
+      }
+    }
+  );
+  expect(dryRun.ok()).toBeTruthy();
+  expect((await dryRun.json()).persisted).toBe(false);
+  const beforeApply = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
+  expect(beforeApply.pages[0].children[0].children.find((node: { id: string }) => node.id === "flatten-boolean").content.type).toBe("boolean_path");
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "평탄화 대상" }).click();
+  await page.getByRole("button", { name: "경로 평탄화" }).click();
+
+  await expect.poll(async () => {
+    const file = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
+    const node = file.pages[0].children[0].children.find((child: { id: string }) => child.id === "flatten-boolean");
+    return {
+      type: node?.content.type,
+      childCount: node?.children.length,
+      relation: node?.content.relation
+    };
+  }).toEqual({ type: "path", childCount: 0, relation: undefined });
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "평탄화 대상" }).click();
+  await expect(page.getByRole("button", { name: "경로 평탄화" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "불리언 분리" })).toBeDisabled();
+});
+
 async function findCanvasColorBounds(
   page: Page,
   color: { r: number; g: number; b: number }
