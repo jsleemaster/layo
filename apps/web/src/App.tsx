@@ -1992,7 +1992,8 @@ type BooleanPathAgentCommand =
       nodeId: string;
       operation: BooleanPathOperation;
     }
-  | { type: "detach_boolean_path"; nodeId: string };
+  | { type: "detach_boolean_path"; nodeId: string }
+  | { type: "flatten_path"; nodeId: string; sourceNodeIds: string[]; name?: string };
 
 async function persistBooleanPathCommand(
   fileId: string,
@@ -8918,6 +8919,14 @@ export function App() {
           (node.content.type === "path" || node.content.type === "boolean_path")
       )) ||
     Boolean(selectedBooleanPath && !isNodeLocked(selectedBooleanPath));
+  const canFlattenPath =
+    selectedNodes.length >= 1 &&
+    selectedNodes.every(
+      (node) =>
+        !isNodeLocked(node) &&
+        node.kind === "path" &&
+        (node.content.type === "path" || node.content.type === "boolean_path")
+    );
   const contextMenuNodeIsLocked = isNodeLocked(contextMenuNode);
   const contextMenuNodeIsHidden = contextMenuNode ? !isNodeVisible(contextMenuNode) : false;
   const canMutateContextMenuNode = Boolean(contextMenuNode && !contextMenuNodeIsLocked);
@@ -10197,6 +10206,11 @@ export function App() {
         updateViewportFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
         return;
       }
+      if (isCommand && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "e") {
+        event.preventDefault();
+        flattenSelectedPaths();
+        return;
+      }
       if (isCommand && event.altKey) {
         const booleanShortcutKey = event.code.startsWith("Key")
           ? event.code.slice(3).toLowerCase()
@@ -10793,6 +10807,50 @@ export function App() {
       .then(() => setProjectStatus("불리언 경로 저장됨"))
       .catch((error) => {
         const message = error instanceof Error ? error.message : "불리언 경로를 저장하지 못했습니다";
+        setProjectStatus(message);
+      });
+  };
+
+
+  const flattenSelectedPaths = () => {
+    const currentEditor = editorRef.current;
+    const project = currentProjectRef.current;
+    if (!currentEditor || !project) {
+      return;
+    }
+    const sourceNodeIds = currentEditor.selection.nodeIds;
+    const sources = sourceNodeIds.flatMap((nodeId) => {
+      const node = findNodeById(currentEditor.document, nodeId);
+      return node ? [node] : [];
+    });
+    if (
+      sources.length === 0 ||
+      sources.some(
+        (node) =>
+          isNodeLocked(node) ||
+          node.kind !== "path" ||
+          (node.content.type !== "path" && node.content.type !== "boolean_path")
+      )
+    ) {
+      return;
+    }
+    let nodeId = sourceNodeIds.length === 1 ? sourceNodeIds[0] : `flattened-${flattenRendererNodes(currentEditor.document).length + 1}`;
+    let sequence = flattenRendererNodes(currentEditor.document).length + 1;
+    while (sourceNodeIds.length > 1 && findNodeById(currentEditor.document, nodeId)) {
+      sequence += 1;
+      nodeId = `flattened-${sequence}`;
+    }
+    const command: BooleanPathAgentCommand = {
+      type: "flatten_path",
+      nodeId,
+      sourceNodeIds,
+      name: sourceNodeIds.length === 1 ? sources[0].name : "평탄화 경로"
+    };
+    dispatch(command);
+    void persistBooleanPathCommand(project.currentDocumentId, command)
+      .then(() => setProjectStatus("경로 평탄화됨"))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "경로를 평탄화하지 못했습니다";
         setProjectStatus(message);
       });
   };
@@ -15405,7 +15463,7 @@ export function App() {
               ◇
             </span>
           </button>
-          {canApplyBooleanPath || selectedBooleanPath ? (
+          {canApplyBooleanPath || selectedBooleanPath || canFlattenPath ? (
             <>
               <button
                 type="button"
@@ -15442,6 +15500,15 @@ export function App() {
                 onClick={() => applyBooleanPathOperation("exclusion")}
               >
                 ⊕
+              </button>
+              <button
+                type="button"
+                aria-label="경로 평탄화"
+                title="경로 평탄화 (Ctrl/Cmd+E)"
+                disabled={!canFlattenPath}
+                onClick={flattenSelectedPaths}
+              >
+                ▱
               </button>
               <button
                 type="button"
