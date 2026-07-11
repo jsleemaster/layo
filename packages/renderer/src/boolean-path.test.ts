@@ -98,7 +98,7 @@ describe("path flattening", () => {
     const result = flattenPathGeometry([
       {
         pathData:
-          "M50 0 C77.614 0 100 22.386 100 50 C100 77.614 77.614 100 50 100 C22.386 100 0 77.614 0 50 C0 22.386 22.386 0 50 0 Z M35 35 H65 V65 H35 Z",
+          "M50 0 C77.614 0 100 11.193 100 25 C100 38.807 77.614 50 50 50 C22.386 50 0 38.807 0 25 C0 11.193 22.386 0 50 0 Z M35 15 H65 V35 H35 Z",
         fillRule: "evenodd",
         transform: { x: 120, y: 80, rotation: 45 }
       }
@@ -106,9 +106,9 @@ describe("path flattening", () => {
 
     expect(result.pathData).toMatch(/[Cc]/);
     expect(result.fillRule).toBe("nonzero");
-    expect(result.bounds.width).toBeCloseTo(141.421, 3);
-    expect(result.bounds.height).toBeCloseTo(141.421, 3);
-    expect(result.area).toBeGreaterThan(6_900);
+    expect(result.bounds.width).toBeCloseTo(106.066, 3);
+    expect(result.bounds.height).toBeCloseTo(106.066, 3);
+    expect(result.area).toBeGreaterThan(3_000);
   });
 
   test("keeps multiple closed sources as one compound standalone path", () => {
