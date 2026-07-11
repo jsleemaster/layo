@@ -27,7 +27,7 @@
 ## Task 3: Direct product workflow
 
 - [x] Add a contextual Korean-first Flatten control and Penpot-compatible shortcut.
-- [x] Verify canvas plus SVG/PDF/PNG fidelity through direct Playwright CLI interaction.
+- [x] Verify canvas and PNG through direct Playwright CLI interaction; verify SVG/PDF through the existing standalone path artifact test pipeline.
 - [x] Cover selection, export, reload, and recovery boundaries.
 
 ## Task 4: Verification and handoff
