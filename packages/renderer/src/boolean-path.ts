@@ -37,7 +37,7 @@ export function flattenPathGeometry(
   const result = new scope.CompoundPath({ insert: false });
   for (const operand of operands) {
     const item = createPathItem(scope, operand, "path flatten source", false);
-    if (operand.fillRule === "evenodd" && item.children.every((path) => path.closed)) {
+    if (operand.fillRule === "evenodd" && item.children.every((path) => path instanceof scope.Path && path.closed)) {
       item.reorient(true, true);
     }
     result.addChildren(item.removeChildren());
@@ -58,7 +58,7 @@ export function flattenPathGeometry(
   const evaluation = {
     pathData: result.pathData,
     fillRule: "nonzero" as const,
-    closed: result.children.every((path) => path.closed),
+    closed: result.children.every((path) => path instanceof scope.Path && path.closed),
     area: filledPathArea(result, scope),
     bounds
   };
