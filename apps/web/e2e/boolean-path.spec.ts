@@ -157,7 +157,7 @@ test("flattens a boolean result through dry-run, direct control, persistence, an
     }
   );
   expect(dryRun.ok()).toBeTruthy();
-  expect((await dryRun.json()).persisted).toBe(false);
+  expect((await dryRun.json()).result.persisted).toBe(false);
   const beforeApply = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
   expect(beforeApply.pages[0].children[0].children.find((node: { id: string }) => node.id === "flatten-boolean").content.type).toBe("boolean_path");
 
