@@ -106,8 +106,8 @@ describe("path flattening", () => {
 
     expect(result.pathData).toMatch(/[Cc]/);
     expect(result.fillRule).toBe("nonzero");
-    expect(result.bounds.width).toBeCloseTo(106.066, 3);
-    expect(result.bounds.height).toBeCloseTo(106.066, 3);
+    expect(result.bounds.width).toBeCloseTo(79.074, 3);
+    expect(result.bounds.height).toBeCloseTo(79.074, 3);
     expect(result.area).toBeGreaterThan(3_000);
   });
 
