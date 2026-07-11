@@ -14,6 +14,7 @@ export interface BooleanPathOperand {
 export interface BooleanPathEvaluation {
   pathData: string;
   fillRule: "nonzero";
+  closed: boolean;
   area: number;
   bounds: {
     x: number;
@@ -57,6 +58,7 @@ export function flattenPathGeometry(
   const evaluation = {
     pathData: result.pathData,
     fillRule: "nonzero" as const,
+    closed: result.children.every((path) => path.closed),
     area: filledPathArea(result, scope),
     bounds
   };
@@ -110,6 +112,7 @@ export function evaluateBooleanPath(
   const evaluation = {
     pathData: result.pathData,
     fillRule: "nonzero" as const,
+    closed: true,
     area: filledPathArea(result, scope),
     bounds
   };
