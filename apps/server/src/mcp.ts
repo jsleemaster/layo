@@ -412,6 +412,12 @@ const agentCommandSchema = z.discriminatedUnion("type", [
     nodeId: z.string().min(1)
   }),
   z.object({
+    type: z.literal("flatten_path"),
+    nodeId: z.string().min(1),
+    sourceNodeIds: z.array(z.string().min(1)).min(1),
+    name: z.string().optional()
+  }),
+  z.object({
     type: z.literal("set_layout"),
     nodeId: z.string(),
     layout: nodeLayoutSchema
