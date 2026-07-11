@@ -119,14 +119,22 @@ describe("path flattening", () => {
     expect(result.area).toBeCloseTo(20_000, 3);
   });
 
-  test("rejects open source geometry before destructive replacement", () => {
-    expect(() =>
-      flattenPathGeometry([
-        {
-          pathData: "M0 0 H100 V100",
-          transform: { x: 0, y: 0, rotation: 0 }
-        }
-      ])
-    ).toThrow("closed geometry");
+  test("preserves open line and cubic subpaths without inventing closing geometry", () => {
+    const result = flattenPathGeometry([
+      {
+        pathData: "M0 0 L100 0",
+        transform: { x: 20, y: 30, rotation: 0 }
+      },
+      {
+        pathData: "M0 0 C25 50 75 50 100 0",
+        transform: { x: 20, y: 80, rotation: 0 }
+      }
+    ]);
+
+    expect(result.pathData).toMatch(/M0,0L100,0/);
+    expect(result.pathData).toMatch(/[Cc]/);
+    expect(result.pathData).not.toMatch(/[Zz]/);
+    expect(result.bounds).toEqual({ x: 20, y: 30, width: 100, height: 87.5 });
+    expect(result.area).toBe(0);
   });
 });
