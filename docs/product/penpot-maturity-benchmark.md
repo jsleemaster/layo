@@ -241,7 +241,7 @@ PR #272 and PR #273 complete first-class path import, editing, topology, and dir
 
 PR #275 adds destructive Flatten for selected closed paths and boolean relationships. The result is one standalone first-class path with normalized curved/compound geometry, even-odd hole handling, world-space bounds, dry-run/apply MCP and HTTP parity, Korean direct control, `Ctrl/Cmd+E`, reversible history, reload persistence, and SVG/PDF/PNG proof. Code-head Full Verification run `29150553848` passed all gates and 185 Playwright tests; final PR-head verification remains the merge gate.
 
-The active next Penpot gap is open-path Flatten with stroke appearance fidelity. Layo currently rejects open geometry before writes; the next plan must preserve stroke width, dash/style, caps, joins, and endpoint markers without silently closing paths or inventing fill geometry. The implementation plan is `docs/superpowers/plans/2026-07-11-penpot-open-path-flattening.md`.
+PR #276 adapts open-path Flatten by preserving explicit open geometry plus stroke width, cap, join, dash, endpoint marker, and opacity contracts through model, MCP/HTTP, editor history, reload, canvas, SVG, PDF stroke operators, and PNG. Mismatched multi-source stroke contracts are no-write. Visual PDF endpoint marker geometry, marker/stroke-aware export bounds, and first-class human stroke controls remain the exact next gap; deterministic PDF marker comments are evidence, not visual parity. See `docs/product/penpot-open-path-flattening-delta.md`.
 
 ## Current Highest-Risk Gaps
 
