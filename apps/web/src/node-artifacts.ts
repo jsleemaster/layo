@@ -624,6 +624,86 @@ function svgStrokeAttributeForNode(node: RendererNode) {
   return `stroke="url(#${svgGradientIdForNode(node, strokeGradient.source)})" data-fallback-stroke="${stroke}"`;
 }
 
+
+function normalizedStrokeDasharray(node: RendererNode) {
+  return (node.style.stroke_dasharray ?? []).filter(
+    (value) => Number.isFinite(value) && value >= 0
+  );
+}
+
+function svgStrokeMarkerId(node: RendererNode, position: "start" | "end", marker: string) {
+  return `layo-marker-${safeSvgIdSuffix(node.id)}-${position}-${marker}`;
+}
+
+function svgStrokePresentationAttributes(node: RendererNode) {
+  const cap = node.style.stroke_cap ?? "butt";
+  const join = node.style.stroke_join ?? "miter";
+  const dasharray = normalizedStrokeDasharray(node);
+  const startMarker = node.style.stroke_start_marker ?? "none";
+  const endMarker = node.style.stroke_end_marker ?? "none";
+  return [
+    ` stroke-linecap="${cap}"`,
+    ` stroke-linejoin="${join}"`,
+    dasharray.length > 0 ? ` stroke-dasharray="${dasharray.map(formatNumber).join(" ")}"` : "",
+    startMarker !== "none"
+      ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker)})"`
+      : "",
+    endMarker !== "none"
+      ? ` marker-end="url(#${svgStrokeMarkerId(node, "end", endMarker)})"`
+      : ""
+  ].join("");
+}
+
+function svgStrokeMarkerShape(marker: string) {
+  if (marker === "circle") {
+    return '<circle cx="5" cy="5" r="3.5" />';
+  }
+  if (marker === "square") {
+    return '<rect x="1.5" y="1.5" width="7" height="7" />';
+  }
+  if (marker === "diamond") {
+    return '<path d="M5 0.8 L9.2 5 L5 9.2 L0.8 5 Z" />';
+  }
+  if (marker === "line_arrow") {
+    return '<path d="M1 1 L8 5 L1 9" fill="none" />';
+  }
+  return '<path d="M0.8 1 L9.2 5 L0.8 9 Z" />';
+}
+
+function svgStrokeMarkerLinesForNode(node: RendererNode, depth: number) {
+  if (!node.style.stroke || node.style.stroke_width <= 0) {
+    return [];
+  }
+  const entries = [
+    ["start", node.style.stroke_start_marker ?? "none"],
+    ["end", node.style.stroke_end_marker ?? "none"]
+  ] as const;
+  return entries.flatMap(([position, marker]) =>
+    marker === "none"
+      ? []
+      : [
+          indent(
+            `<marker id="${svgStrokeMarkerId(node, position, marker)}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" markerUnits="strokeWidth">`,
+            depth
+          ),
+          indent(
+            `<g fill="${escapeSvgText(node.style.stroke ?? "none")}" stroke="${escapeSvgText(
+              node.style.stroke ?? "none"
+            )}">${svgStrokeMarkerShape(marker)}</g>`,
+            depth + 1
+          ),
+          indent("</marker>", depth)
+        ]
+  );
+}
+
+function svgStrokeMarkerLinesForTree(node: RendererNode, depth: number): string[] {
+  return [
+    ...svgStrokeMarkerLinesForNode(node, depth),
+    ...node.children.flatMap((child) => svgStrokeMarkerLinesForTree(child, depth))
+  ];
+}
+
 function clipSourceOpacityForNode(node: RendererNode) {
   const opacity = nodeClip(node)?.source?.opacity;
   return typeof opacity === "number" && Number.isFinite(opacity) ? clampUnit(opacity) : 1;
@@ -742,6 +822,7 @@ function svgShadowFilterLinesForTree(node: RendererNode, depth: number): string[
 function svgDefsForNode(node: RendererNode, depth: number): string[] {
   const defLines = [
     ...svgGradientLinesForTree(node, depth + 1),
+    ...svgStrokeMarkerLinesForTree(node, depth + 1),
     ...svgShadowFilterLinesForTree(node, depth + 1),
     ...svgClipPathLinesForTree(node, depth + 1)
   ];
@@ -800,7 +881,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const pathData = pathDataForNode(node);
   if (pathData) {
     const fillRuleAttribute = svgFillRuleAttributeForNode(node);
-    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + opacity + filter + " />";
+    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + svgStrokePresentationAttributes(node) + opacity + filter + " />";
   }
   if (nodeClipUsesEllipseShape(node)) {
     return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
@@ -1479,6 +1560,27 @@ function pdfClipOpacityForNode(node: RendererNode) {
   return opacity < 1 ? opacity : null;
 }
 
+
+function pdfStrokeStyleCommands(node: RendererNode) {
+  const cap = { butt: 0, round: 1, square: 2 }[node.style.stroke_cap ?? "butt"];
+  const join = { miter: 0, round: 1, bevel: 2 }[node.style.stroke_join ?? "miter"];
+  const dasharray = normalizedStrokeDasharray(node);
+  return [
+    `${cap} J`,
+    `${join} j`,
+    dasharray.length > 0 ? `[${dasharray.map(formatNumber).join(" ")}] 0 d` : "[] 0 d"
+  ];
+}
+
+function pdfStrokeMarkerEvidence(node: RendererNode) {
+  const start = node.style.stroke_start_marker ?? "none";
+  const end = node.style.stroke_end_marker ?? "none";
+  return [
+    start !== "none" ? `% Layo stroke marker start ${start}` : "",
+    end !== "none" ? `% Layo stroke marker end ${end}` : ""
+  ].filter(Boolean);
+}
+
 function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   if (!node.style.stroke || node.style.stroke_width <= 0) {
     return [];
@@ -1488,8 +1590,10 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
     "q",
     `${pdfColorOperands(node.style.stroke)} RG`,
     `${formatNumber(Math.max(0, node.style.stroke_width))} w`,
+    ...pdfStrokeStyleCommands(node),
     ...pdfShapePathCommandsForNode(node, pageHeight, x, y),
     "S",
+    ...pdfStrokeMarkerEvidence(node),
     "Q"
   ];
 }
