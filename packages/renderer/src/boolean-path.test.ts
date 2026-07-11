@@ -131,7 +131,7 @@ describe("path flattening", () => {
       }
     ]);
 
-    expect(result.pathData).toMatch(/M0,0L100,0/);
+    expect(result.pathData).toMatch(/M0,0[Hh]100/);\n    expect(result.pathData.match(/[Mm]/g)).toHaveLength(2);
     expect(result.pathData).toMatch(/[Cc]/);
     expect(result.pathData).not.toMatch(/[Zz]/);
     expect(result.bounds).toEqual({ x: 20, y: 30, width: 100, height: 87.5 });
