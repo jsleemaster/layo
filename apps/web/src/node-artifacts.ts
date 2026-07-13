@@ -1,5 +1,5 @@
 import { unzlibSync, zlibSync } from "fflate";
-import { pathHasOnlyClosedSubpaths, type NodePaintGradient, type NodePaintSource, type NodePaintStop, type NodeStroke, type RendererNode } from "@layo/renderer";
+import { pathHasOnlyClosedSubpaths, type NodeFill, type NodePaintGradient, type NodePaintSource, type NodePaintStop, type NodeStroke, type RendererNode } from "@layo/renderer";
 import { parseEditablePath } from "./path-editor";
 
 export interface NodeArtifactAsset {
@@ -147,6 +147,29 @@ function formatNumber(value: number) {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+
+function fillPaintType(fill: NodeFill) {
+  return fill.paint?.type ?? "solid";
+}
+
+function fillPaintColor(fill: NodeFill) {
+  return fill.paint?.type === "solid" ? fill.paint.color : fill.color;
+}
+
+function visibleFillsForNode(node: RendererNode) {
+  if (!node.style.fills) {
+    return [];
+  }
+  return node.style.fills.filter((fill) => {
+    const paintIsUsable =
+      fill.paint?.type === "gradient"
+        ? (fill.paint.gradient.stops?.length ?? 0) >= 2
+        : fill.paint?.type === "image"
+          ? Boolean(fill.paint.asset_id)
+          : Boolean(fillPaintColor(fill));
+    return fill.visible && fill.opacity > 0 && paintIsUsable;
+  });
+}
 
 function legacyStrokeForNode(node: RendererNode): NodeStroke | null {
   if (!node.style.stroke || node.style.stroke_width <= 0) {
@@ -761,6 +784,96 @@ function svgStrokePaintId(node: RendererNode, stroke: NodeStroke) {
   return `layo-stroke-${prefix}-${safeSvgIdSuffix(node.id)}-${safeSvgIdSuffix(stroke.id)}`;
 }
 
+function svgFillPaintId(node: RendererNode, fill: NodeFill) {
+  const kind = fill.paint?.type === "image" ? "pattern" : "gradient";
+  return `layo-fill-${kind}-${safeSvgIdSuffix(node.id)}-${safeSvgIdSuffix(fill.id)}`;
+}
+
+function svgFillPaintDefinitionLinesForNode(
+  node: RendererNode,
+  options: NodeArtifactOptions,
+  depth: number
+): string[] {
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  return visibleFillsForNode(node).flatMap((fill) => {
+    if (fill.paint?.type === "gradient") {
+      const gradient = fill.paint.gradient;
+      const stops = gradientStopsForGradient(gradient);
+      if (stops.length < 2) {
+        return [];
+      }
+      const stopLines = [...stops]
+        .sort((left, right) => left.offset - right.offset)
+        .map((stop) => {
+          const opacity = clampUnit(stop.opacity);
+          const opacityAttribute = opacity < 1 ? ` stop-opacity="${formatNumber(opacity)}"` : "";
+          return indent(
+            `<stop offset="${gradientStopPercent(stop.offset)}" stop-color="${escapeSvgText(stop.color)}"${opacityAttribute} />`,
+            depth + 1
+          );
+        });
+      if (normalizedGradientType(gradient).includes("radial")) {
+        const center = gradient.start ?? { x: 0.5, y: 0.5 };
+        return [
+          indent(
+            `<radialGradient id="${svgFillPaintId(node, fill)}" cx="${gradientCoordinatePercent(center.x)}" cy="${gradientCoordinatePercent(center.y)}" r="${gradientCoordinatePercent(svgRadialGradientRadius(gradient))}"${svgRadialGradientTransform(gradient)}>`,
+            depth
+          ),
+          ...stopLines,
+          indent("</radialGradient>", depth)
+        ];
+      }
+      const start = gradient.start ?? { x: 0, y: 0.5 };
+      const end = gradient.end ?? { x: 1, y: 0.5 };
+      return [
+        indent(
+          `<linearGradient id="${svgFillPaintId(node, fill)}" x1="${gradientCoordinatePercent(start.x)}" y1="${gradientCoordinatePercent(start.y)}" x2="${gradientCoordinatePercent(end.x)}" y2="${gradientCoordinatePercent(end.y)}">`,
+          depth
+        ),
+        ...stopLines,
+        indent("</linearGradient>", depth)
+      ];
+    }
+    if (fill.paint?.type === "image") {
+      const asset = options.assets?.[fill.paint.asset_id];
+      if (!asset?.dataBase64) {
+        return [];
+      }
+      return [
+        indent(
+          `<pattern id="${svgFillPaintId(node, fill)}" x="0" y="0" width="${width}" height="${height}" patternUnits="userSpaceOnUse">`,
+          depth
+        ),
+        indent(
+          `<image data-fill-asset-id="${escapeSvgText(fill.paint.asset_id)}" x="0" y="0" width="${width}" height="${height}" href="${assetDataUrl(asset)}" preserveAspectRatio="xMidYMid slice" />`,
+          depth + 1
+        ),
+        indent("</pattern>", depth)
+      ];
+    }
+    return [];
+  });
+}
+
+function svgFillPaintDefinitionLinesForTree(
+  node: RendererNode,
+  options: NodeArtifactOptions,
+  depth: number
+): string[] {
+  return [
+    ...svgFillPaintDefinitionLinesForNode(node, options, depth),
+    ...node.children.flatMap((child) => svgFillPaintDefinitionLinesForTree(child, options, depth))
+  ];
+}
+
+function svgFillPaintAttribute(node: RendererNode, fill: NodeFill) {
+  if (fill.paint?.type === "gradient" || fill.paint?.type === "image") {
+    return `url(#${svgFillPaintId(node, fill)})`;
+  }
+  return escapeSvgText(fillPaintColor(fill));
+}
+
 function svgStrokePaintDefinitionLinesForNode(
   node: RendererNode,
   options: NodeArtifactOptions,
@@ -1116,6 +1229,7 @@ function svgAlignedPathStrokeDefinitionLinesForTree(node: RendererNode, depth: n
 function svgDefsForNode(node: RendererNode, options: NodeArtifactOptions, depth: number): string[] {
   const defLines = [
     ...svgGradientLinesForTree(node, depth + 1),
+    ...svgFillPaintDefinitionLinesForTree(node, options, depth + 1),
     ...svgStrokePaintDefinitionLinesForTree(node, options, depth + 1),
     ...svgStrokeMarkerLinesForTree(node, depth + 1),
     ...svgShadowFilterLinesForTree(node, depth + 1),
@@ -1155,12 +1269,24 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const fillAttribute = svgFillAttributeForNode(node);
   const opacity = svgOpacityAttribute(node.style.opacity);
   const filter = svgShadowFilterAttribute(node);
+  const ownedFills = visibleFillsForNode(node);
 
   if (node.content.type === "text") {
     const fontSize = Math.max(1, Math.round(node.content.font_size));
-    return `<text ${svgNodeAttributes(node)} x="0" y="${fontSize}" fill="${fill}" font-family="${escapeSvgText(
-      node.content.font_family
-    )}" font-size="${fontSize}"${opacity}${filter}>${escapeSvgText(node.content.value)}</text>`;
+    const textShape = (paint: string, metadata = "", paintOpacity = opacity) =>
+      `<text ${svgNodeAttributes(node)}${metadata} x="0" y="${fontSize}" fill="${paint}" font-family="${escapeSvgText(
+        node.content.font_family
+      )}" font-size="${fontSize}"${paintOpacity}${filter}>${escapeSvgText(node.content.value)}</text>`;
+    if (node.style.fills) {
+      return ownedFills.map((ownedFill) =>
+        textShape(
+          svgFillPaintAttribute(node, ownedFill),
+          ` data-fill-id="${escapeSvgText(ownedFill.id)}" data-fill-paint="${fillPaintType(ownedFill)}" style="mix-blend-mode: ${ownedFill.blend_mode}"`,
+          svgOpacityAttribute(ownedFill.opacity * node.style.opacity)
+        )
+      ).join("\n");
+    }
+    return textShape(fill);
   }
 
   const imageAsset = imageAssetForNode(node, options);
@@ -1174,28 +1300,30 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
   const pathData = pathDataForNode(node);
   const strokes = visibleStrokesForNode(node);
-  if (!node.style.strokes) {
-    const strokeAttribute = svgStrokeAttributeForNode(node);
+  const shapeForFill = (paint: string, metadata = "", paintOpacity = opacity) => {
+    const common = `${metadata} fill="${paint}" stroke="none"${paintOpacity}${filter}`;
     if (pathData) {
-      const fillRuleAttribute = svgFillRuleAttributeForNode(node);
-      return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + svgStrokePresentationAttributes(node) + opacity + filter + " />";
+      return `<path ${svgNodeAttributes(node)}${assetAttribute} d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)} />`;
     }
     if (nodeClipUsesEllipseShape(node)) {
-      return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+      return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${common} />`;
     }
-    return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
-  }
+    return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${common} />`;
+  };
+  const fillShapes = node.style.fills
+    ? ownedFills.map((ownedFill) =>
+        shapeForFill(
+          svgFillPaintAttribute(node, ownedFill),
+          `data-fill-id="${escapeSvgText(ownedFill.id)}" data-fill-paint="${fillPaintType(ownedFill)}" style="mix-blend-mode: ${ownedFill.blend_mode}"`,
+          svgOpacityAttribute(ownedFill.opacity * node.style.opacity)
+        )
+      )
+    : [shapeForFill(fillAttribute.replace(/^fill="|"$/g, ""))];
 
-  const baseShape = pathData
-    ? `<path ${svgNodeAttributes(node)}${assetAttribute} d="${escapeSvgText(pathData)}" ${fillAttribute} stroke="none"${svgFillRuleAttributeForNode(node)}${opacity}${filter} />`
-    : nodeClipUsesEllipseShape(node)
-      ? `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} stroke="none"${opacity}${filter} />`
-      : `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} stroke="none"${opacity}${filter} />`;
-
-  const closedPathData = closedPathDataForStrokeAlignment(node);
   const strokeShapes = strokes.map((stroke) => {
     const strokeNode = nodeWithStroke(node, stroke);
     const effectivePosition = effectiveStrokePositionForNode(node, stroke);
+    const closedPathData = closedPathDataForStrokeAlignment(node);
     const isAlignedPath = Boolean(pathData && closedPathData && effectivePosition !== "center");
     const renderedWidth = isAlignedPath ? stroke.width * 2 : stroke.width;
     const alignmentReference = effectivePosition === "inside"
@@ -1213,7 +1341,20 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
     }
     return `<rect x="${formatNumber(inset)}" y="${formatNumber(inset)}" width="${formatNumber(Math.max(0, width - inset * 2))}" height="${formatNumber(Math.max(0, height - inset * 2))}" rx="0" ${common} />`;
   });
-  return [baseShape, ...strokeShapes].join("\\n");
+
+  if (!node.style.strokes && node.style.stroke && node.style.stroke_width > 0) {
+    const legacy = legacyStrokeForNode(node);
+    if (legacy) {
+      const strokeNode = nodeWithStroke(node, legacy);
+      const common = `fill="none" stroke="${escapeSvgText(legacy.color)}" stroke-width="${formatNumber(legacy.width)}"${svgStrokePresentationAttributes(strokeNode)}`;
+      strokeShapes.push(pathData
+        ? `<path d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)} />`
+        : nodeClipUsesEllipseShape(node)
+          ? `<ellipse ${svgEllipseAttributes(width, height)} ${common} />`
+          : `<rect x="0" y="0" width="${width}" height="${height}" rx="0" ${common} />`);
+    }
+  }
+  return [...fillShapes, ...strokeShapes].join("\n");
 }
 
 function indent(line: string, depth: number) {
@@ -1252,6 +1393,12 @@ export function imageAssetIdsForNode(node: RendererNode) {
     if (candidate.content.type === "image" && !seen.has(candidate.content.asset_id)) {
       seen.add(candidate.content.asset_id);
       ids.push(candidate.content.asset_id);
+    }
+    for (const fill of candidate.style.fills ?? []) {
+      if (fill.paint?.type === "image" && !seen.has(fill.paint.asset_id)) {
+        seen.add(fill.paint.asset_id);
+        ids.push(fill.paint.asset_id);
+      }
     }
     for (const stroke of candidate.style.strokes ?? []) {
       if (stroke.paint?.type === "image" && !seen.has(stroke.paint.asset_id)) {
