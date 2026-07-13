@@ -1157,7 +1157,7 @@ describe("Penpot component instance migration", () => {
           concurrentTarget.name = "Concurrent product edit";
           await writeRawFile(
             internals.filePathFor("penpot-concurrent-target"),
-            `${JSON.stringify(concurrentTarget, null, 2)}\\n`,
+            `${JSON.stringify(concurrentTarget, null, 2)}\n`,
             "utf8"
           );
           throw new Error("injected failure after concurrent target write");
