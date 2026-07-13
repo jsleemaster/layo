@@ -7503,6 +7503,31 @@ function Inspector({
           <h3>선</h3>
           <div className="field-grid">
             <label>
+              선 색상
+              <input
+                data-testid="inspector-stroke-color"
+                type="color"
+                value={selectedNode.style.stroke}
+                onChange={(event) => updateStrokeStyle({ stroke: event.currentTarget.value })}
+              />
+            </label>
+            <label>
+              두께
+              <input
+                data-testid="inspector-stroke-width"
+                type="number"
+                min="0"
+                step="0.5"
+                value={selectedNode.style.stroke_width}
+                onChange={(event) => {
+                  const width = Number(event.currentTarget.value);
+                  if (Number.isFinite(width) && width >= 0) {
+                    updateStrokeStyle({ stroke_width: width });
+                  }
+                }}
+              />
+            </label>
+            <label>
               끝 모양
               <select
                 data-testid="inspector-stroke-cap"
