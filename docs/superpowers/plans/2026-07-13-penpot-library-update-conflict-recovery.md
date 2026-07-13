@@ -1,6 +1,6 @@
 # Penpot Library Update Conflict And Recovery Plan
 
-**Status:** Active after PR #287.
+**Status:** Active after PR #288.
 
 **Goal:** Make imported Penpot library updates safe under source deletion,
 renames, local override conflicts, and partial failure, with deterministic
@@ -64,17 +64,21 @@ References:
       captured for review.
 - [x] Bind compatibility review and mutation to one registry archive, parsed
       library, and target document snapshot.
-- [ ] Add stale-subscription metadata and concurrent-writer cases.
+- [ ] Add stale-subscription metadata concurrency coverage.
+- [x] Add concurrent target-writer rollback coverage and preserve the newer
+      product edit when optimistic identity no longer matches.
 - [x] Inject a failure after asset, document, and subscription writes and restore
       the exact pre-update bytes for every affected path.
 - [x] Prove identical retry plus manual saved-version and recovery-version flows.
-- [ ] Add per-file serialization and optimistic snapshot identity so rollback
-      cannot clobber another writer.
+- [x] Add per-file serialization shared by library updates and normal product
+      saves, plus optimistic target identity for direct filesystem changes.
 - [ ] Add crash-level journal or atomic commit recovery and restart proof.
 
 Evidence is recorded in
 `docs/product/penpot-library-in-use-deletion-guard-delta.md` and
 `docs/product/penpot-library-override-target-conflict-delta.md`,
 `docs/product/penpot-library-stale-preview-snapshot-delta.md`, and
-`docs/product/penpot-library-update-rollback-delta.md`. The plan remains active;
-do not treat PR #287 as completion of the broader recovery goal.
+`docs/product/penpot-library-update-rollback-delta.md`, and
+`docs/product/penpot-library-concurrent-writer-guard-delta.md`. The plan remains
+active; do not treat PR #288 as completion of the broader recovery goal.
+Concurrent subscription metadata and crash-level restart recovery are next.

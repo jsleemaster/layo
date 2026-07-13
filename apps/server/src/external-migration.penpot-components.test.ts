@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile as writeRawFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -968,6 +968,220 @@ describe("Penpot component instance migration", () => {
           (component) => component.id === `penpot-component-${circleComponentId}`
         )?.source_node.style.fill
       ).toBe("#7c3aed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes concurrent library updates for the same target", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-update-lock-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-update-lock-project",
+        documentId: "penpot-update-lock-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      type LibraryArchiveReader = {
+        readAccessibleLibraryRegistryArchive(
+          fileId: string,
+          libraryId: string
+        ): Promise<unknown>;
+      };
+      const secondStorage = new FileStorage(root);
+      const firstInternals = storage as unknown as LibraryArchiveReader;
+      const secondInternals = secondStorage as unknown as LibraryArchiveReader;
+      const firstReadArchive =
+        firstInternals.readAccessibleLibraryRegistryArchive.bind(storage);
+      const secondReadArchive =
+        secondInternals.readAccessibleLibraryRegistryArchive.bind(secondStorage);
+      let readCount = 0;
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let markFirstEntered!: () => void;
+      const firstEntered = new Promise<void>((resolve) => {
+        markFirstEntered = resolve;
+      });
+      let markSecondEntered!: () => void;
+      const secondEntered = new Promise<void>((resolve) => {
+        markSecondEntered = resolve;
+      });
+      firstInternals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+        readCount += 1;
+        markFirstEntered();
+        await firstGate;
+        return firstReadArchive(fileId, libraryId);
+      };
+      secondInternals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+        readCount += 1;
+        markSecondEntered();
+        return secondReadArchive(fileId, libraryId);
+      };
+
+      const firstUpdate = storage.updateLibraryRegistryItem(
+        "penpot-update-lock-target",
+        libraryDocumentId
+      );
+      await firstEntered;
+      const secondUpdate = secondStorage.updateLibraryRegistryItem(
+        "penpot-update-lock-target",
+        libraryDocumentId
+      );
+      const secondState = await Promise.race([
+        secondEntered.then(() => "entered" as const),
+        new Promise<"blocked">((resolve) => {
+          setTimeout(() => resolve("blocked"), 50);
+        })
+      ]);
+      releaseFirst();
+      const results = await Promise.allSettled([firstUpdate, secondUpdate]);
+
+      expect(secondState).toBe("blocked");
+      expect(results).toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" })
+      ]);
+      expect(readCount).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes product writes behind a failing library update", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-product-write-lock-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-product-write-project",
+        documentId: "penpot-product-write-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0ea5e9";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const concurrentTarget = await storage.readFile("penpot-product-write-target");
+      concurrentTarget.name = "Concurrent product edit";
+      const originalFill = concurrentTarget.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      )?.source_node.style.fill;
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+      };
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let concurrentWrite!: ReturnType<FileStorage["writeFile"]>;
+      let writerState: "blocked" | "written" | undefined;
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        await writeSubscriptions(subscriptions);
+        concurrentWrite = storage.writeFile("penpot-product-write-target", concurrentTarget);
+        writerState = await Promise.race([
+          concurrentWrite.then(() => "written" as const),
+          new Promise<"blocked">((resolve) => {
+            setTimeout(() => resolve("blocked"), 50);
+          })
+        ]);
+        throw new Error("injected failure while product write waits");
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-product-write-target", libraryDocumentId)
+      ).rejects.toThrow("injected failure while product write waits");
+      await concurrentWrite;
+
+      expect(writerState).toBe("blocked");
+      const preservedTarget = await storage.readFile("penpot-product-write-target");
+      expect(preservedTarget.name).toBe("Concurrent product edit");
+      expect(
+        preservedTarget.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe(originalFill);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not roll back over a concurrent target writer", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-concurrent-writer-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-concurrent-project",
+        documentId: "penpot-concurrent-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0ea5e9";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+        filePathFor(fileId: string): string;
+      };
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let failAfterConcurrentWrite = true;
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        await writeSubscriptions(subscriptions);
+        if (failAfterConcurrentWrite) {
+          failAfterConcurrentWrite = false;
+          const concurrentTarget = await storage.readFile("penpot-concurrent-target");
+          concurrentTarget.name = "Concurrent product edit";
+          await writeRawFile(
+            internals.filePathFor("penpot-concurrent-target"),
+            `${JSON.stringify(concurrentTarget, null, 2)}\n`,
+            "utf8"
+          );
+          throw new Error("injected failure after concurrent target write");
+        }
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-concurrent-target", libraryDocumentId)
+      ).rejects.toThrow("rollback conflicted with concurrent writes");
+
+      const preservedTarget = await storage.readFile("penpot-concurrent-target");
+      expect(preservedTarget.name).toBe("Concurrent product edit");
+      expect(
+        preservedTarget.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0ea5e9");
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-concurrent-target", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2 });
+      expect((await storage.readFile("penpot-concurrent-target")).name).toBe(
+        "Concurrent product edit"
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

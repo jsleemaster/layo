@@ -48,6 +48,29 @@ export const PROJECT_ARCHIVE_MIME_TYPE = "application/vnd.layo.project-archive+z
 export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+zip";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+const storagePathMutationTails = new Map<string, Promise<void>>();
+
+async function withStoragePathMutationLock<T>(
+  storagePath: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = storagePathMutationTails.get(storagePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  storagePathMutationTails.set(storagePath, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (storagePathMutationTails.get(storagePath) === current) {
+      storagePathMutationTails.delete(storagePath);
+    }
+  }
+}
+
 export interface LayoutSpacing {
   top: number;
   right: number;
@@ -1505,6 +1528,16 @@ export class FileStorage {
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => this.writeFileWithoutMutationLock(fileId, document)
+    );
+  }
+
+  private async writeFileWithoutMutationLock(
+    fileId: string,
+    document: DesignFile
+  ): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await writeFile(this.filePathFor(fileId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -2277,6 +2310,16 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+    );
+  }
+
+  private async updateLibraryRegistryItemLocked(
+    fileId: string,
+    libraryId: string
+  ): Promise<ImportedLibraryRegistryItem> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
     const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
       (candidate) => candidate.libraryId === normalizedLibraryId
@@ -2338,6 +2381,7 @@ export class FileStorage {
       this.librarySubscriptionsPath(),
       this.filePathFor(fileId)
     ]);
+    const rollbackGuards: StoragePathSnapshot[] = [];
     try {
       for (const asset of library.assets) {
         await this.writeAsset(asset.metadata, asset.data);
@@ -2380,7 +2424,11 @@ export class FileStorage {
         ),
         ...updatedComponents
       ];
-      await this.writeFile(fileId, target);
+      await this.writeFileWithoutMutationLock(fileId, target);
+      rollbackGuards.push({
+        filePath: this.filePathFor(fileId),
+        data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
+      });
 
       const imported: ImportedLibraryRegistryItem = {
         fileId,
@@ -2399,11 +2447,13 @@ export class FileStorage {
 
     } catch (error) {
       try {
-        await restoreStoragePathSnapshots(rollbackSnapshots);
+        await restoreStoragePathSnapshots(rollbackSnapshots, rollbackGuards);
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
-          "library registry update failed and rollback failed"
+          rollbackError instanceof StorageRollbackConflictError
+            ? "library registry update rollback conflicted with concurrent writes"
+            : "library registry update failed and rollback failed"
         );
       }
       throw error;
@@ -4453,6 +4503,8 @@ interface StoragePathSnapshot {
   data: Buffer | null;
 }
 
+class StorageRollbackConflictError extends Error {}
+
 async function captureStoragePathSnapshots(
   filePaths: string[]
 ): Promise<StoragePathSnapshot[]> {
@@ -4471,8 +4523,26 @@ async function captureStoragePathSnapshots(
 }
 
 async function restoreStoragePathSnapshots(
-  snapshots: StoragePathSnapshot[]
+  snapshots: StoragePathSnapshot[],
+  guards: StoragePathSnapshot[] = []
 ): Promise<void> {
+  const currentGuards = await captureStoragePathSnapshots(
+    guards.map((guard) => guard.filePath)
+  );
+  for (const guard of guards) {
+    const current = currentGuards.find(
+      (candidate) => candidate.filePath === guard.filePath
+    );
+    const matches = current?.data === null
+      ? guard.data === null
+      : guard.data !== null && current?.data.equals(guard.data);
+    if (!matches) {
+      throw new StorageRollbackConflictError(
+        `storage path changed after library update write: ${guard.filePath}`
+      );
+    }
+  }
+
   for (const snapshot of snapshots) {
     if (snapshot.data === null) {
       await rm(snapshot.filePath, { force: true });
