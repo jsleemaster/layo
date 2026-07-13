@@ -293,6 +293,17 @@ and retention `29239015484` passed. Penpot component/main-copy/variant
 migration is the next exact import gap. See
 `docs/product/penpot-first-class-fill-paints-delta.md`.
 
+PR #283 through PR #292 mature shared-library ownership, nested swaps,
+conflict preflight, immutable review snapshots, guarded rollback, durable
+write-ahead recovery, resource-keyed process locks, and operation-level
+read-modify-write transactions. The current publication follow-up closes the
+remaining single-host archive/metadata/event split with one serialized,
+journaled transaction. RED `29276435367` proved competing source mismatch;
+crash RED `29277054987` proved restart mismatch after archive replacement.
+See `docs/product/penpot-library-publication-transaction-delta.md`. Hosted
+multi-instance registry ownership, authorization, transactional object storage,
+backup retention, and durable pub/sub remain deliberately open.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:

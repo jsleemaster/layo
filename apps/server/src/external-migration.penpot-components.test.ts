@@ -1559,6 +1559,215 @@ describe("Penpot component instance migration", () => {
     }
   }, 10_000);
 
+  test("keeps registry metadata and archive from the same competing publication", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-library-publication-race-"));
+    const releasePath = path.join(root, "release-publisher");
+    const workerPath = fileURLToPath(new URL("./storage-publication-worker.ts", import.meta.url));
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const spawnPublisher = (mode: "publish-paused" | "publish", fileId: string) => {
+      const child = spawn(process.execPath, [
+        "--import",
+        "tsx",
+        workerPath,
+        mode,
+        root,
+        fileId,
+        "shared-publication",
+        releasePath
+      ], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+      children.push(child);
+      return child;
+    };
+    const waitForMarker = (child: ChildProcessWithoutNullStreams, marker: string) =>
+      new Promise<void>((resolve, reject) => {
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk.toString();
+          if (stdout.includes(marker)) {
+            resolve();
+          }
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (!stdout.includes(marker)) {
+            reject(new Error(`publisher exited ${code} before ${marker}: ${stderr}`));
+          }
+        });
+      });
+    const waitForExit = (child: ChildProcessWithoutNullStreams) =>
+      new Promise<void>((resolve, reject) => {
+        if (child.exitCode !== null) {
+          if (child.exitCode === 0) {
+            resolve();
+          } else {
+            reject(new Error(`publisher exited ${child.exitCode}`));
+          }
+          return;
+        }
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`publisher exited ${code}: ${stderr}`));
+          }
+        });
+      });
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-a-project",
+        documentId: "publication-a",
+        documentName: "Publication A",
+        fileName: "publication-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-b-project",
+        documentId: "publication-b",
+        documentName: "Publication B",
+        fileName: "publication-b.penpot"
+      });
+
+      const publisherA = spawnPublisher("publish-paused", "publication-a");
+      await waitForMarker(publisherA, "publish-paused");
+      const publisherAExit = waitForExit(publisherA);
+      const publisherB = spawnPublisher("publish", "publication-b");
+      const publisherBExit = waitForExit(publisherB);
+      await expect(
+        Promise.race([
+          publisherBExit.then(() => "completed"),
+          delay(300).then(() => "blocked")
+        ])
+      ).resolves.toBe("blocked");
+
+      await writeRawFile(releasePath, "release\n", "utf8");
+      await Promise.all([publisherAExit, publisherBExit]);
+
+      const entry = (await storage.listLibraryRegistry()).find(
+        (candidate) => candidate.libraryId === "shared-publication"
+      );
+      const review = await storage.reviewLibraryRegistryItem(
+        entry?.sourceFileId ?? "publication-a",
+        "shared-publication"
+      );
+      expect(review.originalFileId).toBe(entry?.sourceFileId);
+    } finally {
+      await writeRawFile(releasePath, "release\n", "utf8").catch(() => undefined);
+      for (const child of children) {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+      await Promise.allSettled(children.map((child) => waitForExit(child)));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  test("recovers an interrupted library publication before serving registry state", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-recovery-"));
+    const releasePath = path.join(root, "unused-release");
+    const workerPath = fileURLToPath(new URL("./storage-publication-worker.ts", import.meta.url));
+    let publisher: ChildProcessWithoutNullStreams | null = null;
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-recovery-a-project",
+        documentId: "publication-recovery-a",
+        documentName: "Publication Recovery A",
+        fileName: "publication-recovery-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-recovery-b-project",
+        documentId: "publication-recovery-b",
+        documentName: "Publication Recovery B",
+        fileName: "publication-recovery-b.penpot"
+      });
+      await storage.publishLibraryToRegistry("publication-recovery-a", {
+        libraryId: "recovery-publication"
+      });
+
+      publisher = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          workerPath,
+          "publish-crash-after-archive",
+          root,
+          "publication-recovery-b",
+          "recovery-publication",
+          releasePath
+        ],
+        { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+      );
+      await new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        publisher?.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        publisher?.once("error", reject);
+        publisher?.once("exit", (code) => {
+          if (code === 86) {
+            resolve();
+          } else {
+            reject(new Error(`crashing publisher exited ${code}: ${stderr}`));
+          }
+        });
+      });
+
+      const restarted = new FileStorage(root);
+      await restarted.publishLibraryToRegistry("publication-recovery-b", {
+        libraryId: "unrelated-publication"
+      });
+      await restarted.prepareFiles();
+
+      const entries = await restarted.listLibraryRegistry();
+      const entry = entries.find(
+        (candidate) => candidate.libraryId === "recovery-publication"
+      );
+      expect(entry?.sourceFileId).toBe("publication-recovery-a");
+      expect(
+        entries.find((candidate) => candidate.libraryId === "unrelated-publication")
+          ?.sourceFileId
+      ).toBe("publication-recovery-b");
+      const review = await restarted.reviewLibraryRegistryItem(
+        "publication-recovery-a",
+        "recovery-publication"
+      );
+      expect(review.originalFileId).toBe(entry?.sourceFileId);
+    } finally {
+      if (publisher?.exitCode === null) {
+        publisher.kill("SIGKILL");
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test("namespaces publication recovery journals away from document update journals", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-namespace-"));
+    try {
+      const storage = new FileStorage(root) as unknown as {
+        libraryUpdateRecoveryPathFor(fileId: string): string;
+        libraryPublicationRecoveryPathFor(libraryId: string): string;
+      };
+      expect(storage.libraryPublicationRecoveryPathFor("kit")).not.toBe(
+        storage.libraryUpdateRecoveryPathFor("library-publication-kit")
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
     const releasePath = path.join(root, "unused-release");

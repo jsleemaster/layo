@@ -1405,19 +1405,31 @@ export class FileStorage {
     return path.join(this.libraryUpdateRecoveryDir(), `${fileId}.json`);
   }
 
+  private libraryPublicationRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "library-publications");
+  }
+
+  private libraryPublicationRecoveryPathFor(libraryId: string) {
+    assertSafeStorageId(libraryId);
+    return path.join(this.libraryPublicationRecoveryDir(), `${libraryId}.json`);
+  }
+
   private async persistLibraryUpdateRecoveryJournal(
     fileId: string,
     original: StoragePathSnapshot[],
-    intended: StoragePathSnapshot[]
+    intended: StoragePathSnapshot[],
+    kind: LibraryUpdateRecoveryJournal["kind"] = "library-registry-update"
   ): Promise<void> {
     const journal: LibraryUpdateRecoveryJournal = {
       schemaVersion: 1,
-      kind: "library-registry-update",
+      kind,
       fileId,
       original: original.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot)),
       intended: intended.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot))
     };
-    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    const journalPath = kind === "library-registry-publication"
+      ? this.libraryPublicationRecoveryPathFor(fileId)
+      : this.libraryUpdateRecoveryPathFor(fileId);
     await mkdir(path.dirname(journalPath), { recursive: true });
     await durablyReplaceFile(
       journalPath,
@@ -1425,8 +1437,13 @@ export class FileStorage {
     );
   }
 
-  private async removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void> {
-    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+  private async removeLibraryUpdateRecoveryJournal(
+    fileId: string,
+    kind: LibraryUpdateRecoveryJournal["kind"] = "library-registry-update"
+  ): Promise<void> {
+    const journalPath = kind === "library-registry-publication"
+      ? this.libraryPublicationRecoveryPathFor(fileId)
+      : this.libraryUpdateRecoveryPathFor(fileId);
     await rm(journalPath, { force: true });
     await syncDirectory(path.dirname(journalPath));
   }
@@ -1437,52 +1454,90 @@ export class FileStorage {
   }
 
   private async recoverInterruptedLibraryUpdates(): Promise<void> {
-    let entries: string[];
-    try {
-      entries = await readdir(this.libraryUpdateRecoveryDir());
-    } catch (error) {
-      if ((error as { code?: string }).code === "ENOENT") {
-        return;
-      }
-      throw error;
-    }
-
-    for (const entry of entries.filter((candidate) => candidate.endsWith(".json")).sort()) {
-      const journalPath = path.join(this.libraryUpdateRecoveryDir(), entry);
-      const journal = parseLibraryUpdateRecoveryJournal(
-        JSON.parse(await readFile(journalPath, "utf8"))
-      );
-      const original = journal.original.map((snapshot) =>
-        deserializeRecoverySnapshot(this.rootDir, snapshot)
-      );
-      const intended = new Map(
-        journal.intended.map((snapshot) => {
-          const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
-          return [restored.filePath, restored.data] as const;
-        })
-      );
-      const current = await captureStoragePathSnapshots(
-        original.map((snapshot) => snapshot.filePath)
-      );
-
-      for (const snapshot of original) {
-        const currentData = current.find(
-          (candidate) => candidate.filePath === snapshot.filePath
-        )?.data ?? null;
-        const intendedData = intended.get(snapshot.filePath);
-        if (
-          !storageSnapshotDataEquals(currentData, snapshot.data)
-          && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
-        ) {
-          throw new StorageRollbackConflictError(
-            `interrupted library update path changed outside journal: ${snapshot.filePath}`
-          );
+    const journalPaths: string[] = [];
+    for (const recoveryDir of [
+      this.libraryUpdateRecoveryDir(),
+      this.libraryPublicationRecoveryDir()
+    ]) {
+      try {
+        const entries = await readdir(recoveryDir);
+        journalPaths.push(
+          ...entries
+            .filter((candidate) => candidate.endsWith(".json"))
+            .map((entry) => path.join(recoveryDir, entry))
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== "ENOENT") {
+          throw error;
         }
       }
+    }
 
-      await restoreStoragePathSnapshots(original);
-      await rm(journalPath, { force: true });
-      await syncDirectory(path.dirname(journalPath));
+    for (const journalPath of journalPaths.sort()) {
+      let pendingJournal: LibraryUpdateRecoveryJournal;
+      try {
+        pendingJournal = parseLibraryUpdateRecoveryJournal(
+          JSON.parse(await readFile(journalPath, "utf8"))
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+      const recoverJournal = async (): Promise<void> => {
+        let journal: LibraryUpdateRecoveryJournal;
+        try {
+          journal = parseLibraryUpdateRecoveryJournal(
+            JSON.parse(await readFile(journalPath, "utf8"))
+          );
+        } catch (error) {
+          if ((error as { code?: string }).code === "ENOENT") {
+            return;
+          }
+          throw error;
+        }
+        const original = journal.original.map((snapshot) =>
+          deserializeRecoverySnapshot(this.rootDir, snapshot)
+        );
+        const intended = new Map(
+          journal.intended.map((snapshot) => {
+            const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
+            return [restored.filePath, restored.data] as const;
+          })
+        );
+        const current = await captureStoragePathSnapshots(
+          original.map((snapshot) => snapshot.filePath)
+        );
+
+        for (const snapshot of original) {
+          const currentData = current.find(
+            (candidate) => candidate.filePath === snapshot.filePath
+          )?.data ?? null;
+          const intendedData = intended.get(snapshot.filePath);
+          if (
+            !storageSnapshotDataEquals(currentData, snapshot.data)
+            && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
+          ) {
+            const transactionName = journal.kind === "library-registry-publication"
+              ? "library publication"
+              : "library update";
+            throw new StorageRollbackConflictError(
+              `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
+            );
+          }
+        }
+
+        await restoreStoragePathSnapshots(original);
+        await rm(journalPath, { force: true });
+        await syncDirectory(path.dirname(journalPath));
+      };
+
+      if (pendingJournal.kind === "library-registry-publication") {
+        await withStoragePathMutationLock(this.libraryRegistryPath(), recoverJournal);
+      } else {
+        await recoverJournal();
+      }
     }
   }
 
@@ -2388,34 +2443,92 @@ export class FileStorage {
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
     const teamId = await this.findTeamIdForFile(fileId);
-    const existingEntries = await this.readLibraryRegistryEntries();
-    const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
-    if (existing?.teamId && existing.teamId !== teamId) {
-      throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
-    }
-    const now = nextIsoTimestamp(existing?.updatedAt);
-    const entry: LibraryRegistryEntry = {
-      libraryId,
-      name: normalizeName(options.name, exported.name),
-      sourceFileId: exported.fileId,
-      sourceName: exported.name,
-      teamId,
-      componentCount: exported.componentCount,
-      tokenCount: exported.tokenCount,
-      assetCount: exported.assetCount,
-      publishedAt: existing?.publishedAt ?? now,
-      updatedAt: now
-    };
-    const nextEntries = [
-      entry,
-      ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
-    ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return withStoragePathMutationLock(this.libraryRegistryPath(), async () => {
+      const existingEntries = await this.readLibraryRegistryEntries();
+      const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+      if (existing?.teamId && existing.teamId !== teamId) {
+        throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
+      }
+      const now = nextIsoTimestamp(existing?.updatedAt);
+      const entry: LibraryRegistryEntry = {
+        libraryId,
+        name: normalizeName(options.name, exported.name),
+        sourceFileId: exported.fileId,
+        sourceName: exported.name,
+        teamId,
+        componentCount: exported.componentCount,
+        tokenCount: exported.tokenCount,
+        assetCount: exported.assetCount,
+        publishedAt: existing?.publishedAt ?? now,
+        updatedAt: now
+      };
+      const nextEntries = [
+        entry,
+        ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
+      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-    await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(this.libraryArchivePathFor(libraryId), exported.archive);
-    await this.writeLibraryRegistryEntries(nextEntries);
-    await this.appendLibraryRegistryEvent(entry, exported);
-    return entry;
+      const existingEvents = await this.readLibraryRegistryEvents();
+      const nextEvent = this.createLibraryRegistryEvent(entry, exported, existingEvents);
+      const nextEvents = [...existingEvents, nextEvent];
+      const archivePath = this.libraryArchivePathFor(libraryId);
+      const registryPath = this.libraryRegistryPath();
+      const eventsPath = this.libraryRegistryEventsPath();
+      const original = await captureStoragePathSnapshots([
+        archivePath,
+        registryPath,
+        eventsPath
+      ]);
+      const intended: StoragePathSnapshot[] = [
+        { filePath: archivePath, data: exported.archive },
+        {
+          filePath: registryPath,
+          data: Buffer.from(
+            `${JSON.stringify({ schemaVersion: 1, libraries: nextEntries }, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        {
+          filePath: eventsPath,
+          data: Buffer.from(
+            `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
+            "utf8"
+          )
+        }
+      ];
+      const recoveryId = libraryId;
+
+      await this.persistLibraryUpdateRecoveryJournal(
+        recoveryId,
+        original,
+        intended,
+        "library-registry-publication"
+      );
+      try {
+        await mkdir(this.librariesDir, { recursive: true });
+        await durablyReplaceFile(archivePath, exported.archive);
+        await this.writeLibraryRegistryEntries(nextEntries);
+        await this.writeLibraryRegistryEvents(nextEvents);
+        await this.removeLibraryUpdateRecoveryJournal(
+          recoveryId,
+          "library-registry-publication"
+        );
+        return entry;
+      } catch (error) {
+        try {
+          await restoreStoragePathSnapshots(original);
+          await this.removeLibraryUpdateRecoveryJournal(
+            recoveryId,
+            "library-registry-publication"
+          );
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "library registry publication failed and rollback failed"
+          );
+        }
+        throw error;
+      }
+    });
   }
 
   async listLibraryRegistry(): Promise<LibraryRegistryEntry[]>;
@@ -3814,10 +3927,9 @@ export class FileStorage {
 
   private async writeLibraryRegistryEntries(libraries: LibraryRegistryEntry[]): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(
+    await durablyReplaceFile(
       this.libraryRegistryPath(),
-      `${JSON.stringify({ schemaVersion: 1, libraries }, null, 2)}\n`,
-      "utf8"
+      Buffer.from(`${JSON.stringify({ schemaVersion: 1, libraries }, null, 2)}\n`, "utf8")
     );
   }
 
@@ -3838,10 +3950,9 @@ export class FileStorage {
 
   private async writeLibraryRegistryEvents(events: LibraryRegistryEvent[]): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(
+    await durablyReplaceFile(
       this.libraryRegistryEventsPath(),
-      `${JSON.stringify({ schemaVersion: 1, events }, null, 2)}\n`,
-      "utf8"
+      Buffer.from(`${JSON.stringify({ schemaVersion: 1, events }, null, 2)}\n`, "utf8")
     );
   }
 
@@ -3974,13 +4085,13 @@ export class FileStorage {
     await this.writeLibraryRegistryTokenSubscriptions(nextSubscriptions);
   }
 
-  private async appendLibraryRegistryEvent(
+  private createLibraryRegistryEvent(
     entry: LibraryRegistryEntry,
-    exported: ExportedLibraryArchive
-  ): Promise<LibraryRegistryEvent> {
-    const events = await this.readLibraryRegistryEvents();
+    exported: ExportedLibraryArchive,
+    events: LibraryRegistryEvent[]
+  ): LibraryRegistryEvent {
     const sequence = Math.max(0, ...events.map((event) => event.sequence)) + 1;
-    const event: LibraryRegistryEvent = {
+    return {
       schemaVersion: 1,
       eventId: `library-registry-${sequence}`,
       sequence,
@@ -3998,8 +4109,6 @@ export class FileStorage {
       registryUpdatedAt: entry.updatedAt,
       createdAt: entry.updatedAt
     };
-    await this.writeLibraryRegistryEvents([...events, event]);
-    return event;
   }
 
   private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
@@ -4920,7 +5029,7 @@ interface SerializedRecoverySnapshot {
 
 interface LibraryUpdateRecoveryJournal {
   schemaVersion: 1;
-  kind: "library-registry-update";
+  kind: "library-registry-update" | "library-registry-publication";
   fileId: string;
   original: SerializedRecoverySnapshot[];
   intended: SerializedRecoverySnapshot[];
@@ -4972,7 +5081,8 @@ function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecover
   const candidate = value as Partial<LibraryUpdateRecoveryJournal>;
   if (
     candidate.schemaVersion !== 1
-    || candidate.kind !== "library-registry-update"
+    || (candidate.kind !== "library-registry-update"
+      && candidate.kind !== "library-registry-publication")
     || typeof candidate.fileId !== "string"
     || !Array.isArray(candidate.original)
     || !Array.isArray(candidate.intended)
@@ -4982,7 +5092,7 @@ function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecover
   assertSafeStorageId(candidate.fileId);
   return {
     schemaVersion: 1,
-    kind: "library-registry-update",
+    kind: candidate.kind,
     fileId: candidate.fileId,
     original: candidate.original.map(parseSerializedRecoverySnapshot),
     intended: candidate.intended.map(parseSerializedRecoverySnapshot)
