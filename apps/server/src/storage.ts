@@ -48,6 +48,29 @@ export const PROJECT_ARCHIVE_MIME_TYPE = "application/vnd.layo.project-archive+z
 export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+zip";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+const storagePathMutationTails = new Map<string, Promise<void>>();
+
+async function withStoragePathMutationLock<T>(
+  storagePath: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const previous = storagePathMutationTails.get(storagePath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  storagePathMutationTails.set(storagePath, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (storagePathMutationTails.get(storagePath) === current) {
+      storagePathMutationTails.delete(storagePath);
+    }
+  }
+}
+
 export interface LayoutSpacing {
   top: number;
   right: number;
@@ -2274,6 +2297,16 @@ export class FileStorage {
   }
 
   async updateLibraryRegistryItem(
+    fileId: string,
+    libraryId: string
+  ): Promise<ImportedLibraryRegistryItem> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+    );
+  }
+
+  private async updateLibraryRegistryItemLocked(
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
