@@ -27,6 +27,98 @@ async function createServerWithDocument() {
   return createHttpServer(storage);
 }
 
+function penpotComponentHttpArchive() {
+  const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
+  const fileId = "10101010-1010-1010-1010-101010101010";
+  const pageId = "20202020-2020-2020-2020-202020202020";
+  const componentId = "30303030-3030-3030-3030-303030303030";
+  const mainId = "40404040-4040-4040-4040-404040404040";
+  const mainLabelId = "50505050-5050-5050-5050-505050505050";
+  const copyId = "60606060-6060-6060-6060-606060606060";
+  const copyLabelId = "70707070-7070-7070-7070-707070707070";
+  return {
+    componentId,
+    mainId,
+    mainLabelId,
+    copyId,
+    archive: createZipArchive([
+      {
+        path: "manifest.json",
+        data: json({
+          type: "penpot/export-files",
+          version: 1,
+          files: [{ id: fileId, name: "HTTP components", features: ["components/v2"] }]
+        })
+      },
+      { path: `files/${fileId}.json`, data: json({ id: fileId, name: "HTTP components" }) },
+      {
+        path: `files/${fileId}/pages/${pageId}.json`,
+        data: json({ id: pageId, name: "Components", objects: {} })
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${mainId}.json`,
+        data: json({
+          id: mainId,
+          name: "Button",
+          type: "frame",
+          x: 80,
+          y: 96,
+          width: 180,
+          height: 56,
+          "main-instance": true,
+          "component-root": true,
+          "component-id": componentId,
+          shapes: [mainLabelId]
+        })
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${mainLabelId}.json`,
+        data: json({
+          id: mainLabelId,
+          name: "Label",
+          type: "text",
+          x: 112,
+          y: 112,
+          width: 116,
+          height: 24,
+          content: "Submit"
+        })
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${copyId}.json`,
+        data: json({
+          id: copyId,
+          name: "Button copy",
+          type: "frame",
+          x: 320,
+          y: 96,
+          width: 180,
+          height: 56,
+          "component-root": true,
+          "component-id": componentId,
+          "shape-ref": mainId,
+          shapes: [copyLabelId]
+        })
+      },
+      {
+        path: `files/${fileId}/pages/${pageId}/${copyLabelId}.json`,
+        data: json({
+          id: copyLabelId,
+          name: "Label",
+          type: "text",
+          x: 352,
+          y: 112,
+          width: 116,
+          height: 24,
+          "shape-ref": mainLabelId,
+          touched: ["text-content-group"],
+          content: "Continue"
+        })
+      }
+    ])
+  };
+}
+
 describe("HTTP server", () => {
   test("serves health and starts with an empty file list", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
@@ -173,6 +265,91 @@ describe("HTTP server", () => {
       blockedBy: expect.arrayContaining(["mapping_not_implemented"])
     });
     expect(await new FileStorage(tempRoot).listProjects()).toEqual([]);
+  });
+
+  test("persists imported Penpot components through HTTP, agent inspection, and code handoff", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    const server = createHttpServer(storage);
+    const fixture = penpotComponentHttpArchive();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: {
+        archiveBase64: fixture.archive.toString("base64"),
+        fileName: "components.penpot",
+        projectId: "penpot-component-project",
+        documentId: "penpot-component-document",
+        name: "Penpot components"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().imported.file.components).toEqual([
+      expect.objectContaining({
+        id: `penpot-component-${fixture.componentId}`,
+        source_node: expect.objectContaining({ id: `penpot-${fixture.mainId}`, kind: "component" })
+      })
+    ]);
+
+    const persisted = await storage.readFile("penpot-component-document");
+    const copy = persisted.pages[0].children.find(
+      (node) => node.id === `penpot-${fixture.copyId}`
+    );
+    expect(copy).toMatchObject({
+      kind: "component_instance",
+      component_instance: {
+        definition_id: `penpot-component-${fixture.componentId}`,
+        variant_id: "default",
+        overrides: [
+          {
+            node_id: `penpot-${fixture.mainLabelId}`,
+            field: "text",
+            value: "Continue"
+          }
+        ],
+        detached: false
+      }
+    });
+
+    const inspect = await server.inject({
+      method: "GET",
+      url: "/files/penpot-component-document/agent/inspect"
+    });
+    expect(inspect.statusCode).toBe(200);
+    expect(inspect.json().inspection).toMatchObject({ componentCount: 1 });
+
+    const validate = await server.inject({
+      method: "GET",
+      url: "/files/penpot-component-document/agent/validate"
+    });
+    expect(validate.statusCode).toBe(200);
+    expect(validate.json().validation.issues).toEqual([]);
+
+    const exported = await server.inject({
+      method: "GET",
+      url: "/files/penpot-component-document/export/code"
+    });
+    expect(exported.statusCode).toBe(200);
+    expect(exported.json().export.implementationSpec.components[0]).toMatchObject({
+      id: `penpot-component-${fixture.componentId}`,
+      sourceNodeId: `penpot-${fixture.mainId}`
+    });
+    const exportedCopy = exported.json().export.elements.find(
+      (element: { id: string }) => element.id === `penpot-${fixture.copyId}`
+    );
+    expect(exportedCopy.structure.componentRef).toMatchObject({
+      definitionId: `penpot-component-${fixture.componentId}`,
+      variantId: "default",
+      detached: false,
+      overrides: [
+        expect.objectContaining({
+          nodeId: `penpot-${fixture.mainLabelId}`,
+          value: "Continue"
+        })
+      ]
+    });
   });
 
   test("imports external Figma REST JSON into a fresh project", async () => {

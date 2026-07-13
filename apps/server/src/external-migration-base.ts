@@ -162,6 +162,11 @@ export function importExternalMigrationArchive(
       });
       return adaptPenpotMaskedGroupClipping(imported, entries);
     }
+    if (penpotReview?.blockedBy.includes("penpot_component_relation_invalid")) {
+      throw inputValidationError(
+        `Penpot component relation validation failed: ${penpotReview.warnings.join(" ")}`
+      );
+    }
 
     const figmaPackage = readFigmaPackage(entries);
     if (!figmaPackage) {
@@ -358,7 +363,11 @@ function reviewZipArchive(
     assetCandidates,
     documentCandidates,
     warnings: penpotReview ? [...warnings, ...penpotReview.warnings] : warnings,
-    blockedBy: canImport ? [] : blockedByForSource(source, "zip"),
+    blockedBy: canImport
+      ? []
+      : penpotReview?.blockedBy.length
+        ? penpotReview.blockedBy
+        : blockedByForSource(source, "zip"),
     canImport
   });
 }
