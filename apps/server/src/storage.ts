@@ -1046,6 +1046,7 @@ export interface ImportedLibraryRegistryTokens {
 
 export class FileStorage {
   private readonly priorRootDir: string | null;
+  private libraryUpdateRecoveryPromise: Promise<void> | null = null;
 
   constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
     const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
@@ -1154,14 +1155,14 @@ export class FileStorage {
 
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
-    await this.recoverInterruptedLibraryUpdates();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
-    await this.recoverInterruptedLibraryUpdates();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
@@ -1201,6 +1202,11 @@ export class FileStorage {
     const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
     await rm(journalPath, { force: true });
     await syncDirectory(path.dirname(journalPath));
+  }
+
+  private recoverInterruptedLibraryUpdatesOnce(): Promise<void> {
+    this.libraryUpdateRecoveryPromise ??= this.recoverInterruptedLibraryUpdates();
+    return this.libraryUpdateRecoveryPromise;
   }
 
   private async recoverInterruptedLibraryUpdates(): Promise<void> {
