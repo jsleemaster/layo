@@ -973,6 +973,68 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("does not roll back over a concurrent target writer", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-concurrent-writer-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-concurrent-project",
+        documentId: "penpot-concurrent-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0ea5e9";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+      };
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let failAfterConcurrentWrite = true;
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        await writeSubscriptions(subscriptions);
+        if (failAfterConcurrentWrite) {
+          failAfterConcurrentWrite = false;
+          const concurrentTarget = await storage.readFile("penpot-concurrent-target");
+          concurrentTarget.name = "Concurrent product edit";
+          await storage.writeFile("penpot-concurrent-target", concurrentTarget);
+          throw new Error("injected failure after concurrent target write");
+        }
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-concurrent-target", libraryDocumentId)
+      ).rejects.toThrow("rollback conflicted with concurrent writes");
+
+      const preservedTarget = await storage.readFile("penpot-concurrent-target");
+      expect(preservedTarget.name).toBe("Concurrent product edit");
+      expect(
+        preservedTarget.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0ea5e9");
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-concurrent-target", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2 });
+      expect((await storage.readFile("penpot-concurrent-target")).name).toBe(
+        "Concurrent product edit"
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {
