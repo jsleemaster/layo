@@ -662,7 +662,11 @@ describe("file version API helpers", () => {
       const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
 
       if (pathname === "/libraries" && init?.method === "POST") {
-        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(init.headers).toEqual({
+          Authorization: "Bearer editor-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "editor-user"
+        });
         expect(JSON.parse(String(init.body))).toEqual({
           fileId: "document-1",
           libraryId: "team-kit",
@@ -811,7 +815,8 @@ describe("file version API helpers", () => {
       publishLibraryToRegistry(
         "document-1",
         { libraryId: "team-kit", name: "Team Kit" },
-        fetcher as typeof fetch
+        fetcher as typeof fetch,
+        { userId: "editor-user", memberToken: "editor-token" }
       )
     ).resolves.toMatchObject({ libraryId: "team-kit", componentCount: 1 });
     await expect(listLibraryRegistry(fetcher as typeof fetch)).resolves.toEqual([
