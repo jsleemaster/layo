@@ -329,6 +329,14 @@ while viewer-readable review/preflight paths remain open. See
 Principal-filtered reads, revocation, shared transactional storage, receipt
 retention, and durable pub/sub remain open.
 
+PR #297 begins authenticated registry discovery. Configured HTTP, browser, and
+MCP list reads require a member principal, filter unscoped results to the
+principal's team ids, and reject file-scoped cross-team reads while preserving
+same-team viewer access. See
+`docs/product/penpot-library-read-authorization-delta.md`. Authenticated
+review/preflight reads, SSE events, revocation, shared transactional storage,
+receipt retention, and durable pub/sub remain open.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
