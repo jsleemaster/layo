@@ -34,6 +34,13 @@ When auth is not configured, local-first list behavior is unchanged.
 - GREEN `29290833407` passed 251 web tests, 292 server tests, the Rust
   workspace, and 193 Playwright CLI cases with no retry. Restore
   `29290833400` and retention `29290833356` passed.
+- External review found that storage's file-scoped compatibility filter includes
+  unscoped entries. Review RED `29292379607` returned `private-kit` through
+  both HTTP and MCP despite a valid team principal.
+- The shared authorization filter now removes unscoped and non-member-team
+  entries after every hosted list read. Review GREEN `29292539822` passed 251
+  web, 292 server, Rust, and 193 Playwright cases without retry; restore
+  `29292539819` and retention `29292539837` passed.
 - Direct Playwright interaction clicked the credentialed registry refresh,
   checked activated-session Authorization and X-Layo-User-Id headers, and
   completed publish, review, and import.
