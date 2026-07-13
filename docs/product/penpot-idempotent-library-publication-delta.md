@@ -25,6 +25,8 @@ fingerprint and committed registry entry.
 - The receipt survives a new `FileStorage` instance.
 - Reusing the key for another file, library, name, or team returns HTTP 409 and
   performs no write.
+- The same key is available through the MCP `publish_library_registry_item` tool.
+- Unsafe path-like keys fail validation as no-write HTTP 400 responses.
 - Requests without a key preserve the existing publication behavior.
 
 ## Evidence
@@ -33,7 +35,10 @@ fingerprint and committed registry entry.
   second event.
 - Failure-learning `29280022017`: product behavior returned 409, while the HTTP
   test read Fastify's generic `error` field instead of the detailed `message`.
-- Storage and HTTP regressions cover durable replay, one event, and conflict.
+- MCP RED `29280506268`: the tool discarded the key and published twice.
+- Validation RED `29280727694`: an unsafe key surfaced as HTTP 500 instead of 400.
+- Storage, HTTP, and MCP regressions cover durable replay, one event, conflict,
+  and safe key validation.
 
 ## Remaining Gap
 
