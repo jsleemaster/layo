@@ -55,6 +55,18 @@ export function authenticateTeamMember(
   };
 }
 
+export function authorizeTeamLibraryRead(
+  member: AuthenticatedTeamMember,
+  teamId: string | undefined
+): void {
+  if (!teamId) {
+    throw forbiddenError("team library read requires a team-shared file");
+  }
+  if (!member.teamIds.includes(teamId)) {
+    throw forbiddenError("team member is not authorized for the library team");
+  }
+}
+
 export function authorizeTeamLibraryWrite(
   member: AuthenticatedTeamMember,
   teamId: string | undefined
