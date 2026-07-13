@@ -363,6 +363,12 @@ export interface LibraryRegistryItemUpdatePreview {
     targetComponentId: string;
     affectedInstanceIds: string[];
   }>;
+  conflictedComponents: Array<{
+    sourceComponentId: string;
+    targetComponentId: string;
+    affectedInstanceIds: string[];
+    missingOverrideNodeIds: string[];
+  }>;
 }
 
 export interface LibraryRegistryTokenSubscription {
