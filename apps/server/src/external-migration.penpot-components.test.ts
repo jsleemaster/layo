@@ -691,8 +691,15 @@ describe("Penpot component instance migration", () => {
       const circle = library.components?.find(
         (component) => component.id === `penpot-component-${circleComponentId}`
       );
+      const outer = library.components?.find(
+        (component) => component.id === `penpot-component-${outerComponentId}`
+      );
       expect(circle).toBeDefined();
+      expect(outer?.source_node.children[0]?.id).toBe(
+        `penpot-${outerMainSlotId}`
+      );
       circle!.source_node.id = "replacement-circle-root";
+      outer!.source_node.children[0]!.id = "replacement-outer-slot";
       await storage.writeFile(libraryDocumentId, library);
       await storage.publishLibraryToRegistry(libraryDocumentId, {
         libraryId: libraryDocumentId,
@@ -720,6 +727,12 @@ describe("Penpot component instance migration", () => {
               `penpot-${outerCopyId}__penpot-${outerMainSlotId}`
             ],
             missingOverrideNodeIds: [`penpot-${circleMainId}`]
+          },
+          {
+            sourceComponentId: `penpot-component-${outerComponentId}`,
+            targetComponentId: `penpot-component-${outerComponentId}`,
+            affectedInstanceIds: [`penpot-${outerCopyId}`],
+            missingOverrideNodeIds: [`penpot-${outerMainSlotId}`]
           }
         ]
       });
