@@ -4481,7 +4481,6 @@ function componentOverrideTargetConflicts(
   const visit = (node: DesignNode): void => {
     if (node.component_instance?.definition_id === componentId) {
       const missingNodeIds = node.component_instance.overrides
-        .filter((override) => override.field !== "component_swap")
         .map((override) => override.node_id)
         .filter((nodeId) => !sourceNodeIds.has(nodeId));
       if (missingNodeIds.length > 0) {
