@@ -1,7 +1,7 @@
 # Penpot Library Read Authorization Delta
 
 Date: 2026-07-14  
-Status: In progress in PR #297
+Status: Completed in PR #297
 
 ## Product Change
 
@@ -23,7 +23,20 @@ When auth is not configured, local-first list behavior is unchanged.
   cross-team assertion could run.
 - Contract RED `29288538333`: the first web API overload could not represent
   both fetch injection and member credentials.
-- GREEN and direct Playwright evidence: pending.
+- First full run `29288809355` exposed a retry in the spanned-grid
+  reorder interaction. Diagnostic run `29289606382` confirmed the browser
+  reached the intended drag target but the reorder event could still be lost.
+- Failure-learning RED `29290200053` forced a rerender between mousedown and
+  mouseup and failed both attempts, proving the drag listener lifecycle race.
+- The grid reorder listener now remains mounted across renders and invokes the
+  latest dispatch through a ref; the focused E2E preserves the active drag
+  through a viewport rerender.
+- GREEN `29290833407` passed 251 web tests, 292 server tests, the Rust
+  workspace, and 193 Playwright CLI cases with no retry. Restore
+  `29290833400` and retention `29290833356` passed.
+- Direct Playwright interaction clicked the credentialed registry refresh,
+  checked activated-session Authorization and X-Layo-User-Id headers, and
+  completed publish, review, and import.
 
 ## Deliberate Remaining Gaps
 
