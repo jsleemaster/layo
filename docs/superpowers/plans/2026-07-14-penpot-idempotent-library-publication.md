@@ -1,7 +1,7 @@
 # Penpot Idempotent Library Publication Plan
 
 Date: 2026-07-14
-Status: Active
+Status: Completed by PR #294 merge gate
 
 ## Goal
 
@@ -43,8 +43,8 @@ regression.
 - [x] Pass `Idempotency-Key` from HTTP into storage.
 - [x] Expose the same retry key through the MCP publication tool.
 - [x] Reject unsafe path-like keys as no-write HTTP 400.
-- [ ] Complete final full verification and review.
-- [ ] Merge PR and complete post-merge cleanup.
+- [x] Complete final full verification and review.
+- [x] Prepare PR merge and post-merge cleanup.
 
 ## Failure Learning
 
@@ -59,6 +59,13 @@ blocked before writes but surfaced as 500 instead of the required input 400.
 Follow-up `29280923088` confirmed the 400 implementation and corrected the test
 to the existing validation `{ error }` branch rather than Fastify's `{ message }`
 branch used by ordinary 409 conflicts.
+
+## Final Verification
+
+- Full Verification `29281150206`: maturity/design gates, typecheck, build,
+  web 251, server 282, Rust workspace, and Playwright CLI 192 passed.
+- Storage Restore Drill `29281150135`: passed.
+- Storage Backup Retention `29281150115`: passed.
 
 ## Remaining Gap
 
