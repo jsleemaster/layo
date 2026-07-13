@@ -729,6 +729,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/files/target-file/import/library/registry" && init?.method === "POST") {
+        expect(init.headers).toEqual({
+          Authorization: "Bearer editor-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "editor-user"
+        });
         expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit", idPrefix: "team" });
         return jsonResponse({
           imported: {
@@ -829,7 +834,12 @@ describe("file version API helpers", () => {
       components: [expect.objectContaining({ originalComponentId: "component-card" })]
     });
     await expect(
-      importLibraryRegistryItem("target-file", { libraryId: "team-kit", idPrefix: "team" }, fetcher as typeof fetch)
+      importLibraryRegistryItem(
+        "target-file",
+        { libraryId: "team-kit", idPrefix: "team" },
+        fetcher as typeof fetch,
+        { userId: "editor-user", memberToken: "editor-token" }
+      )
     ).resolves.toMatchObject({
       libraryId: "team-kit",
       fileId: "target-file",
