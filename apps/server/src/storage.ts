@@ -1229,6 +1229,14 @@ export interface LibraryRegistryTokenUpdateNotification {
 export interface PublishLibraryRegistryOptions {
   libraryId?: string;
   name?: string;
+  idempotencyKey?: string;
+}
+
+interface LibraryPublicationReceipt {
+  schemaVersion: 1;
+  idempotencyKey: string;
+  fingerprint: string;
+  entry: LibraryRegistryEntry;
 }
 
 export interface ReviewedLibraryRegistryItem extends ReviewedLibraryArchive {
@@ -1355,6 +1363,17 @@ export class FileStorage {
   private libraryArchivePathFor(libraryId: string) {
     assertSafeStorageId(libraryId);
     return path.join(this.librariesDir, `${libraryId}.layo-library.zip`);
+  }
+
+  private libraryPublicationReceiptPathFor(libraryId: string, idempotencyKey: string) {
+    assertSafeStorageId(libraryId);
+    assertSafeStorageId(idempotencyKey);
+    return path.join(
+      this.librariesDir,
+      "publication-receipts",
+      libraryId,
+      `${idempotencyKey}.json`
+    );
   }
 
   private projectPathFor(projectId: string) {
@@ -2442,17 +2461,34 @@ export class FileStorage {
   ): Promise<LibraryRegistryEntry> {
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
+    const name = normalizeName(options.name, exported.name);
+    const idempotencyKey = normalizeLibraryPublicationIdempotencyKey(options.idempotencyKey);
     const teamId = await this.findTeamIdForFile(fileId);
+    const fingerprint = JSON.stringify({ fileId, libraryId, name, teamId: teamId ?? null });
     return withStoragePathMutationLock(this.libraryRegistryPath(), async () => {
       const existingEntries = await this.readLibraryRegistryEntries();
       const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
       if (existing?.teamId && existing.teamId !== teamId) {
         throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
       }
+      const receiptPath = idempotencyKey
+        ? this.libraryPublicationReceiptPathFor(libraryId, idempotencyKey)
+        : undefined;
+      if (receiptPath && await pathExists(receiptPath)) {
+        const receipt = parseLibraryPublicationReceipt(
+          JSON.parse(await readFile(receiptPath, "utf8"))
+        );
+        if (receipt.fingerprint !== fingerprint) {
+          throw idempotencyConflictError(
+            `library publication idempotency key was already used with another request: ${idempotencyKey}`
+          );
+        }
+        return receipt.entry;
+      }
       const now = nextIsoTimestamp(existing?.updatedAt);
       const entry: LibraryRegistryEntry = {
         libraryId,
-        name: normalizeName(options.name, exported.name),
+        name,
         sourceFileId: exported.fileId,
         sourceName: exported.name,
         teamId,
@@ -2476,7 +2512,8 @@ export class FileStorage {
       const original = await captureStoragePathSnapshots([
         archivePath,
         registryPath,
-        eventsPath
+        eventsPath,
+        ...(receiptPath ? [receiptPath] : [])
       ]);
       const intended: StoragePathSnapshot[] = [
         { filePath: archivePath, data: exported.archive },
@@ -2493,7 +2530,21 @@ export class FileStorage {
             `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
             "utf8"
           )
-        }
+        },
+        ...(receiptPath && idempotencyKey
+          ? [{
+              filePath: receiptPath,
+              data: Buffer.from(
+                `${JSON.stringify({
+                  schemaVersion: 1,
+                  idempotencyKey,
+                  fingerprint,
+                  entry
+                } satisfies LibraryPublicationReceipt, null, 2)}\n`,
+                "utf8"
+              )
+            }]
+          : [])
       ];
       const recoveryId = libraryId;
 
@@ -2508,6 +2559,21 @@ export class FileStorage {
         await durablyReplaceFile(archivePath, exported.archive);
         await this.writeLibraryRegistryEntries(nextEntries);
         await this.writeLibraryRegistryEvents(nextEvents);
+        if (receiptPath && idempotencyKey) {
+          await mkdir(path.dirname(receiptPath), { recursive: true });
+          await durablyReplaceFile(
+            receiptPath,
+            Buffer.from(
+              `${JSON.stringify({
+                schemaVersion: 1,
+                idempotencyKey,
+                fingerprint,
+                entry
+              } satisfies LibraryPublicationReceipt, null, 2)}\n`,
+              "utf8"
+            )
+          );
+        }
         await this.removeLibraryUpdateRecoveryJournal(
           recoveryId,
           "library-registry-publication"
@@ -4187,6 +4253,22 @@ function normalizeLibraryRegistryId(value: string | undefined) {
   return libraryId;
 }
 
+function normalizeLibraryPublicationIdempotencyKey(value: string | undefined) {
+  const idempotencyKey = value?.trim();
+  if (!idempotencyKey) {
+    return undefined;
+  }
+  if (idempotencyKey.length > 128) {
+    throw inputValidationError("library publication idempotency key must be 128 characters or fewer");
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(idempotencyKey)) {
+    throw inputValidationError(
+      "library publication idempotency key may contain only letters, numbers, underscores, and hyphens"
+    );
+  }
+  return idempotencyKey;
+}
+
 function nextIsoTimestamp(previousTimestamp: string | undefined) {
   const now = new Date();
   if (!previousTimestamp) {
@@ -4209,6 +4291,13 @@ function forbiddenError(message: string) {
   const error = new Error(message) as Error & { code: string; statusCode: number };
   error.code = "EACCES";
   error.statusCode = 403;
+  return error;
+}
+
+function idempotencyConflictError(message: string) {
+  const error = new Error(message) as Error & { code: string; statusCode: number };
+  error.code = "EIDEMPOTENCY";
+  error.statusCode = 409;
   return error;
 }
 
@@ -4653,6 +4742,27 @@ function parseDesignFileArchiveDocument(input: unknown): DesignFile {
     ...candidate,
     name: normalizeName(candidate.name, candidate.id),
     pages: candidate.pages
+  };
+}
+
+function parseLibraryPublicationReceipt(input: unknown): LibraryPublicationReceipt {
+  if (!input || typeof input !== "object") {
+    throw new Error("invalid library publication receipt");
+  }
+  const candidate = input as Record<string, unknown>;
+  if (
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.idempotencyKey !== "string" ||
+    typeof candidate.fingerprint !== "string"
+  ) {
+    throw new Error("invalid library publication receipt");
+  }
+  assertSafeStorageId(candidate.idempotencyKey);
+  return {
+    schemaVersion: 1,
+    idempotencyKey: candidate.idempotencyKey,
+    fingerprint: candidate.fingerprint,
+    entry: parseLibraryRegistryEntry(candidate.entry)
   };
 }
 

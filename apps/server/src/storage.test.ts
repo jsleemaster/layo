@@ -579,6 +579,38 @@ describe("FileStorage", () => {
     expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
   });
 
+  test("library registry publication retries with the same idempotency key only publish once", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const options = {
+      libraryId: "team-kit",
+      name: "Team Kit",
+      idempotencyKey: "publish-team-kit-v1"
+    } as any;
+
+    const first = await storage.publishLibraryToRegistry("sample-file", options);
+    const retryingStorage = new FileStorage(tempRoot);
+    const retried = await retryingStorage.publishLibraryToRegistry("sample-file", options);
+
+    expect(retried).toEqual(first);
+    await expect(
+      retryingStorage.publishLibraryToRegistry("sample-file", {
+        ...options,
+        name: "Another Kit"
+      })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringMatching(/idempotency key was already used/i)
+    });
+    await expect(retryingStorage.listLibraryRegistryEvents()).resolves.toEqual([
+      expect.objectContaining({
+        sequence: 1,
+        libraryId: "team-kit",
+        registryUpdatedAt: first.updatedAt
+      })
+    ]);
+  });
+
   test("library registry publishes lists reviews and imports the latest shared library", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

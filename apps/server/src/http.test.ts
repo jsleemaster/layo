@@ -852,6 +852,40 @@ describe("HTTP server", () => {
     });
   });
 
+  test("retries library publication through Idempotency-Key without a second result", async () => {
+    const server = await createServerWithDocument();
+    const request = {
+      method: "POST" as const,
+      url: "/libraries",
+      headers: { "idempotency-key": "publish-team-kit-v1" },
+      payload: {
+        fileId: "sample-file",
+        libraryId: "team-kit",
+        name: "Team Kit"
+      }
+    };
+
+    const first = await server.inject(request);
+    const retried = await server.inject(request);
+    expect(first.statusCode).toBe(200);
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual(first.json());
+
+    const conflict = await server.inject({
+      ...request,
+      payload: { ...request.payload, name: "Another Kit" }
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().message).toMatch(/idempotency key was already used/i);
+
+    const invalid = await server.inject({
+      ...request,
+      headers: { "idempotency-key": "../unsafe" }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().error).toMatch(/idempotency key/i);
+  });
+
   test("publishes lists reviews and imports registry libraries", async () => {
     const server = await createServerWithDocument();
     await server.inject({

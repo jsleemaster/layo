@@ -293,16 +293,23 @@ and retention `29239015484` passed. Penpot component/main-copy/variant
 migration is the next exact import gap. See
 `docs/product/penpot-first-class-fill-paints-delta.md`.
 
-PR #283 through PR #292 mature shared-library ownership, nested swaps,
+PR #283 through PR #293 mature shared-library ownership, nested swaps,
 conflict preflight, immutable review snapshots, guarded rollback, durable
-write-ahead recovery, resource-keyed process locks, and operation-level
-read-modify-write transactions. The current publication follow-up closes the
-remaining single-host archive/metadata/event split with one serialized,
-journaled transaction. RED `29276435367` proved competing source mismatch;
+write-ahead recovery, resource-keyed process locks, operation-level
+read-modify-write transactions, and one serialized archive/metadata/event
+publication transaction. RED `29276435367` proved competing source mismatch;
 crash RED `29277054987` proved restart mismatch after archive replacement.
-See `docs/product/penpot-library-publication-transaction-delta.md`. Hosted
+See `docs/product/penpot-library-publication-transaction-delta.md`.
+
+PR #294 adapts Penpot 2.14.1's idempotent RPC retry contract to local-first
+library publication. A durable receipt is committed and recovered with the
+archive, metadata, and event paths; the same key returns the original entry
+across storage instances, while mismatched reuse is a no-write HTTP 409. RED
+`29279535916` proved duplicate result and event creation. See
+`docs/product/penpot-idempotent-library-publication-delta.md`. Hosted
 multi-instance registry ownership, authorization, transactional object storage,
-backup retention, and durable pub/sub remain deliberately open.
+receipt retention, backup automation, and durable pub/sub remain deliberately
+open.
 
 ## Current Highest-Risk Gaps
 
