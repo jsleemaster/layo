@@ -10,6 +10,7 @@ import type {
   NodeConstraints,
   NodeLayout,
   NodeLayoutItem,
+  NodeStroke,
   TextOrientation,
   TextWritingMode
 } from "./storage";
@@ -62,6 +63,7 @@ export interface CodeStructureNode {
     fillStyle?: string;
     stroke: string | null;
     strokeWidth: number;
+    strokes?: NodeStroke[];
     opacity: number;
     effectShadow?: string;
     effectShadows?: string[];
@@ -432,6 +434,7 @@ function structureFor(
       ...(node.style.fill_style ? { fillStyle: node.style.fill_style } : {}),
       stroke: node.style.stroke,
       strokeWidth: node.style.stroke_width,
+      ...(node.style.strokes ? { strokes: structuredClone(node.style.strokes) } : {}),
       opacity: node.style.opacity,
       ...(effectShadow ? { effectShadow } : {}),
       ...(effectShadows.length ? { effectShadows } : {}),
@@ -557,7 +560,11 @@ function styleAnnotationFor(node: DesignNode, tokenMap: Map<string, DesignToken>
       effectShadow ? ` · Shadow ${effectShadow}` : ""
     }`,
     detail:
-      shadows.length > 1
+      node.style.strokes
+        ? `${node.style.strokes.length} ordered stroke layer(s): ${node.style.strokes
+            .map((stroke) => `${stroke.id} ${stroke.position} ${formatPx(stroke.width)} opacity ${formatNumber(stroke.opacity)}${stroke.visible ? "" : " hidden"}`)
+            .join("; ")}`
+        : shadows.length > 1
         ? `${shadows.length} effect shadow layers map to box-shadow`
         : token && token.type === "color"
         ? `fill token ${token.id} maps to var(--${cssTokenName(token.id)})`
