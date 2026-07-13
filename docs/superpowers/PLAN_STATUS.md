@@ -26,10 +26,12 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No plan is active after the PR #295 merge gate. The next Penpot maturity loop
-must create an exact failed case for authenticated registry import/update/token
-mutations, principal-filtered reads, shared transactional storage, credential
-rotation, receipt retention, or durable pub/sub.
+`2026-07-14-penpot-library-mutation-authorization.md` is active in PR #296.
+RED `29286183142` proved that a configured viewer can import a same-team
+registry library and write target subscription/document state. The completion
+gate is target-team owner/editor authorization for component/token import and
+update across HTTP, web, and MCP, with direct Playwright proof, full
+verification, review, merge, and cleanup.
 
 ## Completed Plans
 
