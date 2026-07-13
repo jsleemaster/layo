@@ -726,7 +726,7 @@ function applyPenpotComponentRelations(
       }
 
       const instance = materializePenpotComponentInstance(selectedSource, mappedCopy, definition.id, variantId);
-      applyPenpotCopyOverrides(instance, selectedSource, shape, page.shapesById, state);
+      applyPenpotCopyOverrides(instance, selectedSource, mappedCopy, shape, page.shapesById, state);
       replaceDesignNode(mappedPage.children, mappedCopy.id, instance);
     }
   }
@@ -783,6 +783,7 @@ function renamePenpotInstanceTree(node: DesignNode, instanceId: string, root: bo
 function applyPenpotCopyOverrides(
   instance: DesignNode,
   source: DesignNode,
+  mappedCopy: DesignNode,
   copyRoot: PenpotShape,
   shapesById: Map<string, PenpotShape>,
   state: PenpotMappingState
@@ -793,40 +794,135 @@ function applyPenpotCopyOverrides(
     if (!sourceShapeId) {
       continue;
     }
-    const touched = valueFor(copyShape.json, 'touched');
-    const touchedGroups = Array.isArray(touched)
-      ? touched.filter((value): value is string => typeof value === 'string')
-      : [];
-    if (!touchedGroups.includes('text-content-group')) {
-      continue;
-    }
 
     const sourceNodeId = penpotStorageId(sourceShapeId, sourceShapeId);
     const sourceNode = findDesignNode([source], sourceNodeId);
-    const instanceNode = findDesignNode([instance], `${instance.id}__${sourceNodeId}`);
-    const textValue = stringValue(valueFor(copyShape.json, 'content', 'characters', 'text'));
-    if (!sourceNode || sourceNode.content.type !== 'text' || !instanceNode || instanceNode.content.type !== 'text' || textValue === undefined) {
+    const instanceNode = sourceNodeId === source.id
+      ? instance
+      : findDesignNode([instance], `${instance.id}__${sourceNodeId}`);
+    const copyNode = copyShape.id === copyRoot.id
+      ? mappedCopy
+      : findDesignNode([mappedCopy], penpotStorageId(copyShape.id, copyShape.id));
+    if (!sourceNode || !instanceNode || !copyNode) {
       state.warnings.push(
-        `Skipped unreadable Penpot text override on ${copyShape.name}; the linked component instance was preserved.`
+        `Skipped unreadable Penpot override on ${copyShape.name}; the linked component instance was preserved.`
       );
       continue;
     }
-    if (textValue === sourceNode.content.value) {
-      continue;
+
+    const touched = valueFor(copyShape.json, 'touched');
+    const touchedGroups = new Set(
+      Array.isArray(touched)
+        ? touched.filter((value): value is string => typeof value === 'string')
+        : []
+    );
+
+    if (touchedGroups.has('text-content-group')) {
+      if (
+        sourceNode.content.type !== 'text'
+        || instanceNode.content.type !== 'text'
+        || copyNode.content.type !== 'text'
+      ) {
+        state.warnings.push(
+          `Skipped unreadable Penpot text override on ${copyShape.name}; the linked component instance was preserved.`
+        );
+      } else if (copyNode.content.value !== sourceNode.content.value) {
+        instanceNode.content = { ...instanceNode.content, value: copyNode.content.value };
+        addPenpotComponentOverride(instance, sourceNodeId, 'text', sourceNode.content.value, copyNode.content.value);
+      }
     }
 
-    instanceNode.content = { ...instanceNode.content, value: textValue };
-    instance.component_instance?.overrides.push({
-      node_id: sourceNodeId,
-      field: 'text',
-      value: textValue
-    });
+    if (touchedGroups.has('fill-group')) {
+      instanceNode.style = {
+        ...instanceNode.style,
+        fill: copyNode.style.fill,
+        ...(copyNode.style.fills ? { fills: structuredClone(copyNode.style.fills) } : {})
+      };
+      addPenpotComponentOverride(instance, sourceNodeId, 'fill', sourceNode.style.fill, copyNode.style.fill);
+      if (copyNode.style.fills) {
+        addPenpotComponentOverride(instance, sourceNodeId, 'fills', sourceNode.style.fills, copyNode.style.fills);
+      }
+    }
+
+    if (touchedGroups.has('stroke-group')) {
+      instanceNode.style = {
+        ...instanceNode.style,
+        stroke: copyNode.style.stroke,
+        stroke_width: copyNode.style.stroke_width,
+        ...(copyNode.style.strokes ? { strokes: structuredClone(copyNode.style.strokes) } : {})
+      };
+      addPenpotComponentOverride(instance, sourceNodeId, 'stroke', sourceNode.style.stroke, copyNode.style.stroke);
+      addPenpotComponentOverride(
+        instance,
+        sourceNodeId,
+        'stroke_width',
+        sourceNode.style.stroke_width,
+        copyNode.style.stroke_width
+      );
+      if (copyNode.style.strokes) {
+        addPenpotComponentOverride(instance, sourceNodeId, 'strokes', sourceNode.style.strokes, copyNode.style.strokes);
+      }
+    }
+
+    if (touchedGroups.has('opacity-group')) {
+      instanceNode.style = { ...instanceNode.style, opacity: copyNode.style.opacity };
+      addPenpotComponentOverride(instance, sourceNodeId, 'opacity', sourceNode.style.opacity, copyNode.style.opacity);
+    }
+
+    const geometryTouched = touchedGroups.has('geometry-group');
+    const positionTouched = geometryTouched || touchedGroups.has('position-group');
+    const sizeTouched = geometryTouched || touchedGroups.has('size-group');
+    if (positionTouched && sourceNodeId !== source.id) {
+      instanceNode.transform = {
+        ...instanceNode.transform,
+        x: copyNode.transform.x,
+        y: copyNode.transform.y
+      };
+      addPenpotComponentOverride(instance, sourceNodeId, 'x', sourceNode.transform.x, copyNode.transform.x);
+      addPenpotComponentOverride(instance, sourceNodeId, 'y', sourceNode.transform.y, copyNode.transform.y);
+    }
+    if (sizeTouched) {
+      instanceNode.size = structuredClone(copyNode.size);
+      addPenpotComponentOverride(instance, sourceNodeId, 'width', sourceNode.size.width, copyNode.size.width);
+      addPenpotComponentOverride(instance, sourceNodeId, 'height', sourceNode.size.height, copyNode.size.height);
+    }
   }
+}
+
+function addPenpotComponentOverride(
+  instance: DesignNode,
+  sourceNodeId: string,
+  field: string,
+  sourceValue: unknown,
+  value: unknown
+): void {
+  const serializedSource = serializePenpotComponentOverride(sourceValue);
+  const serializedValue = serializePenpotComponentOverride(value);
+  if (serializedSource === serializedValue) {
+    return;
+  }
+  instance.component_instance?.overrides.push({
+    node_id: sourceNodeId,
+    field,
+    value: serializedValue
+  });
+}
+
+function serializePenpotComponentOverride(value: unknown): string {
+  if (value === null) {
+    return '__layo_component_override_null__';
+  }
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
 function collectPenpotShapeTree(root: PenpotShape, shapesById: Map<string, PenpotShape>): PenpotShape[] {
   const result: PenpotShape[] = [];
+  const visited = new Set<string>();
   const visit = (shape: PenpotShape): void => {
+    if (visited.has(shape.id)) {
+      return;
+    }
+    visited.add(shape.id);
     result.push(shape);
     for (const childId of shape.childIds) {
       const child = shapesById.get(childId);
