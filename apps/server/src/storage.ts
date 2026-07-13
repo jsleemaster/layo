@@ -1857,13 +1857,16 @@ export class FileStorage {
 
   private async mutateFile<T>(
     fileId: string,
-    mutation: (document: DesignFile) => Promise<T> | T
+    mutation: (document: DesignFile) => Promise<T> | T,
+    recordAutoVersion = true
   ): Promise<T> {
     return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
       const document = await this.readFile(fileId);
       const result = await mutation(document);
       await this.writeFileWithoutMutationLock(fileId, document);
-      await this.recordFileEditForAutoVersion(fileId, document);
+      if (recordAutoVersion) {
+        await this.recordFileEditForAutoVersion(fileId, document);
+      }
       return result;
     });
   }
@@ -2332,7 +2335,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryArchive> {
-    const target = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (target) => {
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const idPrefix = options.idPrefix?.trim() ? normalizeLibraryIdPrefix(options.idPrefix) : undefined;
     const tokenIdMap = createLibraryTokenIdMap(target, library.library.tokens, idPrefix);
@@ -2364,7 +2367,7 @@ export class FileStorage {
     target.components = [...(target.components ?? []), ...importedComponents];
     await this.writeFile(fileId, target);
 
-    return {
+      return {
       fileId,
       originalFileId: library.manifest.fileId,
       originalName: library.manifest.name,
@@ -2376,6 +2379,7 @@ export class FileStorage {
       componentIdMap,
       tokenIdMap
     };
+    }, false);
   }
 
   async publishLibraryToRegistry(
@@ -2603,7 +2607,7 @@ export class FileStorage {
     entry: LibraryRegistryEntry,
     archive: Buffer
   ): Promise<ImportedLibraryRegistryTokens> {
-    const target = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (target) => {
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const replacedTokenCount = (target.tokens ?? []).length;
     const replacedTokenSetCount = (target.token_sets ?? []).length;
@@ -2614,7 +2618,7 @@ export class FileStorage {
     target.token_themes = structuredClone(library.library.token_themes);
     await this.writeFile(fileId, target);
 
-    return {
+      return {
       fileId,
       libraryId: entry.libraryId,
       libraryName: entry.name,
@@ -2627,6 +2631,7 @@ export class FileStorage {
       replacedTokenSetCount,
       replacedTokenThemeCount
     };
+    }, false);
   }
 
   async reviewLibraryRegistryItemUpdate(
@@ -2932,18 +2937,20 @@ export class FileStorage {
 
   async restoreFileVersion(fileId: string, versionId: string): Promise<RestoreFileVersionResult> {
     const restoredVersion = await this.readFileVersion(fileId, versionId);
-    const currentDocument = await this.readFile(fileId);
-    const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
-      message: "복원 전 자동 저장",
-      source: "restore"
+    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+      const currentDocument = await this.readFile(fileId);
+      const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
+        message: "복원 전 자동 저장",
+        source: "restore"
+      });
+      const restoredDocument = { ...structuredClone(restoredVersion.document), id: fileId };
+      await this.writeFileWithoutMutationLock(fileId, restoredDocument);
+      return {
+        file: restoredDocument,
+        restoredVersion: summarizeStoredFileVersion(restoredVersion),
+        recoveryVersion
+      };
     });
-    const restoredDocument = { ...structuredClone(restoredVersion.document), id: fileId };
-    await this.writeFile(fileId, restoredDocument);
-    return {
-      file: restoredDocument,
-      restoredVersion: summarizeStoredFileVersion(restoredVersion),
-      recoveryVersion
-    };
   }
 
   async listCommentThreads(
@@ -3633,40 +3640,46 @@ export class FileStorage {
   }
 
   async applyAgentCommands(fileId: string, input: AgentBatchInput): Promise<AgentBatchResult> {
-    const before = await this.readFile(fileId);
     const persisted = !(input.dryRun ?? false);
-
-    if (persisted && input.collaboration) {
-      const collaborativeResult = await applyAgentCommandsToCollaboration({
-        target: input.collaboration,
-        fallbackDocument: before,
-        commands: input.commands
-      });
-      const result = createAgentBatchResult(
-        fileId,
-        collaborativeResult.before,
-        collaborativeResult.preview,
-        input,
-        true,
-        collaborativeResult.changedNodeIds
+    if (!persisted) {
+      const before = await this.readFile(fileId);
+      const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
+        before,
+        input.commands
       );
-      await this.writeFile(fileId, collaborativeResult.preview);
-      await this.recordFileEditForAutoVersion(fileId, collaborativeResult.preview);
-      return result;
+      return createAgentBatchResult(fileId, before, preview, input, false, changedNodeIds);
     }
 
-    const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
-      before,
-      input.commands
-    );
-    const result = createAgentBatchResult(fileId, before, preview, input, persisted, changedNodeIds);
+    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+      const before = await this.readFile(fileId);
+      if (input.collaboration) {
+        const collaborativeResult = await applyAgentCommandsToCollaboration({
+          target: input.collaboration,
+          fallbackDocument: before,
+          commands: input.commands
+        });
+        const result = createAgentBatchResult(
+          fileId,
+          collaborativeResult.before,
+          collaborativeResult.preview,
+          input,
+          true,
+          collaborativeResult.changedNodeIds
+        );
+        await this.writeFileWithoutMutationLock(fileId, collaborativeResult.preview);
+        await this.recordFileEditForAutoVersion(fileId, collaborativeResult.preview);
+        return result;
+      }
 
-    if (persisted) {
-      await this.writeFile(fileId, preview);
+      const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
+        before,
+        input.commands
+      );
+      const result = createAgentBatchResult(fileId, before, preview, input, true, changedNodeIds);
+      await this.writeFileWithoutMutationLock(fileId, preview);
       await this.recordFileEditForAutoVersion(fileId, preview);
-    }
-
-    return result;
+      return result;
+    });
   }
 
   async exportCode(fileId: string, options: CodeExportOptions = {}): Promise<CodeExportResult> {
