@@ -635,7 +635,8 @@ describe("MCP AI editing workflow", () => {
         arguments: {
           fileId: "library-file",
           libraryId: "team-kit",
-          name: "Team Kit"
+          name: "Team Kit",
+          idempotencyKey: "publish-team-kit-v1"
         }
       })
     );
@@ -649,6 +650,19 @@ describe("MCP AI editing workflow", () => {
       assetCount: 0
     });
     expect(published.library.publishedAt).toEqual(expect.any(String));
+
+    const retried = parseToolJson(
+      await client.callTool({
+        name: "publish_library_registry_item",
+        arguments: {
+          fileId: "library-file",
+          libraryId: "team-kit",
+          name: "Team Kit",
+          idempotencyKey: "publish-team-kit-v1"
+        }
+      })
+    );
+    expect(retried.library).toEqual(published.library);
 
     const listed = parseToolJson(
       await client.callTool({
