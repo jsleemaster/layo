@@ -144,6 +144,33 @@ export type StrokeCap = "butt" | "round" | "square";
 export type StrokeJoin = "miter" | "round" | "bevel";
 export type StrokeMarker = "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
 
+const svgPathTokenPattern = /[AaCcHhLlMmQqSsTtVvZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:e[-+]?\d+)?/gi;
+const svgPathCommandPattern = /^[AaCcHhLlMmQqSsTtVvZz]$/;
+
+export function pathHasOnlyClosedSubpaths(pathData: string) {
+  const commands = (pathData.match(svgPathTokenPattern) ?? []).filter((token) => svgPathCommandPattern.test(token));
+  let activeSubpath = false;
+  let subpathCount = 0;
+  for (const command of commands) {
+    const normalized = command.toUpperCase();
+    if (normalized === "M") {
+      if (activeSubpath) {
+        return false;
+      }
+      activeSubpath = true;
+      subpathCount += 1;
+    } else if (normalized === "Z") {
+      if (!activeSubpath) {
+        return false;
+      }
+      activeSubpath = false;
+    } else if (!activeSubpath) {
+      return false;
+    }
+  }
+  return subpathCount > 0 && !activeSubpath;
+}
+
 export interface NodeStroke {
   id: string;
   color: string;
