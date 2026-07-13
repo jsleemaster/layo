@@ -355,6 +355,16 @@ export interface LibraryRegistryUpdateNotification {
   registryUpdatedAt: string;
 }
 
+export interface LibraryRegistryItemUpdatePreview {
+  canUpdate: boolean;
+  blockedBy: string[];
+  deletedComponents: Array<{
+    sourceComponentId: string;
+    targetComponentId: string;
+    affectedInstanceIds: string[];
+  }>;
+}
+
 export interface LibraryRegistryTokenSubscription {
   fileId: string;
   libraryId: string;
@@ -826,6 +836,20 @@ export async function listLibraryRegistryUpdates(
   const response = await fetcher(apiUrl(`/files/${fileId}/libraries/updates`));
   const payload = await readDocumentJson(response);
   return (payload as { updates: LibraryRegistryUpdateNotification[] }).updates;
+}
+
+export async function reviewLibraryRegistryItemUpdate(
+  fileId: string,
+  libraryId: string,
+  fetcher: typeof fetch = fetch
+): Promise<LibraryRegistryItemUpdatePreview> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/update/review`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ libraryId })
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { review: LibraryRegistryItemUpdatePreview }).review;
 }
 
 export async function updateLibraryRegistryItem(
