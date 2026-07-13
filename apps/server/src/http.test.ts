@@ -877,6 +877,13 @@ describe("HTTP server", () => {
     });
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json().message).toMatch(/idempotency key was already used/i);
+
+    const invalid = await server.inject({
+      ...request,
+      headers: { "idempotency-key": "../unsafe" }
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json().message).toMatch(/idempotency key/i);
   });
 
   test("publishes lists reviews and imports registry libraries", async () => {
