@@ -26,10 +26,12 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No plan is active after the PR #296 merge gate. The next Penpot maturity loop
-must create an exact failed case for principal-filtered registry reads/events,
-credential rotation/revocation, shared transactional storage, receipt
-retention, or durable pub/sub.
+`2026-07-14-penpot-library-read-authorization.md` is active in PR #297.
+RED `29288230571` proved unauthenticated hosted registry lists return 200 and
+can expose unrelated-team libraries. Contract RED `29288538333` proved the
+web API did not model read credentials. The completion gate is HTTP/web/MCP
+principal-team filtering, file-scoped read authorization, direct Playwright
+proof, full verification, review, merge, and cleanup.
 
 ## Completed Plans
 
