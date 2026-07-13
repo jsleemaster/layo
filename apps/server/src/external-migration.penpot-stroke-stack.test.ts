@@ -137,7 +137,7 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
   ]);
 }
 
-test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
+test("preserves Penpot ordered solid and gradient stroke paints", () => {
   const archive = createPenpotSolidMultiStrokeExportArchive();
   const review = reviewExternalMigrationArchive(archive, { fileName: "multi-strokes.penpot" });
   expect(review).toMatchObject({
@@ -187,14 +187,39 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: expectedMixedGradientStrokeColor,
+      stroke: "#ff0000",
       stroke_width: expectedMixedGradientStrokeWidth,
-      opacity: 1
+      opacity: 1,
+      strokes: [
+        {
+          id: "penpot-stroke-1",
+          paint: { type: "solid", color: "#ff0000" },
+          opacity: 0.5,
+          width: expectedMixedGradientStrokeWidth
+        },
+        {
+          id: "penpot-stroke-2",
+          paint: {
+            type: "gradient",
+            gradient: {
+              stops: [
+                { color: "#00ff00", opacity: 1, offset: 0 },
+                { color: "#0000ff", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          width: expectedMixedGradientStrokeWidth
+        }
+      ]
     }
   });
+  expect(frame.children[0].style.strokes).toMatchObject([
+    { paint: { type: "solid", color: "#ff0000" }, opacity: 0.5, width: 4 },
+    { paint: { type: "solid", color: "#0000ff" }, opacity: 1, width: 4 }
+  ]);
 });
 
-test("reviews imports and persists flattened Penpot solid stroke stacks", async () => {
+test("reviews imports and persists first-class Penpot stroke paints", async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const storage = new FileStorage(tempRoot);
   const server = createHttpServer(storage);
