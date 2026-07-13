@@ -112,6 +112,7 @@ test("Inspector preserves gradient and image stroke paints through artifacts and
     return green > 20 && blue > 20;
   })).toBe(true);
 
+  await page.getByTestId("inspector-stroke-1-image").blur();
   await page.keyboard.press("Control+z");
   await expect(page.getByTestId("inspector-stroke-1-paint-type")).toHaveValue("solid");
   await page.keyboard.press("Control+Shift+z");
