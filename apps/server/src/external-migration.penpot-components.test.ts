@@ -574,6 +574,76 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("blocks deletion of a library component used by an imported nested swap before writes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-delete-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-delete-project",
+        documentId: "penpot-delete-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const library = await storage.readFile(libraryDocumentId);
+      library.components = library.components?.filter(
+        (component) => component.id !== `penpot-component-${circleComponentId}`
+      );
+      await storage.writeFile(libraryDocumentId, library);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const beforeTarget = await storage.readFile("penpot-delete-target");
+      const beforeSubscriptions = await storage.listLibraryRegistrySubscriptions(
+        "penpot-delete-target"
+      );
+      const updateReviewer = storage as unknown as {
+        reviewLibraryRegistryItemUpdate(
+          fileId: string,
+          libraryId: string
+        ): Promise<{
+          canUpdate: boolean;
+          blockedBy: string[];
+          deletedComponents: Array<{
+            sourceComponentId: string;
+            targetComponentId: string;
+            affectedInstanceIds: string[];
+          }>;
+        }>;
+      };
+      await expect(
+        updateReviewer.reviewLibraryRegistryItemUpdate(
+          "penpot-delete-target",
+          libraryDocumentId
+        )
+      ).resolves.toEqual({
+        canUpdate: false,
+        blockedBy: ["library_component_deletion_in_use"],
+        deletedComponents: [
+          {
+            sourceComponentId: `penpot-component-${circleComponentId}`,
+            targetComponentId: `penpot-component-${circleComponentId}`,
+            affectedInstanceIds: [
+              `penpot-${outerCopyId}__penpot-${outerMainSlotId}`
+            ]
+          }
+        ]
+      });
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-delete-target", libraryDocumentId)
+      ).rejects.toThrow(/component deletion.*in use/i);
+      expect(await storage.readFile("penpot-delete-target")).toEqual(beforeTarget);
+      expect(
+        await storage.listLibraryRegistrySubscriptions("penpot-delete-target")
+      ).toEqual(beforeSubscriptions);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {
