@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
@@ -68,7 +68,11 @@ async function acquireStorageProcessMutationLock(
 ): Promise<() => Promise<void>> {
   const storageRoot = path.dirname(path.dirname(storagePath));
   const locksDir = path.join(storageRoot, "locks");
-  const lockDir = path.join(locksDir, "storage-mutations.lock");
+  const resourceHash = createHash("sha256")
+    .update(path.resolve(storagePath))
+    .digest("hex");
+  const lockName = `storage-mutation-${resourceHash}.lock`;
+  const lockDir = path.join(locksDir, lockName);
   const ownerPath = path.join(lockDir, "owner.json");
   const owner: StorageProcessLockOwner = {
     schemaVersion: 1,
@@ -108,7 +112,7 @@ async function acquireStorageProcessMutationLock(
         }
         const releasingDir = path.join(
           locksDir,
-          `storage-mutations.releasing-${owner.token}`
+          `${lockName}.releasing-${owner.token}`
         );
         await rename(lockDir, releasingDir);
         await rm(releasingDir, { recursive: true, force: true });
@@ -2532,8 +2536,11 @@ export class FileStorage {
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
     return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      this.librarySubscriptionsPath(),
+      () => withStoragePathMutationLock(
+        this.filePathFor(fileId),
+        () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      )
     );
   }
 
