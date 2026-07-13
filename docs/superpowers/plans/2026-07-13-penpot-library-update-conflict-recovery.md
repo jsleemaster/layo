@@ -1,6 +1,6 @@
 # Penpot Library Update Conflict And Recovery Plan
 
-**Status:** Active through the cross-process lock PR.
+**Status:** Active through the cross-process RMW follow-up.
 
 **Goal:** Make imported Penpot library updates safe under source deletion,
 renames, local override conflicts, and partial failure, with deterministic
@@ -77,7 +77,7 @@ References:
       recovery, and external-byte conflict proof.
 - [x] Scope startup recovery to one shared promise per storage instance so
       project reads cannot roll back an active same-process journal.
-- [x] Add cross-process mutation locking with safe stale-lock recovery.\n- [ ] Make archive, registry metadata, and event publication one crash-recoverable\n      cross-process transaction.
+- [x] Add cross-process mutation locking with safe stale-lock recovery.\n- [x] Hold the process lock across each document read-modify-write operation\n      so final-write serialization cannot lose edits read from stale JSON.\n- [ ] Make archive, registry metadata, and event publication one crash-recoverable\n      cross-process transaction.
 
 Evidence is recorded in
 `docs/product/penpot-library-in-use-deletion-guard-delta.md` and
