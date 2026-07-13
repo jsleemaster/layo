@@ -82,9 +82,16 @@ those two inner writes produced GREEN Full Verification `29274757103`: 251
 web tests, 277 server tests, Rust workspace tests, and 192 Playwright cases
 passed cleanly.
 
+## Publication Follow-Up
+
+The exact remaining gap was reproduced and closed by
+`docs/product/penpot-library-publication-transaction-delta.md`. Competing
+publishers now serialize the complete archive/metadata/event publication, and a
+publisher killed after archive replacement is rolled back from a durable
+journal before registry state is served.
+
 ## Remaining Gap
 
-The target and subscription mutation is now serialized across local processes,
-but library publication still spans archive bytes, registry metadata, and event
-publication without one crash-recoverable cross-process transaction. The next
-Penpot maturity goal must reproduce and close that publication boundary.
+Filesystem publication is recoverable on one host. Hosted multi-instance
+registry ownership, authorization, transactional object storage, backup
+retention, and durable pub/sub remain open.
