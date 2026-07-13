@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 
 test.beforeEach(async () => {
   await rm(".layo", { recursive: true, force: true });
@@ -68,6 +68,19 @@ test("Inspector manages an ordered multi-stroke stack and persists it across rel
   await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
   await page.getByTestId("layer-panel").getByText("랜딩 프레임").click();
 
+  await page.getByTestId("inspector-tab-dev").click();
+  const pngDownloadPromise = page.waitForEvent("download");
+  await page.getByTestId("dev-panel-download-png").click();
+  const pngDownload = await pngDownloadPromise;
+  const pngPath = await pngDownload.path();
+  if (!pngPath) throw new Error("multi-stroke PNG path missing");
+  const png = await readFile(pngPath);
+  const pngWidth = png.readUInt32BE(16);
+  const pngHeight = png.readUInt32BE(20);
+  expect(pngWidth).toBeGreaterThan(frame.size.width);
+  expect(pngHeight).toBeGreaterThan(frame.size.height);
+  await page.getByTestId("inspector-tab-design").click();
+
   const stack = page.getByTestId("inspector-stroke-stack");
   await expect(stack.getByTestId("inspector-stroke-row-0")).toBeVisible();
   await expect(stack.getByTestId("inspector-stroke-row-1")).toBeVisible();
@@ -87,6 +100,10 @@ test("Inspector manages an ordered multi-stroke stack and persists it across rel
   await expect(stack.locator('[data-testid^="inspector-stroke-row-"]')).toHaveCount(2);
 
   await stack.getByTestId("inspector-stroke-add").click();
+  await expect(stack.locator('[data-testid^="inspector-stroke-row-"]')).toHaveCount(3);
+  await page.keyboard.press("Control+z");
+  await expect(stack.locator('[data-testid^="inspector-stroke-row-"]')).toHaveCount(2);
+  await page.keyboard.press("Control+Shift+z");
   await expect(stack.locator('[data-testid^="inspector-stroke-row-"]')).toHaveCount(3);
   await stack.getByTestId("inspector-stroke-2-position").selectOption("center");
   await stack.getByTestId("inspector-stroke-2-opacity").fill("0.35");
