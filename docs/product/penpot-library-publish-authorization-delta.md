@@ -1,7 +1,7 @@
 # Penpot Library Publication Authorization Delta
 
 Date: 2026-07-14  
-Status: In progress in PR #295
+Status: Completed by PR #295 merge gate
 
 ## Benchmark
 
@@ -40,7 +40,12 @@ entries exist for local development compatibility.
 - `29283735052`: browser publication had no credential parameter.
 - `29283903958`: MCP publication had no injected principal.
 - `29284023373`: configuration accepted a blank member id.
-- Final GREEN and direct Playwright evidence: pending.
+- GREEN `29284459320`: maturity/design gates, typecheck, web build, 251 web
+  tests, 288 server tests, Rust workspace, and 193 Playwright CLI tests passed.
+- Direct Playwright: created a realtime team, entered a member token, shared
+  the project, published from the file panel, observed both credential headers,
+  and saw `Credentialed Team Kit 게시됨`.
+- Restore drill `29284459310` and backup retention `29284459291` passed.
 
 ## Deliberate Remaining Gaps
 
