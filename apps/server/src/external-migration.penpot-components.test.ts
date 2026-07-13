@@ -1277,6 +1277,68 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("does not recover an active library update during same-process project reads", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-active-read-"));
+    let releaseSubscriptionWrite = () => undefined;
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-active-read-project",
+        documentId: "penpot-active-read-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0f766e";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+      };
+      let markSubscriptionReached!: () => void;
+      const subscriptionReached = new Promise<void>((resolve) => {
+        markSubscriptionReached = resolve;
+      });
+      const subscriptionRelease = new Promise<void>((resolve) => {
+        releaseSubscriptionWrite = resolve;
+      });
+      const originalWriteSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        markSubscriptionReached();
+        await subscriptionRelease;
+        await originalWriteSubscriptions(subscriptions);
+      };
+
+      const activeUpdate = storage.updateLibraryRegistryItem(
+        "penpot-active-read-target",
+        libraryDocumentId
+      );
+      await subscriptionReached;
+      await storage.listProjects();
+
+      expect(
+        (await storage.readFile("penpot-active-read-target")).components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0f766e");
+
+      releaseSubscriptionWrite();
+      await activeUpdate;
+    } finally {
+      releaseSubscriptionWrite();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("recovers an interrupted library target write on storage restart", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-restart-"));
     try {
