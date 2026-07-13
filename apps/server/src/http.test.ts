@@ -886,6 +886,59 @@ describe("HTTP server", () => {
     expect(invalid.json().error).toMatch(/idempotency key/i);
   });
 
+  test("authorizes team library publication by member token and editor role", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "source-project",
+      name: "Source Project",
+      documentId: "source-file",
+      documentName: "Source File"
+    });
+    await storage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" },
+          { userId: "editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" },
+          { userId: "other-editor", role: "editor", teamIds: ["team-beta"], token: "other-token" }
+        ]
+      }
+    } as any);
+    const publish = (userId: string, token: string) => server.inject({
+      method: "POST",
+      url: "/libraries",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "x-layo-user-id": userId
+      },
+      payload: {
+        fileId: "source-file",
+        libraryId: "team-kit",
+        name: "Team Kit"
+      }
+    });
+
+    const viewer = await publish("viewer", "viewer-token");
+    expect(viewer.statusCode).toBe(403);
+    await expect(storage.listLibraryRegistry()).resolves.toEqual([]);
+
+    const invalidToken = await publish("editor", "wrong-token");
+    expect(invalidToken.statusCode).toBe(401);
+    await expect(storage.listLibraryRegistry()).resolves.toEqual([]);
+
+    const wrongTeam = await publish("other-editor", "other-token");
+    expect(wrongTeam.statusCode).toBe(403);
+    await expect(storage.listLibraryRegistry()).resolves.toEqual([]);
+
+    const editor = await publish("editor", "editor-token");
+    expect(editor.statusCode).toBe(200);
+    expect(editor.json().library).toMatchObject({
+      libraryId: "team-kit",
+      teamId: "team-alpha"
+    });
+  });
+
   test("publishes lists reviews and imports registry libraries", async () => {
     const server = await createServerWithDocument();
     await server.inject({
