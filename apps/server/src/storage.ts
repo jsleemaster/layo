@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -4767,15 +4768,15 @@ function storageSnapshotDataEquals(left: Buffer | null, right: Buffer | null): b
 }
 
 async function durablyReplaceFile(filePath: string, data: Buffer): Promise<void> {
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  const handle = await open(temporaryPath, "w");
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await handle.writeFile(data);
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
+    const handle = await open(temporaryPath, "w");
+    try {
+      await handle.writeFile(data);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(temporaryPath, filePath);
     await syncDirectory(path.dirname(filePath));
   } catch (error) {
@@ -4841,10 +4842,14 @@ async function restoreStoragePathSnapshots(
   for (const snapshot of snapshots) {
     if (snapshot.data === null) {
       await rm(snapshot.filePath, { force: true });
+      const parentPath = path.dirname(snapshot.filePath);
+      if (await pathExists(parentPath)) {
+        await syncDirectory(parentPath);
+      }
       continue;
     }
     await mkdir(path.dirname(snapshot.filePath), { recursive: true });
-    await writeFile(snapshot.filePath, snapshot.data);
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
   }
 }
 
