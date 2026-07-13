@@ -171,10 +171,40 @@ export function pathHasOnlyClosedSubpaths(pathData: string) {
   return subpathCount > 0 && !activeSubpath;
 }
 
-export type NodeStrokePaint =
+export type NodePaint =
   | { type: "solid"; color: string }
   | { type: "gradient"; gradient: NodePaintGradient }
   | { type: "image"; asset_id: string };
+
+export type NodeStrokePaint = NodePaint;
+export type NodeFillPaint = NodePaint;
+export type FillBlendMode =
+  | "normal"
+  | "multiply"
+  | "screen"
+  | "overlay"
+  | "darken"
+  | "lighten"
+  | "color-dodge"
+  | "color-burn"
+  | "hard-light"
+  | "soft-light"
+  | "difference"
+  | "exclusion"
+  | "hue"
+  | "saturation"
+  | "color"
+  | "luminosity";
+
+export interface NodeFill {
+  id: string;
+  /** Legacy solid fallback retained while older documents migrate. */
+  color: string;
+  paint?: NodeFillPaint;
+  opacity: number;
+  visible: boolean;
+  blend_mode: FillBlendMode;
+}
 
 export interface NodeStroke {
   id: string;
@@ -230,6 +260,8 @@ export interface RendererNode {
     fill: string;
     fill_token?: string | null;
     fill_style?: string | null;
+    /** Ordered authoritative fill stack. Legacy fill remains a migration input. */
+    fills?: NodeFill[];
     stroke: string | null;
     stroke_width: number;
     /** Ordered authoritative stroke stack. Legacy stroke fields remain migration inputs. */
