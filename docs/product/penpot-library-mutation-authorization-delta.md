@@ -1,7 +1,7 @@
 # Penpot Library Mutation Authorization Delta
 
 Date: 2026-07-14  
-Status: In progress in PR #296
+Status: Completed by PR #296 merge gate
 
 ## Product Change
 
@@ -24,7 +24,13 @@ preserve their existing open workflow.
 
 - RED `29286183142`: viewer registry import returned 200 and could write target
   subscription state instead of returning 403.
-- GREEN and direct Playwright evidence: pending.
+- GREEN `29286759478`: maturity/design gates, typecheck, build, 251 web
+  tests, 290 server tests, Rust workspace, and 193 Playwright CLI tests passed.
+- Direct Playwright: created a realtime team with a member token, shared and
+  published a source library, created and shared a target project, reviewed and
+  imported the library, verified both credential headers, and observed the
+  visible imported status.
+- Restore drill `29286759480` and retention `29286759454` passed.
 
 ## Deliberate Remaining Gaps
 
