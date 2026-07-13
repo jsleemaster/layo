@@ -571,8 +571,8 @@ test("file panel exports a shared library archive and imports reusable component
   ]);
 });
 
-test("file panel sends active team member credentials when publishing a library", async ({ page }) => {
-  await createProjectFromEmptyState(page);
+test("file panel sends active team member credentials for library publish and import", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
 
   await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
   await page.getByRole("tab", { name: "실시간 협업" }).click();
@@ -600,6 +600,32 @@ test("file panel sends active team member credentials when publishing a library"
   });
   await expect(page.getByTestId("library-registry-status")).toContainText(
     "Credentialed Team Kit 게시됨"
+  );
+
+  await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+  await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  await page.getByTestId(`library-registry-review-${documentId}`).click();
+  await expect(page.getByTestId("library-registry-review")).toContainText(
+    "Credentialed Team Kit"
+  );
+
+  const importRequest = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "POST" &&
+      new URL(candidate.url()).pathname.endsWith("/import/library/registry")
+  );
+  await page.getByRole("button", { name: "검토한 게시 라이브러리 가져오기" }).click();
+
+  const imported = await importRequest;
+  expect(imported.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "게시 라이브러리 가져옴"
   );
 });
 
