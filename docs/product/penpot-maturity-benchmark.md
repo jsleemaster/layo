@@ -332,7 +332,10 @@ retention, and durable pub/sub remain open.
 PR #297 completes authenticated registry discovery. Configured HTTP, browser,
 and MCP list reads require a member principal, filter unscoped results to the
 principal's team ids, and reject file-scoped cross-team reads while preserving
-same-team viewer access. Failure-learning RED `29290200053` also proved that
+same-team viewer access. The same principal-team filter is applied after
+file-scoped storage compatibility filtering so legacy/private unscoped entries
+cannot re-enter hosted results; review RED `29292379607` proved the leak and
+review GREEN `29292539822` closed it across HTTP and MCP. Failure-learning RED `29290200053` also proved that
 grid header reorder lost its active session across a React rerender; the stable
 listener plus latest-dispatch ref passed all 193 Playwright cases without retry
 in GREEN `29290833407`. See
