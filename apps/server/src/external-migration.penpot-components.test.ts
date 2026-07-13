@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { inspectCanvas, validateDocument } from "./agent-control";
 import { exportDesignToCode } from "./code-export";
 import { createZipArchive } from "./file-archive";
+import { createHttpServer } from "./http";
 import { importExternalMigrationArchive, reviewExternalMigrationArchive } from "./external-migration";
 import { FileStorage } from "./storage";
 
@@ -599,22 +600,8 @@ describe("Penpot component instance migration", () => {
       const beforeSubscriptions = await storage.listLibraryRegistrySubscriptions(
         "penpot-delete-target"
       );
-      const updateReviewer = storage as unknown as {
-        reviewLibraryRegistryItemUpdate(
-          fileId: string,
-          libraryId: string
-        ): Promise<{
-          canUpdate: boolean;
-          blockedBy: string[];
-          deletedComponents: Array<{
-            sourceComponentId: string;
-            targetComponentId: string;
-            affectedInstanceIds: string[];
-          }>;
-        }>;
-      };
       await expect(
-        updateReviewer.reviewLibraryRegistryItemUpdate(
+        storage.reviewLibraryRegistryItemUpdate(
           "penpot-delete-target",
           libraryDocumentId
         )
@@ -632,6 +619,32 @@ describe("Penpot component instance migration", () => {
           }
         ]
       });
+
+      const server = createHttpServer(storage, { webDistDir: null });
+      try {
+        const reviewResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-delete-target/import/library/registry/update/review",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(reviewResponse.statusCode).toBe(200);
+        expect(reviewResponse.json().review).toMatchObject({
+          canUpdate: false,
+          blockedBy: ["library_component_deletion_in_use"]
+        });
+
+        const updateResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-delete-target/import/library/registry/update",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(updateResponse.statusCode).toBe(400);
+        expect(updateResponse.json()).toEqual({
+          error: expect.stringMatching(/component deletion.*in use/i)
+        });
+      } finally {
+        await server.close();
+      }
 
       await expect(
         storage.updateLibraryRegistryItem("penpot-delete-target", libraryDocumentId)
