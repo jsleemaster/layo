@@ -1530,11 +1530,15 @@ describe("Penpot component instance migration", () => {
       });
 
       const xWorker = spawnWorker("geometry-x");
+      await waitForMarker(xWorker, "geometry-x-ready");
       const yWorker = spawnWorker("geometry-y");
-      await Promise.all([
-        waitForMarker(xWorker, "geometry-x-ready"),
-        waitForMarker(yWorker, "geometry-y-ready")
+      const yRead = waitForMarker(yWorker, "geometry-y-ready");
+      const yReadBeforeRelease = await Promise.race([
+        yRead.then(() => true),
+        delay(500).then(() => false)
       ]);
+      expect(yReadBeforeRelease).toBe(false);
+
       await writeRawFile(releasePath, "release\n", "utf8");
       await Promise.all(exits);
 
