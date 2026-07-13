@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { DesignNode } from "./storage";
-import { normalizeAgentNodeStyle } from "./agent-control-base";
+import { normalizeAgentNodeStyle, normalizeAgentNodeStyleForNode } from "./agent-control-base";
 
 const baseStyle: DesignNode["style"] = {
   fill: "#ffffff",
@@ -82,4 +82,41 @@ describe("first-class multi-stroke agent contract", () => {
       normalizeAgentNodeStyle({ ...baseStyle, strokes: [{ ...duplicate, id: "dash", dasharray: [0, 0] }] })
     ).toThrow("strokes[0].dasharray is invalid");
   });
+  test("normalizes area alignment to center for open paths and preserves closed paths", () => {
+    const outside: NodeStroke = {
+      id: "outside",
+      color: "#ef4444",
+      opacity: 1,
+      width: 8,
+      position: "outside",
+      style: "solid",
+      visible: true,
+      dasharray: [],
+      cap: "round",
+      join: "round",
+      start_marker: "none",
+      end_marker: "none"
+    };
+    const openPath: DesignNode = {
+      id: "open",
+      kind: "path",
+      name: "Open path",
+      transform: { x: 0, y: 0, rotation: 0 },
+      size: { width: 100, height: 100 },
+      style: baseStyle,
+      content: { type: "path", path_data: "M0 50 C25 0 75 0 100 50", fill_rule: "nonzero" },
+      children: []
+    };
+    const closedPath: DesignNode = {
+      ...openPath,
+      id: "closed",
+      content: { type: "path", path_data: "M0 0 H100 V100 H0 Z", fill_rule: "nonzero" }
+    };
+
+    expect(normalizeAgentNodeStyleForNode(openPath, { ...baseStyle, strokes: [outside] }).strokes?.[0].position)
+      .toBe("center");
+    expect(normalizeAgentNodeStyleForNode(closedPath, { ...baseStyle, strokes: [outside] }).strokes?.[0].position)
+      .toBe("outside");
+  });
+
 });
