@@ -152,11 +152,25 @@ function legacyStrokeForNode(node: RendererNode): NodeStroke | null {
   };
 }
 
+function strokePaintType(stroke: NodeStroke) {
+  return stroke.paint?.type ?? "solid";
+}
+
+function strokePaintColor(stroke: NodeStroke) {
+  return stroke.paint?.type === "solid" ? stroke.paint.color : stroke.color;
+}
+
 function visibleStrokesForNode(node: RendererNode) {
   if (node.style.strokes) {
-    return node.style.strokes.filter((stroke) =>
-      stroke.visible && stroke.width > 0 && stroke.opacity > 0 && Boolean(stroke.color)
-    );
+    return node.style.strokes.filter((stroke) => {
+      const paintIsUsable =
+        stroke.paint?.type === "gradient"
+          ? (stroke.paint.gradient.stops?.length ?? 0) >= 2
+          : stroke.paint?.type === "image"
+            ? Boolean(stroke.paint.asset_id)
+            : Boolean(strokePaintColor(stroke));
+      return stroke.visible && stroke.width > 0 && stroke.opacity > 0 && paintIsUsable;
+    });
   }
   const legacy = legacyStrokeForNode(node);
   return legacy ? [legacy] : [];
@@ -726,6 +740,99 @@ function svgGradientLinesForTree(node: RendererNode, depth: number): string[] {
   return [...svgGradientLinesForNode(node, depth), ...node.children.flatMap((child) => svgGradientLinesForTree(child, depth))];
 }
 
+function svgStrokePaintId(node: RendererNode, stroke: NodeStroke) {
+  const prefix = stroke.paint?.type === "image" ? "pattern" : "gradient";
+  return `layo-stroke-${prefix}-${safeSvgIdSuffix(node.id)}-${safeSvgIdSuffix(stroke.id)}`;
+}
+
+function svgStrokePaintDefinitionLinesForNode(
+  node: RendererNode,
+  options: NodeArtifactOptions,
+  depth: number
+): string[] {
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  return visibleStrokesForNode(node).flatMap((stroke) => {
+    if (stroke.paint?.type === "gradient") {
+      const gradient = stroke.paint.gradient;
+      const stops = gradientStopsForGradient(gradient);
+      if (stops.length < 2) {
+        return [];
+      }
+      const stopLines = [...stops]
+        .sort((left, right) => left.offset - right.offset)
+        .map((stop) => {
+          const opacity = clampUnit(stop.opacity);
+          const opacityAttribute = opacity < 1 ? ` stop-opacity="${formatNumber(opacity)}"` : "";
+          return indent(
+            `<stop offset="${gradientStopPercent(stop.offset)}" stop-color="${escapeSvgText(stop.color)}"${opacityAttribute} />`,
+            depth + 1
+          );
+        });
+      if (normalizedGradientType(gradient).includes("radial")) {
+        const center = gradient.start ?? { x: 0.5, y: 0.5 };
+        return [
+          indent(
+            `<radialGradient id="${svgStrokePaintId(node, stroke)}" cx="${gradientCoordinatePercent(center.x)}" cy="${gradientCoordinatePercent(center.y)}" r="${gradientCoordinatePercent(svgRadialGradientRadius(gradient))}"${svgRadialGradientTransform(gradient)}>`,
+            depth
+          ),
+          ...stopLines,
+          indent("</radialGradient>", depth)
+        ];
+      }
+      const start = gradient.start ?? { x: 0, y: 0.5 };
+      const end = gradient.end ?? { x: 1, y: 0.5 };
+      return [
+        indent(
+          `<linearGradient id="${svgStrokePaintId(node, stroke)}" x1="${gradientCoordinatePercent(start.x)}" y1="${gradientCoordinatePercent(start.y)}" x2="${gradientCoordinatePercent(end.x)}" y2="${gradientCoordinatePercent(end.y)}">`,
+          depth
+        ),
+        ...stopLines,
+        indent("</linearGradient>", depth)
+      ];
+    }
+    if (stroke.paint?.type === "image") {
+      const asset = options.assets?.[stroke.paint.asset_id];
+      if (!asset?.dataBase64) {
+        return [];
+      }
+      return [
+        indent(
+          `<pattern id="${svgStrokePaintId(node, stroke)}" x="0" y="0" width="${width}" height="${height}" patternUnits="userSpaceOnUse">`,
+          depth
+        ),
+        indent(
+          `<image data-stroke-asset-id="${escapeSvgText(stroke.paint.asset_id)}" x="0" y="0" width="${width}" height="${height}" href="${assetDataUrl(asset)}" preserveAspectRatio="xMidYMid slice" />`,
+          depth + 1
+        ),
+        indent("</pattern>", depth)
+      ];
+    }
+    return [];
+  });
+}
+
+function svgStrokePaintDefinitionLinesForTree(
+  node: RendererNode,
+  options: NodeArtifactOptions,
+  depth: number
+): string[] {
+  return [
+    ...svgStrokePaintDefinitionLinesForNode(node, options, depth),
+    ...node.children.flatMap((child) => svgStrokePaintDefinitionLinesForTree(child, options, depth))
+  ];
+}
+
+function svgStrokePaintAttribute(node: RendererNode, stroke: NodeStroke) {
+  if (stroke.paint?.type === "gradient") {
+    return `url(#${svgStrokePaintId(node, stroke)})`;
+  }
+  if (stroke.paint?.type === "image") {
+    return `url(#${svgStrokePaintId(node, stroke)})`;
+  }
+  return escapeSvgText(strokePaintColor(stroke));
+}
+
 function svgFillAttributeForNode(node: RendererNode) {
   const fill = escapeSvgText(node.style.fill);
   const fillGradient = svgFillGradientForNode(node);
@@ -990,9 +1097,10 @@ function svgAlignedPathStrokeDefinitionLinesForTree(node: RendererNode, depth: n
   ];
 }
 
-function svgDefsForNode(node: RendererNode, depth: number): string[] {
+function svgDefsForNode(node: RendererNode, options: NodeArtifactOptions, depth: number): string[] {
   const defLines = [
     ...svgGradientLinesForTree(node, depth + 1),
+    ...svgStrokePaintDefinitionLinesForTree(node, options, depth + 1),
     ...svgStrokeMarkerLinesForTree(node, depth + 1),
     ...svgShadowFilterLinesForTree(node, depth + 1),
     ...svgClipPathLinesForTree(node, depth + 1),
@@ -1079,7 +1187,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
       : effectivePosition === "outside"
         ? ` mask="url(#${alignedPathStrokeMaskId(node)})"`
         : "";
-    const common = `data-stroke-id="${escapeSvgText(stroke.id)}" data-stroke-position="${stroke.position}" data-effective-stroke-position="${effectivePosition}" fill="none" stroke="${escapeSvgText(stroke.color)}" stroke-opacity="${formatNumber(stroke.opacity)}" stroke-width="${formatNumber(renderedWidth)}"${svgStrokePresentationAttributes(strokeNode)}`;
+    const common = `data-stroke-id="${escapeSvgText(stroke.id)}" data-stroke-paint="${strokePaintType(stroke)}" data-stroke-position="${stroke.position}" data-effective-stroke-position="${effectivePosition}" fill="none" stroke="${svgStrokePaintAttribute(node, stroke)}" stroke-opacity="${formatNumber(stroke.opacity)}" stroke-width="${formatNumber(renderedWidth)}"${svgStrokePresentationAttributes(strokeNode)}`;
     if (pathData) {
       return `<path d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)}${alignmentReference} />`;
     }
@@ -1129,6 +1237,12 @@ export function imageAssetIdsForNode(node: RendererNode) {
       seen.add(candidate.content.asset_id);
       ids.push(candidate.content.asset_id);
     }
+    for (const stroke of candidate.style.strokes ?? []) {
+      if (stroke.paint?.type === "image" && !seen.has(stroke.paint.asset_id)) {
+        seen.add(stroke.paint.asset_id);
+        ids.push(stroke.paint.asset_id);
+      }
+    }
     candidate.children.forEach(visit);
   };
   visit(node);
@@ -1148,7 +1262,7 @@ export function svgForNode(node: RendererNode, options: NodeArtifactOptions = {}
       bounds.minX
     )} ${formatNumber(bounds.minY)} ${width} ${height}" data-node-id="${nodeId}" data-node-name="${nodeName}" role="img" aria-label="${nodeName}">`,
     `  ${title}`,
-    ...svgDefsForNode(node, 1),
+    ...svgDefsForNode(node, options, 1),
     ...svgLinesForNode(node, options, 1, true),
     "</svg>",
     ""
