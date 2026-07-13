@@ -621,8 +621,30 @@ test("file panel sends active team member credentials for library publish and im
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+
+  const updatesRequest = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "GET" &&
+      new URL(candidate.url()).pathname.endsWith("/libraries/updates")
+  );
   await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  const updates = await updatesRequest;
+  expect(updates.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
+
+  const reviewRequest = page.waitForRequest(
+    (candidate) =>
+      candidate.method() === "POST" &&
+      new URL(candidate.url()).pathname.endsWith("/import/library/registry/review")
+  );
   await page.getByTestId(`library-registry-review-${documentId}`).click();
+  const reviewed = await reviewRequest;
+  expect(reviewed.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
   await expect(page.getByTestId("library-registry-review")).toContainText(
     "Credentialed Team Kit"
   );
