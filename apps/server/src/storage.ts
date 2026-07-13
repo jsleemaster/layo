@@ -2388,34 +2388,36 @@ export class FileStorage {
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
     const teamId = await this.findTeamIdForFile(fileId);
-    const existingEntries = await this.readLibraryRegistryEntries();
-    const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
-    if (existing?.teamId && existing.teamId !== teamId) {
-      throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
-    }
-    const now = nextIsoTimestamp(existing?.updatedAt);
-    const entry: LibraryRegistryEntry = {
-      libraryId,
-      name: normalizeName(options.name, exported.name),
-      sourceFileId: exported.fileId,
-      sourceName: exported.name,
-      teamId,
-      componentCount: exported.componentCount,
-      tokenCount: exported.tokenCount,
-      assetCount: exported.assetCount,
-      publishedAt: existing?.publishedAt ?? now,
-      updatedAt: now
-    };
-    const nextEntries = [
-      entry,
-      ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
-    ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return withStoragePathMutationLock(this.libraryRegistryPath(), async () => {
+      const existingEntries = await this.readLibraryRegistryEntries();
+      const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+      if (existing?.teamId && existing.teamId !== teamId) {
+        throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
+      }
+      const now = nextIsoTimestamp(existing?.updatedAt);
+      const entry: LibraryRegistryEntry = {
+        libraryId,
+        name: normalizeName(options.name, exported.name),
+        sourceFileId: exported.fileId,
+        sourceName: exported.name,
+        teamId,
+        componentCount: exported.componentCount,
+        tokenCount: exported.tokenCount,
+        assetCount: exported.assetCount,
+        publishedAt: existing?.publishedAt ?? now,
+        updatedAt: now
+      };
+      const nextEntries = [
+        entry,
+        ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
+      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-    await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(this.libraryArchivePathFor(libraryId), exported.archive);
-    await this.writeLibraryRegistryEntries(nextEntries);
-    await this.appendLibraryRegistryEvent(entry, exported);
-    return entry;
+      await mkdir(this.librariesDir, { recursive: true });
+      await writeFile(this.libraryArchivePathFor(libraryId), exported.archive);
+      await this.writeLibraryRegistryEntries(nextEntries);
+      await this.appendLibraryRegistryEvent(entry, exported);
+      return entry;
+    });
   }
 
   async listLibraryRegistry(): Promise<LibraryRegistryEntry[]>;
