@@ -26,6 +26,8 @@ interface PdfCommandEntry {
   type: "commands";
   commands: string[];
   clipOpacity?: number;
+  fillOpacity?: number;
+  fillBlendMode?: NodeFill["blend_mode"];
   graphicsStateName?: string;
   graphicsStateId?: number;
 }
@@ -113,6 +115,8 @@ interface PdfImageFillEntry {
   sMaskId?: number;
   patternName?: string;
   patternId?: number;
+  graphicsStateName?: string;
+  graphicsStateId?: number;
 }
 
 interface PdfImageStrokeEntry {
@@ -163,6 +167,31 @@ function formatNumber(value: number) {
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function pdfBlendModeName(blendMode: string | undefined) {
+  const names: Record<string, string> = {
+    normal: "Normal",
+    multiply: "Multiply",
+    screen: "Screen",
+    overlay: "Overlay",
+    darken: "Darken",
+    lighten: "Lighten",
+    "color-dodge": "ColorDodge",
+    "color-burn": "ColorBurn",
+    "hard-light": "HardLight",
+    "soft-light": "SoftLight",
+    difference: "Difference",
+    exclusion: "Exclusion",
+    hue: "Hue",
+    saturation: "Saturation",
+    color: "Color",
+    luminosity: "Luminosity"
+  };
+  return names[blendMode ?? "normal"] ?? "Normal";
+}
+
+function pdfFillGraphicsStateObject(opacity: number, blendMode: string | undefined) {
+  return `<< /Type /ExtGState /ca ${formatNumber(opacity)} /CA ${formatNumber(opacity)} /BM /${pdfBlendModeName(blendMode)} >>`;
+}
 
 function fillPaintType(fill: NodeFill) {
   return fill.paint?.type ?? "solid";
@@ -2615,7 +2644,9 @@ function collectPdfEntries(
         };
         entries.push({
           type: "commands",
-          commands: [`% Layo fill paint ${fill.id} solid`, ...pdfFillCommands(solidNode, pageHeight, x, y)]
+          commands: [`% Layo fill paint ${fill.id} solid`, ...pdfFillCommands(solidNode, pageHeight, x, y)],
+          fillOpacity: node.style.opacity * fill.opacity,
+          fillBlendMode: fill.blend_mode
         });
       });
     } else if (fillGradient) {
@@ -2711,9 +2742,11 @@ function pdfImageFillCommands(entry: PdfImageFillEntry) {
     };
     return [`% Layo fill paint ${entry.fill.id} image`, ...pdfFillCommands(fallbackNode, entry.pageHeight, entry.x, entry.y)];
   }
+  const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
   return [
     `% Layo fill paint ${entry.fill.id} image`,
     "q",
+    graphicsState,
     ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
     pdfClipOperatorForNode(entry.node),
     "n",
@@ -2764,7 +2797,14 @@ function contentForPdfEntries(entries: PdfEntry[]) {
   return [
     ...entries.flatMap((entry) => {
       if (entry.type === "commands") {
-        return entry.graphicsStateName ? [...entry.commands, `/${entry.graphicsStateName} gs`] : entry.commands;
+        if (!entry.graphicsStateName) {
+          return entry.commands;
+        }
+        const graphicsState = `/${entry.graphicsStateName} gs`;
+        const saveIndex = entry.commands.indexOf("q");
+        return saveIndex >= 0
+          ? [...entry.commands.slice(0, saveIndex + 1), graphicsState, ...entry.commands.slice(saveIndex + 1)]
+          : [graphicsState, ...entry.commands];
       }
       if (entry.type === "shadow") {
         return pdfShadowCommands(entry);
@@ -2920,19 +2960,39 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     );
   });
 
+  const fillCommandEntries = entries.filter(
+    (entry): entry is PdfCommandEntry => entry.type === "commands" && typeof entry.fillOpacity === "number"
+  );
+  fillCommandEntries.forEach((entry, index) => {
+    entry.graphicsStateName = `FillGs${index + 1}`;
+    entry.graphicsStateId = addPdfObject(
+      objects,
+      pdfFillGraphicsStateObject(entry.fillOpacity ?? 1, entry.fillBlendMode)
+    );
+  });
+
   const gradientEntries = entries.filter((entry): entry is PdfGradientPaintEntry => entry.type === "gradientFill" || entry.type === "gradientStroke");
   gradientEntries.forEach((entry, index) => {
     entry.shadingName = `Sh${index + 1}`;
     entry.shadingId = addPdfObject(objects, pdfGradientShadingObject(entry));
     const opacity = pdfGradientFillOpacity(entry);
-    if (typeof opacity === "number") {
+    const blendMode = entry.type === "gradientFill" ? entry.source.blendMode : undefined;
+    if (typeof opacity === "number" || (blendMode && blendMode !== "normal")) {
       entry.graphicsStateName = `PaintGs${index + 1}`;
-      entry.graphicsStateId = addPdfObject(objects, `<< /Type /ExtGState /ca ${formatNumber(opacity)} /CA ${formatNumber(opacity)} >>`);
+      entry.graphicsStateId = addPdfObject(
+        objects,
+        pdfFillGraphicsStateObject(opacity ?? 1, blendMode)
+      );
     }
   });
 
   const imageFillEntries = entries.filter((entry): entry is PdfImageFillEntry => entry.type === "imageFill");
   imageFillEntries.forEach((entry, index) => {
+    entry.graphicsStateName = `FillImageGs${index + 1}`;
+    entry.graphicsStateId = addPdfObject(
+      objects,
+      pdfFillGraphicsStateObject(entry.node.style.opacity * entry.fill.opacity, entry.fill.blend_mode)
+    );
     const assetBytes = bytesFromBase64(entry.asset.dataBase64);
     const previewBytes = entry.asset.pdfPreviewPngBase64 ? bytesFromBase64(entry.asset.pdfPreviewPngBase64) : null;
     const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : previewBytes ? decodePng(previewBytes) : null;
@@ -3053,6 +3113,12 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
       .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
       .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
     ...gradientEntries
+      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
+      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
+    ...fillCommandEntries
+      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
+      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
+    ...imageFillEntries
       .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
       .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`)
   ];
