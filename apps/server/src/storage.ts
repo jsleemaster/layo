@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   applyAgentCommandsToDocument,
@@ -1153,16 +1153,103 @@ export class FileStorage {
 
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
+    await this.recoverInterruptedLibraryUpdates();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
+    await this.recoverInterruptedLibraryUpdates();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
     await this.removeUnreferencedLegacySampleDocument();
+  }
+
+  private libraryUpdateRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "library-updates");
+  }
+
+  private libraryUpdateRecoveryPathFor(fileId: string) {
+    assertSafeStorageId(fileId);
+    return path.join(this.libraryUpdateRecoveryDir(), `${fileId}.json`);
+  }
+
+  private async persistLibraryUpdateRecoveryJournal(
+    fileId: string,
+    original: StoragePathSnapshot[],
+    intended: StoragePathSnapshot[]
+  ): Promise<void> {
+    const journal: LibraryUpdateRecoveryJournal = {
+      schemaVersion: 1,
+      kind: "library-registry-update",
+      fileId,
+      original: original.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot)),
+      intended: intended.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot))
+    };
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    await mkdir(path.dirname(journalPath), { recursive: true });
+    await durablyReplaceFile(
+      journalPath,
+      Buffer.from(`${JSON.stringify(journal, null, 2)}\n`, "utf8")
+    );
+  }
+
+  private async removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void> {
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    await rm(journalPath, { force: true });
+    await syncDirectory(path.dirname(journalPath));
+  }
+
+  private async recoverInterruptedLibraryUpdates(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.libraryUpdateRecoveryDir());
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries.filter((candidate) => candidate.endsWith(".json")).sort()) {
+      const journalPath = path.join(this.libraryUpdateRecoveryDir(), entry);
+      const journal = parseLibraryUpdateRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+      const original = journal.original.map((snapshot) =>
+        deserializeRecoverySnapshot(this.rootDir, snapshot)
+      );
+      const intended = new Map(
+        journal.intended.map((snapshot) => {
+          const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
+          return [restored.filePath, restored.data] as const;
+        })
+      );
+      const current = await captureStoragePathSnapshots(
+        original.map((snapshot) => snapshot.filePath)
+      );
+
+      for (const snapshot of original) {
+        const currentData = current.find(
+          (candidate) => candidate.filePath === snapshot.filePath
+        )?.data ?? null;
+        const intendedData = intended.get(snapshot.filePath);
+        if (
+          !storageSnapshotDataEquals(currentData, snapshot.data)
+          && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
+        ) {
+          throw new StorageRollbackConflictError(
+            `interrupted library update path changed outside journal: ${snapshot.filePath}`
+          );
+        }
+      }
+
+      await restoreStoragePathSnapshots(original);
+      await rm(journalPath, { force: true });
+      await syncDirectory(path.dirname(journalPath));
+    }
   }
 
   private async removeUnreferencedLegacySampleDocument() {
@@ -2353,6 +2440,7 @@ export class FileStorage {
           .join(", ")}`
       );
     }
+
     const deletedTargetComponentIds = new Set(
       preview.deletedComponents.map((component) => component.targetComponentId)
     );
@@ -2372,6 +2460,42 @@ export class FileStorage {
       ),
       ...subscription.componentIdMap
     };
+    const updatedTokens = new Map(
+      library.library.tokens.map((token) => {
+        const nextTokenId = tokenIdMap[token.id];
+        if (!nextTokenId) {
+          throw new Error(`library token missing from id map: ${token.id}`);
+        }
+        return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
+      })
+    );
+    const nextTokens = [...(target.tokens ?? [])];
+    for (const [tokenId, token] of updatedTokens) {
+      const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
+      if (index === -1) {
+        nextTokens.push(token);
+      } else {
+        nextTokens[index] = token;
+      }
+    }
+
+    const updatedComponents = library.library.components.map((component) => {
+      const nextComponentId = componentIdMap[component.id];
+      if (!nextComponentId) {
+        throw new Error(`library component missing from id map: ${component.id}`);
+      }
+      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+    });
+    const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
+    target.tokens = nextTokens;
+    target.components = [
+      ...(target.components ?? []).filter(
+        (component) =>
+          !updatedComponentIds.has(component.id)
+          && !deletedTargetComponentIds.has(component.id)
+      ),
+      ...updatedComponents
+    ];
 
     const rollbackSnapshots = await captureStoragePathSnapshots([
       ...library.assets.flatMap((asset) => [
@@ -2381,49 +2505,35 @@ export class FileStorage {
       this.librarySubscriptionsPath(),
       this.filePathFor(fileId)
     ]);
+    const intendedSnapshots: StoragePathSnapshot[] = library.assets.flatMap((asset) => {
+      const metadata = parseStoredAsset(asset.metadata);
+      return [
+        {
+          filePath: this.assetPathFor(metadata.assetId),
+          data: Buffer.from(asset.data)
+        },
+        {
+          filePath: this.assetMetadataPathFor(metadata.assetId),
+          data: Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, "utf8")
+        }
+      ];
+    });
+    intendedSnapshots.push({
+      filePath: this.filePathFor(fileId),
+      data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
+    });
+    await this.persistLibraryUpdateRecoveryJournal(
+      fileId,
+      rollbackSnapshots,
+      intendedSnapshots
+    );
+
     const rollbackGuards: StoragePathSnapshot[] = [];
     try {
       for (const asset of library.assets) {
         await this.writeAsset(asset.metadata, asset.data);
       }
 
-      const updatedTokens = new Map(
-        library.library.tokens.map((token) => {
-          const nextTokenId = tokenIdMap[token.id];
-          if (!nextTokenId) {
-            throw new Error(`library token missing from id map: ${token.id}`);
-          }
-          return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
-        })
-      );
-      const nextTokens = [...(target.tokens ?? [])];
-      for (const [tokenId, token] of updatedTokens) {
-        const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
-        if (index === -1) {
-          nextTokens.push(token);
-        } else {
-          nextTokens[index] = token;
-        }
-      }
-
-      const updatedComponents = library.library.components.map((component) => {
-        const nextComponentId = componentIdMap[component.id];
-        if (!nextComponentId) {
-          throw new Error(`library component missing from id map: ${component.id}`);
-        }
-        return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
-      });
-      const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
-
-      target.tokens = nextTokens;
-      target.components = [
-        ...(target.components ?? []).filter(
-          (component) =>
-            !updatedComponentIds.has(component.id)
-            && !deletedTargetComponentIds.has(component.id)
-        ),
-        ...updatedComponents
-      ];
       await this.writeFileWithoutMutationLock(fileId, target);
       rollbackGuards.push({
         filePath: this.filePathFor(fileId),
@@ -2447,14 +2557,26 @@ export class FileStorage {
         entry,
         imported,
         subscription.idPrefix,
-        (snapshot) => rollbackGuards.push(snapshot)
+        (snapshot) => rollbackGuards.push(snapshot),
+        async (snapshot) => {
+          intendedSnapshots.push(snapshot);
+          await this.persistLibraryUpdateRecoveryJournal(
+            fileId,
+            rollbackSnapshots,
+            intendedSnapshots
+          );
+        }
       );
+      await this.removeLibraryUpdateRecoveryJournal(fileId);
       return imported;
-
     } catch (error) {
       try {
         await restoreStoragePathSnapshots(rollbackSnapshots, rollbackGuards);
+        await this.removeLibraryUpdateRecoveryJournal(fileId);
       } catch (rollbackError) {
+        if (rollbackError instanceof StorageRollbackConflictError) {
+          await this.removeLibraryUpdateRecoveryJournal(fileId);
+        }
         throw new AggregateError(
           [error, rollbackError],
           rollbackError instanceof StorageRollbackConflictError
@@ -3464,7 +3586,8 @@ export class FileStorage {
 
   private async writeLibraryRegistrySubscriptions(
     subscriptions: LibraryRegistrySubscription[],
-    onCommitted?: (snapshot: StoragePathSnapshot) => void
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
     const snapshot = {
@@ -3474,6 +3597,7 @@ export class FileStorage {
         "utf8"
       )
     };
+    await onPrepared?.(snapshot);
     await writeFile(snapshot.filePath, snapshot.data);
     onCommitted?.(snapshot);
   }
@@ -3507,7 +3631,8 @@ export class FileStorage {
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryItem,
     idPrefix: string | undefined,
-    onCommitted?: (snapshot: StoragePathSnapshot) => void
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
     assertSafeStorageId(fileId);
     const subscriptions = await this.readLibraryRegistrySubscriptions();
@@ -3537,7 +3662,7 @@ export class FileStorage {
         a.libraryName.localeCompare(b.libraryName) ||
         a.libraryId.localeCompare(b.libraryId)
     );
-    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted);
+    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted, onPrepared);
   }
 
   private async upsertLibraryRegistryTokenSubscription(
