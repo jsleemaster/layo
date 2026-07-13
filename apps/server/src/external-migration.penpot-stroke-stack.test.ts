@@ -17,7 +17,6 @@ const differentWidthStrokeRectId = "13131313-1313-1313-1313-131313131313";
 const mixedGradientStrokeRectId = "14141414-1414-1414-1414-141414141414";
 const expectedStrokeStackColor = "#800080";
 const expectedDifferentWidthStrokeWidth = 8;
-const expectedMixedGradientStrokeColor = "#804040";
 const expectedMixedGradientStrokeWidth = 6;
 
 afterEach(async () => {
