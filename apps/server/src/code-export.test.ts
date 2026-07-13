@@ -129,7 +129,7 @@ describe("code export", () => {
     expect(result.elements[0]?.structure.style.strokes).toEqual(
       fixture.pages[0].children[0].style.strokes
     );
-    expect(result.indexModule).toContain('"asset_id":"asset-border"');
+    expect(result.elements[0]?.jsModule).toContain('"asset_id": "asset-border"');
   });
 
   test("exports color token bindings as CSS variables and implementation metadata", () => {
