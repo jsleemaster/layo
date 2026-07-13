@@ -41,6 +41,28 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
 
+  const authorizeLibraryWrite = async (
+    request: {
+      headers: {
+        authorization?: string | string[];
+        "x-layo-user-id"?: string | string[];
+      };
+    },
+    fileId: string
+  ) => {
+    if (!options.libraryRegistryAuth) {
+      return;
+    }
+    const member = authenticateTeamMember(
+      options.libraryRegistryAuth,
+      Array.isArray(request.headers["x-layo-user-id"])
+        ? request.headers["x-layo-user-id"][0]
+        : request.headers["x-layo-user-id"],
+      bearerToken(request.headers.authorization)
+    );
+    authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
+  };
+
   server.setErrorHandler((error, _request, reply) => {
     if ((error as { code?: string }).code === INPUT_VALIDATION_ERROR_CODE) {
       return reply.code(400).send({ error: (error as Error).message });
@@ -207,16 +229,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Body: { fileId: string; libraryId?: string; name?: string };
   }>("/libraries", async (request) => {
-    if (options.libraryRegistryAuth) {
-      const member = authenticateTeamMember(
-        options.libraryRegistryAuth,
-        Array.isArray(request.headers["x-layo-user-id"])
-          ? request.headers["x-layo-user-id"][0]
-          : request.headers["x-layo-user-id"],
-        bearerToken(request.headers.authorization)
-      );
-      authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(request.body.fileId));
-    }
+    await authorizeLibraryWrite(request, request.body.fileId);
     const idempotencyHeader = request.headers["idempotency-key"];
     return {
       library: await storage.publishLibraryToRegistry(request.body.fileId, {
@@ -385,6 +398,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/tokens", async (request) => {
+    await authorizeLibraryWrite(request, request.params.fileId);
     return {
       imported: await storage.importLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
     };
@@ -394,6 +408,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string; idPrefix?: string };
   }>("/files/:fileId/import/library/registry", async (request) => {
+    await authorizeLibraryWrite(request, request.params.fileId);
     return {
       imported: await storage.importLibraryRegistryItem(request.params.fileId, request.body.libraryId, {
         idPrefix: request.body.idPrefix
@@ -441,6 +456,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/update", async (request) => {
+    await authorizeLibraryWrite(request, request.params.fileId);
     return {
       imported: await storage.updateLibraryRegistryItem(request.params.fileId, request.body.libraryId)
     };
@@ -450,6 +466,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/tokens/update", async (request) => {
+    await authorizeLibraryWrite(request, request.params.fileId);
     return {
       imported: await storage.updateLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
     };

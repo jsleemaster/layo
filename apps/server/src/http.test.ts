@@ -939,6 +939,65 @@ describe("HTTP server", () => {
     });
   });
 
+  test("blocks viewer registry imports before writing target subscriptions", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "source-project",
+      name: "Source Project",
+      documentId: "source-file",
+      documentName: "Source File"
+    });
+    await storage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    await storage.createProject({
+      projectId: "target-project",
+      name: "Target Project",
+      documentId: "target-file",
+      documentName: "Target File"
+    });
+    await storage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" },
+          { userId: "editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" }
+        ]
+      }
+    });
+    const editorHeaders = {
+      authorization: "Bearer editor-token",
+      "x-layo-user-id": "editor"
+    };
+    const published = await server.inject({
+      method: "POST",
+      url: "/libraries",
+      headers: editorHeaders,
+      payload: {
+        fileId: "source-file",
+        libraryId: "team-kit",
+        name: "Team Kit"
+      }
+    });
+    expect(published.statusCode).toBe(200);
+    await expect(storage.listLibraryRegistrySubscriptions("target-file")).resolves.toEqual([]);
+
+    const blocked = await server.inject({
+      method: "POST",
+      url: "/files/target-file/import/library/registry",
+      headers: {
+        authorization: "Bearer viewer-token",
+        "x-layo-user-id": "viewer"
+      },
+      payload: {
+        libraryId: "team-kit",
+        idPrefix: "team"
+      }
+    });
+    expect(blocked.statusCode).toBe(403);
+    await expect(storage.listLibraryRegistrySubscriptions("target-file")).resolves.toEqual([]);
+  });
+
   test("publishes lists reviews and imports registry libraries", async () => {
     const server = await createServerWithDocument();
     await server.inject({
