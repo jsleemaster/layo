@@ -138,6 +138,27 @@ export interface NodePaintSource {
   gradient?: NodePaintGradient;
 }
 
+export type StrokePosition = "inside" | "center" | "outside";
+export type StrokeStyle = "solid" | "dotted" | "dashed" | "mixed";
+export type StrokeCap = "butt" | "round" | "square";
+export type StrokeJoin = "miter" | "round" | "bevel";
+export type StrokeMarker = "none" | "line_arrow" | "triangle" | "square" | "circle" | "diamond";
+
+export interface NodeStroke {
+  id: string;
+  color: string;
+  opacity: number;
+  width: number;
+  position: StrokePosition;
+  style: StrokeStyle;
+  visible: boolean;
+  dasharray: number[];
+  cap: StrokeCap;
+  join: StrokeJoin;
+  start_marker: StrokeMarker;
+  end_marker: StrokeMarker;
+}
+
 export type ImageFitMode = "fill" | "fit";
 export type TextWritingMode = "horizontal_tb" | "vertical_rl" | "vertical_lr";
 export type TextOrientation = "mixed" | "upright" | "sideways";
@@ -177,6 +198,8 @@ export interface RendererNode {
     fill_style?: string | null;
     stroke: string | null;
     stroke_width: number;
+    /** Ordered authoritative stroke stack. Legacy stroke fields remain migration inputs. */
+    strokes?: NodeStroke[];
     stroke_cap?: "butt" | "round" | "square";
     stroke_join?: "miter" | "round" | "bevel";
     stroke_dasharray?: number[];

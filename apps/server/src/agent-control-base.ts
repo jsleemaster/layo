@@ -19,6 +19,7 @@ import type {
   NodeExportPreset,
   NodeLayout,
   NodeLayoutItem,
+  NodeStroke,
   TextOrientation,
   TextWritingMode
 } from "./storage";
@@ -180,7 +181,7 @@ export type AgentCommand =
     }
   | { type: "detach_instance"; nodeId: string };
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 type GeometryPatch = Partial<{ x: number; y: number; width: number; height: number }>;
 
@@ -188,6 +189,7 @@ const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[
   "fill",
   "stroke",
   "stroke_width",
+  "strokes",
   "opacity",
   "effect_shadow"
 ];
@@ -2137,7 +2139,60 @@ function componentSourceNodeForVariant(
   return variant?.source_node ?? definition.source_node;
 }
 
-function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode["style"] {
+function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] | undefined {
+  if (strokes === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(strokes)) {
+    throw new Error("strokes must be an ordered array");
+  }
+  const ids = new Set<string>();
+  const positions = new Set(["inside", "center", "outside"]);
+  const styles = new Set(["solid", "dotted", "dashed", "mixed"]);
+  const caps = new Set(["butt", "round", "square"]);
+  const joins = new Set(["miter", "round", "bevel"]);
+  const markers = new Set(["none", "line_arrow", "triangle", "square", "circle", "diamond"]);
+  return strokes.map((stroke, index) => {
+    const id = typeof stroke.id === "string" ? stroke.id.trim() : "";
+    if (!id || ids.has(id)) {
+      throw new Error(`strokes[${index}].id must be non-empty and unique`);
+    }
+    ids.add(id);
+    if (typeof stroke.color !== "string" || !stroke.color.trim()) {
+      throw new Error(`strokes[${index}].color is required`);
+    }
+    if (!Number.isFinite(stroke.opacity) || stroke.opacity < 0 || stroke.opacity > 1) {
+      throw new Error(`strokes[${index}].opacity must be between 0 and 1`);
+    }
+    if (!Number.isFinite(stroke.width) || stroke.width < 0) {
+      throw new Error(`strokes[${index}].width must be a non-negative number`);
+    }
+    if (!positions.has(stroke.position) || !styles.has(stroke.style) || !caps.has(stroke.cap) ||
+        !joins.has(stroke.join) || !markers.has(stroke.start_marker) || !markers.has(stroke.end_marker)) {
+      throw new Error(`strokes[${index}] has an invalid enum value`);
+    }
+    if (!Array.isArray(stroke.dasharray) || stroke.dasharray.some((value) => !Number.isFinite(value) || value < 0) ||
+        (stroke.dasharray.length > 0 && !stroke.dasharray.some((value) => value > 0))) {
+      throw new Error(`strokes[${index}].dasharray is invalid`);
+    }
+    return {
+      id,
+      color: stroke.color.trim(),
+      opacity: stroke.opacity,
+      width: stroke.width,
+      position: stroke.position,
+      style: stroke.style,
+      visible: Boolean(stroke.visible),
+      dasharray: [...stroke.dasharray],
+      cap: stroke.cap,
+      join: stroke.join,
+      start_marker: stroke.start_marker,
+      end_marker: stroke.end_marker
+    };
+  });
+}
+
+export function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode["style"] {
   if (!Number.isFinite(style.stroke_width) || style.stroke_width < 0) {
     throw new Error(`stroke_width must be a non-negative number`);
   }
@@ -2186,6 +2241,7 @@ function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode["style"
     fill_style: style.fill_style ?? null,
     stroke: style.stroke ?? null,
     stroke_width: style.stroke_width,
+    ...(style.strokes !== undefined ? { strokes: normalizeAgentStrokes(style.strokes) } : {}),
     ...(style.stroke_cap !== undefined ? { stroke_cap: style.stroke_cap } : {}),
     ...(style.stroke_join !== undefined ? { stroke_join: style.stroke_join } : {}),
     ...(style.stroke_dasharray !== undefined ? { stroke_dasharray: [...style.stroke_dasharray] } : {}),
@@ -2293,7 +2349,7 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = style[field] as string | number | null;
+    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -2437,6 +2493,9 @@ function findComponentSourceStyleValue(
   }
   if (field === "effect_shadow") {
     return node.style.effect_shadow ?? null;
+  }
+  if (field === "strokes") {
+    return node.style.strokes ? JSON.stringify(node.style.strokes) : null;
   }
   return node.style[field];
 }

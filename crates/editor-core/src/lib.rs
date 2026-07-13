@@ -18,5 +18,6 @@ pub use model::{
     LayoutItemPosition, LayoutItemSizing, LayoutJustifyContent, LayoutJustifyItems,
     LayoutMode, LayoutPadding, LayoutSelfAlignment, LayoutSizing, LayoutSpacingTokens,
     LayoutWrap, Node, NodeConstraints, NodeContent, NodeExportPreset, NodeKind,
-    NodeLayout, NodeLayoutItem, Page, Style, VerticalConstraint,
+    NodeLayout, NodeLayoutItem, NodeStroke, Page, StrokeCap, StrokeJoin, StrokeMarker,
+    StrokePosition, StrokeStyle, Style, VerticalConstraint,
 };

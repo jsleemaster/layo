@@ -97,13 +97,14 @@ export type GeometryPatch = Partial<{
   height: number;
 }>;
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
   "fill",
   "stroke",
   "stroke_width",
+  "strokes",
   "opacity",
   "effect_shadow"
 ];
@@ -711,6 +712,13 @@ function sameEffectShadowStack(
     return beforeStack === afterStack;
   }
   return beforeStack.length === afterStack.length && beforeStack.every((shadow, index) => shadow === afterStack[index]);
+}
+
+function sameStrokeStacks(
+  left: RendererNode["style"]["strokes"],
+  right: RendererNode["style"]["strokes"]
+) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 function sameNumberArray(
@@ -2473,6 +2481,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         previousStyle.fill_style === command.style.fill_style &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
+        sameStrokeStacks(previousStyle.strokes, command.style.strokes) &&
         (previousStyle.stroke_cap ?? "butt") === (command.style.stroke_cap ?? "butt") &&
         (previousStyle.stroke_join ?? "miter") === (command.style.stroke_join ?? "miter") &&
         sameNumberArray(previousStyle.stroke_dasharray, command.style.stroke_dasharray) &&
@@ -5710,7 +5719,7 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = style[field] as string | number | null;
+    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -5862,6 +5871,13 @@ function applyComponentInstanceOverrides(instance: RendererNode, sourceRootNodeI
         ...target.style,
         stroke: override.value === nullComponentOverrideValue ? null : override.value
       };
+    } else if (override.field === "strokes") {
+      try {
+        const strokes = override.value === nullComponentOverrideValue ? undefined : JSON.parse(override.value);
+        target.style = { ...target.style, ...(Array.isArray(strokes) ? { strokes } : {}) };
+      } catch {
+        // Ignore malformed historical override payloads.
+      }
     } else if (override.field === "stroke_width" || override.field === "opacity") {
       const value = Number(override.value);
       if (Number.isFinite(value)) {
@@ -5974,6 +5990,9 @@ function findComponentSourceStyleValue(
   }
   if (field === "effect_shadow") {
     return node.style.effect_shadow ?? null;
+  }
+  if (field === "strokes") {
+    return node.style.strokes ? JSON.stringify(node.style.strokes) : null;
   }
   return node.style[field];
 }

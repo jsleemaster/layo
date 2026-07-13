@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-11
+Last audited: 2026-07-13
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -28,12 +28,13 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-first-class-multi-stroke.md` | Active | PR #277 closes PDF endpoint marker geometry, first-class path stroke/marker bounds, and Korean single-stroke controls. Penpot supports ordered multi-strokes with per-stroke opacity, position, style, visibility, dash/gap, and endpoints; that single-stroke ceiling is the next exact gap. Deployment remains deferred. |
+| `2026-07-13-penpot-closed-path-stroke-alignment.md` | Active | PR #278 adds the first-class ordered stroke stack across model, deterministic commands, history, reload, collaboration preservation, component overrides, Korean Inspector, canvas, SVG/PDF/PNG box alignment, and code handoff. Closed arbitrary paths still need geometry-aware inside/outside rendering; that exact failed case is next. Deployment remains deferred. |
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-13-penpot-first-class-multi-stroke.md` | Completed | PR #278 adds ordered per-stroke color, opacity, width, position, style, visibility, dash, cap/join, and endpoints across Rust/TypeScript models, validated MCP/HTTP style mutation, persistence, editor history, Yjs preservation, component overrides, Korean Inspector lifecycle, Konva/SVG/PDF paint passes, PNG bounds, and code handoff. Failure learning fixed legacy PDF coordinate shifts, raw UI color, scalar-only overrides, missing E2E registration, a mistaken lifecycle expectation, duplicate canvas painting, missing PNG/undo proof, and vector dash defaults. Full Verification `29224618439` passed all gates and 187 Playwright cases; restore `29224618444` and retention `29224618447` passed. Product evidence is `docs/product/penpot-first-class-multi-stroke-delta.md`. Closed curved path alignment is routed next; deployment remains deferred. |
 | `2026-07-11-penpot-pdf-stroke-marker-fidelity.md` | Completed | PR #277 draws all supported endpoint markers as tangent-aware PDF geometry, expands first-class path SVG/PDF bounds for strokes and markers, exposes Korean stroke color/width/cap/join/dash/endpoints, preserves the full style contract through validated server normalization, serializes rapid style writes, and persists undo/redo. Failure runs fixed narrowing, path-bound expectations, dropped fields, persistence races, reducer no-op coverage, form-focus evidence, and tight PNG assumptions. Full Verification `29221738942` passed all gates and 186 Playwright cases. Product evidence is `docs/product/penpot-pdf-stroke-marker-fidelity-delta.md`. Deployment remains deferred. |
 | `2026-07-11-penpot-open-path-flattening.md` | Completed | PR #276 preserves open line/cubic/compound geometry without invented closures and carries stroke width, cap, join, dash, endpoint-marker, and opacity contracts through Rust/TypeScript models, MCP/HTTP dry-run/apply, no-write mismatch guards, history, reload, canvas, SVG, PDF stroke operators, and PNG. Failure-learning runs corrected Paper open-area assumptions, cubic extrema, implicit SVG defaults, and two browser locator assumptions. Full Verification `29154359661` passed all gates and 186 Playwright cases; Storage Restore Drill `29153711191` passed. Product evidence is `docs/product/penpot-open-path-flattening-delta.md`. Deployment remains deferred. |
 | `2026-07-10-penpot-path-flattening.md` | Completed | PR #275 adds Paper.js standalone closed-path flattening, deterministic MCP/HTTP `flatten_path` dry-run/apply, no-write invalid geometry handling, relationship/source removal after successful evaluation, Korean direct control, `Ctrl/Cmd+E`, undo/redo, persistence/reload, and SVG/PDF/PNG proof. RED run `29150104717` failed on the absent evaluator; failure-loop runs corrected rotation math and wrapped HTTP response assumptions; GREEN code-head Full Verification `29150553848` passed maturity/design gates, typecheck, web build, Core tests, and 185 Playwright tests. Final head verification is the merge gate. Product evidence is `docs/product/penpot-path-flattening-delta.md`. |

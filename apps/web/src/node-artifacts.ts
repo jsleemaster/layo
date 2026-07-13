@@ -1,5 +1,5 @@
 import { unzlibSync, zlibSync } from "fflate";
-import type { NodePaintGradient, NodePaintSource, NodePaintStop, RendererNode } from "@layo/renderer";
+import type { NodePaintGradient, NodePaintSource, NodePaintStop, NodeStroke, RendererNode } from "@layo/renderer";
 import { parseEditablePath } from "./path-editor";
 
 export interface NodeArtifactAsset {
@@ -129,6 +129,71 @@ interface PdfGradientStop {
 function formatNumber(value: number) {
   const rounded = Math.round(value * 1000) / 1000;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+
+function legacyStrokeForNode(node: RendererNode): NodeStroke | null {
+  if (!node.style.stroke || node.style.stroke_width <= 0) {
+    return null;
+  }
+  return {
+    id: "legacy",
+    color: node.style.stroke,
+    opacity: 1,
+    width: node.style.stroke_width,
+    position: "center",
+    style: (node.style.stroke_dasharray?.length ?? 0) > 0 ? "mixed" : "solid",
+    visible: true,
+    dasharray: node.style.stroke_dasharray ?? [],
+    cap: node.style.stroke_cap ?? "butt",
+    join: node.style.stroke_join ?? "miter",
+    start_marker: node.style.stroke_start_marker ?? "none",
+    end_marker: node.style.stroke_end_marker ?? "none"
+  };
+}
+
+function visibleStrokesForNode(node: RendererNode) {
+  if (node.style.strokes) {
+    return node.style.strokes.filter((stroke) =>
+      stroke.visible && stroke.width > 0 && stroke.opacity > 0 && Boolean(stroke.color)
+    );
+  }
+  const legacy = legacyStrokeForNode(node);
+  return legacy ? [legacy] : [];
+}
+
+function strokeExpansion(stroke: NodeStroke) {
+  if (stroke.position === "outside") {
+    return stroke.width;
+  }
+  if (stroke.position === "center") {
+    return stroke.width / 2;
+  }
+  return 0;
+}
+
+function nodeWithStroke(node: RendererNode, stroke: NodeStroke): RendererNode {
+  return {
+    ...node,
+    style: {
+      ...node.style,
+      strokes: undefined,
+      stroke: stroke.color,
+      stroke_width: stroke.width,
+      stroke_cap: stroke.cap,
+      stroke_join: stroke.join,
+      stroke_dasharray:
+        stroke.style === "dotted"
+          ? [0, Math.max(1, stroke.width * 2)]
+          : stroke.style === "dashed"
+            ? (stroke.dasharray.length > 0 ? stroke.dasharray : [stroke.width * 3, stroke.width * 2])
+            : stroke.style === "solid"
+              ? []
+              : stroke.dasharray,
+      stroke_start_marker: stroke.start_marker,
+      stroke_end_marker: stroke.end_marker
+    }
+  };
 }
 
 function escapeSvgText(value: string) {
@@ -400,16 +465,21 @@ function shadowBoundsForNode(node: RendererNode): ArtifactBounds | null {
 }
 
 function strokeBoundsForNode(node: RendererNode): ArtifactBounds | null {
-  if (!node.style.stroke || node.style.stroke_width <= 0 || node.kind !== "path") {
+  // Preserve legacy artifact origins; first-class stacks opt into aligned box bounds.
+  if (!node.style.strokes && node.kind !== "path") {
+    return null;
+  }
+  const strokes = visibleStrokesForNode(node);
+  if (strokes.length === 0) {
     return null;
   }
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
-  const strokeRadius = node.style.stroke_width / 2;
-  const hasMarker =
-    (node.style.stroke_start_marker ?? "none") !== "none" ||
-    (node.style.stroke_end_marker ?? "none") !== "none";
-  const expansion = hasMarker ? Math.max(4, node.style.stroke_width * 2.5) : strokeRadius;
+  const expansion = strokes.reduce((largest, stroke) => {
+    const hasMarker = stroke.start_marker !== "none" || stroke.end_marker !== "none";
+    const markerExpansion = hasMarker ? Math.max(4, stroke.width * 2.5) : 0;
+    return Math.max(largest, strokeExpansion(stroke), markerExpansion);
+  }, 0);
   return {
     minX: -expansion,
     minY: -expansion,
@@ -653,11 +723,12 @@ function normalizedStrokeDasharray(node: RendererNode) {
   );
 }
 
-function svgStrokeMarkerId(node: RendererNode, position: "start" | "end", marker: string) {
-  return `layo-marker-${safeSvgIdSuffix(node.id)}-${position}-${marker}`;
+function svgStrokeMarkerId(node: RendererNode, position: "start" | "end", marker: string, strokeId?: string) {
+  const suffix = strokeId ? `-${safeSvgIdSuffix(strokeId)}` : "";
+  return `layo-marker-${safeSvgIdSuffix(node.id)}${suffix}-${position}-${marker}`;
 }
 
-function svgStrokePresentationAttributes(node: RendererNode) {
+function svgStrokePresentationAttributes(node: RendererNode, strokeId?: string) {
   const cap = node.style.stroke_cap ?? "butt";
   const join = node.style.stroke_join ?? "miter";
   const dasharray = normalizedStrokeDasharray(node);
@@ -668,10 +739,10 @@ function svgStrokePresentationAttributes(node: RendererNode) {
     node.style.stroke_join ? ` stroke-linejoin="${join}"` : "",
     dasharray.length > 0 ? ` stroke-dasharray="${dasharray.map(formatNumber).join(" ")}"` : "",
     startMarker !== "none"
-      ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker)})"`
+      ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker, strokeId)})"`
       : "",
     endMarker !== "none"
-      ? ` marker-end="url(#${svgStrokeMarkerId(node, "end", endMarker)})"`
+      ? ` marker-end="url(#${svgStrokeMarkerId(node, "end", endMarker, strokeId)})"`
       : ""
   ].join("");
 }
@@ -692,31 +763,41 @@ function svgStrokeMarkerShape(marker: string) {
   return '<path d="M0.8 1 L9.2 5 L0.8 9 Z" />';
 }
 
-function svgStrokeMarkerLinesForNode(node: RendererNode, depth: number) {
-  if (!node.style.stroke || node.style.stroke_width <= 0) {
-    return [];
-  }
+function svgStrokeMarkerDefinitionLines(
+  node: RendererNode,
+  stroke: NodeStroke,
+  depth: number,
+  strokeId?: string
+) {
   const entries = [
-    ["start", node.style.stroke_start_marker ?? "none"],
-    ["end", node.style.stroke_end_marker ?? "none"]
+    ["start", stroke.start_marker],
+    ["end", stroke.end_marker]
   ] as const;
   return entries.flatMap(([position, marker]) =>
     marker === "none"
       ? []
       : [
           indent(
-            `<marker id="${svgStrokeMarkerId(node, position, marker)}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" markerUnits="strokeWidth">`,
+            `<marker id="${svgStrokeMarkerId(node, position, marker, strokeId)}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" markerUnits="strokeWidth">`,
             depth
           ),
           indent(
-            `<g fill="${escapeSvgText(node.style.stroke ?? "none")}" stroke="${escapeSvgText(
-              node.style.stroke ?? "none"
-            )}">${svgStrokeMarkerShape(marker)}</g>`,
+            `<g fill="${escapeSvgText(stroke.color)}" stroke="${escapeSvgText(stroke.color)}" fill-opacity="${formatNumber(stroke.opacity)}" stroke-opacity="${formatNumber(stroke.opacity)}">${svgStrokeMarkerShape(marker)}</g>`,
             depth + 1
           ),
           indent("</marker>", depth)
         ]
   );
+}
+
+function svgStrokeMarkerLinesForNode(node: RendererNode, depth: number) {
+  if (node.style.strokes) {
+    return visibleStrokesForNode(node).flatMap((stroke) =>
+      svgStrokeMarkerDefinitionLines(node, stroke, depth, stroke.id)
+    );
+  }
+  const legacy = legacyStrokeForNode(node);
+  return legacy ? svgStrokeMarkerDefinitionLines(node, legacy, depth) : [];
 }
 
 function svgStrokeMarkerLinesForTree(node: RendererNode, depth: number): string[] {
@@ -879,7 +960,6 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const height = Math.max(1, Math.round(node.size.height));
   const fill = escapeSvgText(node.style.fill);
   const fillAttribute = svgFillAttributeForNode(node);
-  const strokeAttribute = svgStrokeAttributeForNode(node);
   const opacity = svgOpacityAttribute(node.style.opacity);
   const filter = svgShadowFilterAttribute(node);
 
@@ -894,21 +974,44 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   if (imageAsset) {
     return svgImageForNode(node, imageAsset);
   }
-
   if (node.kind === "group") {
     return null;
   }
 
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
   const pathData = pathDataForNode(node);
-  if (pathData) {
-    const fillRuleAttribute = svgFillRuleAttributeForNode(node);
-    return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + svgStrokePresentationAttributes(node) + opacity + filter + " />";
+  const strokes = visibleStrokesForNode(node);
+  if (!node.style.strokes) {
+    const strokeAttribute = svgStrokeAttributeForNode(node);
+    if (pathData) {
+      const fillRuleAttribute = svgFillRuleAttributeForNode(node);
+      return "<path " + svgNodeAttributes(node) + assetAttribute + " d=\"" + escapeSvgText(pathData) + "\" " + fillAttribute + " " + strokeAttribute + " stroke-width=\"" + Math.max(0, Math.round(node.style.stroke_width)) + "\"" + fillRuleAttribute + svgStrokePresentationAttributes(node) + opacity + filter + " />";
+    }
+    if (nodeClipUsesEllipseShape(node)) {
+      return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+    }
+    return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
   }
-  if (nodeClipUsesEllipseShape(node)) {
-    return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
-  }
-  return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+
+  const baseShape = pathData
+    ? `<path ${svgNodeAttributes(node)}${assetAttribute} d="${escapeSvgText(pathData)}" ${fillAttribute} stroke="none"${svgFillRuleAttributeForNode(node)}${opacity}${filter} />`
+    : nodeClipUsesEllipseShape(node)
+      ? `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} stroke="none"${opacity}${filter} />`
+      : `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} stroke="none"${opacity}${filter} />`;
+
+  const strokeShapes = strokes.map((stroke) => {
+    const strokeNode = nodeWithStroke(node, stroke);
+    const common = `data-stroke-id="${escapeSvgText(stroke.id)}" data-stroke-position="${stroke.position}" fill="none" stroke="${escapeSvgText(stroke.color)}" stroke-opacity="${formatNumber(stroke.opacity)}" stroke-width="${formatNumber(stroke.width)}"${svgStrokePresentationAttributes(strokeNode)}`;
+    if (pathData) {
+      return `<path d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)} />`;
+    }
+    const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
+    if (nodeClipUsesEllipseShape(node)) {
+      return `<ellipse cx="${formatNumber(width / 2)}" cy="${formatNumber(height / 2)}" rx="${formatNumber(Math.max(0, width / 2 - inset))}" ry="${formatNumber(Math.max(0, height / 2 - inset))}" ${common} />`;
+    }
+    return `<rect x="${formatNumber(inset)}" y="${formatNumber(inset)}" width="${formatNumber(Math.max(0, width - inset * 2))}" height="${formatNumber(Math.max(0, height - inset * 2))}" rx="0" ${common} />`;
+  });
+  return [baseShape, ...strokeShapes].join("\\n");
 }
 
 function indent(line: string, depth: number) {
@@ -1712,20 +1815,26 @@ function pdfStrokeMarkerCommands(node: RendererNode, pageHeight: number, x: numb
 }
 
 function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
-  if (!node.style.stroke || node.style.stroke_width <= 0) {
-    return [];
-  }
-
-  return [
-    "q",
-    `${pdfColorOperands(node.style.stroke)} RG`,
-    `${formatNumber(Math.max(0, node.style.stroke_width))} w`,
-    ...pdfStrokeStyleCommands(node),
-    ...pdfShapePathCommandsForNode(node, pageHeight, x, y),
-    "S",
-    ...pdfStrokeMarkerCommands(node, pageHeight, x, y),
-    "Q"
-  ];
+  const strokes = visibleStrokesForNode(node);
+  return strokes.flatMap((stroke, index) => {
+    const strokeNode = nodeWithStroke(node, stroke);
+    const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
+    const graphicsState = stroke.opacity < 1
+      ? `/StrokeGs${safeSvgIdSuffix(node.id)}${index + 1} gs`
+      : "";
+    return [
+      `% Layo stroke ${stroke.id} ${stroke.position}`,
+      "q",
+      graphicsState,
+      `${pdfColorOperands(stroke.color)} RG`,
+      `${formatNumber(Math.max(0, stroke.width))} w`,
+      ...pdfStrokeStyleCommands(strokeNode),
+      ...pdfShapePathCommandsForNode(strokeNode, pageHeight, x, y, inset),
+      "S",
+      ...pdfStrokeMarkerCommands(strokeNode, pageHeight, x, y),
+      "Q"
+    ].filter(Boolean);
+  });
 }
 
 function pdfFillCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -2298,7 +2407,21 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     .filter((entry) => entry.shadingName && entry.shadingId)
     .map((entry) => `/${entry.shadingName} ${entry.shadingId} 0 R`);
   const shadingClause = shadingEntries.length > 0 ? ` /Shading << ${shadingEntries.join(" ")} >>` : "";
+  const strokeGraphicsStateEntries: string[] = [];
+  const collectStrokeGraphicsStates = (candidate: RendererNode) => {
+    visibleStrokesForNode(candidate).forEach((stroke, index) => {
+      if (stroke.opacity < 1) {
+        const name = `StrokeGs${safeSvgIdSuffix(candidate.id)}${index + 1}`;
+        const id = addPdfObject(objects, `<< /Type /ExtGState /ca ${formatNumber(stroke.opacity)} /CA ${formatNumber(stroke.opacity)} >>`);
+        strokeGraphicsStateEntries.push(`/${name} ${id} 0 R`);
+      }
+    });
+    candidate.children.forEach(collectStrokeGraphicsStates);
+  };
+  collectStrokeGraphicsStates(node);
+
   const extGStateEntries = [
+    ...strokeGraphicsStateEntries,
     ...shadowEntries
       .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
       .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),

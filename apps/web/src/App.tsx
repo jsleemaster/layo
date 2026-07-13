@@ -34,6 +34,7 @@ import {
   type NodePaintGradient,
   type NodePaintSource,
   type NodePaintStop,
+  type NodeStroke,
   type RendererDocument,
   type RendererNode,
   type TextOrientation,
@@ -645,7 +646,7 @@ function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialGradie
 }
 
 function canvasRadialStrokeGradientForNode(node: RendererNode): CanvasRadialGradient | null {
-  if (!node.style.stroke || node.style.stroke_width <= 0) {
+  if (node.style.strokes || !node.style.stroke || node.style.stroke_width <= 0) {
     return null;
   }
   return canvasRadialGradientForNode(node, "stroke");
@@ -773,6 +774,21 @@ function localVisualBoundsForNode(node: RendererNode): LocalVisualBounds {
     right: node.size.width,
     bottom: node.size.height
   };
+  const strokeExpansion = (node.style.strokes ?? [])
+    .filter((stroke) => stroke.visible && stroke.width > 0 && stroke.opacity > 0)
+    .reduce((largest, stroke) => {
+      const aligned = stroke.position === "outside" ? stroke.width : stroke.position === "center" ? stroke.width / 2 : 0;
+      const hasMarker = stroke.start_marker !== "none" || stroke.end_marker !== "none";
+      return Math.max(largest, aligned, hasMarker ? Math.max(4, stroke.width * 2.5) : 0);
+    }, 0);
+  if (strokeExpansion > 0) {
+    bounds = mergeLocalVisualBounds(bounds, {
+      left: -strokeExpansion,
+      top: -strokeExpansion,
+      right: node.size.width + strokeExpansion,
+      bottom: node.size.height + strokeExpansion
+    });
+  }
 
   for (const child of node.children) {
     const childBounds = localVisualBoundsForNode(child);
@@ -4374,8 +4390,8 @@ function renderNode({
         data={node.content.path_data}
         fill={node.style.fill}
         fillRule={node.content.fill_rule}
-        stroke={node.style.stroke ?? undefined}
-        strokeWidth={node.style.stroke_width}
+        stroke={node.style.strokes ? undefined : node.style.stroke ?? undefined}
+        strokeWidth={node.style.strokes ? 0 : node.style.stroke_width}
         lineCap={node.style.stroke_cap ?? "butt"}
         lineJoin={node.style.stroke_join ?? "miter"}
         dash={node.style.stroke_dasharray ?? []}
@@ -4432,8 +4448,8 @@ function renderNode({
           width={node.size.width}
           height={node.size.height}
           fill={node.style.fill}
-          stroke={node.style.stroke ?? undefined}
-          strokeWidth={node.style.stroke_width}
+          stroke={node.style.strokes ? undefined : node.style.stroke ?? undefined}
+          strokeWidth={node.style.strokes ? 0 : node.style.stroke_width}
           opacity={node.style.opacity}
           cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
           {...canvasLinearGradientPropsForNode(node)}
@@ -4447,29 +4463,73 @@ function renderNode({
     </Group>
   ));
   const body = renderBody();
+  const multiStrokeBodies = (node.style.strokes ?? [])
+    .filter((stroke) => stroke.visible && stroke.width > 0 && stroke.opacity > 0)
+    .map((stroke) => {
+      const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
+      const dash = stroke.style === "dotted"
+        ? [0, Math.max(1, stroke.width * 2)]
+        : stroke.style === "dashed"
+          ? (stroke.dasharray.length ? stroke.dasharray : [stroke.width * 3, stroke.width * 2])
+          : stroke.dasharray;
+      const common = {
+        key: `stroke-${stroke.id}`,
+        fill: undefined,
+        stroke: stroke.color,
+        strokeWidth: stroke.width,
+        opacity: node.style.opacity * stroke.opacity,
+        lineCap: stroke.style === "dotted" ? "round" as const : stroke.cap,
+        lineJoin: stroke.join,
+        dash,
+        listening: false
+      };
+      if (node.kind === "path" && (node.content.type === "path" || node.content.type === "boolean_path")) {
+        return <KonvaPath {...common} data={node.content.path_data} />;
+      }
+      return (
+        <Rect
+          {...common}
+          x={inset}
+          y={inset}
+          width={Math.max(0, node.size.width - inset * 2)}
+          height={Math.max(0, node.size.height - inset * 2)}
+          cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
+        />
+      );
+    });
   const markerGeometry =
     node.kind === "path" && node.content.type === "path"
       ? openPathMarkerGeometry(node.content.path_data)
       : null;
-  const markerBodies =
-    markerGeometry && node.style.stroke && node.style.stroke_width > 0
-      ? [
-          <CanvasStrokeMarker
-            key="start-marker"
-            marker={node.style.stroke_start_marker ?? "none"}
-            point={markerGeometry.start}
-            stroke={node.style.stroke}
-            strokeWidth={node.style.stroke_width}
-          />,
-          <CanvasStrokeMarker
-            key="end-marker"
-            marker={node.style.stroke_end_marker ?? "none"}
-            point={markerGeometry.end}
-            stroke={node.style.stroke}
-            strokeWidth={node.style.stroke_width}
-          />
-        ]
+  const markerStrokes = node.style.strokes
+    ? node.style.strokes.filter((stroke) => stroke.visible && stroke.width > 0 && stroke.opacity > 0)
+    : node.style.stroke && node.style.stroke_width > 0
+      ? [{
+          id: "legacy",
+          color: node.style.stroke,
+          width: node.style.stroke_width,
+          start_marker: node.style.stroke_start_marker ?? "none",
+          end_marker: node.style.stroke_end_marker ?? "none"
+        }]
       : [];
+  const markerBodies = markerGeometry
+    ? markerStrokes.flatMap((stroke) => [
+        <CanvasStrokeMarker
+          key={`${stroke.id}-start-marker`}
+          marker={stroke.start_marker}
+          point={markerGeometry.start}
+          stroke={stroke.color}
+          strokeWidth={stroke.width}
+        />,
+        <CanvasStrokeMarker
+          key={`${stroke.id}-end-marker`}
+          marker={stroke.end_marker}
+          point={markerGeometry.end}
+          stroke={stroke.color}
+          strokeWidth={stroke.width}
+        />
+      ])
+    : [];
 
   return (
     <Group
@@ -4490,6 +4550,7 @@ function renderNode({
     >
       {shadowBodies}
       {body}
+      {multiStrokeBodies}
       {markerBodies}
       {isSelected ? (
         <>
@@ -6567,6 +6628,67 @@ function Inspector({
     strokeStyleDraftRef.current = { nodeId: selectedNode.id, style: nextStyle };
     onNodeStyleChange(selectedNode.id, nextStyle);
   };
+  const updateStrokeStack = (strokes: NodeStroke[]) => {
+    const primary = strokes.find((stroke) => stroke.visible && stroke.width > 0) ?? strokes[0];
+    updateStrokeStyle({
+      strokes,
+      ...(primary
+        ? {
+            stroke: primary.color,
+            stroke_width: primary.width,
+            stroke_cap: primary.cap,
+            stroke_join: primary.join,
+            stroke_dasharray: primary.dasharray,
+            stroke_start_marker: primary.start_marker,
+            stroke_end_marker: primary.end_marker
+          }
+        : {})
+    });
+  };
+  const addStroke = () => {
+    const current = selectedNode.style.strokes ?? [];
+    const source = current.at(-1);
+    updateStrokeStack([
+      ...current,
+      {
+        id: `stroke-${crypto.randomUUID()}`,
+        color: source?.color ?? selectedNode.style.stroke ?? selectedNode.style.fill,
+        opacity: source?.opacity ?? 1,
+        width: source?.width ?? Math.max(1, selectedNode.style.stroke_width || 1),
+        position: source?.position ?? "center",
+        style: source?.style ?? "solid",
+        visible: true,
+        dasharray: source ? [...source.dasharray] : [],
+        cap: source?.cap ?? selectedNode.style.stroke_cap ?? "butt",
+        join: source?.join ?? selectedNode.style.stroke_join ?? "miter",
+        start_marker: source?.start_marker ?? selectedNode.style.stroke_start_marker ?? "none",
+        end_marker: source?.end_marker ?? selectedNode.style.stroke_end_marker ?? "none"
+      }
+    ]);
+  };
+  const patchStroke = (index: number, patch: Partial<NodeStroke>) => {
+    updateStrokeStack((selectedNode.style.strokes ?? []).map((stroke, candidate) =>
+      candidate === index ? { ...stroke, ...patch } : stroke
+    ));
+  };
+  const moveStroke = (index: number, direction: -1 | 1) => {
+    const strokes = [...(selectedNode.style.strokes ?? [])];
+    const target = index + direction;
+    if (target < 0 || target >= strokes.length) return;
+    [strokes[index], strokes[target]] = [strokes[target], strokes[index]];
+    updateStrokeStack(strokes);
+  };
+  const duplicateStroke = (index: number) => {
+    const strokes = [...(selectedNode.style.strokes ?? [])];
+    const source = strokes[index];
+    if (!source) return;
+    strokes.splice(index + 1, 0, { ...source, id: `stroke-${crypto.randomUUID()}`, dasharray: [...source.dasharray] });
+    updateStrokeStack(strokes);
+  };
+  const deleteStroke = (index: number) => {
+    updateStrokeStack((selectedNode.style.strokes ?? []).filter((_, candidate) => candidate !== index));
+  };
+
   const commitStrokeDasharray = () => {
     const dasharray = strokeDashDraft
       .split(/[ ,]+/)
@@ -7498,7 +7620,65 @@ function Inspector({
           토큰 {fillToken?.name ?? selectedNode.style.fill_token}
         </div>
       ) : null}
-      {selectedNode.style.stroke && selectedNode.style.stroke_width > 0 ? (
+      <section className="inspector-section" data-testid="inspector-stroke-stack" aria-label="선 목록">
+        <div className="inspector-section-heading">
+          <h3>선</h3>
+          <button type="button" data-testid="inspector-stroke-add" onClick={addStroke} aria-label="선 추가" title="선 추가">
+            +
+          </button>
+        </div>
+        {(selectedNode.style.strokes ?? []).map((stroke, index) => (
+          <div className="inspector-stroke-row" data-testid={`inspector-stroke-row-${index}`} key={stroke.id}>
+            <div className="inspector-stroke-actions">
+              <button type="button" onClick={() => patchStroke(index, { visible: !stroke.visible })} aria-label={stroke.visible ? "선 숨기기" : "선 보이기"} title={stroke.visible ? "선 숨기기" : "선 보이기"}>
+                {stroke.visible ? "◉" : "○"}
+              </button>
+              <button type="button" onClick={() => moveStroke(index, -1)} disabled={index === 0} aria-label="선을 위로 이동" title="선을 위로 이동">↑</button>
+              <button type="button" onClick={() => moveStroke(index, 1)} disabled={index === (selectedNode.style.strokes?.length ?? 0) - 1} aria-label="선을 아래로 이동" title="선을 아래로 이동">↓</button>
+              <button type="button" onClick={() => duplicateStroke(index)} aria-label="선 복제" title="선 복제">⧉</button>
+              <button type="button" onClick={() => deleteStroke(index)} aria-label="선 삭제" title="선 삭제">×</button>
+            </div>
+            <div className="field-grid">
+              <label>
+                선 색상
+                <input data-testid={`inspector-stroke-${index}-color`} type="color" value={stroke.color} onChange={(event) => patchStroke(index, { color: event.currentTarget.value })} />
+              </label>
+              <label>
+                두께
+                <input data-testid={`inspector-stroke-${index}-width`} type="number" min="0" step="0.5" value={stroke.width} onChange={(event) => {
+                  const width = Number(event.currentTarget.value);
+                  if (Number.isFinite(width) && width >= 0) patchStroke(index, { width });
+                }} />
+              </label>
+              <label>
+                불투명도
+                <input data-testid={`inspector-stroke-${index}-opacity`} type="number" min="0" max="1" step="0.05" value={stroke.opacity} onChange={(event) => {
+                  const opacity = Number(event.currentTarget.value);
+                  if (Number.isFinite(opacity) && opacity >= 0 && opacity <= 1) patchStroke(index, { opacity });
+                }} />
+              </label>
+              <label>
+                위치
+                <select data-testid={`inspector-stroke-${index}-position`} value={stroke.position} onChange={(event) => patchStroke(index, { position: event.currentTarget.value as NodeStroke["position"] })}>
+                  <option value="inside">안쪽</option>
+                  <option value="center">가운데</option>
+                  <option value="outside">바깥쪽</option>
+                </select>
+              </label>
+              <label>
+                스타일
+                <select data-testid={`inspector-stroke-${index}-style`} value={stroke.style} onChange={(event) => patchStroke(index, { style: event.currentTarget.value as NodeStroke["style"] })}>
+                  <option value="solid">실선</option>
+                  <option value="dotted">점선</option>
+                  <option value="dashed">파선</option>
+                  <option value="mixed">사용자 지정</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        ))}
+      </section>
+      {!selectedNode.style.strokes && selectedNode.style.stroke && selectedNode.style.stroke_width > 0 ? (
         <section className="inspector-section" data-testid="inspector-stroke-controls" aria-label="선">
           <h3>선</h3>
           <div className="field-grid">

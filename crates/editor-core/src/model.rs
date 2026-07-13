@@ -639,6 +639,43 @@ pub enum StrokeMarker {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StrokePosition {
+    Inside,
+    Center,
+    Outside,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum StrokeStyle {
+    Solid,
+    Dotted,
+    Dashed,
+    Mixed,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct NodeStroke {
+    pub id: String,
+    pub color: String,
+    pub opacity: f64,
+    pub width: f64,
+    pub position: StrokePosition,
+    pub style: StrokeStyle,
+    pub visible: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dasharray: Vec<f64>,
+    pub cap: StrokeCap,
+    pub join: StrokeJoin,
+    pub start_marker: StrokeMarker,
+    pub end_marker: StrokeMarker,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct Style {
     pub fill: String,
