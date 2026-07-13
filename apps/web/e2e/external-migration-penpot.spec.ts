@@ -337,6 +337,70 @@ test("imports a packaged Penpot library swap and preserves it after reload", asy
     value: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`
   });
 
+  const libraryId = `penpot-library-${penpotLibrarySwapIds.libraryFileId}`;
+  let updateRequestCount = 0;
+  await page.route(
+    `**/files/${project.currentDocumentId}/import/library/registry/update`,
+    async (route) => {
+      updateRequestCount += 1;
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "update must not run" })
+      });
+    }
+  );
+  await page.route(
+    `**/files/${project.currentDocumentId}/import/library/registry/update/review`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          review: {
+            canUpdate: false,
+            blockedBy: ["library_component_deletion_in_use"],
+            deletedComponents: [
+              {
+                sourceComponentId: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`,
+                targetComponentId: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`,
+                affectedInstanceIds: [
+                  `penpot-${penpotLibrarySwapIds.outerCopyId}`,
+                  `penpot-${penpotLibrarySwapIds.outerCopyId}__penpot-${penpotLibrarySwapIds.outerMainSlotId}`
+                ]
+              }
+            ]
+          }
+        })
+      });
+    }
+  );
+  await page.route(
+    `**/files/${project.currentDocumentId}/libraries/updates`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          updates: [
+            {
+              fileId: project.currentDocumentId,
+              libraryId,
+              libraryName: "Shape library",
+              sourceFileId: libraryId,
+              sourceName: "Shape library",
+              componentCount: 1,
+              tokenCount: 0,
+              assetCount: 0,
+              importedRegistryUpdatedAt: "2026-07-13T00:00:00.000Z",
+              registryUpdatedAt: "2026-07-13T00:01:00.000Z"
+            }
+          ]
+        })
+      });
+    }
+  );
+
   await page.reload();
   await openFilePanel(page);
   await page.getByTestId("project-switcher").selectOption(importedProjectId);
@@ -344,4 +408,10 @@ test("imports a packaged Penpot library swap and preserves it after reload", asy
   await expect(page.getByTestId("layer-panel")).toContainText("Card copy");
   await page.getByRole("button", { name: "Card copy" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("400");
+
+  await page.getByTestId(`library-registry-update-${libraryId}`).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "업데이트 차단 · 사용 중 컴포넌트 삭제 1개 · 영향 인스턴스 2개"
+  );
+  expect(updateRequestCount).toBe(0);
 });

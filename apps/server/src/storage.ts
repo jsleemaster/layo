@@ -929,6 +929,18 @@ export interface LibraryRegistryUpdateNotification {
   registryUpdatedAt: string;
 }
 
+export interface LibraryRegistryDeletedComponentPreview {
+  sourceComponentId: string;
+  targetComponentId: string;
+  affectedInstanceIds: string[];
+}
+
+export interface LibraryRegistryItemUpdatePreview {
+  canUpdate: boolean;
+  blockedBy: string[];
+  deletedComponents: LibraryRegistryDeletedComponentPreview[];
+}
+
 export interface LibraryRegistryTokenSubscription {
   fileId: string;
   libraryId: string;
@@ -2229,6 +2241,44 @@ export class FileStorage {
     };
   }
 
+  async reviewLibraryRegistryItemUpdate(
+    fileId: string,
+    libraryId: string
+  ): Promise<LibraryRegistryItemUpdatePreview> {
+    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+    const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
+      (candidate) => candidate.libraryId === normalizedLibraryId
+    );
+    if (!subscription) {
+      throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
+    }
+    const { archive } = await this.readAccessibleLibraryRegistryArchive(
+      fileId,
+      normalizedLibraryId
+    );
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const sourceComponentIds = new Set(
+      library.library.components.map((component) => component.id)
+    );
+    const deletedComponents = Object.entries(subscription.componentIdMap)
+      .filter(([sourceComponentId]) => !sourceComponentIds.has(sourceComponentId))
+      .map(([sourceComponentId, targetComponentId]) => ({
+        sourceComponentId,
+        targetComponentId,
+        affectedInstanceIds: componentAffectedInstanceIds(target, targetComponentId)
+      }));
+    const hasInUseDeletion = deletedComponents.some(
+      (component) => component.affectedInstanceIds.length > 0
+    );
+
+    return {
+      canUpdate: !hasInUseDeletion,
+      blockedBy: hasInUseDeletion ? ["library_component_deletion_in_use"] : [],
+      deletedComponents
+    };
+  }
+
   async updateLibraryRegistryItem(
     fileId: string,
     libraryId: string
@@ -2240,6 +2290,18 @@ export class FileStorage {
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
     }
+    const preview = await this.reviewLibraryRegistryItemUpdate(fileId, normalizedLibraryId);
+    if (!preview.canUpdate) {
+      throw inputValidationError(
+        `library component deletion is in use: ${preview.deletedComponents
+          .filter((component) => component.affectedInstanceIds.length > 0)
+          .map((component) => component.sourceComponentId)
+          .join(", ")}`
+      );
+    }
+    const deletedTargetComponentIds = new Set(
+      preview.deletedComponents.map((component) => component.targetComponentId)
+    );
     const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
@@ -2292,7 +2354,11 @@ export class FileStorage {
 
     target.tokens = nextTokens;
     target.components = [
-      ...(target.components ?? []).filter((component) => !updatedComponentIds.has(component.id)),
+      ...(target.components ?? []).filter(
+        (component) =>
+          !updatedComponentIds.has(component.id)
+          && !deletedTargetComponentIds.has(component.id)
+      ),
       ...updatedComponents
     ];
     await this.writeFile(fileId, target);
@@ -4349,6 +4415,27 @@ function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
 
 function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
+}
+
+function componentAffectedInstanceIds(
+  document: DesignFile,
+  componentId: string
+): string[] {
+  const affected = new Set<string>();
+  const visit = (node: DesignNode): void => {
+    const instance = node.component_instance;
+    if (
+      instance?.definition_id === componentId
+      || instance?.overrides.some(
+        (override) => override.field === "component_swap" && override.value === componentId
+      )
+    ) {
+      affected.add(node.id);
+    }
+    node.children.forEach(visit);
+  };
+  document.pages.forEach((page) => page.children.forEach(visit));
+  return [...affected];
 }
 
 function collectImageAssetIds(document: DesignFile): string[] {

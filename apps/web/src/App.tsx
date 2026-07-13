@@ -82,6 +82,7 @@ import {
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
+  reviewLibraryRegistryItemUpdate,
   reviewLibraryRegistryTokens,
   saveFileVersion,
   setFileVersionPinned,
@@ -14167,6 +14168,23 @@ export function App() {
     }
 
     try {
+      setLibraryRegistryStatus("게시 라이브러리 업데이트 검토 중");
+      const review = await reviewLibraryRegistryItemUpdate(
+        currentProject.currentDocumentId,
+        libraryId
+      );
+      if (!review.canUpdate) {
+        const affectedInstanceCount = review.deletedComponents.reduce(
+          (total, component) => total + component.affectedInstanceIds.length,
+          0
+        );
+        const message =
+          `업데이트 차단 · 사용 중 컴포넌트 삭제 ${review.deletedComponents.length}개 · 영향 인스턴스 ${affectedInstanceCount}개`;
+        setLibraryRegistryStatus(message);
+        setProjectStatus(message);
+        return;
+      }
+
       setLibraryRegistryStatus("게시 라이브러리 업데이트 적용 중");
       const imported = await updateLibraryRegistryItem(currentProject.currentDocumentId, libraryId);
       await loadProjectDocument(currentProject, projects);

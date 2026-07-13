@@ -45,3 +45,19 @@ References:
       code handoff, SVG/PDF/raster output, and direct Playwright CLI interaction.
 - [ ] Run failure learning, review, merge, post-merge cleanup, and route the next
       exact Penpot maturity gap.
+
+## Progress After PR #284
+
+- [x] Reused the packaged cross-file nested-swap fixture from PR #283.
+- [x] Added the exact in-use source-deletion RED case.
+- [x] Added source/target deletion mapping and direct plus parent-swap impact
+      summaries.
+- [x] Blocked update before asset, target document, or subscription writes.
+- [x] Added storage, HTTP, web API, Korean UI, and direct Playwright CLI proof.
+- [ ] Add incompatible same-id replacement and local override conflict cases.
+- [ ] Add stale subscription, interrupted-write rollback, retry, and version
+      recovery cases.
+
+Evidence is recorded in
+`docs/product/penpot-library-in-use-deletion-guard-delta.md`. The plan remains
+active; do not treat PR #284 as completion of the broader recovery goal.

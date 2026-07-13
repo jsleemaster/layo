@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file library ownership, nested component swaps, source-library media and archives, registry subscriptions, happy-path refresh, no-write missing-source blockers, agent/code handoff, HTTP persistence, and reload interaction. Source deletion, incompatible replacement, local override conflict, partial write failure, and rollback recovery remain unproven; exercise those exact cases next. Deployment remains non-gating. |
+| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file ownership and happy-path refresh. PR #284 adds agent-readable source-deletion preview, source/target id mapping, direct and parent-swap impact analysis, no-write storage/HTTP enforcement, Korean editor blocking, and Playwright proof that apply is never called. RED `29249518688` proved the preview was absent; GREEN `29250183489` passed all gates and 192 Playwright cases. Incompatible same-id replacement, local override conflict, stale subscriptions, partial-write rollback, retry, and version recovery remain active. Deployment remains non-gating. |
 
 ## Completed Plans
 

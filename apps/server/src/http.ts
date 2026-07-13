@@ -404,6 +404,18 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Params: { fileId: string };
     Body: { libraryId: string };
+  }>("/files/:fileId/import/library/registry/update/review", async (request) => {
+    return {
+      review: await storage.reviewLibraryRegistryItemUpdate(
+        request.params.fileId,
+        request.body.libraryId
+      )
+    };
+  });
+
+  server.post<{
+    Params: { fileId: string };
+    Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/update", async (request) => {
     return {
       imported: await storage.updateLibraryRegistryItem(request.params.fileId, request.body.libraryId)
