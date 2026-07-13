@@ -37,7 +37,6 @@ const pathNode: RendererNode = {
 const document: RendererDocument = {
   id: "stroke-history",
   name: "Stroke history",
-  version: 1,
   pages: [{ id: "page-1", name: "Page 1", children: [pathNode] }]
 };
 
