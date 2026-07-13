@@ -2338,6 +2338,7 @@ export class FileStorage {
       this.librarySubscriptionsPath(),
       this.filePathFor(fileId)
     ]);
+    const rollbackGuards: StoragePathSnapshot[] = [];
     try {
       for (const asset of library.assets) {
         await this.writeAsset(asset.metadata, asset.data);
@@ -2381,6 +2382,10 @@ export class FileStorage {
         ...updatedComponents
       ];
       await this.writeFile(fileId, target);
+      rollbackGuards.push({
+        filePath: this.filePathFor(fileId),
+        data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
+      });
 
       const imported: ImportedLibraryRegistryItem = {
         fileId,
@@ -2399,11 +2404,13 @@ export class FileStorage {
 
     } catch (error) {
       try {
-        await restoreStoragePathSnapshots(rollbackSnapshots);
+        await restoreStoragePathSnapshots(rollbackSnapshots, rollbackGuards);
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
-          "library registry update failed and rollback failed"
+          rollbackError instanceof StorageRollbackConflictError
+            ? "library registry update rollback conflicted with concurrent writes"
+            : "library registry update failed and rollback failed"
         );
       }
       throw error;
@@ -4453,6 +4460,8 @@ interface StoragePathSnapshot {
   data: Buffer | null;
 }
 
+class StorageRollbackConflictError extends Error {}
+
 async function captureStoragePathSnapshots(
   filePaths: string[]
 ): Promise<StoragePathSnapshot[]> {
@@ -4471,8 +4480,26 @@ async function captureStoragePathSnapshots(
 }
 
 async function restoreStoragePathSnapshots(
-  snapshots: StoragePathSnapshot[]
+  snapshots: StoragePathSnapshot[],
+  guards: StoragePathSnapshot[] = []
 ): Promise<void> {
+  const currentGuards = await captureStoragePathSnapshots(
+    guards.map((guard) => guard.filePath)
+  );
+  for (const guard of guards) {
+    const current = currentGuards.find(
+      (candidate) => candidate.filePath === guard.filePath
+    );
+    const matches = current?.data === null
+      ? guard.data === null
+      : guard.data !== null && current?.data.equals(guard.data);
+    if (!matches) {
+      throw new StorageRollbackConflictError(
+        `storage path changed after library update write: ${guard.filePath}`
+      );
+    }
+  }
+
   for (const snapshot of snapshots) {
     if (snapshot.data === null) {
       await rm(snapshot.filePath, { force: true });
