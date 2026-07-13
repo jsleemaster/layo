@@ -1742,7 +1742,7 @@ export class FileStorage {
           originalName: library.file.name,
           componentCount: library.file.components?.length ?? 0,
           tokenCount: library.file.tokens?.length ?? 0,
-          assetCount: 0,
+          assetCount: collectComponentImageAssetIds(library.file.components ?? []).length,
           componentIdMap,
           tokenIdMap: {},
           libraryId: entry.libraryId,
@@ -4380,6 +4380,18 @@ function collectImageAssetIdsFromNode(node: DesignNode, assetIds: Set<string>) {
   if (node.content.type === "image") {
     assertSafeStorageId(node.content.asset_id);
     assetIds.add(node.content.asset_id);
+  }
+  for (const fill of node.style.fills ?? []) {
+    if (fill.paint?.type === "image") {
+      assertSafeStorageId(fill.paint.asset_id);
+      assetIds.add(fill.paint.asset_id);
+    }
+  }
+  for (const stroke of node.style.strokes ?? []) {
+    if (stroke.paint?.type === "image") {
+      assertSafeStorageId(stroke.paint.asset_id);
+      assetIds.add(stroke.paint.asset_id);
+    }
   }
   for (const child of node.children) {
     collectImageAssetIdsFromNode(child, assetIds);
