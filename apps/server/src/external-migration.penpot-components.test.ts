@@ -1277,6 +1277,67 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("recovers an interrupted library target write on storage restart", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-restart-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-restart-project",
+        documentId: "penpot-restart-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const originalTarget = await storage.readFile("penpot-restart-target");
+      const originalSubscriptions = await storage.listLibraryRegistrySubscriptions();
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#e11d48";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+      };
+      let markSubscriptionReached!: () => void;
+      const subscriptionReached = new Promise<void>((resolve) => {
+        markSubscriptionReached = resolve;
+      });
+      const neverCommits = new Promise<void>(() => undefined);
+      internals.writeLibraryRegistrySubscriptions = async () => {
+        markSubscriptionReached();
+        await neverCommits;
+      };
+
+      const interruptedUpdate = storage.updateLibraryRegistryItem(
+        "penpot-restart-target",
+        libraryDocumentId
+      );
+      void interruptedUpdate.catch(() => undefined);
+      await subscriptionReached;
+      expect(
+        (await storage.readFile("penpot-restart-target")).components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#e11d48");
+
+      const restartedStorage = new FileStorage(root);
+      await restartedStorage.prepareFiles();
+
+      expect(await restartedStorage.readFile("penpot-restart-target")).toEqual(originalTarget);
+      expect(await restartedStorage.listLibraryRegistrySubscriptions()).toEqual(
+        originalSubscriptions
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {
