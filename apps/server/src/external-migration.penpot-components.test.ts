@@ -343,6 +343,23 @@ describe("Penpot component instance migration", () => {
 
     expect(imported.file.pages).toHaveLength(1);
     expect(imported.file.pages[0].name).toBe("Product");
+    expect(
+      (imported as {
+        importedLibraries?: Array<{ sourceFileId: string; file: { name: string; pages: unknown[]; components?: Array<{ id: string }> } }>;
+      }).importedLibraries
+    ).toEqual([
+      {
+        sourceFileId: libraryFileId,
+        file: expect.objectContaining({
+          name: "Shape library",
+          pages: [expect.objectContaining({ name: "Shapes" })],
+          components: [
+            expect.objectContaining({ id: `penpot-component-${rectangleComponentId}` }),
+            expect.objectContaining({ id: `penpot-component-${circleComponentId}` })
+          ]
+        })
+      }
+    ]);
     expect(imported.file.components?.map((component) => component.id)).toEqual([
       `penpot-component-${outerComponentId}`,
       `penpot-component-${rectangleComponentId}`,
