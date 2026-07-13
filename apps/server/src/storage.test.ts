@@ -589,10 +589,20 @@ describe("FileStorage", () => {
     } as any;
 
     const first = await storage.publishLibraryToRegistry("sample-file", options);
-    const retried = await storage.publishLibraryToRegistry("sample-file", options);
+    const retryingStorage = new FileStorage(tempRoot);
+    const retried = await retryingStorage.publishLibraryToRegistry("sample-file", options);
 
     expect(retried).toEqual(first);
-    await expect(storage.listLibraryRegistryEvents()).resolves.toEqual([
+    await expect(
+      retryingStorage.publishLibraryToRegistry("sample-file", {
+        ...options,
+        name: "Another Kit"
+      })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: expect.stringMatching(/idempotency key was already used/i)
+    });
+    await expect(retryingStorage.listLibraryRegistryEvents()).resolves.toEqual([
       expect.objectContaining({
         sequence: 1,
         libraryId: "team-kit",
