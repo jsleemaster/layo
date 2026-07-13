@@ -469,19 +469,19 @@ test("file panel imports a Penpot mixed fill-image stack into local asset storag
   expect(fileResponse.ok()).toBeTruthy();
   const filePayload = await fileResponse.json();
   const frame = filePayload.file.pages[0].children[0];
-  const fillImageNode = frame.children[0];
-  expect(fillImageNode).toMatchObject({
+  const fillNode = frame.children[0];
+  expect(fillNode).toMatchObject({
     id: `penpot-${fillRectId}`,
-    kind: "image",
+    kind: "rectangle",
     name: "Hero fill",
-    style: { opacity: 0.75 },
-    content: {
-      type: "image",
-      asset_id: expectedFillAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
+    style: {
+      opacity: 1,
+      fills: [
+        { id: "penpot-fill-1", paint: { type: "gradient" }, opacity: 0.4 },
+        { id: "penpot-fill-2", paint: { type: "image", asset_id: expectedFillAssetId }, opacity: 0.75 }
+      ]
+    },
+    content: { type: "empty" }
   });
 
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFillAssetId}`);
@@ -505,7 +505,6 @@ test("file panel imports a Penpot frame fill-image background without dropping c
   await expect(page.getByTestId("external-migration-status")).toContainText("Penpot Frame Background Board 가져옴");
   await expect(page.getByTestId("project-status")).toContainText("Penpot Frame Background Board 가져옴");
   await expect(page.getByTestId("project-name")).toHaveValue("Penpot Frame Background Board");
-  await expect(page.getByTestId("layer-panel")).toContainText("Hero frame background");
   await expect(page.getByTestId("layer-panel")).toContainText("Foreground card");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
@@ -519,21 +518,11 @@ test("file panel imports a Penpot frame fill-image background without dropping c
   const filePayload = await fileResponse.json();
   const frame = filePayload.file.pages[0].children[0];
   expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Hero frame" });
-  expect(frame.children).toHaveLength(2);
-  const background = frame.children[0];
-  expect(background).toMatchObject({
-    id: `penpot-${frameId}-fill-image`,
-    kind: "image",
-    name: "Hero frame background",
-    content: {
-      type: "image",
-      asset_id: expectedFrameBackgroundAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
-  });
-  expect(frame.children[1]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: "rectangle", name: "Foreground card" });
+  expect(frame.style.fills).toMatchObject([
+    { id: "penpot-fill-1", paint: { type: "image", asset_id: expectedFrameBackgroundAssetId } }
+  ]);
+  expect(frame.children).toHaveLength(1);
+  expect(frame.children[0]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: "rectangle", name: "Foreground card" });
 
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedFrameBackgroundAssetId}`);
   expect(assetResponse.ok()).toBeTruthy();

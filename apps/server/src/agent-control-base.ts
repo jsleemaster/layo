@@ -19,9 +19,10 @@ import type {
   NodeConstraints,
   NodeExportPreset,
   NodeLayout,
+  NodeFill,
   NodeLayoutItem,
+  NodePaint,
   NodeStroke,
-  NodeStrokePaint,
   TextOrientation,
   TextWritingMode
 } from "./storage";
@@ -183,12 +184,13 @@ export type AgentCommand =
     }
   | { type: "detach_instance"; nodeId: string };
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "fills" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 type GeometryPatch = Partial<{ x: number; y: number; width: number; height: number }>;
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
   "fill",
+  "fills",
   "stroke",
   "stroke_width",
   "strokes",
@@ -1192,7 +1194,23 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     }
     case "set_fill": {
       const node = requireNode(document, command.nodeId);
-      node.style = { ...node.style, fill: command.fill, fill_token: null, fill_style: null };
+      const fills = node.style.fills
+        ? [{
+            id: node.style.fills[0]?.id ?? "fill-1",
+            color: command.fill,
+            paint: { type: "solid" as const, color: command.fill },
+            opacity: 1,
+            visible: true,
+            blend_mode: "normal" as const
+          }]
+        : undefined;
+      node.style = {
+        ...node.style,
+        fill: command.fill,
+        ...(fills ? { fills } : {}),
+        fill_token: null,
+        fill_style: null
+      };
       return node.id;
     }
     case "set_node_style": {
@@ -2159,34 +2177,38 @@ function componentSourceNodeForVariant(
   return variant?.source_node ?? definition.source_node;
 }
 
-function normalizeAgentStrokePaint(paint: NodeStrokePaint, index: number): NodeStrokePaint {
+function normalizeAgentPaint(
+  paint: NodePaint,
+  index: number,
+  stack: "fills" | "strokes"
+): NodePaint {
   if (paint.type === "solid") {
     const color = typeof paint.color === "string" ? paint.color.trim() : "";
     if (!color) {
-      throw new Error(`strokes[${index}].paint.color is required`);
+      throw new Error(`${stack}[${index}].paint.color is required`);
     }
     return { type: "solid", color };
   }
   if (paint.type === "image") {
     const assetId = typeof paint.asset_id === "string" ? paint.asset_id.trim() : "";
     if (!assetId) {
-      throw new Error(`strokes[${index}].paint.asset_id must be non-empty`);
+      throw new Error(`${stack}[${index}].paint.asset_id must be non-empty`);
     }
     return { type: "image", asset_id: assetId };
   }
   if (paint.type !== "gradient" || !paint.gradient || typeof paint.gradient !== "object") {
-    throw new Error(`strokes[${index}].paint.type is invalid`);
+    throw new Error(`${stack}[${index}].paint.type is invalid`);
   }
 
   const gradient = paint.gradient;
   if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
-    throw new Error(`strokes[${index}].paint.gradient requires at least two stops`);
+    throw new Error(`${stack}[${index}].paint.gradient requires at least two stops`);
   }
   const stops = gradient.stops.map((stop, stopIndex) => {
     const color = typeof stop.color === "string" ? stop.color.trim() : "";
     if (!color || !Number.isFinite(stop.opacity) || stop.opacity < 0 || stop.opacity > 1 ||
         !Number.isFinite(stop.offset) || stop.offset < 0 || stop.offset > 1) {
-      throw new Error(`strokes[${index}].paint.gradient.stops[${stopIndex}] is invalid`);
+      throw new Error(`${stack}[${index}].paint.gradient.stops[${stopIndex}] is invalid`);
     }
     return { color, opacity: stop.opacity, offset: stop.offset };
   });
@@ -2195,12 +2217,12 @@ function normalizeAgentStrokePaint(paint: NodeStrokePaint, index: number): NodeS
       return undefined;
     }
     if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) {
-      throw new Error(`strokes[${index}].paint.gradient.${field} is invalid`);
+      throw new Error(`${stack}[${index}].paint.gradient.${field} is invalid`);
     }
     return { x: value.x, y: value.y };
   };
   if (gradient.width !== undefined && (!Number.isFinite(gradient.width) || gradient.width < 0)) {
-    throw new Error(`strokes[${index}].paint.gradient.width is invalid`);
+    throw new Error(`${stack}[${index}].paint.gradient.width is invalid`);
   }
   return {
     type: "gradient",
@@ -2212,6 +2234,46 @@ function normalizeAgentStrokePaint(paint: NodeStrokePaint, index: number): NodeS
       stops
     }
   };
+}
+
+function normalizeAgentFills(fills: NodeFill[] | undefined): NodeFill[] | undefined {
+  if (fills === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(fills)) {
+    throw new Error("fills must be an ordered array");
+  }
+  const ids = new Set<string>();
+  const blendModes = new Set([
+    "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
+    "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
+  ]);
+  return fills.map((fill, index) => {
+    const id = typeof fill.id === "string" ? fill.id.trim() : "";
+    if (!id || ids.has(id)) {
+      throw new Error(`fills[${index}].id must be non-empty and unique`);
+    }
+    ids.add(id);
+    const color = typeof fill.color === "string" ? fill.color.trim() : "";
+    if (!color) {
+      throw new Error(`fills[${index}].color is required`);
+    }
+    if (!Number.isFinite(fill.opacity) || fill.opacity < 0 || fill.opacity > 1) {
+      throw new Error(`fills[${index}].opacity must be between 0 and 1`);
+    }
+    if (!blendModes.has(fill.blend_mode)) {
+      throw new Error(`fills[${index}].blend_mode is invalid`);
+    }
+    const paint = fill.paint !== undefined ? normalizeAgentPaint(fill.paint, index, "fills") : undefined;
+    return {
+      id,
+      color: paint?.type === "solid" ? paint.color : color,
+      ...(paint !== undefined ? { paint } : {}),
+      opacity: fill.opacity,
+      visible: Boolean(fill.visible),
+      blend_mode: fill.blend_mode
+    };
+  });
 }
 
 function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] | undefined {
@@ -2250,7 +2312,7 @@ function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] 
         (stroke.dasharray.length > 0 && !stroke.dasharray.some((value) => value > 0))) {
       throw new Error(`strokes[${index}].dasharray is invalid`);
     }
-    const paint = stroke.paint !== undefined ? normalizeAgentStrokePaint(stroke.paint, index) : undefined;
+    const paint = stroke.paint !== undefined ? normalizeAgentPaint(stroke.paint, index, "strokes") : undefined;
     return {
       id,
       color: paint?.type === "solid" ? paint.color : stroke.color.trim(),
@@ -2316,6 +2378,7 @@ export function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode[
     fill: style.fill,
     fill_token: style.fill_token ?? null,
     fill_style: style.fill_style ?? null,
+    ...(style.fills !== undefined ? { fills: normalizeAgentFills(style.fills) } : {}),
     stroke: style.stroke ?? null,
     stroke_width: style.stroke_width,
     ...(style.strokes !== undefined ? { strokes: normalizeAgentStrokes(style.strokes) } : {}),
@@ -2342,7 +2405,13 @@ export function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode[
 
 function syncComponentInstanceOverridesForAgentCommand(document: DesignFile, command: AgentCommand): void {
   if (command.type === "set_fill") {
-    syncComponentInstanceStyleOverrides(document, command.nodeId, { fill: command.fill }, ["fill"]);
+    const node = findNodeById(document, command.nodeId);
+    syncComponentInstanceStyleOverrides(
+      document,
+      command.nodeId,
+      { fill: command.fill, ...(node?.style.fills ? { fills: node.style.fills } : {}) },
+      node?.style.fills ? ["fill", "fills"] : ["fill"]
+    );
   } else if (command.type === "set_node_style") {
     syncComponentInstanceStyleOverrides(document, command.nodeId, command.style);
   } else if (command.type === "set_effect_shadow_token") {
@@ -2426,7 +2495,12 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
+    const value =
+      field === "strokes"
+        ? JSON.stringify(style.strokes ?? null)
+        : field === "fills"
+          ? JSON.stringify(style.fills ?? null)
+          : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -2573,6 +2647,9 @@ function findComponentSourceStyleValue(
   }
   if (field === "strokes") {
     return node.style.strokes ? JSON.stringify(node.style.strokes) : null;
+  }
+  if (field === "fills") {
+    return node.style.fills ? JSON.stringify(node.style.fills) : null;
   }
   return node.style[field];
 }

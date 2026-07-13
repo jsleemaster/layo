@@ -31,6 +31,7 @@ import {
   type NodeConstraints,
   type NodeExportPreset,
   type NodeLayout,
+  type NodeFill,
   type NodeLayoutItem,
   type NodePaintGradient,
   type NodePaintSource,
@@ -707,6 +708,117 @@ function canvasLinearGradientPropsForNode(node: RendererNode): CanvasLinearGradi
         }
       : {})
   };
+}
+
+function canvasOwnedFillGradientProps(node: RendererNode, fill: NodeFill): CanvasLinearGradientProps {
+  if (fill.paint?.type !== "gradient") {
+    return {};
+  }
+  const paintNode: RendererNode = {
+    ...node,
+    style: {
+      ...node.style,
+      fills: undefined,
+      paint_sources: [{
+        origin: "penpot",
+        kind: "fill",
+        paintType: "gradient",
+        index: 0,
+        gradient: fill.paint.gradient
+      }]
+    }
+  };
+  return canvasFillGradientPropsForNode(paintNode);
+}
+
+function CanvasOwnedFillBody({
+  node,
+  fill,
+  shadowProps = {}
+}: {
+  node: RendererNode;
+  fill: NodeFill;
+  shadowProps?: Record<string, number | string>;
+}) {
+  if (!fill.visible || fill.opacity <= 0) {
+    return null;
+  }
+  const opacity = node.style.opacity * fill.opacity;
+  const composite = fill.blend_mode === "normal" ? undefined : fill.blend_mode as GlobalCompositeOperation;
+  if (fill.paint?.type === "image") {
+    return (
+      <Group opacity={opacity} globalCompositeOperation={composite}>
+        <CanvasImageBody
+          assetId={fill.paint.asset_id}
+          width={node.size.width}
+          height={node.size.height}
+          opacity={1}
+          fitMode="fill"
+          shadowProps={shadowProps}
+        />
+      </Group>
+    );
+  }
+  const color = fill.paint?.type === "solid" ? fill.paint.color : fill.color;
+  const gradientProps = canvasOwnedFillGradientProps(node, fill);
+  if (node.kind === "path" && (node.content.type === "path" || node.content.type === "boolean_path")) {
+    return (
+      <KonvaPath
+        data={node.content.path_data}
+        fill={color}
+        fillRule={node.content.fill_rule}
+        opacity={opacity}
+        globalCompositeOperation={composite}
+        {...gradientProps}
+        {...shadowProps}
+      />
+    );
+  }
+  if (node.kind === "text" && node.content.type === "text") {
+    if (isVerticalCanvasTextMode(node.content.writing_mode)) {
+      return (
+        <Group opacity={opacity} globalCompositeOperation={composite}>
+          <VerticalCanvasText
+            width={node.size.width}
+            height={node.size.height}
+            value={node.content.value}
+            fontSize={node.content.font_size}
+            fontFamily={node.content.font_family}
+            fill={color}
+            writingMode={node.content.writing_mode}
+            textOrientation={node.content.text_orientation ?? "mixed"}
+            shadowProps={shadowProps}
+          />
+        </Group>
+      );
+    }
+    return (
+      <Text
+        width={node.size.width}
+        height={node.size.height}
+        text={node.content.value}
+        fontSize={node.content.font_size}
+        fontFamily={node.content.font_family}
+        fill={color}
+        opacity={opacity}
+        globalCompositeOperation={composite}
+        {...gradientProps}
+        {...shadowProps}
+      />
+    );
+  }
+  return (
+    <Rect
+      width={node.size.width}
+      height={node.size.height}
+      fill={color}
+      opacity={opacity}
+      globalCompositeOperation={composite}
+      cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
+      {...gradientProps}
+      {...shadowProps}
+    />
+  );
 }
 
 function CanvasRadialStrokeOverlay({ node, gradient }: { node: RendererNode; gradient: CanvasRadialGradient }) {
@@ -4550,7 +4662,13 @@ function renderNode({
   };
 
   const renderBody = (shadowProps: Record<string, number | string> = {}): ReactNode =>
-    node.kind === "group" ? null : node.kind === "image" && node.content.type === "image" ? (
+    node.style.fills && node.kind !== "group" && !(node.kind === "image" && node.content.type === "image") ? (
+      <Group>
+        {node.style.fills.map((fill) => (
+          <CanvasOwnedFillBody key={fill.id} node={node} fill={fill} shadowProps={shadowProps} />
+        ))}
+      </Group>
+    ) : node.kind === "group" ? null : node.kind === "image" && node.content.type === "image" ? (
       <CanvasImageBody
         assetId={node.content.asset_id}
         width={node.size.width}
@@ -6782,6 +6900,102 @@ function Inspector({
       onGeometryChange(selectedNode.id, { [patchKey]: nextValue });
     }
   };
+  const updateFillStyle = (patch: Partial<RendererNode["style"]>) => {
+    const current =
+      strokeStyleDraftRef.current?.nodeId === selectedNode.id
+        ? strokeStyleDraftRef.current.style
+        : selectedNode.style;
+    const nextStyle = { ...current, ...patch };
+    strokeStyleDraftRef.current = { nodeId: selectedNode.id, style: nextStyle };
+    onNodeStyleChange(selectedNode.id, nextStyle);
+  };
+  const currentFillStack = () =>
+    (strokeStyleDraftRef.current?.nodeId === selectedNode.id
+      ? strokeStyleDraftRef.current.style.fills
+      : selectedNode.style.fills) ?? [];
+  const updateFillStack = (fills: NodeFill[]) => {
+    const primary = fills.find((fill) => fill.visible && fill.opacity > 0) ?? fills[0];
+    updateFillStyle({
+      fills,
+      ...(primary ? { fill: primary.paint?.type === "solid" ? primary.paint.color : primary.color } : {})
+    });
+  };
+  const addFill = () => {
+    const current = currentFillStack();
+    const source = current.at(-1);
+    const color = source?.color ?? selectedNode.style.fill;
+    updateFillStack([
+      ...current,
+      {
+        id: `fill-${crypto.randomUUID()}`,
+        color,
+        paint: source?.paint ? structuredClone(source.paint) : { type: "solid", color },
+        opacity: source?.opacity ?? 1,
+        visible: true,
+        blend_mode: source?.blend_mode ?? "normal"
+      }
+    ]);
+  };
+  const patchFill = (index: number, patch: Partial<NodeFill>) => {
+    updateFillStack((currentFillStack()).map((fill, candidate) =>
+      candidate === index ? { ...fill, ...patch } : fill
+    ));
+  };
+  const setFillPaintType = (index: number, fill: NodeFill, type: "solid" | "gradient" | "image") => {
+    if (type === "solid") {
+      patchFill(index, { color: fill.color, paint: { type: "solid", color: fill.color } });
+    } else if (type === "gradient") {
+      patchFill(index, {
+        paint: {
+          type: "gradient",
+          gradient: {
+            type: "linear",
+            start: { x: 0, y: 0.5 },
+            end: { x: 1, y: 0.5 },
+            stops: [
+              { color: fill.color, opacity: 1, offset: 0 },
+              { color: selectedNode.style.fill, opacity: 1, offset: 1 }
+            ]
+          }
+        }
+      });
+    }
+  };
+  const uploadFillImage = async (index: number, file: File | undefined) => {
+    if (!file) return;
+    const asset = await uploadImageAsset(file);
+    patchFill(index, { paint: { type: "image", asset_id: asset.assetId } });
+  };
+  const patchFillGradientColor = (index: number, fill: NodeFill, stopIndex: number, color: string) => {
+    if (fill.paint?.type !== "gradient") return;
+    const stops = [...(fill.paint.gradient.stops ?? [])];
+    const current = stops[stopIndex];
+    if (!current) return;
+    stops[stopIndex] = { ...current, color };
+    patchFill(index, { paint: { type: "gradient", gradient: { ...fill.paint.gradient, stops } } });
+  };
+  const moveFill = (index: number, direction: -1 | 1) => {
+    const fills = [...(currentFillStack())];
+    const target = index + direction;
+    if (target < 0 || target >= fills.length) return;
+    [fills[index], fills[target]] = [fills[target], fills[index]];
+    updateFillStack(fills);
+  };
+  const duplicateFill = (index: number) => {
+    const fills = [...(currentFillStack())];
+    const source = fills[index];
+    if (!source) return;
+    fills.splice(index + 1, 0, {
+      ...source,
+      id: `fill-${crypto.randomUUID()}`,
+      ...(source.paint ? { paint: structuredClone(source.paint) } : {})
+    });
+    updateFillStack(fills);
+  };
+  const deleteFill = (index: number) => {
+    updateFillStack((currentFillStack()).filter((_, candidate) => candidate !== index));
+  };
+
   const updateStrokeStyle = (patch: Partial<RendererNode["style"]>) => {
     const current =
       strokeStyleDraftRef.current?.nodeId === selectedNode.id
@@ -7808,15 +8022,139 @@ function Inspector({
           />
         </label>
       </div>
-      <label className="stacked-field">
-        채우기
-        <input
-          data-testid="inspector-fill"
-          type="color"
-          value={selectedNode.style.fill}
-          onChange={(event) => onFillChange(selectedNode.id, event.currentTarget.value)}
-        />
-      </label>
+      {!selectedNode.style.fills ? (
+        <label className="stacked-field">
+          채우기
+          <input
+            data-testid="inspector-fill"
+            type="color"
+            value={selectedNode.style.fill}
+            onChange={(event) => onFillChange(selectedNode.id, event.currentTarget.value)}
+          />
+        </label>
+      ) : null}
+      <section className="inspector-section" data-testid="inspector-fill-stack" aria-label="채우기 목록">
+        <div className="inspector-section-heading">
+          <h3>채우기</h3>
+          <button type="button" data-testid="inspector-fill-add" onClick={addFill} aria-label="채우기 추가" title="채우기 추가">
+            +
+          </button>
+        </div>
+        {(selectedNode.style.fills ?? []).map((fill, index) => (
+          <div className="inspector-stroke-row" data-testid={`inspector-fill-row-${index}`} key={fill.id}>
+            <div className="inspector-stroke-actions">
+              <button type="button" onClick={() => patchFill(index, { visible: !fill.visible })} aria-label={fill.visible ? "채우기 숨기기" : "채우기 보이기"} title={fill.visible ? "채우기 숨기기" : "채우기 보이기"}>
+                {fill.visible ? "◉" : "○"}
+              </button>
+              <button type="button" onClick={() => moveFill(index, -1)} disabled={index === 0} aria-label="채우기를 위로 이동" title="채우기를 위로 이동">↑</button>
+              <button type="button" onClick={() => moveFill(index, 1)} disabled={index === (selectedNode.style.fills?.length ?? 0) - 1} aria-label="채우기를 아래로 이동" title="채우기를 아래로 이동">↓</button>
+              <button type="button" onClick={() => duplicateFill(index)} aria-label="채우기 복제" title="채우기 복제">⧉</button>
+              <button type="button" onClick={() => deleteFill(index)} aria-label="채우기 삭제" title="채우기 삭제">×</button>
+            </div>
+            <div className="field-grid">
+              <label>
+                페인트
+                <select
+                  data-testid={`inspector-fill-${index}-paint-type`}
+                  value={fill.paint?.type ?? "solid"}
+                  onChange={(event) =>
+                    setFillPaintType(index, fill, event.currentTarget.value as "solid" | "gradient" | "image")
+                  }
+                >
+                  <option value="solid">단색</option>
+                  <option value="gradient">그라디언트</option>
+                  <option value="image">이미지</option>
+                </select>
+              </label>
+              {fill.paint?.type === "gradient" ? (
+                <>
+                  <label>
+                    시작 색상
+                    <input
+                      data-testid={`inspector-fill-${index}-gradient-start`}
+                      type="color"
+                      value={fill.paint.gradient.stops?.[0]?.color ?? fill.color}
+                      onChange={(event) => patchFillGradientColor(index, fill, 0, event.currentTarget.value)}
+                    />
+                  </label>
+                  <label>
+                    끝 색상
+                    <input
+                      data-testid={`inspector-fill-${index}-gradient-end`}
+                      type="color"
+                      value={fill.paint.gradient.stops?.at(-1)?.color ?? fill.color}
+                      onChange={(event) =>
+                        patchFillGradientColor(
+                          index,
+                          fill,
+                          Math.max(0, (fill.paint?.type === "gradient" ? fill.paint.gradient.stops?.length ?? 1 : 1) - 1),
+                          event.currentTarget.value
+                        )
+                      }
+                    />
+                  </label>
+                </>
+              ) : (
+                <label>
+                  색상
+                  <input
+                    data-testid={`inspector-fill-${index}-color`}
+                    type="color"
+                    value={fill.paint?.type === "solid" ? fill.paint.color : fill.color}
+                    onChange={(event) =>
+                      patchFill(index, {
+                        color: event.currentTarget.value,
+                        paint: { type: "solid", color: event.currentTarget.value }
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <label>
+                이미지
+                <input
+                  data-testid={`inspector-fill-${index}-image`}
+                  type="file"
+                  accept="image/*"
+                  aria-label="채우기 이미지 선택"
+                  onChange={(event) => void uploadFillImage(index, event.currentTarget.files?.[0])}
+                />
+              </label>
+              {fill.paint?.type === "image" ? (
+                <div data-testid={`inspector-fill-${index}-image-asset`}>에셋 {fill.paint.asset_id}</div>
+              ) : null}
+              <label>
+                불투명도
+                <input data-testid={`inspector-fill-${index}-opacity`} type="number" min="0" max="1" step="0.05" value={fill.opacity} onChange={(event) => {
+                  const opacity = Number(event.currentTarget.value);
+                  if (Number.isFinite(opacity) && opacity >= 0 && opacity <= 1) patchFill(index, { opacity });
+                }} />
+              </label>
+              <label>
+                혼합
+                <select data-testid={`inspector-fill-${index}-blend-mode`} value={fill.blend_mode} onChange={(event) => patchFill(index, { blend_mode: event.currentTarget.value as NodeFill["blend_mode"] })}>
+                  <option value="normal">일반</option>
+                  <option value="multiply">곱하기</option>
+                  <option value="screen">스크린</option>
+                  <option value="overlay">오버레이</option>
+                  <option value="darken">어둡게</option>
+                  <option value="lighten">밝게</option>
+                  <option value="color-dodge">색상 닷지</option>
+                  <option value="color-burn">색상 번</option>
+                  <option value="hard-light">하드 라이트</option>
+                  <option value="soft-light">소프트 라이트</option>
+                  <option value="difference">차이</option>
+                  <option value="exclusion">제외</option>
+                  <option value="hue">색조</option>
+                  <option value="saturation">채도</option>
+                  <option value="color">색상</option>
+                  <option value="luminosity">명도</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        ))}
+      </section>
       {selectedNode.style.fill_token ? (
         <div className="inspector-token-readout" data-testid="inspector-fill-token">
           토큰 {fillToken?.name ?? selectedNode.style.fill_token}

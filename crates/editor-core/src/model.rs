@@ -697,6 +697,49 @@ pub enum NodeStrokePaint {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeFillPaint {
+    Solid { color: String },
+    Gradient { gradient: NodePaintGradient },
+    Image { asset_id: String },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "kebab-case")]
+#[ts(export)]
+pub enum FillBlendMode {
+    Normal,
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct NodeFill {
+    pub id: String,
+    pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<NodeFillPaint>,
+    pub opacity: f64,
+    pub visible: bool,
+    pub blend_mode: FillBlendMode,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
 pub struct NodeStroke {
     pub id: String,
@@ -724,6 +767,8 @@ pub struct Style {
     pub fill_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill_style: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fills: Option<Vec<NodeFill>>,
     pub stroke: Option<String>,
     pub stroke_width: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -861,6 +906,7 @@ impl DesignFile {
                             fill: "#111827".to_string(),
                             fill_token: None,
                             fill_style: None,
+                            fills: None,
                             stroke: None,
                             stroke_width: 0.0,
                             stroke_cap: None,
@@ -897,6 +943,7 @@ impl DesignFile {
                         fill: "#ffffff".to_string(),
                         fill_token: None,
                         fill_style: None,
+                            fills: None,
                         stroke: Some("#d1d5db".to_string()),
                         stroke_width: 1.0,
                             stroke_cap: None,

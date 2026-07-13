@@ -191,12 +191,14 @@ function enrichPenpotPaintSources(
       continue;
     }
     const fillPaintSources = paintSources.filter((source) => source.kind === "fill");
-    node.style = {
-      ...node.style,
-      ...(fillPaintSources.length > 0
-        ? { paint_sources: fillPaintSources.map((source) => structuredClone(source)) }
-        : {})
-    };
+    if (!node.style.fills) {
+      node.style = {
+        ...node.style,
+        ...(fillPaintSources.length > 0
+          ? { paint_sources: fillPaintSources.map((source) => structuredClone(source)) }
+          : {})
+      };
+    }
   }
 
   return imported;

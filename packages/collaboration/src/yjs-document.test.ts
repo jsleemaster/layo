@@ -332,4 +332,46 @@ describe("collaborative design document", () => {
 
     document.destroy();
   });
+  test("round-trips ordered fill paint ownership through Yjs updates", () => {
+    const source = sampleDocument();
+    source.pages[0]!.children[0]!.style.fills = [
+      {
+        id: "base",
+        color: "#111827",
+        paint: { type: "solid", color: "#111827" },
+        opacity: 0.8,
+        visible: true,
+        blend_mode: "normal"
+      },
+      {
+        id: "accent",
+        color: "#ef4444",
+        paint: {
+          type: "gradient",
+          gradient: {
+            type: "linear",
+            stops: [
+              { color: "#ef4444", opacity: 1, offset: 0 },
+              { color: "#2563eb", opacity: 1, offset: 1 }
+            ]
+          }
+        },
+        opacity: 1,
+        visible: true,
+        blend_mode: "multiply"
+      }
+    ];
+
+    const first = createCollaborativeDesignDocument({ document: source });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    expect(second.getDocument().pages[0]?.children[0]?.style.fills).toEqual(
+      source.pages[0]?.children[0]?.style.fills
+    );
+
+    first.destroy();
+    second.destroy();
+  });
+
 });

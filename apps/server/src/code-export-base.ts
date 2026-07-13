@@ -9,6 +9,7 @@ import type {
   DesignNode,
   NodeConstraints,
   NodeLayout,
+  NodeFill,
   NodeLayoutItem,
   NodeStroke,
   TextOrientation,
@@ -61,6 +62,7 @@ export interface CodeStructureNode {
     fill: string;
     fillToken?: string;
     fillStyle?: string;
+    fills?: NodeFill[];
     stroke: string | null;
     strokeWidth: number;
     strokes?: NodeStroke[];
@@ -432,6 +434,7 @@ function structureFor(
       fill: resolvedFill(node, tokenMap),
       ...(node.style.fill_token ? { fillToken: node.style.fill_token } : {}),
       ...(node.style.fill_style ? { fillStyle: node.style.fill_style } : {}),
+      ...(node.style.fills ? { fills: structuredClone(node.style.fills) } : {}),
       stroke: node.style.stroke,
       strokeWidth: node.style.stroke_width,
       ...(node.style.strokes ? { strokes: structuredClone(node.style.strokes) } : {}),
