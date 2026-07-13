@@ -867,16 +867,23 @@ export function createMcpServer(storage = new FileStorage()) {
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         libraryId: z.string().optional().describe("Optional safe shared library id"),
-        name: z.string().optional().describe("Optional shared library display name")
+        name: z.string().optional().describe("Optional shared library display name"),
+        idempotencyKey: z.string().optional().describe(
+          "Optional safe retry key; reuse only for the same publication request"
+        )
       }
     },
-    async ({ fileId, libraryId, name }) => ({
+    async ({ fileId, libraryId, name, idempotencyKey }) => ({
       content: [
         {
           type: "text",
           text: JSON.stringify(
             {
-              library: await storage.publishLibraryToRegistry(fileId, { libraryId, name })
+              library: await storage.publishLibraryToRegistry(fileId, {
+                libraryId,
+                name,
+                idempotencyKey
+              })
             },
             null,
             2
