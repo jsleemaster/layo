@@ -128,6 +128,30 @@ export interface NodeConstraints {
   vertical: "top" | "bottom" | "top_bottom" | "center" | "scale";
 }
 
+export interface NodePaintPoint {
+  x: number;
+  y: number;
+}
+
+export interface NodePaintStop {
+  color: string;
+  opacity: number;
+  offset: number;
+}
+
+export interface NodePaintGradient {
+  type?: string;
+  start?: NodePaintPoint;
+  end?: NodePaintPoint;
+  width?: number;
+  stops?: NodePaintStop[];
+}
+
+export type NodeStrokePaint =
+  | { type: "solid"; color: string }
+  | { type: "gradient"; gradient: NodePaintGradient }
+  | { type: "image"; asset_id: string };
+
 export type StrokePosition = "inside" | "center" | "outside";
 export type StrokeStyle = "solid" | "dotted" | "dashed" | "mixed";
 export type StrokeCap = "butt" | "round" | "square";
@@ -136,7 +160,9 @@ export type StrokeMarker = "none" | "line_arrow" | "triangle" | "square" | "circ
 
 export interface NodeStroke {
   id: string;
+  /** Legacy solid fallback retained while older documents migrate. */
   color: string;
+  paint?: NodeStrokePaint;
   opacity: number;
   width: number;
   position: StrokePosition;
