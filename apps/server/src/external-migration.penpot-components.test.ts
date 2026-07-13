@@ -1641,9 +1641,16 @@ describe("Penpot component instance migration", () => {
       await waitForMarker(publisherA, "publish-paused");
       const publisherAExit = waitForExit(publisherA);
       const publisherB = spawnPublisher("publish", "publication-b");
-      await waitForExit(publisherB);
+      const publisherBExit = waitForExit(publisherB);
+      await expect(
+        Promise.race([
+          publisherBExit.then(() => "completed"),
+          delay(300).then(() => "blocked")
+        ])
+      ).resolves.toBe("blocked");
+
       await writeRawFile(releasePath, "release\n", "utf8");
-      await publisherAExit;
+      await Promise.all([publisherAExit, publisherBExit]);
 
       const entry = (await storage.listLibraryRegistry()).find(
         (candidate) => candidate.libraryId === "shared-publication"
