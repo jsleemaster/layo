@@ -1672,6 +1672,78 @@ describe("Penpot component instance migration", () => {
     }
   }, 10_000);
 
+  test("recovers an interrupted library publication before serving registry state", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-recovery-"));
+    const releasePath = path.join(root, "unused-release");
+    const workerPath = fileURLToPath(new URL("./storage-publication-worker.ts", import.meta.url));
+    let publisher: ChildProcessWithoutNullStreams | null = null;
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-recovery-a-project",
+        documentId: "publication-recovery-a",
+        documentName: "Publication Recovery A",
+        fileName: "publication-recovery-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-recovery-b-project",
+        documentId: "publication-recovery-b",
+        documentName: "Publication Recovery B",
+        fileName: "publication-recovery-b.penpot"
+      });
+      await storage.publishLibraryToRegistry("publication-recovery-a", {
+        libraryId: "recovery-publication"
+      });
+
+      publisher = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          workerPath,
+          "publish-crash-after-archive",
+          root,
+          "publication-recovery-b",
+          "recovery-publication",
+          releasePath
+        ],
+        { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+      );
+      await new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        publisher?.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        publisher?.once("error", reject);
+        publisher?.once("exit", (code) => {
+          if (code === 86) {
+            resolve();
+          } else {
+            reject(new Error(`crashing publisher exited ${code}: ${stderr}`));
+          }
+        });
+      });
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareFiles();
+      const entry = (await restarted.listLibraryRegistry()).find(
+        (candidate) => candidate.libraryId === "recovery-publication"
+      );
+      expect(entry?.sourceFileId).toBe("publication-recovery-a");
+      const review = await restarted.reviewLibraryRegistryItem(
+        "publication-recovery-a",
+        "recovery-publication"
+      );
+      expect(review.originalFileId).toBe(entry?.sourceFileId);
+    } finally {
+      if (publisher?.exitCode === null) {
+        publisher.kill("SIGKILL");
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
     const releasePath = path.join(root, "unused-release");
