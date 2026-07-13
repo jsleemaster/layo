@@ -1088,7 +1088,7 @@ describe("Penpot component instance migration", () => {
       };
       const writeSubscriptions =
         internals.writeLibraryRegistrySubscriptions.bind(storage);
-      let concurrentWrite: Promise<void> | undefined;
+      let concurrentWrite!: ReturnType<FileStorage["writeFile"]>;
       let writerState: "blocked" | "written" | undefined;
       internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
         await writeSubscriptions(subscriptions);
