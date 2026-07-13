@@ -525,6 +525,38 @@ describe("Penpot component instance migration", () => {
         componentCount: 2,
         assetCount: 1
       });
+
+      const updatedLibrary = await storage.readFile(libraryDocumentId);
+      const updatedCircle = updatedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      expect(updatedCircle).toBeDefined();
+      updatedCircle!.source_node.style.fill = "#0f766e";
+      await storage.writeFile(libraryDocumentId, updatedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-product-document", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2, assetCount: 1 });
+
+      const updatedTarget = await storage.readFile("penpot-product-document");
+      expect(
+        updatedTarget.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0f766e");
+      expect(
+        updatedTarget.pages[0].children.find(
+          (node) => node.id === `penpot-${outerCopyId}`
+        )?.component_instance?.overrides
+      ).toContainEqual({
+        node_id: `penpot-${outerMainSlotId}`,
+        field: "component_swap",
+        value: `penpot-component-${circleComponentId}`
+      });
+
       expect(await storage.listLibraryRegistrySubscriptions("penpot-product-document")).toEqual([
         expect.objectContaining({
           fileId: "penpot-product-document",
