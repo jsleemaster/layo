@@ -9422,6 +9422,7 @@ export function App() {
   const [relayUrl, setRelayUrl] = useState("");
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
+  const [activeMemberToken, setActiveMemberToken] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -14024,10 +14025,10 @@ export function App() {
           name: libraryRegistryName.trim() || editor.document.name
         },
         undefined,
-        collabSession && memberToken.trim()
+        collabSession && activeMemberToken
           ? {
               userId: collabSession.team.currentUserId,
-              memberToken
+              memberToken: activeMemberToken
             }
           : undefined
       );
@@ -15016,6 +15017,7 @@ export function App() {
       updatedAtMs: Date.now()
     });
     setCollabSession(session);
+    setActiveMemberToken(credentials.memberToken?.trim() ?? "");
     setCollabStatus(session.status);
     publishPresenceSnapshot(session);
     setEncryptionEnabled(team.encryption.mode === "shared-key");
