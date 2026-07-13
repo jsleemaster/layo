@@ -171,9 +171,16 @@ export function pathHasOnlyClosedSubpaths(pathData: string) {
   return subpathCount > 0 && !activeSubpath;
 }
 
+export type NodeStrokePaint =
+  | { type: "solid"; color: string }
+  | { type: "gradient"; gradient: NodePaintGradient }
+  | { type: "image"; asset_id: string };
+
 export interface NodeStroke {
   id: string;
+  /** Legacy solid fallback retained while older documents migrate. */
   color: string;
+  paint?: NodeStrokePaint;
   opacity: number;
   width: number;
   position: StrokePosition;
