@@ -6433,6 +6433,7 @@ function Inspector({
   const [styleTypeFilter, setStyleTypeFilter] = useState<"all" | DesignStyle["type"]>("all");
   const [styleSort, setStyleSort] = useState<"az" | "za" | "usage_desc">("az");
   const [strokeDashDraft, setStrokeDashDraft] = useState("");
+  const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
     setPendingStyleKind(null);
@@ -6441,7 +6442,10 @@ function Inspector({
 
   useEffect(() => {
     setStrokeDashDraft((selectedNode?.style.stroke_dasharray ?? []).join(", "));
-  }, [selectedNode?.id, selectedNode?.style.stroke_dasharray]);
+    strokeStyleDraftRef.current = selectedNode
+      ? { nodeId: selectedNode.id, style: selectedNode.style }
+      : null;
+  }, [selectedNode?.id, selectedNode?.style]);
 
   const tokenControls = (
     <InspectorTokenControls
@@ -6555,7 +6559,13 @@ function Inspector({
     }
   };
   const updateStrokeStyle = (patch: Partial<RendererNode["style"]>) => {
-    onNodeStyleChange(selectedNode.id, { ...selectedNode.style, ...patch });
+    const current =
+      strokeStyleDraftRef.current?.nodeId === selectedNode.id
+        ? strokeStyleDraftRef.current.style
+        : selectedNode.style;
+    const nextStyle = { ...current, ...patch };
+    strokeStyleDraftRef.current = { nodeId: selectedNode.id, style: nextStyle };
+    onNodeStyleChange(selectedNode.id, nextStyle);
   };
   const commitStrokeDasharray = () => {
     const dasharray = strokeDashDraft
@@ -8652,6 +8662,7 @@ export function App() {
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
+  const nodeStylePersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
   const pathEditingNodeIdRef = useRef<string | null>(null);
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
@@ -11327,7 +11338,11 @@ export function App() {
       return;
     }
 
-    void persistNodeStyle(currentProject.currentDocumentId, nodeId, style)
+    const persistence = nodeStylePersistenceQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistNodeStyle(currentProject.currentDocumentId, nodeId, style));
+    nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
+    void persistence
       .then(() => {
         setProjectStatus("스타일 저장됨");
         setCodeExportRevision((current) => current + 1);
