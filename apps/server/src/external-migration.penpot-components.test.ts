@@ -866,6 +866,113 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("rolls back partial library writes and supports retry plus saved-version recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-rollback-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-rollback-project",
+        documentId: "penpot-rollback-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const assetId = `penpot-asset-${libraryMediaId}`;
+      const beforeTarget = await storage.readFile("penpot-rollback-target");
+      const beforeSubscription = (
+        await storage.listLibraryRegistrySubscriptions("penpot-rollback-target")
+      )[0];
+      const beforeAsset = await storage.readAsset(assetId);
+      const savedVersion = await storage.saveFileVersion("penpot-rollback-target", {
+        message: "라이브러리 업데이트 전"
+      });
+
+      const publishedAssetData = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="26" fill="#7c3aed"/></svg>',
+        "utf8"
+      );
+      const internals = storage as unknown as {
+        writeAsset(
+          asset: {
+            assetId: string;
+            name: string;
+            mimeType: string;
+            byteLength: number;
+            url: string;
+          },
+          data: Buffer
+        ): Promise<unknown>;
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+      };
+      await internals.writeAsset(
+        { ...beforeAsset, byteLength: publishedAssetData.length },
+        publishedAssetData
+      );
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#7c3aed";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+      await internals.writeAsset(beforeAsset, beforeAsset.data);
+
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let failAfterSubscriptionWrite = true;
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        await writeSubscriptions(subscriptions);
+        if (failAfterSubscriptionWrite) {
+          failAfterSubscriptionWrite = false;
+          throw new Error("injected subscription commit failure");
+        }
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-rollback-target", libraryDocumentId)
+      ).rejects.toThrow("injected subscription commit failure");
+
+      expect(await storage.readFile("penpot-rollback-target")).toEqual(beforeTarget);
+      expect(
+        (await storage.listLibraryRegistrySubscriptions("penpot-rollback-target"))[0]
+      ).toEqual(beforeSubscription);
+      expect(await storage.readAsset(assetId)).toEqual(beforeAsset);
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-rollback-target", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2, assetCount: 1 });
+      const retriedTarget = await storage.readFile("penpot-rollback-target");
+      expect(
+        retriedTarget.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#7c3aed");
+      const retriedAsset = await storage.readAsset(assetId);
+      expect(retriedAsset.byteLength).toBe(publishedAssetData.length);
+      expect(retriedAsset.data.equals(publishedAssetData)).toBe(true);
+
+      const restored = await storage.restoreFileVersion(
+        "penpot-rollback-target",
+        savedVersion.versionId
+      );
+      expect(restored.file).toEqual(beforeTarget);
+      const recoveryVersion = await storage.readFileVersion(
+        "penpot-rollback-target",
+        restored.recoveryVersion.versionId
+      );
+      expect(
+        recoveryVersion.document.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#7c3aed");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {

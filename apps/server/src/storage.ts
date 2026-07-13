@@ -2330,61 +2330,84 @@ export class FileStorage {
       ...subscription.componentIdMap
     };
 
-    await Promise.all(library.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
+    const rollbackSnapshots = await captureStoragePathSnapshots([
+      ...library.assets.flatMap((asset) => [
+        this.assetPathFor(asset.metadata.assetId),
+        this.assetMetadataPathFor(asset.metadata.assetId)
+      ]),
+      this.librarySubscriptionsPath(),
+      this.filePathFor(fileId)
+    ]);
+    try {
+      for (const asset of library.assets) {
+        await this.writeAsset(asset.metadata, asset.data);
+      }
 
-    const updatedTokens = new Map(
-      library.library.tokens.map((token) => {
-        const nextTokenId = tokenIdMap[token.id];
-        if (!nextTokenId) {
-          throw new Error(`library token missing from id map: ${token.id}`);
+      const updatedTokens = new Map(
+        library.library.tokens.map((token) => {
+          const nextTokenId = tokenIdMap[token.id];
+          if (!nextTokenId) {
+            throw new Error(`library token missing from id map: ${token.id}`);
+          }
+          return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
+        })
+      );
+      const nextTokens = [...(target.tokens ?? [])];
+      for (const [tokenId, token] of updatedTokens) {
+        const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
+        if (index === -1) {
+          nextTokens.push(token);
+        } else {
+          nextTokens[index] = token;
         }
-        return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
-      })
-    );
-    const nextTokens = [...(target.tokens ?? [])];
-    for (const [tokenId, token] of updatedTokens) {
-      const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
-      if (index === -1) {
-        nextTokens.push(token);
-      } else {
-        nextTokens[index] = token;
       }
+
+      const updatedComponents = library.library.components.map((component) => {
+        const nextComponentId = componentIdMap[component.id];
+        if (!nextComponentId) {
+          throw new Error(`library component missing from id map: ${component.id}`);
+        }
+        return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+      });
+      const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
+
+      target.tokens = nextTokens;
+      target.components = [
+        ...(target.components ?? []).filter(
+          (component) =>
+            !updatedComponentIds.has(component.id)
+            && !deletedTargetComponentIds.has(component.id)
+        ),
+        ...updatedComponents
+      ];
+      await this.writeFile(fileId, target);
+
+      const imported: ImportedLibraryRegistryItem = {
+        fileId,
+        originalFileId: library.manifest.fileId,
+        originalName: library.manifest.name,
+        componentCount: updatedComponents.length,
+        tokenCount: library.library.tokens.length,
+        assetCount: library.assetIds.length,
+        componentIdMap,
+        tokenIdMap,
+        libraryId: entry.libraryId,
+        libraryName: entry.name
+      };
+      await this.upsertLibraryRegistrySubscription(fileId, entry, imported, subscription.idPrefix);
+      return imported;
+
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(rollbackSnapshots);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "library registry update failed and rollback failed"
+        );
+      }
+      throw error;
     }
-
-    const updatedComponents = library.library.components.map((component) => {
-      const nextComponentId = componentIdMap[component.id];
-      if (!nextComponentId) {
-        throw new Error(`library component missing from id map: ${component.id}`);
-      }
-      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
-    });
-    const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
-
-    target.tokens = nextTokens;
-    target.components = [
-      ...(target.components ?? []).filter(
-        (component) =>
-          !updatedComponentIds.has(component.id)
-          && !deletedTargetComponentIds.has(component.id)
-      ),
-      ...updatedComponents
-    ];
-    await this.writeFile(fileId, target);
-
-    const imported: ImportedLibraryRegistryItem = {
-      fileId,
-      originalFileId: library.manifest.fileId,
-      originalName: library.manifest.name,
-      componentCount: updatedComponents.length,
-      tokenCount: library.library.tokens.length,
-      assetCount: library.assetIds.length,
-      componentIdMap,
-      tokenIdMap,
-      libraryId: entry.libraryId,
-      libraryName: entry.name
-    };
-    await this.upsertLibraryRegistrySubscription(fileId, entry, imported, subscription.idPrefix);
-    return imported;
   }
 
   async listFileVersions(fileId: string): Promise<StoredFileVersionSummary[]> {
@@ -4423,6 +4446,41 @@ function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
 
 function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
+}
+
+interface StoragePathSnapshot {
+  filePath: string;
+  data: Buffer | null;
+}
+
+async function captureStoragePathSnapshots(
+  filePaths: string[]
+): Promise<StoragePathSnapshot[]> {
+  const snapshots: StoragePathSnapshot[] = [];
+  for (const filePath of [...new Set(filePaths)]) {
+    try {
+      snapshots.push({ filePath, data: await readFile(filePath) });
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") {
+        throw error;
+      }
+      snapshots.push({ filePath, data: null });
+    }
+  }
+  return snapshots;
+}
+
+async function restoreStoragePathSnapshots(
+  snapshots: StoragePathSnapshot[]
+): Promise<void> {
+  for (const snapshot of snapshots) {
+    if (snapshot.data === null) {
+      await rm(snapshot.filePath, { force: true });
+      continue;
+    }
+    await mkdir(path.dirname(snapshot.filePath), { recursive: true });
+    await writeFile(snapshot.filePath, snapshot.data);
+  }
 }
 
 function reviewLibraryRegistryComponentUpdate(
