@@ -668,8 +668,6 @@ pub struct NodePaintPoint {
 #[ts(export)]
 pub struct NodePaintStop {
     pub color: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paint: Option<NodeStrokePaint>,
     pub opacity: f64,
     pub offset: f64,
 }
@@ -703,6 +701,8 @@ pub enum NodeStrokePaint {
 pub struct NodeStroke {
     pub id: String,
     pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<NodeStrokePaint>,
     pub opacity: f64,
     pub width: f64,
     pub position: StrokePosition,
