@@ -45,6 +45,12 @@ References:
 - GREEN `29290833407` passed 251 web tests, 292 server tests, the Rust
   workspace, and all 193 Playwright CLI cases without retry.
 - Restore `29290833400` and retention `29290833356` passed.
+- Review RED `29292379607` proved file-scoped HTTP and MCP reads still
+  returned a private unscoped `private-kit` entry.
+- Review GREEN `29292539822` applied the shared principal-team filter to
+  unscoped and file-scoped reads and passed 251 web, 292 server, Rust, and all
+  193 Playwright cases without retry; restore `29292539819` and retention
+  `29292539837` passed.
 - Direct browser proof clicked the credentialed registry refresh, verified the
   activated-session Authorization and X-Layo-User-Id headers, then completed
   publish, review, and import without cross-team disclosure.
