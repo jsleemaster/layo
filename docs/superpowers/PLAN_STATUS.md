@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file ownership and happy-path refresh. PR #284 adds agent-readable source-deletion preview, source/target id mapping, direct and parent-swap impact analysis, no-write storage/HTTP enforcement, Korean editor blocking, and Playwright proof that apply is never called. RED `29249518688` proved the preview was absent; GREEN `29250183489` passed all gates and 192 Playwright cases. Incompatible same-id replacement, local override conflict, stale subscriptions, partial-write rollback, retry, and version recovery remain active. Deployment remains non-gating. |
+| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file ownership and happy-path refresh. PR #284 adds in-use source-deletion preview and no-write enforcement. PR #285 adds same-id replacement compatibility checks across base and variant source trees, affected-instance and missing-override-target summaries, storage/HTTP rejection, distinct Korean UI feedback, and Playwright proof of zero apply requests. RED `29251634592` proved stable component ids were insufficient; review RED `29252869887` proved swap-only override targets also require source-node validation after fixture correction `29252670196`; GREEN `29252017219` passed 251 web tests, 264 server tests, Rust workspace tests, and 192 Playwright cases. Stale preview/subscription races, atomic partial-write rollback, retry, and version recovery remain active. Deployment remains non-gating. |
 
 ## Completed Plans
 

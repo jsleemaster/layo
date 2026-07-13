@@ -617,7 +617,8 @@ describe("Penpot component instance migration", () => {
               `penpot-${outerCopyId}__penpot-${outerMainSlotId}`
             ]
           }
-        ]
+        ],
+        conflictedComponents: []
       });
 
       const server = createHttpServer(storage, { webDistDir: null });
@@ -652,6 +653,126 @@ describe("Penpot component instance migration", () => {
       expect(await storage.readFile("penpot-delete-target")).toEqual(beforeTarget);
       expect(
         await storage.listLibraryRegistrySubscriptions("penpot-delete-target")
+      ).toEqual(beforeSubscriptions);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks a same-id replacement that removes a locally overridden source node", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-override-conflict-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-override-project",
+        documentId: "penpot-override-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const target = await storage.readFile("penpot-override-target");
+      const copy = target.pages[0].children.find(
+        (node) => node.id === `penpot-${outerCopyId}`
+      );
+      const nestedCircle = copy?.children[0];
+      expect(nestedCircle?.component_instance?.definition_id).toBe(
+        `penpot-component-${circleComponentId}`
+      );
+      nestedCircle!.component_instance!.overrides = [
+        {
+          node_id: `penpot-${circleMainId}`,
+          field: "fill",
+          value: "#0f766e"
+        }
+      ];
+      const swapOnlyCircle = structuredClone(nestedCircle!);
+      swapOnlyCircle.id = "penpot-swap-only-circle";
+      swapOnlyCircle.component_instance!.overrides = [
+        {
+          node_id: `penpot-${circleMainId}`,
+          field: "component_swap",
+          value: `penpot-component-${rectangleComponentId}`
+        }
+      ];
+      target.pages[0].children.push(swapOnlyCircle);
+      await storage.writeFile("penpot-override-target", target);
+
+      const library = await storage.readFile(libraryDocumentId);
+      const circle = library.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      expect(circle).toBeDefined();
+      circle!.source_node.id = "replacement-circle-root";
+      await storage.writeFile(libraryDocumentId, library);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const beforeTarget = await storage.readFile("penpot-override-target");
+      const beforeSubscriptions = await storage.listLibraryRegistrySubscriptions(
+        "penpot-override-target"
+      );
+      await expect(
+        storage.reviewLibraryRegistryItemUpdate(
+          "penpot-override-target",
+          libraryDocumentId
+        )
+      ).resolves.toEqual({
+        canUpdate: false,
+        blockedBy: ["library_component_override_target_missing"],
+        deletedComponents: [],
+        conflictedComponents: [
+          {
+            sourceComponentId: `penpot-component-${circleComponentId}`,
+            targetComponentId: `penpot-component-${circleComponentId}`,
+            affectedInstanceIds: [
+              `penpot-${outerCopyId}__penpot-${outerMainSlotId}`,
+              "penpot-swap-only-circle"
+            ],
+            missingOverrideNodeIds: [`penpot-${circleMainId}`]
+          }
+        ]
+      });
+
+      const server = createHttpServer(storage, { webDistDir: null });
+      try {
+        const reviewResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-override-target/import/library/registry/update/review",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(reviewResponse.statusCode).toBe(200);
+        expect(reviewResponse.json().review).toMatchObject({
+          canUpdate: false,
+          blockedBy: ["library_component_override_target_missing"],
+          conflictedComponents: [
+            {
+              sourceComponentId: `penpot-component-${circleComponentId}`,
+              missingOverrideNodeIds: [`penpot-${circleMainId}`]
+            }
+          ]
+        });
+
+        const updateResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-override-target/import/library/registry/update",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(updateResponse.statusCode).toBe(400);
+        expect(updateResponse.json()).toEqual({
+          error: expect.stringMatching(/override target.*missing/i)
+        });
+      } finally {
+        await server.close();
+      }
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-override-target", libraryDocumentId)
+      ).rejects.toThrow(/override target.*missing/i);
+      expect(await storage.readFile("penpot-override-target")).toEqual(beforeTarget);
+      expect(
+        await storage.listLibraryRegistrySubscriptions("penpot-override-target")
       ).toEqual(beforeSubscriptions);
     } finally {
       await rm(root, { recursive: true, force: true });

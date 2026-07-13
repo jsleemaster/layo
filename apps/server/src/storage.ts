@@ -935,10 +935,18 @@ export interface LibraryRegistryDeletedComponentPreview {
   affectedInstanceIds: string[];
 }
 
+export interface LibraryRegistryConflictedComponentPreview {
+  sourceComponentId: string;
+  targetComponentId: string;
+  affectedInstanceIds: string[];
+  missingOverrideNodeIds: string[];
+}
+
 export interface LibraryRegistryItemUpdatePreview {
   canUpdate: boolean;
   blockedBy: string[];
   deletedComponents: LibraryRegistryDeletedComponentPreview[];
+  conflictedComponents: LibraryRegistryConflictedComponentPreview[];
 }
 
 export interface LibraryRegistryTokenSubscription {
@@ -2258,24 +2266,48 @@ export class FileStorage {
     );
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
-    const sourceComponentIds = new Set(
-      library.library.components.map((component) => component.id)
+    const sourceComponents = new Map(
+      library.library.components.map((component) => [component.id, component])
     );
     const deletedComponents = Object.entries(subscription.componentIdMap)
-      .filter(([sourceComponentId]) => !sourceComponentIds.has(sourceComponentId))
+      .filter(([sourceComponentId]) => !sourceComponents.has(sourceComponentId))
       .map(([sourceComponentId, targetComponentId]) => ({
         sourceComponentId,
         targetComponentId,
         affectedInstanceIds: componentAffectedInstanceIds(target, targetComponentId)
       }));
-    const hasInUseDeletion = deletedComponents.some(
-      (component) => component.affectedInstanceIds.length > 0
-    );
+    const conflictedComponents = Object.entries(subscription.componentIdMap)
+      .flatMap(([sourceComponentId, targetComponentId]) => {
+        const sourceComponent = sourceComponents.get(sourceComponentId);
+        if (!sourceComponent) {
+          return [];
+        }
+        const conflicts = componentOverrideTargetConflicts(
+          target,
+          targetComponentId,
+          componentSourceNodeIds(sourceComponent)
+        );
+        return conflicts.affectedInstanceIds.length > 0
+          ? [{
+              sourceComponentId,
+              targetComponentId,
+              ...conflicts
+            }]
+          : [];
+      });
+    const blockedBy = [];
+    if (deletedComponents.some((component) => component.affectedInstanceIds.length > 0)) {
+      blockedBy.push("library_component_deletion_in_use");
+    }
+    if (conflictedComponents.length > 0) {
+      blockedBy.push("library_component_override_target_missing");
+    }
 
     return {
-      canUpdate: !hasInUseDeletion,
-      blockedBy: hasInUseDeletion ? ["library_component_deletion_in_use"] : [],
-      deletedComponents
+      canUpdate: blockedBy.length === 0,
+      blockedBy,
+      deletedComponents,
+      conflictedComponents
     };
   }
 
@@ -2292,6 +2324,13 @@ export class FileStorage {
     }
     const preview = await this.reviewLibraryRegistryItemUpdate(fileId, normalizedLibraryId);
     if (!preview.canUpdate) {
+      if (preview.conflictedComponents.length > 0) {
+        throw inputValidationError(
+          `library component override target is missing: ${preview.conflictedComponents
+            .map((component) => component.sourceComponentId)
+            .join(", ")}`
+        );
+      }
       throw inputValidationError(
         `library component deletion is in use: ${preview.deletedComponents
           .filter((component) => component.affectedInstanceIds.length > 0)
@@ -4415,6 +4454,47 @@ function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
 
 function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
+}
+
+function componentSourceNodeIds(component: ComponentDefinition): Set<string> {
+  const nodeIds = new Set<string>();
+  const visit = (node: DesignNode): void => {
+    nodeIds.add(node.id);
+    node.children.forEach(visit);
+  };
+  visit(component.source_node);
+  component.variants.forEach((variant) => {
+    if (variant.source_node) {
+      visit(variant.source_node);
+    }
+  });
+  return nodeIds;
+}
+
+function componentOverrideTargetConflicts(
+  document: DesignFile,
+  componentId: string,
+  sourceNodeIds: Set<string>
+): { affectedInstanceIds: string[]; missingOverrideNodeIds: string[] } {
+  const affectedInstanceIds = new Set<string>();
+  const missingOverrideNodeIds = new Set<string>();
+  const visit = (node: DesignNode): void => {
+    if (node.component_instance?.definition_id === componentId) {
+      const missingNodeIds = node.component_instance.overrides
+        .map((override) => override.node_id)
+        .filter((nodeId) => !sourceNodeIds.has(nodeId));
+      if (missingNodeIds.length > 0) {
+        affectedInstanceIds.add(node.id);
+        missingNodeIds.forEach((nodeId) => missingOverrideNodeIds.add(nodeId));
+      }
+    }
+    node.children.forEach(visit);
+  };
+  document.pages.forEach((page) => page.children.forEach(visit));
+  return {
+    affectedInstanceIds: [...affectedInstanceIds],
+    missingOverrideNodeIds: [...missingOverrideNodeIds]
+  };
 }
 
 function componentAffectedInstanceIds(

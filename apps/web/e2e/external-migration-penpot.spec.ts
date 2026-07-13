@@ -369,7 +369,8 @@ test("imports a packaged Penpot library swap and preserves it after reload", asy
                   `penpot-${penpotLibrarySwapIds.outerCopyId}__penpot-${penpotLibrarySwapIds.outerMainSlotId}`
                 ]
               }
-            ]
+            ],
+            conflictedComponents: []
           }
         })
       });
@@ -412,6 +413,41 @@ test("imports a packaged Penpot library swap and preserves it after reload", asy
   await page.getByTestId(`library-registry-update-${libraryId}`).click();
   await expect(page.getByTestId("library-registry-status")).toContainText(
     "업데이트 차단 · 사용 중 컴포넌트 삭제 1개 · 영향 인스턴스 2개"
+  );
+  expect(updateRequestCount).toBe(0);
+
+  await page.route(
+    `**/files/${project.currentDocumentId}/import/library/registry/update/review`,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          review: {
+            canUpdate: false,
+            blockedBy: ["library_component_override_target_missing"],
+            deletedComponents: [],
+            conflictedComponents: [
+              {
+                sourceComponentId: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`,
+                targetComponentId: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`,
+                affectedInstanceIds: [
+                  `penpot-${penpotLibrarySwapIds.outerCopyId}__penpot-${penpotLibrarySwapIds.outerMainSlotId}`
+                ],
+                missingOverrideNodeIds: [
+                  `penpot-${penpotLibrarySwapIds.circleMainId}`
+                ]
+              }
+            ]
+          }
+        })
+      });
+    }
+  );
+
+  await page.getByTestId(`library-registry-update-${libraryId}`).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "업데이트 차단 · 호환되지 않는 로컬 오버라이드 1개 · 영향 인스턴스 1개 · 누락 대상 1개"
   );
   expect(updateRequestCount).toBe(0);
 });

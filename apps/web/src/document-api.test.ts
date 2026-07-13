@@ -1450,7 +1450,8 @@ describe("library update preview API", () => {
               targetComponentId: "team-component-circle",
               affectedInstanceIds: ["card-copy", "card-copy__shape-slot"]
             }
-          ]
+          ],
+          conflictedComponents: []
         }
       });
     };
@@ -1470,7 +1471,8 @@ describe("library update preview API", () => {
           targetComponentId: "team-component-circle",
           affectedInstanceIds: ["card-copy", "card-copy__shape-slot"]
         }
-      ]
+      ],
+      conflictedComponents: []
     });
   });
 });
