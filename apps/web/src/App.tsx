@@ -7537,7 +7537,17 @@ function Inspector({
               inputMode="decimal"
               value={strokeDashDraft}
               placeholder="12, 6"
-              onChange={(event) => setStrokeDashDraft(event.currentTarget.value)}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setStrokeDashDraft(value);
+                const dasharray = value
+                  .split(/[ ,]+/)
+                  .map((part) => Number(part))
+                  .filter((part) => Number.isFinite(part) && part >= 0);
+                if (dasharray.length > 0 && dasharray.some((part) => part > 0)) {
+                  updateStrokeStyle({ stroke_dasharray: dasharray });
+                }
+              }}
               onBlur={commitStrokeDasharray}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
