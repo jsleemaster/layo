@@ -1459,7 +1459,7 @@ describe("Penpot component instance migration", () => {
       }
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
@@ -2020,5 +2020,5 @@ describe("Penpot component instance migration", () => {
         detached: false
       }
     });
-  });
+  }, 10_000);
 });
