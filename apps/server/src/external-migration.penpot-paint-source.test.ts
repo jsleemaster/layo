@@ -186,31 +186,45 @@ test("preserves Penpot paint source metadata for agents and code handoff", () =>
     id: `penpot-${gradientRectId}`,
     kind: "rectangle",
     name: "Gradient paint card",
-    style: { fill: "#800080", stroke: "#008080", stroke_width: 3, opacity: 0.6 }
+    style: {
+      fill: "#800080",
+      stroke: "#008080",
+      stroke_width: 3,
+      opacity: 1,
+      fills: [
+        {
+          id: "penpot-fill-1",
+          paint: {
+            type: "gradient",
+            gradient: {
+              type: "linear",
+              stops: [
+                { color: "#ff0000", opacity: 1, offset: 0 },
+                { color: "#0000ff", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          opacity: 0.6,
+          visible: true,
+          blend_mode: "multiply"
+        }
+      ]
+    }
   });
-  expect(rect.style.paint_sources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
+  expect(rect.style.paint_sources).toBeUndefined();
 
   const inspection = inspectCanvas(imported.file);
-  expect(inspection.nodes.find((node) => node.id === `penpot-${gradientRectId}`)?.paintSources).toEqual(
-    expectedPaintSources.filter((source) => source.kind === "fill")
+  expect(inspection.nodes.find((node) => node.id === `penpot-${gradientRectId}`)?.fills).toEqual(
+    rect.style.fills
   );
 
   const exported = exportDesignToCode(imported.file);
   const rootElement = exported.elements.find((element) => element.id === `penpot-${frameId}`);
   const rectStructure = rootElement?.structure.children.find((child) => child.id === `penpot-${gradientRectId}`) as any;
-  expect(rectStructure?.style.paintSources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
-  expect(rectStructure?.annotations).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({
-        id: `penpot-${gradientRectId}-paint-source`,
-        label: "Penpot paint",
-        value: "1 paint source(s) preserved",
-        detail: "1 gradient source(s) keep stops and geometry while Layo uses flattened paint for rendering"
-      })
-    ])
-  );
-  expect(rootElement?.jsModule).toContain('"paintSources"');
-  expect(rootElement?.jsModule).toContain('"blendMode": "multiply"');
+  expect(rectStructure?.style.fills).toEqual(rect.style.fills);
+  expect(rectStructure?.style.paintSources).toBeUndefined();
+  expect(rootElement?.jsModule).toContain('"fills"');
+  expect(rootElement?.jsModule).toContain('"blend_mode": "multiply"');
   expect(rect.style.strokes?.[0]?.paint).toMatchObject({
     type: "gradient",
     gradient: {
@@ -258,7 +272,38 @@ test("persists Penpot paint source metadata through HTTP import", async () => {
     id: `penpot-${gradientRectId}`,
     kind: "rectangle",
     name: "Gradient paint card",
-    style: { fill: "#800080", stroke: "#008080", stroke_width: 3, opacity: 0.6 }
+    style: {
+      fill: "#800080",
+      stroke: "#008080",
+      stroke_width: 3,
+      opacity: 1,
+      fills: [
+        {
+          id: "penpot-fill-1",
+          paint: {
+            type: "gradient",
+            gradient: {
+              type: "linear",
+              stops: [
+                { color: "#ff0000", opacity: 1, offset: 0 },
+                { color: "#0000ff", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          opacity: 0.6,
+          visible: true,
+          blend_mode: "multiply"
+        }
+      ]
+    }
   });
-  expect(rect.style.paint_sources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
+  expect(rect.style.fills).toMatchObject([
+    {
+      id: "penpot-fill-1",
+      paint: { type: "gradient" },
+      opacity: 0.6,
+      blend_mode: "multiply"
+    }
+  ]);
+  expect(rect.style.paint_sources).toBeUndefined();
 });
