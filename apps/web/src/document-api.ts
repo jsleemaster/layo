@@ -722,16 +722,9 @@ export async function publishLibraryToRegistry(
   fetcher: typeof fetch = fetch,
   credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryEntry> {
-  const userId = credentials?.userId.trim();
-  const memberToken = credentials?.memberToken.trim();
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (userId && memberToken) {
-    headers.Authorization = `Bearer ${memberToken}`;
-    headers["X-Layo-User-Id"] = userId;
-  }
   const response = await fetcher(apiUrl("/libraries"), {
     method: "POST",
-    headers,
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ fileId, ...input })
   });
   const payload = await readDocumentJson(response);
@@ -768,11 +761,12 @@ export async function reviewLibraryRegistryItem(
 export async function importLibraryRegistryItem(
   fileId: string,
   input: ImportLibraryRegistryInput,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<ImportedLibraryRegistryItem> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify(input)
   });
   const payload = await readDocumentJson(response);
@@ -796,11 +790,12 @@ export async function reviewLibraryRegistryTokens(
 export async function importLibraryRegistryTokens(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<ImportedLibraryRegistryTokens> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/tokens`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
@@ -828,11 +823,12 @@ export async function listLibraryRegistryTokenUpdates(
 export async function updateLibraryRegistryTokens(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<ImportedLibraryRegistryTokens> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/tokens/update`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
@@ -874,11 +870,12 @@ export async function reviewLibraryRegistryItemUpdate(
 export async function updateLibraryRegistryItem(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<ImportedLibraryRegistryItem> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/update`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
@@ -1236,4 +1233,17 @@ async function readDocumentJson(response: Response): Promise<unknown> {
 function parseContentDispositionFilename(header: string | null): string | null {
   const match = header?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
+}
+
+function libraryRegistryWriteHeaders(
+  credentials?: LibraryRegistryCredentials
+): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const userId = credentials?.userId.trim();
+  const memberToken = credentials?.memberToken.trim();
+  if (userId && memberToken) {
+    headers.Authorization = `Bearer ${memberToken}`;
+    headers["X-Layo-User-Id"] = userId;
+  }
+  return headers;
 }
