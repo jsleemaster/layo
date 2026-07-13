@@ -731,15 +731,35 @@ export async function publishLibraryToRegistry(
   return (payload as { library: LibraryRegistryEntry }).library;
 }
 
-export async function listLibraryRegistry(fetcher?: typeof fetch): Promise<LibraryRegistryEntry[]>;
-export async function listLibraryRegistry(fileId: string, fetcher?: typeof fetch): Promise<LibraryRegistryEntry[]>;
+export async function listLibraryRegistry(
+  fetcher?: typeof fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<LibraryRegistryEntry[]>;
+export async function listLibraryRegistry(
+  fileId: string,
+  fetcher?: typeof fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<LibraryRegistryEntry[]>;
 export async function listLibraryRegistry(
   fileIdOrFetcher?: string | typeof fetch,
-  maybeFetcher: typeof fetch = fetch
+  maybeFetcherOrCredentials: typeof fetch | LibraryRegistryCredentials = fetch,
+  maybeCredentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryEntry[]> {
   const fileId = typeof fileIdOrFetcher === "string" ? fileIdOrFetcher : undefined;
-  const fetcher = typeof fileIdOrFetcher === "function" ? fileIdOrFetcher : maybeFetcher;
-  const response = await fetcher(apiUrl(fileId ? `/libraries?fileId=${encodeURIComponent(fileId)}` : "/libraries"));
+  const fetcher =
+    typeof fileIdOrFetcher === "function"
+      ? fileIdOrFetcher
+      : typeof maybeFetcherOrCredentials === "function"
+        ? maybeFetcherOrCredentials
+        : fetch;
+  const credentials =
+    typeof maybeFetcherOrCredentials === "function"
+      ? maybeCredentials
+      : maybeFetcherOrCredentials;
+  const response = await fetcher(
+    apiUrl(fileId ? `/libraries?fileId=${encodeURIComponent(fileId)}` : "/libraries"),
+    { headers: libraryRegistryWriteHeaders(credentials) }
+  );
   const payload = await readDocumentJson(response);
   return (payload as { libraries: LibraryRegistryEntry[] }).libraries;
 }

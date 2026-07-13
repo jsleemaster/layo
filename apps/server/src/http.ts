@@ -7,6 +7,8 @@ import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
 import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./external-migration.js";
 import {
   authenticateTeamMember,
+  authorizeTeamLibraryRead,
+  filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
   type TeamAuthorizationConfig
@@ -41,26 +43,31 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
 
-  const authorizeLibraryWrite = async (
-    request: {
-      headers: {
-        authorization?: string | string[];
-        "x-layo-user-id"?: string | string[];
-      };
-    },
-    fileId: string
-  ) => {
+  type LibraryRequest = {
+    headers: {
+      authorization?: string | string[];
+      "x-layo-user-id"?: string | string[];
+    };
+  };
+
+  const authenticateLibraryMember = (request: LibraryRequest) => {
     if (!options.libraryRegistryAuth) {
-      return;
+      return undefined;
     }
-    const member = authenticateTeamMember(
+    return authenticateTeamMember(
       options.libraryRegistryAuth,
       Array.isArray(request.headers["x-layo-user-id"])
         ? request.headers["x-layo-user-id"][0]
         : request.headers["x-layo-user-id"],
       bearerToken(request.headers.authorization)
     );
-    authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
+  };
+
+  const authorizeLibraryWrite = async (request: LibraryRequest, fileId: string) => {
+    const member = authenticateLibraryMember(request);
+    if (member) {
+      authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
+    }
   };
 
   server.setErrorHandler((error, _request, reply) => {
@@ -219,10 +226,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
+    const member = authenticateLibraryMember(request);
+    if (request.query.fileId) {
+      if (member) {
+        authorizeTeamLibraryRead(
+          member,
+          await storage.getTeamIdForFile(request.query.fileId)
+        );
+      }
+      const libraries = await storage.listLibraryRegistry(request.query.fileId);
+      return {
+        libraries: member
+          ? filterAuthorizedTeamLibraries(member, libraries)
+          : libraries
+      };
+    }
+
+    const libraries = await storage.listLibraryRegistry();
     return {
-      libraries: request.query.fileId
-        ? await storage.listLibraryRegistry(request.query.fileId)
-        : await storage.listLibraryRegistry()
+      libraries: member
+        ? filterAuthorizedTeamLibraries(member, libraries)
+        : libraries
     };
   });
 

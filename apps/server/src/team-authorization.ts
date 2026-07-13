@@ -55,6 +55,28 @@ export function authenticateTeamMember(
   };
 }
 
+export function filterAuthorizedTeamLibraries<T extends { teamId?: string }>(
+  member: AuthenticatedTeamMember,
+  libraries: T[]
+): T[] {
+  return libraries.filter(
+    (library) =>
+      library.teamId !== undefined && member.teamIds.includes(library.teamId)
+  );
+}
+
+export function authorizeTeamLibraryRead(
+  member: AuthenticatedTeamMember,
+  teamId: string | undefined
+): void {
+  if (!teamId) {
+    throw forbiddenError("team library read requires a team-shared file");
+  }
+  if (!member.teamIds.includes(teamId)) {
+    throw forbiddenError("team member is not authorized for the library team");
+  }
+}
+
 export function authorizeTeamLibraryWrite(
   member: AuthenticatedTeamMember,
   teamId: string | undefined

@@ -585,6 +585,21 @@ test("file panel sends active team member credentials for library publish and im
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
 
+  const listRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "GET" &&
+      url.pathname === "/libraries" &&
+      url.searchParams.has("fileId")
+    );
+  });
+  await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  const listed = await listRequest;
+  expect(listed.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
+
   const publicationRequest = page.waitForRequest(
     (request) =>
       request.method() === "POST" &&
@@ -6197,11 +6212,40 @@ test("canvas grid header reorder supports spanned grid items", async ({ page }) 
   }
   await page.mouse.move(firstColumnBox.x + firstColumnBox.width / 2, firstColumnBox.y + firstColumnBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(
-    thirdColumnBox.x + thirdColumnBox.width / 2,
-    thirdColumnBox.y + thirdColumnBox.height / 2,
-    { steps: 5 }
-  );
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.cursor))
+    .toBe("grabbing");
+
+  const viewport = page.viewportSize();
+  if (!viewport) {
+    throw new Error("grid reorder test requires a fixed viewport");
+  }
+  await page.setViewportSize({ width: viewport.width - 1, height: viewport.height });
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.cursor))
+    .toBe("grabbing");
+
+  const refreshedThirdColumnBox = await thirdColumnHeader.boundingBox();
+  if (!refreshedThirdColumnBox) {
+    throw new Error("grid column reorder target disappeared after drag start");
+  }
+  const targetPoint = {
+    x: refreshedThirdColumnBox.x + refreshedThirdColumnBox.width / 2,
+    y: refreshedThirdColumnBox.y + refreshedThirdColumnBox.height / 2
+  };
+  await page.mouse.move(targetPoint.x, targetPoint.y, { steps: 12 });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.closest<HTMLElement>('[data-grid-track-header="true"]')
+            ?.dataset.gridTrackIndex,
+        targetPoint
+      )
+    )
+    .toBe("2");
   await page.mouse.up();
 
   await expect(page.getByTestId("inspector-layout-grid-column-tracks")).toHaveValue("80px 1fr 120px");

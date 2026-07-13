@@ -687,6 +687,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/libraries") {
+        expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         return jsonResponse({
           libraries: [
             {
@@ -824,7 +829,12 @@ describe("file version API helpers", () => {
         { userId: "editor-user", memberToken: "editor-token" }
       )
     ).resolves.toMatchObject({ libraryId: "team-kit", componentCount: 1 });
-    await expect(listLibraryRegistry(fetcher as typeof fetch)).resolves.toEqual([
+    await expect(
+      listLibraryRegistry(fetcher as typeof fetch, {
+        userId: "viewer-user",
+        memberToken: "viewer-token"
+      })
+    ).resolves.toEqual([
       expect.objectContaining({ libraryId: "team-kit", name: "Team Kit" })
     ]);
     await expect(
