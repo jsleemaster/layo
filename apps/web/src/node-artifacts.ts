@@ -92,15 +92,31 @@ interface PdfGradientStrokeEntry {
   x: number;
   y: number;
   pageHeight: number;
+  strokeId?: string;
   shadingName?: string;
   shadingId?: number;
   graphicsStateName?: string;
   graphicsStateId?: number;
 }
 
+interface PdfImageStrokeEntry {
+  type: "imageStroke";
+  node: RendererNode;
+  stroke: NodeStroke;
+  asset: NodeArtifactAsset;
+  x: number;
+  y: number;
+  pageHeight: number;
+  xObjectName?: string;
+  xObjectId?: number;
+  sMaskId?: number;
+  patternName?: string;
+  patternId?: number;
+}
+
 type PdfGradientPaintEntry = PdfGradientFillEntry | PdfGradientStrokeEntry;
 
-type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfShadowEntry | PdfGradientPaintEntry;
+type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfImageStrokeEntry | PdfShadowEntry | PdfGradientPaintEntry;
 
 interface ArtifactBounds {
   minX: number;
@@ -2022,6 +2038,7 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
         ? [...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfPathClipOperatorForNode(node), "n"]
         : ["-100000 -100000 200000 200000 re", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "W*", "n"];
     return [
+      `% Layo stroke paint ${stroke.id} ${strokePaintType(stroke)}`,
       isAlignedPath ? `% Layo aligned path stroke ${effectivePosition}` : `% Layo stroke ${stroke.id} ${effectivePosition}`,
       "q",
       ...clipCommands,
@@ -2085,6 +2102,7 @@ function pdfGradientStrokeCommands(entry: PdfGradientStrokeEntry) {
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
   const transform = pdfGradientTransformCommand(entry);
   return [
+    `% Layo stroke paint ${entry.strokeId ?? "legacy"} gradient`,
     "q",
     ...outerPath,
     ...innerPath,
@@ -2388,7 +2406,46 @@ function collectPdfEntries(
       entries.push({ type: "commands", commands: pdfFillCommands(node, pageHeight, x, y) });
     }
 
-    if (strokeGradient) {
+    if (node.style.strokes) {
+      visibleStrokesForNode(node).forEach((stroke, index) => {
+        const strokeNode = nodeWithStroke(node, stroke);
+        if (stroke.paint?.type === "gradient" && pdfSupportsGradient(stroke.paint.gradient)) {
+          const stops = gradientStopsForGradient(stroke.paint.gradient);
+          if (stops.length >= 2 && pdfGradientStops(stops)) {
+            entries.push({
+              type: "gradientStroke",
+              node: strokeNode,
+              source: {
+                origin: "penpot",
+                kind: "stroke",
+                paintType: "gradient",
+                index,
+                opacity: stroke.opacity,
+                gradient: stroke.paint.gradient
+              },
+              gradient: stroke.paint.gradient,
+              stops,
+              strokeId: stroke.id,
+              x,
+              y,
+              pageHeight
+            });
+            return;
+          }
+        }
+        if (stroke.paint?.type === "image") {
+          const asset = options.assets?.[stroke.paint.asset_id];
+          if (asset?.dataBase64) {
+            entries.push({ type: "imageStroke", node, stroke, asset, x, y, pageHeight });
+            return;
+          }
+        }
+        entries.push({
+          type: "commands",
+          commands: pdfStrokeCommands({ ...node, style: { ...node.style, strokes: [stroke] } }, pageHeight, x, y)
+        });
+      });
+    } else if (strokeGradient) {
       entries.push({ type: "gradientStroke", node, ...strokeGradient, x, y, pageHeight });
     } else {
       const strokeCommands = pdfStrokeCommands(node, pageHeight, x, y);
@@ -2428,6 +2485,41 @@ function pdfImageCommands(entry: PdfImageEntry) {
   return ["q", `${width} 0 0 ${height} ${formatNumber(entry.x)} ${formatNumber(pdfY)} cm`, `/${entry.xObjectName} Do`, "Q"];
 }
 
+function pdfImageStrokeCommands(entry: PdfImageStrokeEntry) {
+  const strokeNode = nodeWithStroke(entry.node, entry.stroke);
+  const effectivePosition = effectiveStrokePositionForNode(entry.node, entry.stroke);
+  const closedPathData = closedPathDataForStrokeAlignment(entry.node);
+  const isAlignedPath = Boolean(closedPathData && effectivePosition !== "center");
+  const inset = effectivePosition === "inside"
+    ? entry.stroke.width / 2
+    : effectivePosition === "outside"
+      ? -entry.stroke.width / 2
+      : 0;
+  const pathCommands = isAlignedPath
+    ? pdfShapePathCommandsForNode(strokeNode, entry.pageHeight, entry.x, entry.y)
+    : pdfShapePathCommandsForNode(strokeNode, entry.pageHeight, entry.x, entry.y, inset);
+  const clipCommands = !isAlignedPath
+    ? []
+    : effectivePosition === "inside"
+      ? [...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y), pdfPathClipOperatorForNode(entry.node), "n"]
+      : ["-100000 -100000 200000 200000 re", ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y), "W*", "n"];
+  if (!entry.patternName) {
+    return pdfStrokeCommands({ ...entry.node, style: { ...entry.node.style, strokes: [entry.stroke] } }, entry.pageHeight, entry.x, entry.y);
+  }
+  return [
+    `% Layo stroke paint ${entry.stroke.id} image`,
+    "q",
+    ...clipCommands,
+    "/Pattern CS",
+    `/${entry.patternName} SCN`,
+    `${formatNumber(isAlignedPath ? entry.stroke.width * 2 : entry.stroke.width)} w`,
+    ...pdfStrokeStyleCommands(strokeNode),
+    ...pathCommands,
+    "S",
+    "Q"
+  ];
+}
+
 function contentForPdfEntries(entries: PdfEntry[]) {
   return [
     ...entries.flatMap((entry) => {
@@ -2442,6 +2534,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
       }
       if (entry.type === "gradientStroke") {
         return pdfGradientStrokeCommands(entry);
+      }
+      if (entry.type === "imageStroke") {
+        return pdfImageStrokeCommands(entry);
       }
       return pdfImageCommands(entry);
     }),
@@ -2593,6 +2688,47 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     }
   });
 
+  const imageStrokeEntries = entries.filter((entry): entry is PdfImageStrokeEntry => entry.type === "imageStroke");
+  imageStrokeEntries.forEach((entry, index) => {
+    const assetBytes = bytesFromBase64(entry.asset.dataBase64);
+    const previewBytes = entry.asset.pdfPreviewPngBase64 ? bytesFromBase64(entry.asset.pdfPreviewPngBase64) : null;
+    const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : previewBytes ? decodePng(previewBytes) : null;
+    entry.xObjectName = `StrokeIm${index + 1}`;
+    if (png) {
+      const rgbBytes = zlibSync(png.rgb);
+      if (png.alpha) {
+        const alphaBytes = zlibSync(png.alpha);
+        entry.sMaskId = addPdfObject(objects, [
+          `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${alphaBytes.length} >>\nstream\n`,
+          alphaBytes,
+          "\nendstream"
+        ]);
+      }
+      const sMaskClause = entry.sMaskId ? ` /SMask ${entry.sMaskId} 0 R` : "";
+      entry.xObjectId = addPdfObject(objects, [
+        `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode${sMaskClause} /Length ${rgbBytes.length} >>\nstream\n`,
+        rgbBytes,
+        "\nendstream"
+      ]);
+    } else if (entry.asset.mimeType === "image/jpeg") {
+      entry.xObjectId = addPdfObject(objects, [
+        `<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${assetBytes.length} >>\nstream\n`,
+        assetBytes,
+        "\nendstream"
+      ]);
+    }
+    if (entry.xObjectId) {
+      const tileWidth = Math.max(1, Math.round(entry.node.size.width));
+      const tileHeight = Math.max(1, Math.round(entry.node.size.height));
+      const stream = `q ${tileWidth} 0 0 ${tileHeight} 0 0 cm /${entry.xObjectName} Do Q`;
+      entry.patternName = `StrokePattern${index + 1}`;
+      entry.patternId = addPdfObject(
+        objects,
+        `<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ${tileWidth} ${tileHeight}] /XStep ${tileWidth} /YStep ${tileHeight} /Resources << /XObject << /${entry.xObjectName} ${entry.xObjectId} 0 R >> >> /Length ${stream.length} >>\nstream\n${stream}\nendstream`
+      );
+    }
+  });
+
   const content = contentForPdfEntries(entries);
   const contentBytes = new TextEncoder().encode(content);
   const embeddedFileNames = imageEntries
@@ -2607,6 +2743,10 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     .filter((entry) => entry.shadingName && entry.shadingId)
     .map((entry) => `/${entry.shadingName} ${entry.shadingId} 0 R`);
   const shadingClause = shadingEntries.length > 0 ? ` /Shading << ${shadingEntries.join(" ")} >>` : "";
+  const patternEntries = imageStrokeEntries
+    .filter((entry) => entry.patternName && entry.patternId)
+    .map((entry) => `/${entry.patternName} ${entry.patternId} 0 R`);
+  const patternClause = patternEntries.length > 0 ? ` /Pattern << ${patternEntries.join(" ")} >>` : "";
   const strokeGraphicsStateEntries: string[] = [];
   const collectStrokeGraphicsStates = (candidate: RendererNode) => {
     visibleStrokesForNode(candidate).forEach((stroke, index) => {
@@ -2639,7 +2779,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
   setPdfObject(
     objects,
     pageId,
-    `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontId} 0 R >>${xObjectClause}${shadingClause}${extGStateClause} >> /Contents ${contentId} 0 R >>`
+    `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontId} 0 R >>${xObjectClause}${shadingClause}${patternClause}${extGStateClause} >> /Contents ${contentId} 0 R >>`
   );
   setPdfObject(objects, contentId, [`<< /Length ${contentBytes.length} >>\nstream\n`, contentBytes, "endstream"]);
   setPdfObject(objects, infoId, `<< /Title (${escapedName}) /Subject (${escapedNodeId}) /Creator (Layo) >>`);
