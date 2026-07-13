@@ -1405,6 +1405,15 @@ export class FileStorage {
     return path.join(this.libraryUpdateRecoveryDir(), `${fileId}.json`);
   }
 
+  private libraryPublicationRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "library-publications");
+  }
+
+  private libraryPublicationRecoveryPathFor(libraryId: string) {
+    assertSafeStorageId(libraryId);
+    return path.join(this.libraryPublicationRecoveryDir(), `${libraryId}.json`);
+  }
+
   private async persistLibraryUpdateRecoveryJournal(
     fileId: string,
     original: StoragePathSnapshot[],
@@ -1418,7 +1427,9 @@ export class FileStorage {
       original: original.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot)),
       intended: intended.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot))
     };
-    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    const journalPath = kind === "library-registry-publication"
+      ? this.libraryPublicationRecoveryPathFor(fileId)
+      : this.libraryUpdateRecoveryPathFor(fileId);
     await mkdir(path.dirname(journalPath), { recursive: true });
     await durablyReplaceFile(
       journalPath,
@@ -1426,8 +1437,13 @@ export class FileStorage {
     );
   }
 
-  private async removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void> {
-    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+  private async removeLibraryUpdateRecoveryJournal(
+    fileId: string,
+    kind: LibraryUpdateRecoveryJournal["kind"] = "library-registry-update"
+  ): Promise<void> {
+    const journalPath = kind === "library-registry-publication"
+      ? this.libraryPublicationRecoveryPathFor(fileId)
+      : this.libraryUpdateRecoveryPathFor(fileId);
     await rm(journalPath, { force: true });
     await syncDirectory(path.dirname(journalPath));
   }
@@ -1438,18 +1454,26 @@ export class FileStorage {
   }
 
   private async recoverInterruptedLibraryUpdates(): Promise<void> {
-    let entries: string[];
-    try {
-      entries = await readdir(this.libraryUpdateRecoveryDir());
-    } catch (error) {
-      if ((error as { code?: string }).code === "ENOENT") {
-        return;
+    const journalPaths: string[] = [];
+    for (const recoveryDir of [
+      this.libraryUpdateRecoveryDir(),
+      this.libraryPublicationRecoveryDir()
+    ]) {
+      try {
+        const entries = await readdir(recoveryDir);
+        journalPaths.push(
+          ...entries
+            .filter((candidate) => candidate.endsWith(".json"))
+            .map((entry) => path.join(recoveryDir, entry))
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code !== "ENOENT") {
+          throw error;
+        }
       }
-      throw error;
     }
 
-    for (const recoveryEntry of entries.filter((candidate) => candidate.endsWith(".json")).sort()) {
-      const journalPath = path.join(this.libraryUpdateRecoveryDir(), recoveryEntry);
+    for (const journalPath of journalPaths.sort()) {
       let pendingJournal: LibraryUpdateRecoveryJournal;
       try {
         pendingJournal = parseLibraryUpdateRecoveryJournal(
@@ -2471,7 +2495,7 @@ export class FileStorage {
           )
         }
       ];
-      const recoveryId = `library-publication-${libraryId}`;
+      const recoveryId = libraryId;
 
       await this.persistLibraryUpdateRecoveryJournal(
         recoveryId,
@@ -2484,12 +2508,18 @@ export class FileStorage {
         await durablyReplaceFile(archivePath, exported.archive);
         await this.writeLibraryRegistryEntries(nextEntries);
         await this.writeLibraryRegistryEvents(nextEvents);
-        await this.removeLibraryUpdateRecoveryJournal(recoveryId);
+        await this.removeLibraryUpdateRecoveryJournal(
+          recoveryId,
+          "library-registry-publication"
+        );
         return entry;
       } catch (error) {
         try {
           await restoreStoragePathSnapshots(original);
-          await this.removeLibraryUpdateRecoveryJournal(recoveryId);
+          await this.removeLibraryUpdateRecoveryJournal(
+            recoveryId,
+            "library-registry-publication"
+          );
         } catch (rollbackError) {
           throw new AggregateError(
             [error, rollbackError],
