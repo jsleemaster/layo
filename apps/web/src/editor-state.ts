@@ -5719,7 +5719,7 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = style[field] as string | number | null;
+    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -5871,6 +5871,13 @@ function applyComponentInstanceOverrides(instance: RendererNode, sourceRootNodeI
         ...target.style,
         stroke: override.value === nullComponentOverrideValue ? null : override.value
       };
+    } else if (override.field === "strokes") {
+      try {
+        const strokes = override.value === nullComponentOverrideValue ? undefined : JSON.parse(override.value);
+        target.style = { ...target.style, ...(Array.isArray(strokes) ? { strokes } : {}) };
+      } catch {
+        // Ignore malformed historical override payloads.
+      }
     } else if (override.field === "stroke_width" || override.field === "opacity") {
       const value = Number(override.value);
       if (Number.isFinite(value)) {
