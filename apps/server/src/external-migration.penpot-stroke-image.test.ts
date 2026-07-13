@@ -167,16 +167,21 @@ test("imports Penpot stroke-image records as packaged image assets", () => {
   expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Stroke image frame" });
   expect(frame.children[0]).toMatchObject({
     id: `penpot-${strokeImageRectId}`,
-    kind: "image",
+    kind: "rectangle",
     name: "Border texture card",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.6 },
-    content: {
-      type: "image",
-      asset_id: expectedStrokeImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
+    style: {
+      fill: "#ffffff",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1,
+      strokes: [{
+        paint: { type: "image", asset_id: expectedStrokeImageAssetId },
+        opacity: 0.6,
+        width: 12,
+        position: "center"
+      }]
+    },
+    content: { type: "empty" }
   });
 });
 
@@ -232,21 +237,23 @@ test("reviews imports and persists Penpot stroke-image records through HTTP", as
   const imageNode = frame.children[0];
   expect(imageNode).toMatchObject({
     id: `penpot-${strokeImageRectId}`,
-    kind: "image",
+    kind: "rectangle",
     name: "Border texture card",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.6 },
-    content: {
-      type: "image",
-      asset_id: expectedStrokeImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
+    style: {
+      fill: "#ffffff",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1,
+      strokes: [{
+        paint: { type: "image", asset_id: expectedStrokeImageAssetId },
+        opacity: 0.6,
+        width: 12,
+        position: "center"
+      }]
+    },
+    content: { type: "empty" }
   });
-  if (imageNode.content.type !== "image") {
-    throw new Error("expected Penpot stroke-image import to persist an image node");
-  }
-  const asset = await storage.readAsset(imageNode.content.asset_id);
+  const asset = await storage.readAsset(expectedStrokeImageAssetId);
   expect(asset).toMatchObject({
     assetId: expectedStrokeImageAssetId,
     name: "border-texture.png",
