@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   applyAgentCommandsToDocument,
   createAgentBatchResult,
@@ -50,24 +52,249 @@ export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+z
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
+const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
+const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
+
+interface StorageProcessLockOwner {
+  schemaVersion: 1;
+  token: string;
+  pid: number;
+  hostname: string;
+  acquiredAt: string;
+}
+
+async function acquireStorageProcessMutationLock(
+  storagePath: string
+): Promise<() => Promise<void>> {
+  const storageRoot = path.dirname(path.dirname(storagePath));
+  const locksDir = path.join(storageRoot, "locks");
+  const resourceHash = createHash("sha256")
+    .update(path.resolve(storagePath))
+    .digest("hex");
+  const lockName = `storage-mutation-${resourceHash}.lock`;
+  const lockDir = path.join(locksDir, lockName);
+  const ownerPath = path.join(lockDir, "owner.json");
+  const owner: StorageProcessLockOwner = {
+    schemaVersion: 1,
+    token: randomUUID(),
+    pid: process.pid,
+    hostname: hostname(),
+    acquiredAt: new Date().toISOString()
+  };
+  const timeoutMs = normalizeStorageProcessLockTimeout(
+    process.env.LAYO_STORAGE_LOCK_TIMEOUT_MS
+  );
+  const staleMs = normalizeStorageProcessLockStale(
+    process.env.LAYO_STORAGE_LOCK_STALE_MS
+  );
+  const startedAt = Date.now();
+
+  await mkdir(locksDir, { recursive: true });
+  while (true) {
+    const candidateDir = path.join(locksDir, `${lockName}.candidate-${owner.token}`);
+    const candidateOwnerPath = path.join(candidateDir, "owner.json");
+    await mkdir(candidateDir);
+    try {
+      await writeFile(candidateOwnerPath, `${JSON.stringify(owner, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx"
+      });
+      await syncDirectory(candidateDir);
+      await rename(candidateDir, lockDir);
+      await syncDirectory(locksDir);
+
+      return async () => {
+        const currentOwner = parseStorageProcessLockOwner(
+          JSON.parse(await readFile(ownerPath, "utf8"))
+        );
+        if (currentOwner.token !== owner.token) {
+          throw new Error("storage process mutation lock ownership changed before release");
+        }
+        const releasingDir = path.join(
+          locksDir,
+          `${lockName}.releasing-${owner.token}`
+        );
+        await rename(lockDir, releasingDir);
+        await rm(releasingDir, { recursive: true, force: true });
+        await syncDirectory(locksDir);
+      };
+    } catch (error) {
+      await rm(candidateDir, { recursive: true, force: true });
+      if (!isStorageProcessLockContention(error)) {
+        throw error;
+      }
+    }
+
+    if (await recoverAbandonedStorageProcessLock(lockDir, locksDir, staleMs)) {
+      continue;
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`storage process mutation lock timed out: ${lockDir}`);
+    }
+    await delay(STORAGE_PROCESS_LOCK_RETRY_MS);
+  }
+}
+
+function isStorageProcessLockContention(error: unknown): boolean {
+  const code = (error as { code?: string }).code;
+  return code === "EEXIST" || code === "ENOTEMPTY";
+}
+
+async function recoverAbandonedStorageProcessLock(
+  lockDir: string,
+  locksDir: string,
+  staleMs: number
+): Promise<boolean> {
+  const ownerPath = path.join(lockDir, "owner.json");
+  let owner: StorageProcessLockOwner;
+  try {
+    owner = parseStorageProcessLockOwner(
+      JSON.parse(await readFile(ownerPath, "utf8"))
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
+
+  if (
+    Date.now() - Date.parse(owner.acquiredAt) < staleMs
+    || owner.hostname !== hostname()
+    || isProcessAlive(owner.pid)
+  ) {
+    return false;
+  }
+
+  const claimPath = `${lockDir}.recovery-${owner.token}.claim`;
+  try {
+    await link(ownerPath, claimPath);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "EEXIST") {
+      return false;
+    }
+    if (code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
+
+  try {
+    const claimedOwner = parseStorageProcessLockOwner(
+      JSON.parse(await readFile(claimPath, "utf8"))
+    );
+    if (claimedOwner.token !== owner.token) {
+      return false;
+    }
+
+    const abandonedDir = `${lockDir}.abandoned-${owner.token}-${randomUUID()}`;
+    try {
+      await rename(lockDir, abandonedDir);
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return true;
+      }
+      throw error;
+    }
+
+    try {
+      const movedOwner = parseStorageProcessLockOwner(
+        JSON.parse(await readFile(path.join(abandonedDir, "owner.json"), "utf8"))
+      );
+      if (movedOwner.token !== owner.token) {
+        throw new Error("storage process mutation lock changed during stale recovery");
+      }
+      await rm(abandonedDir, { recursive: true, force: true });
+      await syncDirectory(locksDir);
+      return true;
+    } catch (error) {
+      try {
+        await rename(abandonedDir, lockDir);
+      } catch {
+        // Preserve the primary stale-recovery failure.
+      }
+      throw error;
+    }
+  } finally {
+    await rm(claimPath, { force: true });
+    await syncDirectory(locksDir);
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    return code === "EPERM";
+  }
+}
+
+function normalizeStorageProcessLockTimeout(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 100
+    ? Math.floor(parsed)
+    : STORAGE_PROCESS_LOCK_TIMEOUT_MS;
+}
+
+function normalizeStorageProcessLockStale(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 50
+    ? Math.floor(parsed)
+    : 5_000;
+}
+
+function parseStorageProcessLockOwner(value: unknown): StorageProcessLockOwner {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid storage process mutation lock owner");
+  }
+  const candidate = value as Partial<StorageProcessLockOwner>;
+  if (
+    candidate.schemaVersion !== 1
+    || typeof candidate.token !== "string"
+    || typeof candidate.pid !== "number"
+    || !Number.isInteger(candidate.pid)
+    || candidate.pid <= 0
+    || typeof candidate.hostname !== "string"
+    || typeof candidate.acquiredAt !== "string"
+    || !Number.isFinite(Date.parse(candidate.acquiredAt))
+  ) {
+    throw new Error("invalid storage process mutation lock owner");
+  }
+  return {
+    schemaVersion: 1,
+    token: candidate.token,
+    pid: candidate.pid,
+    hostname: candidate.hostname,
+    acquiredAt: candidate.acquiredAt
+  };
+}
 
 async function withStoragePathMutationLock<T>(
   storagePath: string,
   operation: () => Promise<T>
 ): Promise<T> {
   const previous = storagePathMutationTails.get(storagePath) ?? Promise.resolve();
-  let release!: () => void;
+  let releaseInProcess!: () => void;
   const current = new Promise<void>((resolve) => {
-    release = resolve;
+    releaseInProcess = resolve;
   });
   storagePathMutationTails.set(storagePath, current);
   await previous;
+  let releaseProcessLock: (() => Promise<void>) | null = null;
   try {
+    releaseProcessLock = await acquireStorageProcessMutationLock(storagePath);
     return await operation();
   } finally {
-    release();
-    if (storagePathMutationTails.get(storagePath) === current) {
-      storagePathMutationTails.delete(storagePath);
+    try {
+      await releaseProcessLock?.();
+    } finally {
+      releaseInProcess();
+      if (storagePathMutationTails.get(storagePath) === current) {
+        storagePathMutationTails.delete(storagePath);
+      }
     }
   }
 }
@@ -2418,8 +2645,11 @@ export class FileStorage {
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
     return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      this.librarySubscriptionsPath(),
+      () => withStoragePathMutationLock(
+        this.filePathFor(fileId),
+        () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      )
     );
   }
 

@@ -52,6 +52,17 @@ implementation slice reveals a new gap.
 | AI workflow | Penpot MCP reads/writes the focused file through plugin/API context. | Layo MCP/HTTP applies typed command batches directly to saved design files. | Keep typed deterministic commands as a differentiator while matching Penpot-level breadth. |
 | Operations | Self-hosting, configuration, Docker/Kubernetes guidance. | Vercel/static plus Node server and relay deployment notes, Vercel full-stack routing artifacts, a GitHub Actions production deployment path with required Vercel and repository-admin secret checks, deploy-output-derived live smoke verification, a guarded GitHub About sync script that repeats the live smoke check before PATCHing repository metadata, a live production smoke verifier that rejects non-Layo Vercel pages and no longer defaults to a stale hard-coded URL, a verified manual `jsleemasters-projects/layo` production deployment at `https://layo-three.vercel.app/` with same-origin `/health`, a repository-owned `.layo` storage backup/review/restore runbook for persistent filesystem hosts, a scheduled GitHub Actions restore drill that proves a seeded backup can be restored and read without hosted secrets, and a scheduled local backup repository retention workflow that dry-runs then applies keep-last plus max-age pruning without hosted secrets. CI-owned production deploy proof still requires valid Vercel credentials, a repository-admin homepage token, and a workflow deploy-output URL that passes the live smoke check. Hosted backup automation still needs durable database/object-store storage. | Production-grade self-host, Vercel-compatible app deployment, hosted backups, migrations, monitoring, and upgrade docs. |
 
+## Current Library Recovery Evidence
+
+`docs/product/penpot-cross-process-storage-lock-delta.md` adapts Penpot's
+transaction and row-lock ownership principle to Layo's local-first filesystem.
+Resource-keyed owner locks now serialize same-target writes across Node
+processes, enforce `subscriptions -> target` acquisition order for library
+updates, and recover only bounded same-host owners whose PID is dead. Automatic
+cross-host lock stealing deliberately remains unsupported. Atomic publication
+across registry archive bytes, registry metadata, and events is the next exact
+design-system and import/export recovery gap.
+
 ## Recent Design-System Evidence
 
 `2026-06-28-penpot-variant-area-layout-metadata.md` narrowed the older full
