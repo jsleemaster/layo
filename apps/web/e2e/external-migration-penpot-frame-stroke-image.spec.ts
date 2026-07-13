@@ -198,7 +198,7 @@ function createPenpotFrameStrokeImageExportArchive(options: FrameStrokeImageArch
   ]);
 }
 
-test("file panel imports a Penpot frame stroke-image record as a packaged background image asset", async ({ page }, testInfo) => {
+test("file panel imports a Penpot frame stroke-image record as a frame-owned paint", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("frame-stroke-images.penpot");
   await writeFile(penpotZipPath, createPenpotFrameStrokeImageExportArchive());
@@ -246,7 +246,7 @@ test("file panel imports a Penpot frame stroke-image record as a packaged backgr
   expect(await assetResponse.body()).toEqual(pngImage);
 });
 
-test("file panel imports Penpot frame fill-image and stroke-image records as separate packaged image layers", async ({ page }, testInfo) => {
+test("file panel keeps a fill-image child and a frame-owned stroke-image paint", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("frame-dual-image-paints.penpot");
   await writeFile(penpotZipPath, createPenpotFrameStrokeImageExportArchive({ includeFrameFillImage: true }));
