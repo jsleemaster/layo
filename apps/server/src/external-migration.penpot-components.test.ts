@@ -207,7 +207,134 @@ function variantArchive() {
   ]);
 }
 
+const libraryFileId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+const libraryPageId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+const rectangleComponentId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1";
+const circleComponentId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee2";
+const rectangleMainId = "ffffffff-ffff-ffff-ffff-fffffffffff1";
+const circleMainId = "ffffffff-ffff-ffff-ffff-fffffffffff2";
+const outerComponentId = "12121212-1212-1212-1212-121212121212";
+const outerMainId = "13131313-1313-1313-1313-131313131313";
+const outerMainSlotId = "14141414-1414-1414-1414-141414141414";
+const outerCopyId = "15151515-1515-1515-1515-151515151515";
+const outerCopySlotId = "16161616-1616-1616-1616-161616161616";
+
+function packagedLibrarySwapArchive() {
+  const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
+  const shape = (
+    id: string,
+    name: string,
+    type: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    extra: Record<string, unknown> = {}
+  ) => ({ id, name, type, x, y, width, height, ...extra });
+
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: json({
+        type: "penpot/export-files",
+        version: 1,
+        generatedBy: "penpot/packaged-library-swap-contract",
+        files: [
+          { id: fileId, name: "Product file", features: ["components/v2"] },
+          { id: libraryFileId, name: "Shape library", features: ["components/v2"] }
+        ]
+      })
+    },
+    { path: `files/${fileId}.json`, data: json({ id: fileId, name: "Product file" }) },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: json({ id: pageId, name: "Product", index: 0, objects: {} })
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${outerMainId}.json`,
+      data: json(shape(outerMainId, "Card", "frame", 80, 80, 240, 160, {
+        "main-instance": true,
+        "component-root": true,
+        "component-id": outerComponentId,
+        "component-file": fileId,
+        shapes: [outerMainSlotId]
+      }))
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${outerMainSlotId}.json`,
+      data: json(shape(outerMainSlotId, "Shape slot", "rectangle", 112, 112, 64, 64, {
+        "component-id": rectangleComponentId,
+        "component-file": libraryFileId,
+        "shape-ref": rectangleMainId
+      }))
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${outerCopyId}.json`,
+      data: json(shape(outerCopyId, "Card copy", "frame", 400, 80, 240, 160, {
+        "component-root": true,
+        "component-id": outerComponentId,
+        "component-file": fileId,
+        "shape-ref": outerMainId,
+        shapes: [outerCopySlotId]
+      }))
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${outerCopySlotId}.json`,
+      data: json(shape(outerCopySlotId, "Shape slot", "ellipse", 432, 112, 64, 64, {
+        "component-id": circleComponentId,
+        "component-file": libraryFileId,
+        "shape-ref": circleMainId,
+        touched: [`swap-slot-${outerMainSlotId}`]
+      }))
+    },
+    { path: `files/${libraryFileId}.json`, data: json({ id: libraryFileId, name: "Shape library" }) },
+    {
+      path: `files/${libraryFileId}/pages/${libraryPageId}.json`,
+      data: json({ id: libraryPageId, name: "Shapes", index: 0, objects: {} })
+    },
+    {
+      path: `files/${libraryFileId}/pages/${libraryPageId}/${rectangleMainId}.json`,
+      data: json(shape(rectangleMainId, "Rectangle", "rectangle", 80, 80, 64, 64, {
+        "main-instance": true,
+        "component-root": true,
+        "component-id": rectangleComponentId,
+        "component-file": libraryFileId,
+        fills: [{ fillColor: "#2563eb", fillOpacity: 1 }]
+      }))
+    },
+    {
+      path: `files/${libraryFileId}/pages/${libraryPageId}/${circleMainId}.json`,
+      data: json(shape(circleMainId, "Circle", "ellipse", 200, 80, 64, 64, {
+        "main-instance": true,
+        "component-root": true,
+        "component-id": circleComponentId,
+        "component-file": libraryFileId,
+        fills: [{ fillColor: "#f97316", fillOpacity: 1 }]
+      }))
+    }
+  ]);
+}
+
 describe("Penpot component instance migration", () => {
+
+  test("reviews a packaged cross-file component library and nested swap as importable", () => {
+    const review = reviewExternalMigrationArchive(packagedLibrarySwapArchive(), {
+      fileName: "packaged-library-swap.penpot"
+    });
+
+    expect(review).toMatchObject({
+      source: "penpot",
+      canImport: true,
+      blockedBy: []
+    });
+    expect(review.documentCandidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Product file" }),
+        expect.objectContaining({ name: "Shape library" })
+      ])
+    );
+  });
+
   test("reviews readable main and copy relations as structurally importable", () => {
     const review = reviewExternalMigrationArchive(componentArchive(), {
       fileName: "components.penpot"
