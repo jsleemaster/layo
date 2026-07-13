@@ -6212,11 +6212,31 @@ test("canvas grid header reorder supports spanned grid items", async ({ page }) 
   }
   await page.mouse.move(firstColumnBox.x + firstColumnBox.width / 2, firstColumnBox.y + firstColumnBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(
-    thirdColumnBox.x + thirdColumnBox.width / 2,
-    thirdColumnBox.y + thirdColumnBox.height / 2,
-    { steps: 5 }
-  );
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.cursor))
+    .toBe("grabbing");
+
+  const refreshedThirdColumnBox = await thirdColumnHeader.boundingBox();
+  if (!refreshedThirdColumnBox) {
+    throw new Error("grid column reorder target disappeared after drag start");
+  }
+  const targetPoint = {
+    x: refreshedThirdColumnBox.x + refreshedThirdColumnBox.width / 2,
+    y: refreshedThirdColumnBox.y + refreshedThirdColumnBox.height / 2
+  };
+  await page.mouse.move(targetPoint.x, targetPoint.y, { steps: 12 });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.closest<HTMLElement>('[data-grid-track-header="true"]')
+            ?.dataset.gridTrackIndex,
+        targetPoint
+      )
+    )
+    .toBe("2");
   await page.mouse.up();
 
   await expect(page.getByTestId("inspector-layout-grid-column-tracks")).toHaveValue("80px 1fr 120px");
