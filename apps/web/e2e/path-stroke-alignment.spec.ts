@@ -82,40 +82,6 @@ test("closed path alignment paints distinct canvas regions and normalizes open p
   await expect(position).toHaveValue("outside");
   await expect(position).toHaveAttribute("data-effective-position", "outside");
 
-  const colorBounds = await expect.poll(async () => page.evaluate(() => {
-    const result = {
-      red: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, count: 0 },
-      blue: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity, count: 0 }
-    };
-    for (const canvas of document.querySelectorAll("canvas")) {
-      const context = canvas.getContext("2d");
-      if (!context) continue;
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-      for (let y = 0; y < canvas.height; y += 1) {
-        for (let x = 0; x < canvas.width; x += 1) {
-          const offset = (y * canvas.width + x) * 4;
-          const red = pixels[offset];
-          const green = pixels[offset + 1];
-          const blue = pixels[offset + 2];
-          const target = red > 200 && green < 130 && blue < 130
-            ? result.red
-            : blue > 160 && red < 100 && green < 150
-              ? result.blue
-              : null;
-          if (!target) continue;
-          target.minX = Math.min(target.minX, x);
-          target.minY = Math.min(target.minY, y);
-          target.maxX = Math.max(target.maxX, x);
-          target.maxY = Math.max(target.maxY, y);
-          target.count += 1;
-        }
-      }
-    }
-    return result;
-  }), { timeout: 10_000 }).toMatchObject({
-    red: { count: expect.any(Number) },
-    blue: { count: expect.any(Number) }
-  });
   const painted = await page.evaluate(() => {
     const colors = { red: [] as Array<[number, number]>, blue: [] as Array<[number, number]> };
     for (const canvas of document.querySelectorAll("canvas")) {
