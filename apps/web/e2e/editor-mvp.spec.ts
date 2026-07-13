@@ -6216,6 +6216,15 @@ test("canvas grid header reorder supports spanned grid items", async ({ page }) 
     .poll(() => page.evaluate(() => document.body.style.cursor))
     .toBe("grabbing");
 
+  const viewport = page.viewportSize();
+  if (!viewport) {
+    throw new Error("grid reorder test requires a fixed viewport");
+  }
+  await page.setViewportSize({ width: viewport.width - 1, height: viewport.height });
+  await expect
+    .poll(() => page.evaluate(() => document.body.style.cursor))
+    .toBe("grabbing");
+
   const refreshedThirdColumnBox = await thirdColumnHeader.boundingBox();
   if (!refreshedThirdColumnBox) {
     throw new Error("grid column reorder target disappeared after drag start");
