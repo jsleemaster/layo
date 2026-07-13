@@ -626,6 +626,7 @@ describe("Penpot component instance migration", () => {
             sourceComponentId: `penpot-component-${circleComponentId}`,
             targetComponentId: `penpot-component-${circleComponentId}`,
             affectedInstanceIds: [
+              `penpot-${outerCopyId}`,
               `penpot-${outerCopyId}__penpot-${outerMainSlotId}`
             ]
           }
