@@ -1279,7 +1279,7 @@ describe("Penpot component instance migration", () => {
 
   test("does not recover an active library update during same-process project reads", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-active-read-"));
-    let releaseSubscriptionWrite = () => undefined;
+    let releaseSubscriptionWrite: () => void = () => undefined;
     try {
       const storage = new FileStorage(root);
       await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
