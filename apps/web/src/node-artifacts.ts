@@ -1288,11 +1288,12 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const ownedFills = visibleFillsForNode(node);
 
   if (node.content.type === "text") {
-    const fontSize = Math.max(1, Math.round(node.content.font_size));
+    const textContent = node.content;
+    const fontSize = Math.max(1, Math.round(textContent.font_size));
     const textShape = (paint: string, metadata = "", paintOpacity = opacity) =>
       `<text ${svgNodeAttributes(node)}${metadata} x="0" y="${fontSize}" fill="${paint}" font-family="${escapeSvgText(
-        node.content.font_family
-      )}" font-size="${fontSize}"${paintOpacity}${filter}>${escapeSvgText(node.content.value)}</text>`;
+        textContent.font_family
+      )}" font-size="${fontSize}"${paintOpacity}${filter}>${escapeSvgText(textContent.value)}</text>`;
     if (node.style.fills) {
       return ownedFills.map((ownedFill) =>
         textShape(
@@ -2225,7 +2226,7 @@ function pdfRectCommands(node: RendererNode, pageHeight: number, x: number, y: n
   return [...pdfFillCommands(node, pageHeight, x, y), ...pdfStrokeCommands(node, pageHeight, x, y)];
 }
 
-function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
+function pdfGradientFillCommands(entry: PdfGradientFillEntry) {
   if (!entry.shadingName) {
     return pdfRectCommands(entry.node, entry.pageHeight, entry.x, entry.y);
   }
