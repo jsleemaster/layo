@@ -3,6 +3,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
+import {
+  authenticateTeamMember,
+  authorizeTeamLibraryWrite,
+  parseTeamAuthorizationConfig,
+  type TeamAuthorizationConfig
+} from "./team-authorization.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
   return nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
@@ -483,7 +489,15 @@ const writeToolAnnotations = {
   openWorldHint: false
 };
 
-export function createMcpServer(storage = new FileStorage()) {
+export interface McpServerOptions {
+  libraryRegistryAuth?: TeamAuthorizationConfig;
+  libraryRegistryPrincipal?: {
+    userId: string;
+    memberToken: string;
+  };
+}
+
+export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
   const server = new McpServer({
     name: "layo",
     version: "0.1.0"
@@ -873,24 +887,34 @@ export function createMcpServer(storage = new FileStorage()) {
         )
       }
     },
-    async ({ fileId, libraryId, name, idempotencyKey }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              library: await storage.publishLibraryToRegistry(fileId, {
-                libraryId,
-                name,
-                idempotencyKey
-              })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId, name, idempotencyKey }) => {
+      if (options.libraryRegistryAuth) {
+        const member = authenticateTeamMember(
+          options.libraryRegistryAuth,
+          options.libraryRegistryPrincipal?.userId,
+          options.libraryRegistryPrincipal?.memberToken
+        );
+        authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                library: await storage.publishLibraryToRegistry(fileId, {
+                  libraryId,
+                  name,
+                  idempotencyKey
+                })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -2192,7 +2216,21 @@ export function createMcpServer(storage = new FileStorage()) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const server = createMcpServer();
+  // Keeps MCP library credentials process-local while sharing the HTTP role policy.
+  const libraryRegistryAuth = parseTeamAuthorizationConfig(
+    process.env.LAYO_LIBRARY_REGISTRY_MEMBERS
+  );
+  const libraryRegistryPrincipal =
+    process.env.LAYO_MCP_USER_ID && process.env.LAYO_MCP_MEMBER_TOKEN
+      ? {
+          userId: process.env.LAYO_MCP_USER_ID,
+          memberToken: process.env.LAYO_MCP_MEMBER_TOKEN
+        }
+      : undefined;
+  const server = createMcpServer(undefined, {
+    libraryRegistryAuth,
+    libraryRegistryPrincipal
+  });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
