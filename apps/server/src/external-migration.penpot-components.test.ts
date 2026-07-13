@@ -1338,6 +1338,154 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("recovers committed asset target and subscription writes before journal cleanup", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-commit-restart-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-commit-restart-project",
+        documentId: "penpot-commit-restart-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const assetId = `penpot-asset-${libraryMediaId}`;
+      const originalTarget = await storage.readFile("penpot-commit-restart-target");
+      const originalSubscriptions = await storage.listLibraryRegistrySubscriptions();
+      const originalAsset = await storage.readAsset(assetId);
+      const publishedAssetData = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#0891b2"/></svg>',
+        "utf8"
+      );
+      const internals = storage as unknown as {
+        writeAsset(
+          asset: {
+            assetId: string;
+            name: string;
+            mimeType: string;
+            byteLength: number;
+            url: string;
+          },
+          data: Buffer
+        ): Promise<unknown>;
+        removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void>;
+      };
+      await internals.writeAsset(
+        { ...originalAsset, byteLength: publishedAssetData.length },
+        publishedAssetData
+      );
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0891b2";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+      await internals.writeAsset(originalAsset, originalAsset.data);
+
+      let markCleanupReached!: () => void;
+      const cleanupReached = new Promise<void>((resolve) => {
+        markCleanupReached = resolve;
+      });
+      const neverCleans = new Promise<void>(() => undefined);
+      internals.removeLibraryUpdateRecoveryJournal = async () => {
+        markCleanupReached();
+        await neverCleans;
+      };
+
+      const interruptedUpdate = storage.updateLibraryRegistryItem(
+        "penpot-commit-restart-target",
+        libraryDocumentId
+      );
+      void interruptedUpdate.catch(() => undefined);
+      await cleanupReached;
+      expect(
+        (await storage.readFile("penpot-commit-restart-target")).components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0891b2");
+      expect((await storage.readAsset(assetId)).data.equals(publishedAssetData)).toBe(true);
+
+      const restartedStorage = new FileStorage(root);
+      await restartedStorage.prepareFiles();
+
+      expect(await restartedStorage.readFile("penpot-commit-restart-target")).toEqual(
+        originalTarget
+      );
+      expect(await restartedStorage.listLibraryRegistrySubscriptions()).toEqual(
+        originalSubscriptions
+      );
+      expect(await restartedStorage.readAsset(assetId)).toEqual(originalAsset);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses restart recovery over a target outside journal intent", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-restart-conflict-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-restart-conflict-project",
+        documentId: "penpot-restart-conflict-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#4f46e5";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+        filePathFor(fileId: string): string;
+      };
+      let markSubscriptionReached!: () => void;
+      const subscriptionReached = new Promise<void>((resolve) => {
+        markSubscriptionReached = resolve;
+      });
+      const neverCommits = new Promise<void>(() => undefined);
+      internals.writeLibraryRegistrySubscriptions = async () => {
+        markSubscriptionReached();
+        await neverCommits;
+      };
+      const interruptedUpdate = storage.updateLibraryRegistryItem(
+        "penpot-restart-conflict-target",
+        libraryDocumentId
+      );
+      void interruptedUpdate.catch(() => undefined);
+      await subscriptionReached;
+
+      const externalTarget = await storage.readFile("penpot-restart-conflict-target");
+      externalTarget.name = "External writer after interruption";
+      await writeRawFile(
+        internals.filePathFor("penpot-restart-conflict-target"),
+        `${JSON.stringify(externalTarget, null, 2)}\n`,
+        "utf8"
+      );
+
+      const restartedStorage = new FileStorage(root);
+      await expect(restartedStorage.prepareFiles()).rejects.toThrow(
+        "interrupted library update path changed outside journal"
+      );
+      expect((await restartedStorage.readFile("penpot-restart-conflict-target")).name).toBe(
+        "External writer after interruption"
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {
