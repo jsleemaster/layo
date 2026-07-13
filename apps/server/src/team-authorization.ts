@@ -82,8 +82,10 @@ function parseTeamMemberCredential(input: unknown): TeamMemberCredential {
   const candidate = input as Partial<TeamMemberCredential>;
   if (
     typeof candidate.userId !== "string" ||
+    !candidate.userId.trim() ||
     !isRole(candidate.role) ||
     !Array.isArray(candidate.teamIds) ||
+    candidate.teamIds.length === 0 ||
     !candidate.teamIds.every((teamId) => typeof teamId === "string" && teamId.trim())
   ) {
     throw new Error("invalid library registry team member credential");
