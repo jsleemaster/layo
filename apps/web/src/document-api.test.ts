@@ -31,6 +31,7 @@ import {
   reviewFileArchive,
   reviewLibraryArchive,
   reviewLibraryRegistryItem,
+  reviewLibraryRegistryItemUpdate,
   reviewLibraryRegistryTokens,
   saveFileVersion,
   setFileVersionPinned,
@@ -1427,6 +1428,50 @@ describe("comment API helpers", () => {
       [expect.stringContaining("/files/sample-file/comments/comment-1/replies"), "POST"],
       [expect.stringContaining("/files/sample-file/comments/comment-1/read"), "POST"]
     ]);
+  });
+});
+
+describe("library update preview API", () => {
+  test("reviews component deletion impact before applying a registry update", async () => {
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+      expect(pathname).toBe(
+        "/files/target-file/import/library/registry/update/review"
+      );
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ libraryId: "team-kit" });
+      return jsonResponse({
+        review: {
+          canUpdate: false,
+          blockedBy: ["library_component_deletion_in_use"],
+          deletedComponents: [
+            {
+              sourceComponentId: "component-circle",
+              targetComponentId: "team-component-circle",
+              affectedInstanceIds: ["card-copy", "card-copy__shape-slot"]
+            }
+          ]
+        }
+      });
+    };
+
+    await expect(
+      reviewLibraryRegistryItemUpdate(
+        "target-file",
+        "team-kit",
+        fetcher as typeof fetch
+      )
+    ).resolves.toEqual({
+      canUpdate: false,
+      blockedBy: ["library_component_deletion_in_use"],
+      deletedComponents: [
+        {
+          sourceComponentId: "component-circle",
+          targetComponentId: "team-component-circle",
+          affectedInstanceIds: ["card-copy", "card-copy__shape-slot"]
+        }
+      ]
+    });
   });
 });
 
