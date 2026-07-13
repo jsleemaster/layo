@@ -939,7 +939,7 @@ describe("Penpot component instance migration", () => {
       expect(
         (await storage.listLibraryRegistrySubscriptions("penpot-rollback-target"))[0]
       ).toEqual(beforeSubscription);
-      expect((await storage.readAsset(assetId)).data.equals(beforeAsset.data)).toBe(true);
+      expect(await storage.readAsset(assetId)).toEqual(beforeAsset);
 
       await expect(
         storage.updateLibraryRegistryItem("penpot-rollback-target", libraryDocumentId)
@@ -950,7 +950,9 @@ describe("Penpot component instance migration", () => {
           (component) => component.id === `penpot-component-${circleComponentId}`
         )?.source_node.style.fill
       ).toBe("#7c3aed");
-      expect((await storage.readAsset(assetId)).data.equals(publishedAssetData)).toBe(true);
+      const retriedAsset = await storage.readAsset(assetId);
+      expect(retriedAsset.byteLength).toBe(publishedAssetData.length);
+      expect(retriedAsset.data.equals(publishedAssetData)).toBe(true);
 
       const restored = await storage.restoreFileVersion(
         "penpot-rollback-target",
