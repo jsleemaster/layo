@@ -685,21 +685,24 @@ describe("Penpot component instance migration", () => {
           value: "#0f766e"
         }
       ];
+      const swapOnlyCircle = structuredClone(nestedCircle!);
+      swapOnlyCircle.id = "penpot-swap-only-circle";
+      swapOnlyCircle.component_instance!.overrides = [
+        {
+          node_id: `penpot-${circleMainId}`,
+          field: "component_swap",
+          value: `penpot-component-${rectangleComponentId}`
+        }
+      ];
+      target.pages[0].children.push(swapOnlyCircle);
       await storage.writeFile("penpot-override-target", target);
 
       const library = await storage.readFile(libraryDocumentId);
       const circle = library.components?.find(
         (component) => component.id === `penpot-component-${circleComponentId}`
       );
-      const outer = library.components?.find(
-        (component) => component.id === `penpot-component-${outerComponentId}`
-      );
       expect(circle).toBeDefined();
-      expect(outer?.source_node.children[0]?.id).toBe(
-        `penpot-${outerMainSlotId}`
-      );
       circle!.source_node.id = "replacement-circle-root";
-      outer!.source_node.children[0]!.id = "replacement-outer-slot";
       await storage.writeFile(libraryDocumentId, library);
       await storage.publishLibraryToRegistry(libraryDocumentId, {
         libraryId: libraryDocumentId,
@@ -724,15 +727,10 @@ describe("Penpot component instance migration", () => {
             sourceComponentId: `penpot-component-${circleComponentId}`,
             targetComponentId: `penpot-component-${circleComponentId}`,
             affectedInstanceIds: [
-              `penpot-${outerCopyId}__penpot-${outerMainSlotId}`
+              `penpot-${outerCopyId}__penpot-${outerMainSlotId}`,
+              "penpot-swap-only-circle"
             ],
             missingOverrideNodeIds: [`penpot-${circleMainId}`]
-          },
-          {
-            sourceComponentId: `penpot-component-${outerComponentId}`,
-            targetComponentId: `penpot-component-${outerComponentId}`,
-            affectedInstanceIds: [`penpot-${outerCopyId}`],
-            missingOverrideNodeIds: [`penpot-${outerMainSlotId}`]
           }
         ]
       });
