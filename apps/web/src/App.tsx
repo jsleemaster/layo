@@ -14,6 +14,7 @@ import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Path as KonvaPath, Rect, RegularPolygon, Shape, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  pathHasOnlyClosedSubpaths,
   type BooleanPathOperation,
   type DesignStyle,
   type DesignToken,
@@ -214,7 +215,6 @@ import {
   moveEditablePathAnchor,
   moveEditablePathControl,
   parseEditablePath,
-  pathHasOnlyClosedSubpaths,
   separateEditablePathAtAnchor,
   serializeEditablePath,
   type EditablePath,
