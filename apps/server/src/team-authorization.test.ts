@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   authenticateTeamMember,
+  authorizeTeamLibraryRead,
   authorizeTeamLibraryWrite,
   bearerToken,
   parseTeamAuthorizationConfig
@@ -101,6 +102,13 @@ describe("team library authorization", () => {
       statusCode: 401
     });
     const viewer = authenticateTeamMember(config, "viewer-user", "viewer-token");
+    expect(() => authorizeTeamLibraryRead(viewer, "team-alpha")).not.toThrow();
+    expect(captureError(() => authorizeTeamLibraryRead(viewer, "team-beta"))).toMatchObject({
+      statusCode: 403
+    });
+    expect(captureError(() => authorizeTeamLibraryRead(viewer, undefined))).toMatchObject({
+      statusCode: 403
+    });
     expect(captureError(() => authorizeTeamLibraryWrite(viewer, "team-alpha"))).toMatchObject({
       statusCode: 403
     });
