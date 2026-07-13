@@ -56,6 +56,9 @@ contract.
 MCP RED `29280506268` proved the existing tool discarded the key and published
 twice. HTTP validation RED `29280727694` proved an unsafe path-like key was
 blocked before writes but surfaced as 500 instead of the required input 400.
+Follow-up `29280923088` confirmed the 400 implementation and corrected the test
+to the existing validation `{ error }` branch rather than Fastify's `{ message }`
+branch used by ordinary 409 conflicts.
 
 ## Remaining Gap
 
