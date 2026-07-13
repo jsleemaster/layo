@@ -55,6 +55,16 @@ export function authenticateTeamMember(
   };
 }
 
+export function filterAuthorizedTeamLibraries<T extends { teamId?: string }>(
+  member: AuthenticatedTeamMember,
+  libraries: T[]
+): T[] {
+  return libraries.filter(
+    (library) =>
+      library.teamId !== undefined && member.teamIds.includes(library.teamId)
+  );
+}
+
 export function authorizeTeamLibraryRead(
   member: AuthenticatedTeamMember,
   teamId: string | undefined
