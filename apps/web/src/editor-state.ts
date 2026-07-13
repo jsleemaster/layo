@@ -97,13 +97,14 @@ export type GeometryPatch = Partial<{
   height: number;
 }>;
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
   "fill",
   "stroke",
   "stroke_width",
+  "strokes",
   "opacity",
   "effect_shadow"
 ];
@@ -711,6 +712,13 @@ function sameEffectShadowStack(
     return beforeStack === afterStack;
   }
   return beforeStack.length === afterStack.length && beforeStack.every((shadow, index) => shadow === afterStack[index]);
+}
+
+function sameStrokeStacks(
+  left: RendererNode["style"]["strokes"],
+  right: RendererNode["style"]["strokes"]
+) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 function sameNumberArray(
@@ -2473,6 +2481,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         previousStyle.fill_style === command.style.fill_style &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
+        sameStrokeStacks(previousStyle.strokes, command.style.strokes) &&
         (previousStyle.stroke_cap ?? "butt") === (command.style.stroke_cap ?? "butt") &&
         (previousStyle.stroke_join ?? "miter") === (command.style.stroke_join ?? "miter") &&
         sameNumberArray(previousStyle.stroke_dasharray, command.style.stroke_dasharray) &&
