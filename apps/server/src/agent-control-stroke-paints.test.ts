@@ -80,6 +80,15 @@ describe("first-class stroke paint contract", () => {
       "strokes[0].paint.asset_id must be non-empty"
     );
 
+    const missingSolidColor = {
+      ...baseStroke,
+      id: "missing-solid-color",
+      paint: { type: "solid" }
+    } as unknown as NodeStroke;
+    expect(() => normalizeAgentNodeStyle({ ...baseStyle, strokes: [missingSolidColor] })).toThrow(
+      "strokes[0].paint.color is required"
+    );
+
     const invalidGradient = {
       ...baseStroke,
       id: "invalid-gradient",
