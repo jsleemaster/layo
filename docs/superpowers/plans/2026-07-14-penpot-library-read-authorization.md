@@ -1,6 +1,6 @@
 # Penpot Team Library Read Authorization Plan
 
-Status: Active  
+Status: Completed  
 Date: 2026-07-14  
 PR: #297
 
@@ -36,7 +36,18 @@ References:
 
 - RED `29288230571`: unauthenticated hosted list returned 200.
 - Contract RED `29288538333`: web list overload did not model credentials.
-- GREEN: pending.
+- First full run `29288809355` passed product checks but exposed one retry in
+  the pre-existing spanned-grid header reorder E2E.
+- Diagnostic run `29289606382` proved both drag endpoints were correct but
+  still retried, isolating a dropped reorder event.
+- Deterministic RED `29290200053` forced a React rerender during the drag and
+  failed both attempts with unchanged tracks.
+- GREEN `29290833407` passed 251 web tests, 292 server tests, the Rust
+  workspace, and all 193 Playwright CLI cases without retry.
+- Restore `29290833400` and retention `29290833356` passed.
+- Direct browser proof clicked the credentialed registry refresh, verified the
+  activated-session Authorization and X-Layo-User-Id headers, then completed
+  publish, review, and import without cross-team disclosure.
 
 ## Remaining Boundary
 
