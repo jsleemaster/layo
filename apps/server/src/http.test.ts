@@ -876,7 +876,7 @@ describe("HTTP server", () => {
       payload: { ...request.payload, name: "Another Kit" }
     });
     expect(conflict.statusCode).toBe(409);
-    expect(conflict.json().error).toMatch(/idempotency key was already used/i);
+    expect(conflict.json().message).toMatch(/idempotency key was already used/i);
   });
 
   test("publishes lists reviews and imports registry libraries", async () => {
