@@ -325,7 +325,7 @@ describe("HTTP server", () => {
       url: "/files/penpot-component-document/agent/validate"
     });
     expect(validate.statusCode).toBe(200);
-    expect(validate.json().validation.valid).toBe(true);
+    expect(validate.json().validation.issues).toEqual([]);
 
     const exported = await server.inject({
       method: "GET",
