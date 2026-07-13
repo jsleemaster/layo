@@ -2266,49 +2266,11 @@ export class FileStorage {
     );
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
-    const sourceComponents = new Map(
-      library.library.components.map((component) => [component.id, component])
+    return reviewLibraryRegistryComponentUpdate(
+      subscription,
+      target,
+      library.library.components
     );
-    const deletedComponents = Object.entries(subscription.componentIdMap)
-      .filter(([sourceComponentId]) => !sourceComponents.has(sourceComponentId))
-      .map(([sourceComponentId, targetComponentId]) => ({
-        sourceComponentId,
-        targetComponentId,
-        affectedInstanceIds: componentAffectedInstanceIds(target, targetComponentId)
-      }));
-    const conflictedComponents = Object.entries(subscription.componentIdMap)
-      .flatMap(([sourceComponentId, targetComponentId]) => {
-        const sourceComponent = sourceComponents.get(sourceComponentId);
-        if (!sourceComponent) {
-          return [];
-        }
-        const conflicts = componentOverrideTargetConflicts(
-          target,
-          targetComponentId,
-          componentSourceNodeIds(sourceComponent)
-        );
-        return conflicts.affectedInstanceIds.length > 0
-          ? [{
-              sourceComponentId,
-              targetComponentId,
-              ...conflicts
-            }]
-          : [];
-      });
-    const blockedBy = [];
-    if (deletedComponents.some((component) => component.affectedInstanceIds.length > 0)) {
-      blockedBy.push("library_component_deletion_in_use");
-    }
-    if (conflictedComponents.length > 0) {
-      blockedBy.push("library_component_override_target_missing");
-    }
-
-    return {
-      canUpdate: blockedBy.length === 0,
-      blockedBy,
-      deletedComponents,
-      conflictedComponents
-    };
   }
 
   async updateLibraryRegistryItem(
@@ -2322,7 +2284,17 @@ export class FileStorage {
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
     }
-    const preview = await this.reviewLibraryRegistryItemUpdate(fileId, normalizedLibraryId);
+    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(
+      fileId,
+      normalizedLibraryId
+    );
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const preview = reviewLibraryRegistryComponentUpdate(
+      subscription,
+      target,
+      library.library.components
+    );
     if (!preview.canUpdate) {
       if (preview.conflictedComponents.length > 0) {
         throw inputValidationError(
@@ -2341,9 +2313,6 @@ export class FileStorage {
     const deletedTargetComponentIds = new Set(
       preview.deletedComponents.map((component) => component.targetComponentId)
     );
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
-    const target = await this.readFile(fileId);
-    const library = readLibraryArchivePayload(readZipArchive(archive));
     const tokenIdMap = {
       ...createLibraryTokenIdMap(
         target,
@@ -4454,6 +4423,56 @@ function jsonArchiveEntry(pathName: string, value: unknown): ZipArchiveEntry {
 
 function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
+}
+
+function reviewLibraryRegistryComponentUpdate(
+  subscription: LibraryRegistrySubscription,
+  target: DesignFile,
+  components: ComponentDefinition[]
+): LibraryRegistryItemUpdatePreview {
+  const sourceComponents = new Map(
+    components.map((component) => [component.id, component])
+  );
+  const deletedComponents = Object.entries(subscription.componentIdMap)
+    .filter(([sourceComponentId]) => !sourceComponents.has(sourceComponentId))
+    .map(([sourceComponentId, targetComponentId]) => ({
+      sourceComponentId,
+      targetComponentId,
+      affectedInstanceIds: componentAffectedInstanceIds(target, targetComponentId)
+    }));
+  const conflictedComponents = Object.entries(subscription.componentIdMap)
+    .flatMap(([sourceComponentId, targetComponentId]) => {
+      const sourceComponent = sourceComponents.get(sourceComponentId);
+      if (!sourceComponent) {
+        return [];
+      }
+      const conflicts = componentOverrideTargetConflicts(
+        target,
+        targetComponentId,
+        componentSourceNodeIds(sourceComponent)
+      );
+      return conflicts.affectedInstanceIds.length > 0
+        ? [{
+            sourceComponentId,
+            targetComponentId,
+            ...conflicts
+          }]
+        : [];
+    });
+  const blockedBy = [];
+  if (deletedComponents.some((component) => component.affectedInstanceIds.length > 0)) {
+    blockedBy.push("library_component_deletion_in_use");
+  }
+  if (conflictedComponents.length > 0) {
+    blockedBy.push("library_component_override_target_missing");
+  }
+
+  return {
+    canUpdate: blockedBy.length === 0,
+    blockedBy,
+    deletedComponents,
+    conflictedComponents
+  };
 }
 
 function componentSourceNodeIds(component: ComponentDefinition): Set<string> {
