@@ -10444,6 +10444,27 @@ export function App() {
               setProjectStatus(message);
             });
           }
+          if (
+            currentProjectRef.current &&
+            currentNode &&
+            nextNode &&
+            JSON.stringify(currentNode.style) !== JSON.stringify(nextNode.style)
+          ) {
+            const persistence = nodeStylePersistenceQueueRef.current
+              .catch(() => undefined)
+              .then(() =>
+                persistNodeStyle(
+                  currentProjectRef.current!.currentDocumentId,
+                  nextNode.id,
+                  nextNode.style
+                )
+              );
+            nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
+            void persistence.catch((error) => {
+              const message = error instanceof Error ? error.message : "스타일을 저장하지 못했습니다";
+              setProjectStatus(message);
+            });
+          }
           const booleanCommand = booleanPathCommandForTransition(
             current.document,
             nextState.document
