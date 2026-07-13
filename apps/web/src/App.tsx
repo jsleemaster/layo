@@ -4274,22 +4274,52 @@ function canvasStrokePaint(
     const gradient = stroke.paint.gradient;
     const start = gradient.start ?? { x: 0, y: 0.5 };
     const end = gradient.end ?? { x: 1, y: 0.5 };
-    const paint = (gradient.type ?? "linear").replace(/^:/, "").toLowerCase().includes("radial")
-      ? canvas.createRadialGradient(
-          start.x * node.size.width,
-          start.y * node.size.height,
-          0,
-          start.x * node.size.width,
-          start.y * node.size.height,
-          Math.max(1, Math.hypot((end.x - start.x) * node.size.width, (end.y - start.y) * node.size.height))
-        )
-      : canvas.createLinearGradient(
-          start.x * node.size.width,
-          start.y * node.size.height,
-          end.x * node.size.width,
-          end.y * node.size.height
-        );
-    for (const stop of [...(gradient.stops ?? [])].sort((left, right) => left.offset - right.offset)) {
+    const sortedStops = [...(gradient.stops ?? [])].sort((left, right) => left.offset - right.offset);
+    const type = (gradient.type ?? "linear").replace(/^:/, "").toLowerCase();
+    if (type.includes("radial")) {
+      const centerPoint = {
+        x: start.x * node.size.width,
+        y: start.y * node.size.height
+      };
+      const endPoint = {
+        x: end.x * node.size.width,
+        y: end.y * node.size.height
+      };
+      const radius = Math.max(1, Math.hypot(endPoint.x - centerPoint.x, endPoint.y - centerPoint.y));
+      const colorStops = canvasGradientColorStops(sortedStops);
+      if (colorStops) {
+        const ellipticalPattern = canvasEllipticalRadialFillPatternForNode(node, {
+          centerPoint,
+          radius,
+          width: canvasRadialGradientWidth(gradient),
+          angleRadians: Math.atan2(end.y - start.y, end.x - start.x) + Math.PI / 2,
+          colorStops
+        });
+        if (ellipticalPattern) {
+          const pattern = canvas.createPattern(ellipticalPattern, "no-repeat");
+          if (pattern) return pattern;
+        }
+      }
+      const paint = canvas.createRadialGradient(
+        centerPoint.x,
+        centerPoint.y,
+        0,
+        centerPoint.x,
+        centerPoint.y,
+        radius
+      );
+      for (const stop of sortedStops) {
+        paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop));
+      }
+      return paint;
+    }
+    const paint = canvas.createLinearGradient(
+      start.x * node.size.width,
+      start.y * node.size.height,
+      end.x * node.size.width,
+      end.y * node.size.height
+    );
+    for (const stop of sortedStops) {
       paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop));
     }
     return paint;
