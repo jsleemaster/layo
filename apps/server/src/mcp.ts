@@ -498,6 +498,18 @@ export interface McpServerOptions {
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
+  const authorizeLibraryWrite = async (fileId: string) => {
+    if (!options.libraryRegistryAuth) {
+      return;
+    }
+    const member = authenticateTeamMember(
+      options.libraryRegistryAuth,
+      options.libraryRegistryPrincipal?.userId,
+      options.libraryRegistryPrincipal?.memberToken
+    );
+    authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
+  };
+
   const server = new McpServer({
     name: "layo",
     version: "0.1.0"
@@ -888,14 +900,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, libraryId, name, idempotencyKey }) => {
-      if (options.libraryRegistryAuth) {
-        const member = authenticateTeamMember(
-          options.libraryRegistryAuth,
-          options.libraryRegistryPrincipal?.userId,
-          options.libraryRegistryPrincipal?.memberToken
-        );
-        authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
-      }
+      await authorizeLibraryWrite(fileId);
       return {
         content: [
           {
@@ -1014,20 +1019,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           .describe("Optional safe prefix applied to imported component ids and conflicting token ids")
       }
     },
-    async ({ fileId, libraryId, idPrefix }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              imported: await storage.importLibraryRegistryItem(fileId, libraryId, { idPrefix })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId, idPrefix }) => {
+      await authorizeLibraryWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                imported: await storage.importLibraryRegistryItem(fileId, libraryId, { idPrefix })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1041,20 +1049,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         libraryId: z.string().describe("Shared library id returned by list_library_registry")
       }
     },
-    async ({ fileId, libraryId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              imported: await storage.importLibraryRegistryTokens(fileId, libraryId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId }) => {
+      await authorizeLibraryWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                imported: await storage.importLibraryRegistryTokens(fileId, libraryId)
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1167,20 +1178,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         libraryId: z.string().describe("Shared library id returned by list_library_registry_updates")
       }
     },
-    async ({ fileId, libraryId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              imported: await storage.updateLibraryRegistryItem(fileId, libraryId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId }) => {
+      await authorizeLibraryWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                imported: await storage.updateLibraryRegistryItem(fileId, libraryId)
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1193,20 +1207,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         libraryId: z.string().describe("Shared library id returned by list_library_registry_token_updates")
       }
     },
-    async ({ fileId, libraryId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              imported: await storage.updateLibraryRegistryTokens(fileId, libraryId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId }) => {
+      await authorizeLibraryWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                imported: await storage.updateLibraryRegistryTokens(fileId, libraryId)
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
