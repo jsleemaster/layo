@@ -714,6 +714,13 @@ function sameEffectShadowStack(
   return beforeStack.length === afterStack.length && beforeStack.every((shadow, index) => shadow === afterStack[index]);
 }
 
+function sameFillStacks(
+  left: RendererNode["style"]["fills"],
+  right: RendererNode["style"]["fills"]
+) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
 function sameStrokeStacks(
   left: RendererNode["style"]["strokes"],
   right: RendererNode["style"]["strokes"]
@@ -2479,6 +2486,7 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         previousStyle.fill === command.style.fill &&
         previousStyle.fill_token === command.style.fill_token &&
         previousStyle.fill_style === command.style.fill_style &&
+        sameFillStacks(previousStyle.fills, command.style.fills) &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
         sameStrokeStacks(previousStyle.strokes, command.style.strokes) &&
