@@ -6827,7 +6827,7 @@ function Inspector({
             end: { x: 1, y: 0.5 },
             stops: [
               { color: stroke.color, opacity: 1, offset: 0 },
-              { color: "#2563eb", opacity: 1, offset: 1 }
+              { color: selectedNode.style.fill, opacity: 1, offset: 1 }
             ]
           }
         }
