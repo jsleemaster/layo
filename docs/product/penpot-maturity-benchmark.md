@@ -245,6 +245,17 @@ PR #276 adapts open-path Flatten by preserving explicit open geometry plus strok
 
 PR #277 closes that endpoint-fidelity gap with tangent-aware PDF geometry for every supported marker, first-class path stroke/marker artifact bounds, Korean stroke color/width/cap/join/dash/endpoint controls, validated `set_node_style` persistence, serialized rapid edits, and persisted undo/redo. Full Verification `29221738942` passed all gates and 186 Playwright cases. Penpot's ordered multi-stroke model, including per-stroke opacity, position, visibility, style, and endpoints, is now the exact next gap. See `docs/product/penpot-pdf-stroke-marker-fidelity-delta.md`.
 
+PR #278 closes the single-stroke ceiling with an authoritative ordered
+`style.strokes` contract, per-layer color/opacity/width/position/style/
+visibility/dash/cap/join/endpoints, validated deterministic mutation, history,
+reload, Yjs preservation, component overrides, Korean Inspector lifecycle,
+separate Konva/SVG/PDF paint passes, box-shape PNG bounds, and code handoff.
+Full Verification `29224618439` passed all gates and 187 Playwright cases;
+restore `29224618444` and retention `29224618447` passed. Closed arbitrary
+paths still render alignment metadata without geometry-aware inside/outside
+offset or clipping, so that exact case is the next active gap. See
+`docs/product/penpot-first-class-multi-stroke-delta.md`.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
