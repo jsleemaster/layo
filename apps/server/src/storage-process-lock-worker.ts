@@ -53,11 +53,12 @@ if (mode === "update") {
   if (!libraryId) {
     throw new Error("geometry worker requires a node id");
   }
-  const originalWriteFile = storage.writeFile.bind(storage);
-  storage.writeFile = async (fileId, document) => {
+  const originalReadFile = storage.readFile.bind(storage);
+  storage.readFile = async (fileId) => {
+    const document = await originalReadFile(fileId);
     process.stdout.write(`${mode}-ready\n`);
     await waitForRelease();
-    return originalWriteFile(fileId, document);
+    return document;
   };
   await storage.updateNodeGeometry(
     targetFileId,
