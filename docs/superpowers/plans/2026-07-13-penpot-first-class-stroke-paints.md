@@ -16,25 +16,26 @@ References:
 
 ## Task 1: Exact RED contract
 
-- [ ] Add ordered solid, gradient, and image stroke fixtures with independent
+- [x] Add ordered solid, gradient, and image stroke fixtures with independent
       opacity, alignment, visibility, and dash behavior.
-- [ ] Prove current first-class strokes cannot preserve those paint sources
+- [x] Prove current first-class strokes cannot preserve those paint sources
       through MCP/HTTP, reload, Yjs, components, and code handoff.
-- [ ] Record canvas, SVG, PDF, and PNG artifact failures before implementation.
+- [x] Record canvas, SVG, PDF, and PNG artifact failures before implementation.
 
 ## Task 2: Unified stroke paint ownership
 
-- [ ] Add one structured per-stroke paint-source contract and deterministic
+- [x] Add one structured per-stroke paint-source contract and deterministic
       validation/migration from legacy gradient/image stroke fields.
-- [ ] Preserve asset references, gradient geometry/stops, order, no-op history,
+- [x] Preserve asset references, gradient geometry/stops, order, no-op history,
       component overrides, and open/closed alignment behavior.
-- [ ] Render and export every supported paint source without flattening.
+- [x] Render and export every supported paint source without flattening.
 
 ## Task 3: Product proof
 
-- [ ] Add Korean Inspector paint controls and full create/edit/reorder/
+- [x] Add Korean Inspector paint controls and full create/edit/reorder/
       hide/duplicate/delete lifecycle coverage.
-- [ ] Verify undo/redo, persistence, reload, collaboration, migration, code
+- [x] Verify undo/redo, persistence, reload, collaboration, migration, code
       handoff, canvas pixels, and downloaded artifacts through Playwright CLI.
-- [ ] Run the failure-learning loop, review, merge, post-merge cleanup, and route
-      the next exact Penpot gap.
+- [x] Run the failure-learning loop and code review, record final green
+      evidence, and route the next exact Penpot gap. Merge and cleanup remain
+      PR closeout gates.
