@@ -70,8 +70,8 @@ References:
 - [x] Inject a failure after asset, document, and subscription writes and restore
       the exact pre-update bytes for every affected path.
 - [x] Prove identical retry plus manual saved-version and recovery-version flows.
-- [x] Add per-file library-update serialization and optimistic target snapshot
-      identity so rollback cannot clobber another product writer.
+- [x] Add per-file serialization shared by library updates and normal product
+      saves, plus optimistic target identity for direct filesystem changes.
 - [ ] Add crash-level journal or atomic commit recovery and restart proof.
 
 Evidence is recorded in
