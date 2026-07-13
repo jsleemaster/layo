@@ -369,7 +369,17 @@ function readPenpotPackage(
   const pages = primaryFile?.pages ?? readPenpotPages(entries, fileId);
   const relationPages = packagedFiles.flatMap((candidate) => candidate.pages);
   const warnings = pages.length === 0 ? ['Penpot ZIP export did not contain readable page JSON entries.'] : [];
-  const mediaById = readPenpotMedia(entries, fileId, warnings);
+  const mediaById = new Map<string, PenpotPackageAsset>();
+  for (const packagedFile of packagedFiles) {
+    for (const [mediaId, asset] of readPenpotMedia(entries, packagedFile.id, warnings)) {
+      const existing = mediaById.get(mediaId);
+      if (existing && existing.storageObjectId !== asset.storageObjectId) {
+        warnings.push(`Skipped ambiguous Penpot media ${mediaId} from ${packagedFile.name}.`);
+        continue;
+      }
+      mediaById.set(mediaId, asset);
+    }
+  }
   const documentCandidates: ExternalMigrationDocumentCandidate[] = packagedFiles.flatMap((candidate) => [
     {
       path: candidate.path,
