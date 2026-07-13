@@ -363,7 +363,7 @@ describe("collaborative design document", () => {
     ];
 
     const first = createCollaborativeDesignDocument({ document: source });
-    const second = createCollaborativeDesignDocument({ document: sampleDocument() });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
     Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
 
     expect(second.getDocument().pages[0]?.children[0]?.style.fills).toEqual(
