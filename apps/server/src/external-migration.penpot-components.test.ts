@@ -10,7 +10,7 @@ const mainLabelId = "55555555-5555-5555-5555-555555555555";
 const copyId = "66666666-6666-6666-6666-666666666666";
 const copyLabelId = "77777777-7777-7777-7777-777777777777";
 
-function componentArchive() {
+function componentArchive(options: { copyShapeRef?: string } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
   return createZipArchive([
     {
@@ -77,7 +77,7 @@ function componentArchive() {
         "component-root": true,
         "component-id": componentId,
         "component-file": fileId,
-        "shape-ref": mainId,
+        "shape-ref": options.copyShapeRef ?? mainId,
         fills: [{ fillColor: "#2563eb", fillOpacity: 1 }],
         shapes: [copyLabelId]
       })
@@ -269,6 +269,26 @@ describe("Penpot component instance migration", () => {
         content: expect.objectContaining({ value: "Continue" })
       })
     ]);
+  });
+
+  test("blocks a dangling component copy before import writes a flattened document", () => {
+    const archive = componentArchive({ copyShapeRef: "ffffffff-ffff-ffff-ffff-ffffffffffff" });
+    const review = reviewExternalMigrationArchive(archive, { fileName: "dangling.penpot" });
+
+    expect(review).toMatchObject({
+      source: "penpot",
+      canImport: false,
+      blockedBy: ["penpot_component_relation_invalid"]
+    });
+    expect(review.warnings).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Button copy.*main-instance relation/i)])
+    );
+    expect(() =>
+      importExternalMigrationArchive(archive, {
+        fileName: "dangling.penpot",
+        fileId: "must-not-import"
+      })
+    ).toThrow(/component relation/i);
   });
 
   test("groups Penpot variant mains and preserves the selected copy combination", () => {
