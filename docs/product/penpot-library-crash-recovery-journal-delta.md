@@ -2,8 +2,9 @@
 
 **PR:** #290  
 **Status:** Interrupted library asset, target, and subscription writes now recover
-from a durable write-ahead journal on storage startup. Cross-process mutation
-locking remains active.
+from a durable write-ahead journal on storage startup. Recovery runs once per
+storage instance so live same-process transactions are not mistaken for restart
+residue. Cross-process mutation locking remains active.
 
 ## Failed Case
 
@@ -45,8 +46,10 @@ References:
   fsync.
 - Write journaled asset, target, and subscription paths through the same durable
   temporary-file and atomic-rename primitive, preventing truncated final paths.
-- On `prepareFiles()` and `prepareProjects()`, scan recovery journals before
-  exposing stored documents.
+- On the first `prepareFiles()` or `prepareProjects()` call for a
+  `FileStorage` instance, scan recovery journals before exposing stored
+  documents. Concurrent and later prepare calls share the same settled startup
+  promise instead of re-entering recovery over a live transaction.
 - Recover only when every current path equals either its original or intended
   bytes. Restore all originals, remove the journal, and fsync the recovery
   directory.
@@ -57,12 +60,13 @@ References:
 
 ## Verification
 
-GREEN Full Verification `29267673690` passed:
+GREEN Full Verification `29269613815` passed after the active-journal
+failure-learning fix:
 
 - Penpot maturity and design rule gates
 - TypeScript typecheck and web build
 - 251 web tests
-- 273 server tests
+- 274 server tests
 - Rust workspace tests
 - 192 Playwright CLI tests
 
@@ -76,13 +80,26 @@ The restart regressions cover:
 
 ## Failure Learning
 
-**Root cause:** compensating rollback existed only in the live call stack. No
-durable mutation intent survived process termination, and direct final-path writes
-could leave truncated files that were neither old nor new.
+**Initial root cause:** compensating rollback existed only in the live call
+stack. No durable mutation intent survived process termination, and direct
+final-path writes could leave truncated files that were neither old nor new.
+
+**Follow-up failed case:** Full Verification `29268578370` exposed a missing
+newly published component in the browser library-update flow. Focused RED
+`29269470254` then paused a live update at the subscription boundary and called
+`listProjects()` on the same storage instance. The project prepare path
+re-entered startup recovery and restored the original `#f97316` component over
+the live intended `#0f766e` bytes.
+
+**Follow-up root cause:** startup recovery was data-idempotent but not scoped to
+the storage-instance lifecycle. Every project prepare call rescanned journals,
+so ordinary same-process reads could interpret an active WAL as restart residue.
 
 **Durable guard:** restart tests keep the original update unresolved to model a
 lost process, instantiate new storage against the same root, and verify startup
-recovery or conflict without invoking the original catch path.
+recovery or conflict without invoking the original catch path. The focused
+same-process regression now proves project reads cannot recover an active
+journal after startup preparation has already settled.
 
 ## Remaining Risk And Next Goal
 
