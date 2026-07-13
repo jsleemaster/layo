@@ -4,7 +4,7 @@ import type {
   ExternalMigrationImportResult,
   ExternalMigrationReviewOptions
 } from './external-migration.js';
-import type { DesignFile, DesignNode, ImageFitMode, NodePaintGradient, NodeStroke } from './storage.js';
+import type { DesignFile, DesignNode, ImageFitMode, NodeFill, NodePaintGradient, NodeStroke } from './storage.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -372,7 +372,7 @@ function mapPenpotShape(
   const strokeImageMediaId = imageMediaIdForPaintRecord(strokeImageRecord, 'strokeImage', 'stroke-image');
   const imageMediaId = shape.type === 'image'
     ? imageMediaIdForShape(shape, fillImageRecord, strokeImageRecord)
-    : fillImageMediaId ?? strokeImageMediaId;
+    : undefined;
   const imageAsset = imageMediaId ? state.assetsById.get(imageMediaId) : undefined;
   const fillImageAsset = fillImageMediaId ? state.assetsById.get(fillImageMediaId) : undefined;
   const strokeImageAsset = strokeImageMediaId ? state.assetsById.get(strokeImageMediaId) : undefined;
@@ -395,11 +395,11 @@ function mapPenpotShape(
     return null;
   }
 
-  if (shape.type === 'rect' && imageMediaId && !imageAsset) {
-    const imageKind = fillImageMediaId ? 'fill-image' : 'stroke-image';
-    state.skippedNodeCount += 1;
-    state.warnings.push(`Skipped Penpot ${imageKind} shape ${shape.name} because its packaged asset was not found.`);
-    return null;
+  if (shape.type !== 'image' && fillImageMediaId && !fillImageAsset) {
+    state.warnings.push(`Skipped unavailable Penpot fill-image paint on ${shape.name}; the owning shape was preserved.`);
+  }
+  if (shape.type !== 'image' && strokeImageMediaId && !strokeImageAsset) {
+    state.warnings.push(`Skipped unavailable Penpot stroke-image paint on ${shape.name}; the owning shape was preserved.`);
   }
 
   if (shape.type === 'frame' || shape.type === 'group') {
@@ -420,10 +420,10 @@ function mapPenpotShape(
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const renderedImageAsset =
-    svgRawAsset ?? (shape.type === 'image' ? imageAsset : fillImageAsset);
+  const renderedImageAsset = svgRawAsset ?? (shape.type === 'image' ? imageAsset : undefined);
   const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame' && shape.type !== 'group';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
+  const fillStack = mapsAsImage ? [] : penpotFillStack(shape.json, state.assetsById);
   const fill = mapsAsImage
     ? '#f3f4f6'
     : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
@@ -453,6 +453,7 @@ function mapPenpotShape(
     },
     style: {
       fill,
+      ...(fillStack.length > 0 ? { fills: fillStack } : {}),
       stroke,
       stroke_width: stroke ? penpotStrokeWidth(shape.json) : 0,
       ...(strokeStack.length > 0 ? { strokes: strokeStack } : {}),
@@ -480,6 +481,16 @@ function mapPenpotShape(
   if (renderedImageAsset && shape.type !== 'frame') {
     state.usedAssets.set(renderedImageAsset.metadata.assetId, renderedImageAsset);
   }
+  for (const fillPaint of fillStack) {
+    if (fillPaint.paint?.type === 'image') {
+      const asset = [...state.assetsById.values()].find(
+        (candidate) => candidate.metadata.assetId === fillPaint.paint?.asset_id
+      );
+      if (asset) {
+        state.usedAssets.set(asset.metadata.assetId, asset);
+      }
+    }
+  }
   if (strokeImageAsset && strokeStack.some((stroke) => stroke.paint?.type === "image")) {
     state.usedAssets.set(strokeImageAsset.metadata.assetId, strokeImageAsset);
   }
@@ -497,22 +508,7 @@ function mapPenpotShape(
       const mappedChild = mapPenpotShape(child, shape.bounds, shapesById, state, nextVisiting);
       return mappedChild ? [mappedChild] : [];
     });
-    const frameImageNodes: DesignNode[] = [];
-    if (fillImageAsset && fillImageRecord) {
-      frameImageNodes.push(frameFillImageNode(shape, fillImageAsset, fillImageRecord));
-    }
-
-    if (frameImageNodes.length > 0) {
-      mapped.children = [...frameImageNodes, ...mappedChildren];
-      state.mappedNodeCount += frameImageNodes.length;
-      for (const asset of [fillImageAsset]) {
-        if (asset) {
-          state.usedAssets.set(asset.metadata.assetId, asset);
-        }
-      }
-    } else {
-      mapped.children = mappedChildren;
-    }
+    mapped.children = mappedChildren;
   }
 
   return mapped;
@@ -1211,8 +1207,12 @@ function roundOpacity(value: number): number {
   return Math.round(clampOpacity(value) * 1000) / 1000;
 }
 
-function penpotGradientDefinition(record: JsonRecord): NodePaintGradient | null {
-  const gradient = asRecord(valueFor(record, 'strokeColorGradient', 'stroke-color-gradient', 'gradient'));
+function penpotGradientDefinition(record: JsonRecord, kind: 'fill' | 'stroke'): NodePaintGradient | null {
+  const gradient = asRecord(
+    kind === 'fill'
+      ? valueFor(record, 'fillColorGradient', 'fill-color-gradient', 'gradient')
+      : valueFor(record, 'strokeColorGradient', 'stroke-color-gradient', 'gradient')
+  );
   if (!gradient) return null;
   const stops = recordsFor(valueFor(gradient, 'stops')).flatMap((stop) => {
     const color = colorValue(valueFor(stop, 'color', 'strokeColor', 'stroke-color', 'fillColor', 'fill-color'));
@@ -1246,10 +1246,42 @@ function penpotGradientDefinition(record: JsonRecord): NodePaintGradient | null 
   };
 }
 
+function penpotFillStack(shape: JsonRecord, assetsById: Map<string, PenpotPackageAsset>): NodeFill[] {
+  const blendModes = new Set([
+    'normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'color-dodge', 'color-burn',
+    'hard-light', 'soft-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'
+  ]);
+  return recordsFor(valueFor(shape, 'fills')).flatMap((record, index) => {
+    const solidColor = colorValue(valueFor(record, 'fillColor', 'fill-color', 'color'));
+    const gradient = penpotGradientDefinition(record, 'fill');
+    const imageMediaId = imageMediaIdForPaintRecord(record, 'fillImage', 'fill-image');
+    const imageAsset = imageMediaId ? assetsById.get(imageMediaId) : undefined;
+    const fallback = solidColor ?? penpotGradientFillPaint(record)?.color ?? '#ffffff';
+    const rawBlendMode = (stringValue(valueFor(record, 'blendMode', 'blend-mode')) ?? 'normal')
+      .replace(/^:/, '')
+      .replaceAll('_', '-')
+      .toLowerCase();
+    const blend_mode = blendModes.has(rawBlendMode) ? rawBlendMode as NodeFill['blend_mode'] : 'normal';
+    const paint = imageAsset
+      ? { type: 'image' as const, asset_id: imageAsset.metadata.assetId }
+      : gradient
+        ? { type: 'gradient' as const, gradient }
+        : { type: 'solid' as const, color: fallback };
+    return [{
+      id: `penpot-fill-${index + 1}`,
+      color: fallback,
+      paint,
+      opacity: clampOpacity(finiteNumber(valueFor(record, 'fillOpacity', 'fill-opacity', 'opacity'), 1)),
+      visible: valueFor(record, 'hidden') !== true,
+      blend_mode
+    } satisfies NodeFill];
+  });
+}
+
 function penpotStrokeStack(shape: JsonRecord, assetsById: Map<string, PenpotPackageAsset>): NodeStroke[] {
   return recordsFor(valueFor(shape, 'strokes')).flatMap((record, index) => {
     const solidColor = colorValue(valueFor(record, 'strokeColor', 'stroke-color', 'color'));
-    const gradient = penpotGradientDefinition(record);
+    const gradient = penpotGradientDefinition(record, 'stroke');
     const imageMediaId = imageMediaIdForPaintRecord(record, 'strokeImage', 'stroke-image');
     const imageAsset = imageMediaId ? assetsById.get(imageMediaId) : undefined;
     const fallback = solidColor ?? penpotGradientStrokePaint(record)?.color ?? '#000000';
