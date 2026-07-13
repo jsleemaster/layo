@@ -1757,6 +1757,7 @@ export class FileStorage {
       file,
       source: imported.source,
       sourceLabel: imported.sourceLabel,
+      assetCount: imported.importedAssets.length,
       mappedNodeCount: imported.mappedNodeCount,
       skippedNodeCount: imported.skippedNodeCount,
       warnings: imported.warnings
