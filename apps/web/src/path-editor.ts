@@ -156,6 +156,28 @@ export function parseEditablePath(pathData: string): EditablePath | null {
   };
 }
 
+export function pathHasOnlyClosedSubpaths(pathData: string) {
+  const path = parseEditablePath(pathData);
+  if (!path) {
+    return false;
+  }
+
+  let subpathCount = 0;
+  let activeSubpathClosed = true;
+  for (const command of path.commands) {
+    if (command.type === "M") {
+      if (subpathCount > 0 && !activeSubpathClosed) {
+        return false;
+      }
+      subpathCount += 1;
+      activeSubpathClosed = false;
+    } else if (command.type === "Z") {
+      activeSubpathClosed = true;
+    }
+  }
+  return subpathCount > 0 && activeSubpathClosed;
+}
+
 export function editablePathAnchors(path: EditablePath): EditablePathAnchor[] {
   const anchors: EditablePathAnchor[] = [];
   path.commands.forEach((command, commandIndex) => {
