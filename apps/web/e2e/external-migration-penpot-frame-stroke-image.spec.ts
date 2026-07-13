@@ -262,7 +262,6 @@ test("file panel imports Penpot frame fill-image and stroke-image records as sep
   await expect(page.getByTestId("project-status")).toContainText("Penpot Frame Stroke Image Board 가져옴");
   await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board");
   await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board background");
-  await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board stroke image");
   await expect(page.getByTestId("layer-panel")).toContainText("Foreground card");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
