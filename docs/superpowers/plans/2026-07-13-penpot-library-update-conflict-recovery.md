@@ -1,6 +1,6 @@
 # Penpot Library Update Conflict And Recovery Plan
 
-**Status:** Active after PR #289.
+**Status:** Active after PR #290.
 
 **Goal:** Make imported Penpot library updates safe under source deletion,
 renames, local override conflicts, and partial failure, with deterministic
@@ -73,7 +73,11 @@ References:
 - [x] Prove identical retry plus manual saved-version and recovery-version flows.
 - [x] Add per-file serialization shared by library updates and normal product
       saves, plus optimistic target identity for direct filesystem changes.
-- [ ] Add crash-level journal or atomic commit recovery and restart proof.
+- [x] Add crash-level write-ahead journal, atomic path replacement, startup
+      recovery, and external-byte conflict proof.
+- [x] Scope startup recovery to one shared promise per storage instance so
+      project reads cannot roll back an active same-process journal.
+- [ ] Add cross-process mutation locking with safe stale-lock recovery.
 
 Evidence is recorded in
 `docs/product/penpot-library-in-use-deletion-guard-delta.md` and
@@ -81,6 +85,7 @@ Evidence is recorded in
 `docs/product/penpot-library-stale-preview-snapshot-delta.md`, and
 `docs/product/penpot-library-update-rollback-delta.md`, and
 `docs/product/penpot-library-concurrent-writer-guard-delta.md`, and
-`docs/product/penpot-library-subscription-writer-guard-delta.md`. The plan
-remains active; do not treat PR #289 as completion of the broader recovery goal.
-Crash-level journal or atomic commit restart recovery is next.
+`docs/product/penpot-library-subscription-writer-guard-delta.md`, and
+`docs/product/penpot-library-crash-recovery-journal-delta.md`. The plan remains
+active; do not treat PR #290 as completion of the broader recovery goal.
+Cross-process mutation locking and stale-lock recovery are next.

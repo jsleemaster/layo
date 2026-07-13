@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283-#287 establish cross-file ownership, conflict preflight, immutable review/apply snapshots, and caught-failure rollback. PR #288 preserves externally changed target bytes and serializes same-target library updates plus normal product saves. PR #289 registers exact subscription bytes only after commit and refuses rollback over external metadata. RED `29264877952` proved the external subscription was overwritten; GREEN `29265062411` passed 251 web tests, 270 server tests, Rust workspace tests, and 192 Playwright cases. Cross-process journal or atomic commit restart recovery remains active. Deployment remains non-gating. |
+| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283-#289 establish cross-file ownership, conflict preflight, immutable review/apply snapshots, caught-failure rollback, writer serialization, and target/subscription optimistic identity. PR #290 adds a durable original/intended write-ahead journal, atomic replacement for journaled asset/target/subscription paths, startup rollback, and external-byte conflict preservation. RED `29266760052` proved restart exposed partial target state. Browser failure `29268578370` and focused RED `29269470254` proved repeated same-instance prepare calls could recover a live journal; GREEN `29269613815` passed 251 web tests, 274 server tests, Rust workspace tests, and 192 Playwright cases. Cross-process mutation locking and stale-lock recovery remain active. Deployment remains non-gating. |
 
 ## Completed Plans
 

@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   applyAgentCommandsToDocument,
@@ -1045,6 +1046,7 @@ export interface ImportedLibraryRegistryTokens {
 
 export class FileStorage {
   private readonly priorRootDir: string | null;
+  private libraryUpdateRecoveryPromise: Promise<void> | null = null;
 
   constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
     const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
@@ -1153,16 +1155,108 @@ export class FileStorage {
 
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
     await this.removeUnreferencedLegacySampleDocument();
+  }
+
+  private libraryUpdateRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "library-updates");
+  }
+
+  private libraryUpdateRecoveryPathFor(fileId: string) {
+    assertSafeStorageId(fileId);
+    return path.join(this.libraryUpdateRecoveryDir(), `${fileId}.json`);
+  }
+
+  private async persistLibraryUpdateRecoveryJournal(
+    fileId: string,
+    original: StoragePathSnapshot[],
+    intended: StoragePathSnapshot[]
+  ): Promise<void> {
+    const journal: LibraryUpdateRecoveryJournal = {
+      schemaVersion: 1,
+      kind: "library-registry-update",
+      fileId,
+      original: original.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot)),
+      intended: intended.map((snapshot) => serializeRecoverySnapshot(this.rootDir, snapshot))
+    };
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    await mkdir(path.dirname(journalPath), { recursive: true });
+    await durablyReplaceFile(
+      journalPath,
+      Buffer.from(`${JSON.stringify(journal, null, 2)}\n`, "utf8")
+    );
+  }
+
+  private async removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void> {
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    await rm(journalPath, { force: true });
+    await syncDirectory(path.dirname(journalPath));
+  }
+
+  private recoverInterruptedLibraryUpdatesOnce(): Promise<void> {
+    this.libraryUpdateRecoveryPromise ??= this.recoverInterruptedLibraryUpdates();
+    return this.libraryUpdateRecoveryPromise;
+  }
+
+  private async recoverInterruptedLibraryUpdates(): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(this.libraryUpdateRecoveryDir());
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries.filter((candidate) => candidate.endsWith(".json")).sort()) {
+      const journalPath = path.join(this.libraryUpdateRecoveryDir(), entry);
+      const journal = parseLibraryUpdateRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+      const original = journal.original.map((snapshot) =>
+        deserializeRecoverySnapshot(this.rootDir, snapshot)
+      );
+      const intended = new Map(
+        journal.intended.map((snapshot) => {
+          const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
+          return [restored.filePath, restored.data] as const;
+        })
+      );
+      const current = await captureStoragePathSnapshots(
+        original.map((snapshot) => snapshot.filePath)
+      );
+
+      for (const snapshot of original) {
+        const currentData = current.find(
+          (candidate) => candidate.filePath === snapshot.filePath
+        )?.data ?? null;
+        const intendedData = intended.get(snapshot.filePath);
+        if (
+          !storageSnapshotDataEquals(currentData, snapshot.data)
+          && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
+        ) {
+          throw new StorageRollbackConflictError(
+            `interrupted library update path changed outside journal: ${snapshot.filePath}`
+          );
+        }
+      }
+
+      await restoreStoragePathSnapshots(original);
+      await rm(journalPath, { force: true });
+      await syncDirectory(path.dirname(journalPath));
+    }
   }
 
   private async removeUnreferencedLegacySampleDocument() {
@@ -1541,6 +1635,19 @@ export class FileStorage {
     await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await writeFile(this.filePathFor(fileId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
+    return document;
+  }
+
+  private async writeFileDurablyWithoutMutationLock(
+    fileId: string,
+    document: DesignFile
+  ): Promise<DesignFile> {
+    await this.adoptPriorDefaultStoreIfNeeded();
+    await mkdir(this.filesDir, { recursive: true });
+    await durablyReplaceFile(
+      this.filePathFor(fileId),
+      Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8")
+    );
     return document;
   }
 
@@ -2353,6 +2460,7 @@ export class FileStorage {
           .join(", ")}`
       );
     }
+
     const deletedTargetComponentIds = new Set(
       preview.deletedComponents.map((component) => component.targetComponentId)
     );
@@ -2372,6 +2480,42 @@ export class FileStorage {
       ),
       ...subscription.componentIdMap
     };
+    const updatedTokens = new Map(
+      library.library.tokens.map((token) => {
+        const nextTokenId = tokenIdMap[token.id];
+        if (!nextTokenId) {
+          throw new Error(`library token missing from id map: ${token.id}`);
+        }
+        return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
+      })
+    );
+    const nextTokens = [...(target.tokens ?? [])];
+    for (const [tokenId, token] of updatedTokens) {
+      const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
+      if (index === -1) {
+        nextTokens.push(token);
+      } else {
+        nextTokens[index] = token;
+      }
+    }
+
+    const updatedComponents = library.library.components.map((component) => {
+      const nextComponentId = componentIdMap[component.id];
+      if (!nextComponentId) {
+        throw new Error(`library component missing from id map: ${component.id}`);
+      }
+      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+    });
+    const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
+    target.tokens = nextTokens;
+    target.components = [
+      ...(target.components ?? []).filter(
+        (component) =>
+          !updatedComponentIds.has(component.id)
+          && !deletedTargetComponentIds.has(component.id)
+      ),
+      ...updatedComponents
+    ];
 
     const rollbackSnapshots = await captureStoragePathSnapshots([
       ...library.assets.flatMap((asset) => [
@@ -2381,50 +2525,36 @@ export class FileStorage {
       this.librarySubscriptionsPath(),
       this.filePathFor(fileId)
     ]);
+    const intendedSnapshots: StoragePathSnapshot[] = library.assets.flatMap((asset) => {
+      const metadata = parseStoredAsset(asset.metadata);
+      return [
+        {
+          filePath: this.assetPathFor(metadata.assetId),
+          data: Buffer.from(asset.data)
+        },
+        {
+          filePath: this.assetMetadataPathFor(metadata.assetId),
+          data: Buffer.from(`${JSON.stringify(metadata, null, 2)}\n`, "utf8")
+        }
+      ];
+    });
+    intendedSnapshots.push({
+      filePath: this.filePathFor(fileId),
+      data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
+    });
+    await this.persistLibraryUpdateRecoveryJournal(
+      fileId,
+      rollbackSnapshots,
+      intendedSnapshots
+    );
+
     const rollbackGuards: StoragePathSnapshot[] = [];
     try {
       for (const asset of library.assets) {
-        await this.writeAsset(asset.metadata, asset.data);
+        await this.writeAssetDurably(asset.metadata, asset.data);
       }
 
-      const updatedTokens = new Map(
-        library.library.tokens.map((token) => {
-          const nextTokenId = tokenIdMap[token.id];
-          if (!nextTokenId) {
-            throw new Error(`library token missing from id map: ${token.id}`);
-          }
-          return [nextTokenId, { ...structuredClone(token), id: nextTokenId }];
-        })
-      );
-      const nextTokens = [...(target.tokens ?? [])];
-      for (const [tokenId, token] of updatedTokens) {
-        const index = nextTokens.findIndex((candidate) => candidate.id === tokenId);
-        if (index === -1) {
-          nextTokens.push(token);
-        } else {
-          nextTokens[index] = token;
-        }
-      }
-
-      const updatedComponents = library.library.components.map((component) => {
-        const nextComponentId = componentIdMap[component.id];
-        if (!nextComponentId) {
-          throw new Error(`library component missing from id map: ${component.id}`);
-        }
-        return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
-      });
-      const updatedComponentIds = new Set(updatedComponents.map((component) => component.id));
-
-      target.tokens = nextTokens;
-      target.components = [
-        ...(target.components ?? []).filter(
-          (component) =>
-            !updatedComponentIds.has(component.id)
-            && !deletedTargetComponentIds.has(component.id)
-        ),
-        ...updatedComponents
-      ];
-      await this.writeFileWithoutMutationLock(fileId, target);
+      await this.writeFileDurablyWithoutMutationLock(fileId, target);
       rollbackGuards.push({
         filePath: this.filePathFor(fileId),
         data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
@@ -2447,14 +2577,26 @@ export class FileStorage {
         entry,
         imported,
         subscription.idPrefix,
-        (snapshot) => rollbackGuards.push(snapshot)
+        (snapshot) => rollbackGuards.push(snapshot),
+        async (snapshot) => {
+          intendedSnapshots.push(snapshot);
+          await this.persistLibraryUpdateRecoveryJournal(
+            fileId,
+            rollbackSnapshots,
+            intendedSnapshots
+          );
+        }
       );
+      await this.removeLibraryUpdateRecoveryJournal(fileId);
       return imported;
-
     } catch (error) {
       try {
         await restoreStoragePathSnapshots(rollbackSnapshots, rollbackGuards);
+        await this.removeLibraryUpdateRecoveryJournal(fileId);
       } catch (rollbackError) {
+        if (rollbackError instanceof StorageRollbackConflictError) {
+          await this.removeLibraryUpdateRecoveryJournal(fileId);
+        }
         throw new AggregateError(
           [error, rollbackError],
           rollbackError instanceof StorageRollbackConflictError
@@ -2996,6 +3138,22 @@ export class FileStorage {
     return parsed;
   }
 
+  private async writeAssetDurably(asset: StoredAsset, data: Buffer): Promise<StoredAsset> {
+    const parsed = parseStoredAsset(asset);
+    if (data.length !== parsed.byteLength) {
+      throw new Error(`asset byte length mismatch: ${parsed.assetId}`);
+    }
+    assertImageBytesMatchMimeType(data, parsed.mimeType);
+    await this.adoptPriorDefaultStoreIfNeeded();
+    await mkdir(this.assetsDir, { recursive: true });
+    await durablyReplaceFile(this.assetPathFor(parsed.assetId), data);
+    await durablyReplaceFile(
+      this.assetMetadataPathFor(parsed.assetId),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8")
+    );
+    return parsed;
+  }
+
   async readAsset(assetId: string): Promise<StoredAssetData> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const raw = await readFile(this.assetMetadataPathFor(assetId), "utf8");
@@ -3464,7 +3622,8 @@ export class FileStorage {
 
   private async writeLibraryRegistrySubscriptions(
     subscriptions: LibraryRegistrySubscription[],
-    onCommitted?: (snapshot: StoragePathSnapshot) => void
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
     const snapshot = {
@@ -3474,7 +3633,8 @@ export class FileStorage {
         "utf8"
       )
     };
-    await writeFile(snapshot.filePath, snapshot.data);
+    await onPrepared?.(snapshot);
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
     onCommitted?.(snapshot);
   }
 
@@ -3507,7 +3667,8 @@ export class FileStorage {
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryItem,
     idPrefix: string | undefined,
-    onCommitted?: (snapshot: StoragePathSnapshot) => void
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
     assertSafeStorageId(fileId);
     const subscriptions = await this.readLibraryRegistrySubscriptions();
@@ -3537,7 +3698,7 @@ export class FileStorage {
         a.libraryName.localeCompare(b.libraryName) ||
         a.libraryId.localeCompare(b.libraryId)
     );
-    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted);
+    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted, onPrepared);
   }
 
   private async upsertLibraryRegistryTokenSubscription(
@@ -4512,6 +4673,133 @@ function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
 }
 
+interface SerializedRecoverySnapshot {
+  relativePath: string;
+  data: string | null;
+}
+
+interface LibraryUpdateRecoveryJournal {
+  schemaVersion: 1;
+  kind: "library-registry-update";
+  fileId: string;
+  original: SerializedRecoverySnapshot[];
+  intended: SerializedRecoverySnapshot[];
+}
+
+function serializeRecoverySnapshot(
+  rootDir: string,
+  snapshot: StoragePathSnapshot
+): SerializedRecoverySnapshot {
+  const relativePath = path.relative(rootDir, snapshot.filePath);
+  resolveRecoverySnapshotPath(rootDir, relativePath);
+  return {
+    relativePath,
+    data: snapshot.data?.toString("base64") ?? null
+  };
+}
+
+function deserializeRecoverySnapshot(
+  rootDir: string,
+  snapshot: SerializedRecoverySnapshot
+): StoragePathSnapshot {
+  return {
+    filePath: resolveRecoverySnapshotPath(rootDir, snapshot.relativePath),
+    data: snapshot.data === null ? null : Buffer.from(snapshot.data, "base64")
+  };
+}
+
+function resolveRecoverySnapshotPath(rootDir: string, relativePath: string): string {
+  if (!relativePath || path.isAbsolute(relativePath)) {
+    throw new Error("invalid recovery snapshot path");
+  }
+  const resolvedRoot = path.resolve(rootDir);
+  const resolved = path.resolve(resolvedRoot, relativePath);
+  const relativeToRoot = path.relative(resolvedRoot, resolved);
+  if (
+    relativeToRoot === ".."
+    || relativeToRoot.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeToRoot)
+  ) {
+    throw new Error(`recovery snapshot path escapes storage root: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecoveryJournal {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid library update recovery journal");
+  }
+  const candidate = value as Partial<LibraryUpdateRecoveryJournal>;
+  if (
+    candidate.schemaVersion !== 1
+    || candidate.kind !== "library-registry-update"
+    || typeof candidate.fileId !== "string"
+    || !Array.isArray(candidate.original)
+    || !Array.isArray(candidate.intended)
+  ) {
+    throw new Error("invalid library update recovery journal");
+  }
+  assertSafeStorageId(candidate.fileId);
+  return {
+    schemaVersion: 1,
+    kind: "library-registry-update",
+    fileId: candidate.fileId,
+    original: candidate.original.map(parseSerializedRecoverySnapshot),
+    intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseSerializedRecoverySnapshot(value: unknown): SerializedRecoverySnapshot {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid recovery snapshot");
+  }
+  const candidate = value as Partial<SerializedRecoverySnapshot>;
+  if (
+    typeof candidate.relativePath !== "string"
+    || (candidate.data !== null && typeof candidate.data !== "string")
+  ) {
+    throw new Error("invalid recovery snapshot");
+  }
+  return {
+    relativePath: candidate.relativePath,
+    data: candidate.data
+  };
+}
+
+function storageSnapshotDataEquals(left: Buffer | null, right: Buffer | null): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return left.equals(right);
+}
+
+async function durablyReplaceFile(filePath: string, data: Buffer): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(temporaryPath, "w");
+    try {
+      await handle.writeFile(data);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(temporaryPath, filePath);
+    await syncDirectory(path.dirname(filePath));
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function syncDirectory(directoryPath: string): Promise<void> {
+  const handle = await open(directoryPath, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 interface StoragePathSnapshot {
   filePath: string;
   data: Buffer | null;
@@ -4560,10 +4848,14 @@ async function restoreStoragePathSnapshots(
   for (const snapshot of snapshots) {
     if (snapshot.data === null) {
       await rm(snapshot.filePath, { force: true });
+      const parentPath = path.dirname(snapshot.filePath);
+      if (await pathExists(parentPath)) {
+        await syncDirectory(parentPath);
+      }
       continue;
     }
     await mkdir(path.dirname(snapshot.filePath), { recursive: true });
-    await writeFile(snapshot.filePath, snapshot.data);
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
   }
 }
 
