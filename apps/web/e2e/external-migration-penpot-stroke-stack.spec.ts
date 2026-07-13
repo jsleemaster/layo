@@ -211,7 +211,7 @@ test("file panel imports a Penpot solid stroke stack as a flattened visible stro
   });
 });
 
-test("dev panel PNG raster artifact keeps mixed Penpot stroke stacks on the flattened fallback", async ({ page }, testInfo) => {
+test("dev panel PNG raster artifact preserves mixed Penpot stroke paint order", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("mixed-stroke-stack-raster.penpot");
   await writeFile(penpotZipPath, createPenpotSolidMultiStrokeExportArchive());
@@ -239,11 +239,8 @@ test("dev panel PNG raster artifact keeps mixed Penpot stroke stacks on the flat
   const leftStroke = await imagePixel(page, png, "image/png", 8, Math.floor(height / 2));
   const rightStroke = await imagePixel(page, png, "image/png", width - 9, Math.floor(height / 2));
 
-  expect(Math.abs(leftStroke.r - rightStroke.r)).toBeLessThan(12);
-  expect(Math.abs(leftStroke.g - rightStroke.g)).toBeLessThan(12);
-  expect(Math.abs(leftStroke.b - rightStroke.b)).toBeLessThan(12);
-  expect(leftStroke.r).toBeGreaterThan(leftStroke.b + 40);
-  expect(rightStroke.b).not.toBeGreaterThan(rightStroke.r + 40);
+  expect(leftStroke.g).toBeGreaterThan(leftStroke.b + 40);
+  expect(rightStroke.b).toBeGreaterThan(rightStroke.g + 40);
   expect(leftStroke.a).toBeGreaterThan(200);
   expect(rightStroke.a).toBeGreaterThan(200);
 });
