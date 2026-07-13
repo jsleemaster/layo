@@ -26,7 +26,12 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+`2026-07-14-penpot-library-review-authorization.md` is active in PR #298.
+RED `29293745767` proved an unauthenticated team-beta registry review returns
+200 instead of 401. The completion gate is exact-target-team viewer
+authorization across HTTP/MCP registry reviews and subscription/update reads,
+activated-session web credentials, direct Playwright proof, full verification,
+review, merge, and cleanup.
 
 ## Completed Plans
 
