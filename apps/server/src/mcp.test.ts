@@ -772,6 +772,16 @@ describe("MCP AI editing workflow", () => {
             name: `${teamId} Kit`
           });
         }
+        await storage.createProject({
+          projectId: "private-project",
+          name: "Private",
+          documentId: "private-file",
+          documentName: "Private"
+        });
+        await storage.publishLibraryToRegistry("private-file", {
+          libraryId: "private-kit",
+          name: "Private Kit"
+        });
       }
     });
 
@@ -782,6 +792,19 @@ describe("MCP AI editing workflow", () => {
       })
     );
     expect(listed.libraries).toEqual([
+      expect.objectContaining({
+        libraryId: "team-alpha-kit",
+        teamId: "team-alpha"
+      })
+    ]);
+
+    const fileScoped = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: { fileId: "alpha-file" }
+      })
+    );
+    expect(fileScoped.libraries).toEqual([
       expect.objectContaining({
         libraryId: "team-alpha-kit",
         teamId: "team-alpha"
