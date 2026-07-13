@@ -46,6 +46,7 @@ interface PenpotPackage {
   fileName: string;
   documentCandidates: ExternalMigrationDocumentCandidate[];
   pages: PenpotPage[];
+  relationPages: PenpotPage[];
   mediaById: Map<string, PenpotPackageAsset>;
   warnings: string[];
 }
@@ -138,7 +139,7 @@ export function reviewPenpotZipEntries(
     return null;
   }
 
-  const relationErrors = penpotComponentRelationErrors(penpotPackage.pages);
+  const relationErrors = penpotComponentRelationErrors(penpotPackage.relationPages);
   return {
     canImport: penpotPackage.pages.length > 0 && relationErrors.length === 0,
     documentCandidates: penpotPackage.documentCandidates,
@@ -155,7 +156,7 @@ export function importPenpotZipEntries(
   if (!penpotPackage || penpotPackage.pages.length === 0) {
     throw inputValidationError('Penpot ZIP export does not contain importable pages.');
   }
-  const relationErrors = penpotComponentRelationErrors(penpotPackage.pages);
+  const relationErrors = penpotComponentRelationErrors(penpotPackage.relationPages);
   if (relationErrors.length > 0) {
     throw inputValidationError(`Penpot component relation validation failed: ${relationErrors.join(' ')}`);
   }
@@ -250,9 +251,20 @@ function penpotComponentRelationErrors(pages: PenpotPage[]): string[] {
         const connectedShapeRef = stringValue(valueFor(copyShape.json, 'shapeRef', 'shape-ref'));
         const touched = valueFor(copyShape.json, 'touched');
         const hasTouchedGroups = Array.isArray(touched) && touched.some((value) => typeof value === 'string');
+        const connectedComponentId = stringValue(
+          valueFor(copyShape.json, 'componentId', 'component-id')
+        );
+        const connectedComponentMains = connectedComponentId
+          ? mainsByComponentId.get(connectedComponentId) ?? []
+          : [];
+        const resolvesNestedComponent = Boolean(
+          connectedShapeRef
+          && connectedComponentMains.length === 1
+          && connectedComponentMains[0].id === connectedShapeRef
+        );
         if (
           (hasTouchedGroups && !connectedShapeRef)
-          || (connectedShapeRef && !sourceShapeIds.has(connectedShapeRef))
+          || (connectedShapeRef && !sourceShapeIds.has(connectedShapeRef) && !resolvesNestedComponent)
           || (connectedShapeRef && connectedSourceIds.has(connectedShapeRef))
         ) {
           errors.push(
@@ -290,30 +302,49 @@ function readPenpotPackage(
   const fileJson = asRecord(parseJsonEntry(entries, filePath)) ?? {};
   const fileName =
     normalizeImportName(options.fileName, stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? 'Imported Penpot');
-  const pages = readPenpotPages(entries, fileId);
+  const packagedFiles = manifestFiles.flatMap((metadata, index) => {
+    const packagedFileId = stringValue(metadata.id);
+    if (!packagedFileId) {
+      return [];
+    }
+    const packagedFilePath = `files/${packagedFileId}.json`;
+    const packagedFileJson = asRecord(parseJsonEntry(entries, packagedFilePath)) ?? {};
+    const packagedPages = readPenpotPages(entries, packagedFileId);
+    return [{
+      id: packagedFileId,
+      name: stringValue(metadata.name)
+        ?? stringValue(packagedFileJson.name)
+        ?? `Imported Penpot ${index + 1}`,
+      path: packagedFilePath,
+      pages: packagedPages
+    }];
+  });
+  const primaryFile = packagedFiles.find((candidate) => candidate.id === fileId);
+  const pages = primaryFile?.pages ?? readPenpotPages(entries, fileId);
+  const relationPages = packagedFiles.flatMap((candidate) => candidate.pages);
   const warnings = pages.length === 0 ? ['Penpot ZIP export did not contain readable page JSON entries.'] : [];
   const mediaById = readPenpotMedia(entries, fileId, warnings);
-  const totalShapeCount = pages.reduce((total, page) => total + page.shapesById.size, 0);
-  const documentCandidates: ExternalMigrationDocumentCandidate[] = [
+  const documentCandidates: ExternalMigrationDocumentCandidate[] = packagedFiles.flatMap((candidate) => [
     {
-      path: filePath,
-      name: stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? fileName,
-      pageCount: pages.length,
-      nodeCount: totalShapeCount
+      path: candidate.path,
+      name: candidate.name,
+      pageCount: candidate.pages.length,
+      nodeCount: candidate.pages.reduce((total, page) => total + page.shapesById.size, 0)
     },
-    ...pages.map((page) => ({
+    ...candidate.pages.map((page) => ({
       path: page.path,
       name: page.name,
       pageCount: 1,
       nodeCount: page.shapesById.size
     }))
-  ];
+  ]);
 
   return {
     fileId,
     fileName: stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? fileName,
     documentCandidates,
     pages,
+    relationPages,
     mediaById,
     warnings
   };
