@@ -321,6 +321,14 @@ credentials remain outside exported team manifests. See
 import/update/token mutations, principal-filtered reads, shared transactional
 storage, revocation, receipt retention, and durable pub/sub remain open.
 
+PR #296 extends that role boundary from publication to target-file registry
+writes. Configured component/token import and update routes in HTTP, the web
+editor, and MCP require an exact-target-team owner or editor before mutation,
+while viewer-readable review/preflight paths remain open. See
+`docs/product/penpot-library-mutation-authorization-delta.md`.
+Principal-filtered reads, revocation, shared transactional storage, receipt
+retention, and durable pub/sub remain open.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
