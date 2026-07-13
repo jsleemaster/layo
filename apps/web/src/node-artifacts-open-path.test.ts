@@ -40,13 +40,44 @@ describe("open path stroke artifacts", () => {
     expect(svg).toContain('<path');
   });
 
-  test("emits PDF cap join dash operators and marker geometry metadata", () => {
+  test("emits PDF cap join dash operators and visible endpoint marker geometry", () => {
     const pdf = new TextDecoder().decode(pdfForNode(openStrokePath));
 
     expect(pdf).toContain("1 J");
     expect(pdf).toContain("2 j");
     expect(pdf).toContain("[12 6] 0 d");
-    expect(pdf).toContain("% Layo stroke marker start circle");
-    expect(pdf).toContain("% Layo stroke marker end triangle");
+    expect(pdf).toContain("% Layo stroke marker geometry start circle");
+    expect(pdf).toContain("% Layo stroke marker geometry end triangle");
+    expect(pdf.match(/ cm/g)).toHaveLength(2);
+    expect(pdf).toMatch(/(?: re| c| l)\n(?:f|S)/);
   });
+
+  test.each(["line_arrow", "triangle", "square", "circle", "diamond"] as const)(
+    "draws the %s endpoint marker as PDF geometry",
+    (marker) => {
+      const pdf = new TextDecoder().decode(pdfForNode({
+        ...openStrokePath,
+        id: "marker-" + marker,
+        style: {
+          ...openStrokePath.style,
+          stroke_start_marker: marker,
+          stroke_end_marker: marker
+        }
+      }));
+
+      expect(pdf).toContain("% Layo stroke marker geometry start " + marker);
+      expect(pdf).toContain("% Layo stroke marker geometry end " + marker);
+      expect(pdf.match(/ cm/g)).toHaveLength(2);
+      expect(pdf).not.toContain("% Layo stroke marker start " + marker);
+    }
+  );
+
+  test("expands SVG and PDF bounds for wide strokes and rotated endpoint markers", () => {
+    const svg = svgForNode(openStrokePath);
+    const pdf = new TextDecoder().decode(pdfForNode(openStrokePath));
+
+    expect(svg).toContain('width="140" height="90" viewBox="-20 -20 140 90"');
+    expect(pdf).toContain("/MediaBox [0 0 140 90]");
+  });
+
 });

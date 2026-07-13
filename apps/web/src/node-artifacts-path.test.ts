@@ -42,7 +42,7 @@ describe("first-class path artifacts", () => {
     expect(svg).not.toContain('data-node-id="path-left"');
 
     const pdfText = new TextDecoder().decode(pdfForNode(booleanPathNode));
-    expect(pdfText).toContain("150 100 l");
+    expect(pdfText).toContain("151 101 l");
   });
 
   test("renders path geometry and even-odd winding in SVG and PDF", () => {
@@ -56,8 +56,8 @@ describe("first-class path artifacts", () => {
     const pdf = pdfForNode(firstClassPathNode);
     const pdfText = new TextDecoder().decode(pdf);
 
-    expect(pdfText).toContain("0 100 m");
-    expect(pdfText).toContain("100 100 l");
+    expect(pdfText).toContain("1 101 m");
+    expect(pdfText).toContain("101 101 l");
     expect(pdfText).toMatch(/\nf\*\nQ/);
   });
 });

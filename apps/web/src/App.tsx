@@ -6432,11 +6432,20 @@ function Inspector({
   const [styleSearchQuery, setStyleSearchQuery] = useState("");
   const [styleTypeFilter, setStyleTypeFilter] = useState<"all" | DesignStyle["type"]>("all");
   const [styleSort, setStyleSort] = useState<"az" | "za" | "usage_desc">("az");
+  const [strokeDashDraft, setStrokeDashDraft] = useState("");
+  const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
     setPendingStyleKind(null);
     setStyleNameDraft("");
   }, [selectedNode?.id]);
+
+  useEffect(() => {
+    setStrokeDashDraft((selectedNode?.style.stroke_dasharray ?? []).join(", "));
+    strokeStyleDraftRef.current = selectedNode
+      ? { nodeId: selectedNode.id, style: selectedNode.style }
+      : null;
+  }, [selectedNode?.id, selectedNode?.style]);
 
   const tokenControls = (
     <InspectorTokenControls
@@ -6548,6 +6557,34 @@ function Inspector({
     if (Number.isFinite(nextValue)) {
       onGeometryChange(selectedNode.id, { [patchKey]: nextValue });
     }
+  };
+  const updateStrokeStyle = (patch: Partial<RendererNode["style"]>) => {
+    const current =
+      strokeStyleDraftRef.current?.nodeId === selectedNode.id
+        ? strokeStyleDraftRef.current.style
+        : selectedNode.style;
+    const nextStyle = { ...current, ...patch };
+    strokeStyleDraftRef.current = { nodeId: selectedNode.id, style: nextStyle };
+    onNodeStyleChange(selectedNode.id, nextStyle);
+  };
+  const commitStrokeDasharray = () => {
+    const dasharray = strokeDashDraft
+      .split(/[ ,]+/)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value >= 0);
+    if (dasharray.length > 0 && dasharray.some((value) => value > 0)) {
+      const currentDasharray =
+        strokeStyleDraftRef.current?.nodeId === selectedNode.id
+          ? strokeStyleDraftRef.current.style.stroke_dasharray ?? []
+          : selectedNode.style.stroke_dasharray ?? [];
+      if (JSON.stringify(currentDasharray) !== JSON.stringify(dasharray)) {
+        updateStrokeStyle({ stroke_dasharray: dasharray });
+      }
+      setStrokeDashDraft(dasharray.join(", "));
+      return;
+    }
+    updateStrokeStyle({ stroke_dasharray: [] });
+    setStrokeDashDraft("");
   };
   const updateEffectShadow = (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextStyle = { ...selectedNode.style };
@@ -7460,6 +7497,144 @@ function Inspector({
         <div className="inspector-token-readout" data-testid="inspector-fill-token">
           토큰 {fillToken?.name ?? selectedNode.style.fill_token}
         </div>
+      ) : null}
+      {selectedNode.style.stroke && selectedNode.style.stroke_width > 0 ? (
+        <section className="inspector-section" data-testid="inspector-stroke-controls" aria-label="선">
+          <h3>선</h3>
+          <div className="field-grid">
+            <label>
+              선 색상
+              <input
+                data-testid="inspector-stroke-color"
+                type="color"
+                value={selectedNode.style.stroke}
+                onChange={(event) => updateStrokeStyle({ stroke: event.currentTarget.value })}
+              />
+            </label>
+            <label>
+              두께
+              <input
+                data-testid="inspector-stroke-width"
+                type="number"
+                min="0"
+                step="0.5"
+                value={selectedNode.style.stroke_width}
+                onChange={(event) => {
+                  const width = Number(event.currentTarget.value);
+                  if (Number.isFinite(width) && width >= 0) {
+                    updateStrokeStyle({ stroke_width: width });
+                  }
+                }}
+              />
+            </label>
+            <label>
+              끝 모양
+              <select
+                data-testid="inspector-stroke-cap"
+                value={selectedNode.style.stroke_cap ?? "butt"}
+                onChange={(event) =>
+                  updateStrokeStyle({
+                    stroke_cap: event.currentTarget.value as NonNullable<RendererNode["style"]["stroke_cap"]>
+                  })
+                }
+              >
+                <option value="butt">각진 끝</option>
+                <option value="round">둥근 끝</option>
+                <option value="square">사각 끝</option>
+              </select>
+            </label>
+            <label>
+              모서리
+              <select
+                data-testid="inspector-stroke-join"
+                value={selectedNode.style.stroke_join ?? "miter"}
+                onChange={(event) =>
+                  updateStrokeStyle({
+                    stroke_join: event.currentTarget.value as NonNullable<RendererNode["style"]["stroke_join"]>
+                  })
+                }
+              >
+                <option value="miter">뾰족</option>
+                <option value="round">둥글게</option>
+                <option value="bevel">깎기</option>
+              </select>
+            </label>
+          </div>
+          <label className="stacked-field">
+            대시 패턴
+            <input
+              data-testid="inspector-stroke-dasharray"
+              type="text"
+              inputMode="decimal"
+              value={strokeDashDraft}
+              placeholder="12, 6"
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setStrokeDashDraft(value);
+                const dasharray = value
+                  .split(/[ ,]+/)
+                  .map((part) => Number(part))
+                  .filter((part) => Number.isFinite(part) && part >= 0);
+                if (dasharray.length > 0 && dasharray.some((part) => part > 0)) {
+                  updateStrokeStyle({ stroke_dasharray: dasharray });
+                }
+              }}
+              onBlur={commitStrokeDasharray}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  commitStrokeDasharray();
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+          </label>
+          {selectedNode.kind === "path" ? (
+            <div className="field-grid">
+              <label>
+                시작점
+                <select
+                  data-testid="inspector-stroke-start-marker"
+                  value={selectedNode.style.stroke_start_marker ?? "none"}
+                  onChange={(event) =>
+                    updateStrokeStyle({
+                      stroke_start_marker: event.currentTarget.value as NonNullable<
+                        RendererNode["style"]["stroke_start_marker"]
+                      >
+                    })
+                  }
+                >
+                  <option value="none">없음</option>
+                  <option value="line_arrow">선 화살표</option>
+                  <option value="triangle">삼각형</option>
+                  <option value="square">사각형</option>
+                  <option value="circle">원</option>
+                  <option value="diamond">마름모</option>
+                </select>
+              </label>
+              <label>
+                끝점
+                <select
+                  data-testid="inspector-stroke-end-marker"
+                  value={selectedNode.style.stroke_end_marker ?? "none"}
+                  onChange={(event) =>
+                    updateStrokeStyle({
+                      stroke_end_marker: event.currentTarget.value as NonNullable<
+                        RendererNode["style"]["stroke_end_marker"]
+                      >
+                    })
+                  }
+                >
+                  <option value="none">없음</option>
+                  <option value="line_arrow">선 화살표</option>
+                  <option value="triangle">삼각형</option>
+                  <option value="square">사각형</option>
+                  <option value="circle">원</option>
+                  <option value="diamond">마름모</option>
+                </select>
+              </label>
+            </div>
+          ) : null}
+        </section>
       ) : null}
       <label className="stacked-field">
         색상 스타일
@@ -8528,6 +8703,7 @@ export function App() {
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const editorRef = useRef<EditorState | null>(null);
+  const nodeStylePersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
   const pathEditingNodeIdRef = useRef<string | null>(null);
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
@@ -10299,6 +10475,27 @@ export function App() {
               setProjectStatus(message);
             });
           }
+          if (
+            currentProjectRef.current &&
+            currentNode &&
+            nextNode &&
+            JSON.stringify(currentNode.style) !== JSON.stringify(nextNode.style)
+          ) {
+            const persistence = nodeStylePersistenceQueueRef.current
+              .catch(() => undefined)
+              .then(() =>
+                persistNodeStyle(
+                  currentProjectRef.current!.currentDocumentId,
+                  nextNode.id,
+                  nextNode.style
+                )
+              );
+            nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
+            void persistence.catch((error) => {
+              const message = error instanceof Error ? error.message : "스타일을 저장하지 못했습니다";
+              setProjectStatus(message);
+            });
+          }
           const booleanCommand = booleanPathCommandForTransition(
             current.document,
             nextState.document
@@ -11203,7 +11400,11 @@ export function App() {
       return;
     }
 
-    void persistNodeStyle(currentProject.currentDocumentId, nodeId, style)
+    const persistence = nodeStylePersistenceQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistNodeStyle(currentProject.currentDocumentId, nodeId, style));
+    nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
+    void persistence
       .then(() => {
         setProjectStatus("스타일 저장됨");
         setCodeExportRevision((current) => current + 1);

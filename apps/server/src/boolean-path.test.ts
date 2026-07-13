@@ -340,6 +340,34 @@ describe("non-destructive boolean path commands", () => {
       }])
     ).toThrow("boolean path source must be path geometry");
   });
+
+  test("preserves and validates first-class stroke contracts through set_node_style", () => {
+    const style = {
+      ...createBooleanFixture().pages[0].children[0].style,
+      stroke: "#0f172a",
+      stroke_width: 8,
+      stroke_cap: "square" as const,
+      stroke_join: "round" as const,
+      stroke_dasharray: [4, 2],
+      stroke_start_marker: "diamond" as const,
+      stroke_end_marker: "line_arrow" as const
+    };
+    const updated = applyAgentCommandsToDocument(createBooleanFixture(), [{
+      type: "set_node_style",
+      nodeId: "path-left",
+      style
+    }]);
+
+    expect(updated.document.pages[0].children[0].style).toMatchObject(style);
+    expect(() =>
+      applyAgentCommandsToDocument(createBooleanFixture(), [{
+        type: "set_node_style",
+        nodeId: "path-left",
+        style: { ...style, stroke_dasharray: [0, 0] }
+      }])
+    ).toThrow("stroke_dasharray");
+  });
+
 });
 
 function createBooleanFixture(): DesignFile {

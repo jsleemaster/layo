@@ -245,8 +245,14 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   await page.getByRole("button", { name: "경로 평탄화" }).click();
 
   const readOpenPath = async () => {
-    const file = (await (await page.request.get("http://127.0.0.1:4317/files/" + fileId)).json()).file;
-    return file.pages[0].children[0].children.find((node: { id: string }) => node.id === "open-stroke");
+    const response = await page.request.get("http://127.0.0.1:4317/files/" + fileId);
+    if (!response.ok()) {
+      return undefined;
+    }
+    const file = (await response.json()).file;
+    return file?.pages?.[0]?.children?.[0]?.children?.find(
+      (node: { id: string }) => node.id === "open-stroke"
+    );
   };
   await expect.poll(async () => {
     const node = await readOpenPath();
@@ -278,6 +284,48 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   expect(visibleBounds.right - visibleBounds.left).toBeGreaterThan(150);
   expect(visibleBounds.bottom - visibleBounds.top).toBeGreaterThan(20);
 
+  await page.getByTestId("inspector-stroke-color").fill("#1d4ed8");
+  await page.getByTestId("inspector-stroke-width").fill("10");
+  await page.getByTestId("inspector-stroke-cap").selectOption("square");
+  await page.getByTestId("inspector-stroke-join").selectOption("round");
+  await page.getByTestId("inspector-stroke-dasharray").fill("4, 2");
+  await page.getByTestId("inspector-stroke-start-marker").selectOption("diamond");
+  await page.getByTestId("inspector-stroke-end-marker").selectOption("line_arrow");
+  await expect.poll(async () => {
+    const node = await readOpenPath();
+    return {
+      stroke: node?.style.stroke,
+      width: node?.style.stroke_width,
+      cap: node?.style.stroke_cap,
+      join: node?.style.stroke_join,
+      dash: node?.style.stroke_dasharray,
+      start: node?.style.stroke_start_marker,
+      end: node?.style.stroke_end_marker
+    };
+  }).toEqual({
+    stroke: "#1d4ed8",
+    width: 10,
+    cap: "square",
+    join: "round",
+    dash: [4, 2],
+    start: "diamond",
+    end: "line_arrow"
+  });
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await readOpenPath())?.style.stroke_end_marker).toBe("triangle");
+  await page.keyboard.press("Control+Shift+z");
+  await expect.poll(async () => (await readOpenPath())?.style.stroke_end_marker).toBe("line_arrow");
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
+  await expect(page.getByTestId("inspector-stroke-color")).toHaveValue("#1d4ed8");
+  await expect(page.getByTestId("inspector-stroke-width")).toHaveValue("10");
+  await expect(page.getByTestId("inspector-stroke-cap")).toHaveValue("square");
+  await expect(page.getByTestId("inspector-stroke-dasharray")).toHaveValue("4, 2");
+
   await page.getByTestId("inspector-tab-dev").click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByTestId("dev-panel-download-png").click();
@@ -285,6 +333,8 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   const png = await readFile(await download.path() as string);
   expect([...png.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
   expect(png.byteLength).toBeGreaterThan(100);
+  expect(png.readUInt32BE(16)).toBeGreaterThan(360);
+  expect(png.readUInt32BE(20)).toBeGreaterThan(40);
 });
 
 async function findCanvasColorBounds(

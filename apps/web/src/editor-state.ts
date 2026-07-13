@@ -713,6 +713,18 @@ function sameEffectShadowStack(
   return beforeStack.length === afterStack.length && beforeStack.every((shadow, index) => shadow === afterStack[index]);
 }
 
+function sameNumberArray(
+  before: number[] | null | undefined,
+  after: number[] | null | undefined
+): boolean {
+  const beforeValues = before ?? [];
+  const afterValues = after ?? [];
+  return (
+    beforeValues.length === afterValues.length &&
+    beforeValues.every((value, index) => value === afterValues[index])
+  );
+}
+
 function activeDesignTokenReferenceMap(document: RendererDocument): Map<string, DesignToken> {
   const tokens = document.tokens ?? [];
   const tokenSets = document.token_sets ?? [];
@@ -2461,6 +2473,13 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
         previousStyle.fill_style === command.style.fill_style &&
         previousStyle.stroke === command.style.stroke &&
         previousStyle.stroke_width === command.style.stroke_width &&
+        (previousStyle.stroke_cap ?? "butt") === (command.style.stroke_cap ?? "butt") &&
+        (previousStyle.stroke_join ?? "miter") === (command.style.stroke_join ?? "miter") &&
+        sameNumberArray(previousStyle.stroke_dasharray, command.style.stroke_dasharray) &&
+        (previousStyle.stroke_start_marker ?? "none") ===
+          (command.style.stroke_start_marker ?? "none") &&
+        (previousStyle.stroke_end_marker ?? "none") ===
+          (command.style.stroke_end_marker ?? "none") &&
         previousStyle.opacity === command.style.opacity &&
         (previousStyle.effect_shadow ?? null) === (nextStyle.effect_shadow ?? null) &&
         sameEffectShadowStack(previousStyle.effect_shadows, nextStyle.effect_shadows) &&
