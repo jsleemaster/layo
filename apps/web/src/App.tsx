@@ -10369,6 +10369,13 @@ export function App() {
     [components, editor, selectedNodeIds]
   );
   const localSessionId = collabSession?.getLocalPresence().sessionId ?? null;
+  const activeLibraryRegistryCredentials =
+    collabSession && activeMemberToken
+      ? {
+          userId: collabSession.team.currentUserId,
+          memberToken: activeMemberToken
+        }
+      : undefined;
   const currentDocumentName = editor?.document.name ?? "문서 없음";
   const currentProjectName = currentProject?.name ?? "프로젝트 없음";
   const topFileShareLabel =
@@ -14025,12 +14032,7 @@ export function App() {
           name: libraryRegistryName.trim() || editor.document.name
         },
         undefined,
-        collabSession && activeMemberToken
-          ? {
-              userId: collabSession.team.currentUserId,
-              memberToken: activeMemberToken
-            }
-          : undefined
+        activeLibraryRegistryCredentials
       );
       setLibraryRegistryName(published.name);
       await refreshLibraryRegistry(`${published.name} 게시됨`);
@@ -14103,10 +14105,15 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 가져오는 중");
-      const imported = await importLibraryRegistryItem(currentProject.currentDocumentId, {
-        libraryId: libraryRegistryReview.review.libraryId,
-        idPrefix: libraryRegistryPrefix.trim() || undefined
-      });
+      const imported = await importLibraryRegistryItem(
+        currentProject.currentDocumentId,
+        {
+          libraryId: libraryRegistryReview.review.libraryId,
+          idPrefix: libraryRegistryPrefix.trim() || undefined
+        },
+        undefined,
+        activeLibraryRegistryCredentials
+      );
       await loadProjectDocument(currentProject, projects);
       setLibraryRegistryReview(null);
       setLibraryRegistryStatus(
@@ -14134,7 +14141,9 @@ export function App() {
       setLibraryRegistryStatus("게시 라이브러리 토큰 가져오는 중");
       const imported = await importLibraryRegistryTokens(
         currentProject.currentDocumentId,
-        libraryRegistryTokenReview.review.libraryId
+        libraryRegistryTokenReview.review.libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
       );
       await loadProjectDocument(currentProject, projects);
       await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
@@ -14158,7 +14167,12 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 업데이트 적용 중");
-      const imported = await updateLibraryRegistryTokens(currentProject.currentDocumentId, libraryId);
+      const imported = await updateLibraryRegistryTokens(
+        currentProject.currentDocumentId,
+        libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
+      );
       await loadProjectDocument(currentProject, projects);
       await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
       setLibraryRegistryStatus(
@@ -14203,7 +14217,12 @@ export function App() {
       }
 
       setLibraryRegistryStatus("게시 라이브러리 업데이트 적용 중");
-      const imported = await updateLibraryRegistryItem(currentProject.currentDocumentId, libraryId);
+      const imported = await updateLibraryRegistryItem(
+        currentProject.currentDocumentId,
+        libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
+      );
       await loadProjectDocument(currentProject, projects);
       setLibraryRegistryStatus(
         `${imported.libraryName} 업데이트 적용됨 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
