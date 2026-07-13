@@ -1559,6 +1559,104 @@ describe("Penpot component instance migration", () => {
     }
   }, 10_000);
 
+  test("keeps registry metadata and archive from the same competing publication", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-library-publication-race-"));
+    const releasePath = path.join(root, "release-publisher");
+    const workerPath = fileURLToPath(new URL("./storage-publication-worker.ts", import.meta.url));
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const spawnPublisher = (mode: "publish-paused" | "publish", fileId: string) => {
+      const child = spawn(process.execPath, [
+        "--import",
+        "tsx",
+        workerPath,
+        mode,
+        root,
+        fileId,
+        "shared-publication",
+        releasePath
+      ], { stdio: ["pipe", "pipe", "pipe"], env: process.env });
+      children.push(child);
+      return child;
+    };
+    const waitForMarker = (child: ChildProcessWithoutNullStreams, marker: string) =>
+      new Promise<void>((resolve, reject) => {
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk.toString();
+          if (stdout.includes(marker)) {
+            resolve();
+          }
+        });
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (!stdout.includes(marker)) {
+            reject(new Error(`publisher exited ${code} before ${marker}: ${stderr}`));
+          }
+        });
+      });
+    const waitForExit = (child: ChildProcessWithoutNullStreams) =>
+      new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`publisher exited ${code}: ${stderr}`));
+          }
+        });
+      });
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-a-project",
+        documentId: "publication-a",
+        documentName: "Publication A",
+        fileName: "publication-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-b-project",
+        documentId: "publication-b",
+        documentName: "Publication B",
+        fileName: "publication-b.penpot"
+      });
+
+      const publisherA = spawnPublisher("publish-paused", "publication-a");
+      await waitForMarker(publisherA, "publish-paused");
+      const publisherAExit = waitForExit(publisherA);
+      const publisherB = spawnPublisher("publish", "publication-b");
+      await waitForExit(publisherB);
+      await writeRawFile(releasePath, "release\n", "utf8");
+      await publisherAExit;
+
+      const entry = (await storage.listLibraryRegistry()).find(
+        (candidate) => candidate.libraryId === "shared-publication"
+      );
+      const review = await storage.reviewLibraryRegistryItem(
+        entry?.sourceFileId ?? "publication-a",
+        "shared-publication"
+      );
+      expect(review.originalFileId).toBe(entry?.sourceFileId);
+    } finally {
+      await writeRawFile(releasePath, "release\n", "utf8").catch(() => undefined);
+      for (const child of children) {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+      await Promise.allSettled(children.map((child) => waitForExit(child)));
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
     const releasePath = path.join(root, "unused-release");
