@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-07-11
+Last checked: 2026-07-13
 
 ## Product Target
 
@@ -251,10 +251,19 @@ visibility/dash/cap/join/endpoints, validated deterministic mutation, history,
 reload, Yjs preservation, component overrides, Korean Inspector lifecycle,
 separate Konva/SVG/PDF paint passes, box-shape PNG bounds, and code handoff.
 Full Verification `29224618439` passed all gates and 187 Playwright cases;
-restore `29224618444` and retention `29224618447` passed. Closed arbitrary
-paths still render alignment metadata without geometry-aware inside/outside
-offset or clipping, so that exact case is the next active gap. See
+restore `29224618444` and retention `29224618447` passed. See
 `docs/product/penpot-first-class-multi-stroke-delta.md`.
+
+PR #279 closes closed arbitrary-path alignment with one shared closed-subpath
+resolver, Path2D interior/inverse canvas clipping, SVG clip/mask definitions,
+PDF even-odd clip operators, PNG bounds, open-path center normalization at the
+agent and render boundaries, and Korean Inspector effective-state controls.
+Full Verification `29227360608` passed all gates and 188 Playwright cases;
+restore `29227360595` and retention `29227360638` passed. First-class stroke
+entries still only own a solid color while Layo's legacy/import paths separately
+support gradient and image stroke paints, so per-stroke paint-source ownership
+is the next exact gap. See
+`docs/product/penpot-closed-path-stroke-alignment-delta.md`.
 
 ## Current Highest-Risk Gaps
 
