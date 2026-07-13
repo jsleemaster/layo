@@ -6909,6 +6909,10 @@ function Inspector({
     strokeStyleDraftRef.current = { nodeId: selectedNode.id, style: nextStyle };
     onNodeStyleChange(selectedNode.id, nextStyle);
   };
+  const currentFillStack = () =>
+    (strokeStyleDraftRef.current?.nodeId === selectedNode.id
+      ? strokeStyleDraftRef.current.style.fills
+      : selectedNode.style.fills) ?? [];
   const updateFillStack = (fills: NodeFill[]) => {
     const primary = fills.find((fill) => fill.visible && fill.opacity > 0) ?? fills[0];
     updateFillStyle({
@@ -6917,7 +6921,7 @@ function Inspector({
     });
   };
   const addFill = () => {
-    const current = selectedNode.style.fills ?? [];
+    const current = currentFillStack();
     const source = current.at(-1);
     const color = source?.color ?? selectedNode.style.fill;
     updateFillStack([
@@ -6933,7 +6937,7 @@ function Inspector({
     ]);
   };
   const patchFill = (index: number, patch: Partial<NodeFill>) => {
-    updateFillStack((selectedNode.style.fills ?? []).map((fill, candidate) =>
+    updateFillStack((currentFillStack()).map((fill, candidate) =>
       candidate === index ? { ...fill, ...patch } : fill
     ));
   };
@@ -6971,14 +6975,14 @@ function Inspector({
     patchFill(index, { paint: { type: "gradient", gradient: { ...fill.paint.gradient, stops } } });
   };
   const moveFill = (index: number, direction: -1 | 1) => {
-    const fills = [...(selectedNode.style.fills ?? [])];
+    const fills = [...(currentFillStack())];
     const target = index + direction;
     if (target < 0 || target >= fills.length) return;
     [fills[index], fills[target]] = [fills[target], fills[index]];
     updateFillStack(fills);
   };
   const duplicateFill = (index: number) => {
-    const fills = [...(selectedNode.style.fills ?? [])];
+    const fills = [...(currentFillStack())];
     const source = fills[index];
     if (!source) return;
     fills.splice(index + 1, 0, {
@@ -6989,7 +6993,7 @@ function Inspector({
     updateFillStack(fills);
   };
   const deleteFill = (index: number) => {
-    updateFillStack((selectedNode.style.fills ?? []).filter((_, candidate) => candidate !== index));
+    updateFillStack((currentFillStack()).filter((_, candidate) => candidate !== index));
   };
 
   const updateStrokeStyle = (patch: Partial<RendererNode["style"]>) => {
