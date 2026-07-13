@@ -2349,7 +2349,7 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = style[field] as string | number | null;
+    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
