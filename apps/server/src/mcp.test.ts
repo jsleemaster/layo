@@ -796,6 +796,66 @@ describe("MCP AI editing workflow", () => {
     expect(listed.libraries).toEqual([]);
   });
 
+  test("blocks viewer MCP imports before writing target subscriptions", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "viewer-user",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "viewer-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "viewer-user",
+        memberToken: "viewer-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "source-project",
+          name: "Source Project",
+          documentId: "source-file",
+          documentName: "Source File"
+        });
+        await storage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+        await storage.createProject({
+          projectId: "target-project",
+          name: "Target Project",
+          documentId: "target-file",
+          documentName: "Target File"
+        });
+        await storage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
+        await storage.publishLibraryToRegistry("source-file", {
+          libraryId: "team-kit",
+          name: "Team Kit"
+        });
+      }
+    });
+
+    const blocked = await client.callTool({
+      name: "import_library_registry_item",
+      arguments: {
+        fileId: "target-file",
+        libraryId: "team-kit",
+        idPrefix: "team"
+      }
+    });
+    expect(blocked).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/viewer cannot publish/) })]
+    });
+
+    const subscriptions = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry_subscriptions",
+        arguments: { fileId: "target-file" }
+      })
+    );
+    expect(subscriptions.subscriptions).toEqual([]);
+  });
+
   test("scopes registry library MCP list and imports to matching project teams", async () => {
     const client = await connectMcpClient();
 
@@ -2033,10 +2093,13 @@ async function connectMcpClient(options?: {
     userId: string;
     memberToken: string;
   };
+  setupStorage?: (storage: FileStorage) => Promise<void>;
 }) {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-mcp-"));
   activeClient = new Client({ name: "layo-test", version: "1.0.0" });
-  activeServer = createMcpServer(new FileStorage(tempRoot), options);
+  const storage = new FileStorage(tempRoot);
+  await options?.setupStorage?.(storage);
+  activeServer = createMcpServer(storage, options);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   await Promise.all([
