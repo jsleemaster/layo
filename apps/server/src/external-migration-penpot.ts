@@ -908,18 +908,6 @@ function escapeSvgText(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function frameFillImageNode(
-  shape: PenpotShape,
-  asset: PenpotPackageAsset,
-  fillRecord: JsonRecord | null = penpotFillImageRecordForShape(shape)
-): DesignNode {
-  return frameImageNode(shape, asset, {
-    idSuffix: 'fill-image',
-    nameSuffix: 'background',
-    opacity: finiteNumber(valueFor(fillRecord ?? {}, 'fillOpacity', 'fill-opacity', 'opacity'), 1)
-  });
-}
-
 function frameStrokeImageNode(
   shape: PenpotShape,
   asset: PenpotPackageAsset,
