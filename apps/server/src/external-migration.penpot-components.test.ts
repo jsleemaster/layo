@@ -1726,11 +1726,20 @@ describe("Penpot component instance migration", () => {
       });
 
       const restarted = new FileStorage(root);
+      await restarted.publishLibraryToRegistry("publication-recovery-b", {
+        libraryId: "unrelated-publication"
+      });
       await restarted.prepareFiles();
-      const entry = (await restarted.listLibraryRegistry()).find(
+
+      const entries = await restarted.listLibraryRegistry();
+      const entry = entries.find(
         (candidate) => candidate.libraryId === "recovery-publication"
       );
       expect(entry?.sourceFileId).toBe("publication-recovery-a");
+      expect(
+        entries.find((candidate) => candidate.libraryId === "unrelated-publication")
+          ?.sourceFileId
+      ).toBe("publication-recovery-b");
       const review = await restarted.reviewLibraryRegistryItem(
         "publication-recovery-a",
         "recovery-publication"
@@ -1742,7 +1751,22 @@ describe("Penpot component instance migration", () => {
       }
       await rm(root, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 15_000);
+
+  test("namespaces publication recovery journals away from document update journals", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-namespace-"));
+    try {
+      const storage = new FileStorage(root) as unknown as {
+        libraryUpdateRecoveryPathFor(fileId: string): string;
+        libraryPublicationRecoveryPathFor(libraryId: string): string;
+      };
+      expect(storage.libraryPublicationRecoveryPathFor("kit")).not.toBe(
+        storage.libraryUpdateRecoveryPathFor("library-publication-kit")
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
