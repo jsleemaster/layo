@@ -2442,7 +2442,13 @@ export class FileStorage {
         libraryId: entry.libraryId,
         libraryName: entry.name
       };
-      await this.upsertLibraryRegistrySubscription(fileId, entry, imported, subscription.idPrefix);
+      await this.upsertLibraryRegistrySubscription(
+        fileId,
+        entry,
+        imported,
+        subscription.idPrefix,
+        (snapshot) => rollbackGuards.push(snapshot)
+      );
       return imported;
 
     } catch (error) {
@@ -3456,13 +3462,20 @@ export class FileStorage {
     }
   }
 
-  private async writeLibraryRegistrySubscriptions(subscriptions: LibraryRegistrySubscription[]): Promise<void> {
+  private async writeLibraryRegistrySubscriptions(
+    subscriptions: LibraryRegistrySubscription[],
+    onCommitted?: (snapshot: StoragePathSnapshot) => void
+  ): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(
-      this.librarySubscriptionsPath(),
-      `${JSON.stringify({ schemaVersion: 1, subscriptions }, null, 2)}\n`,
-      "utf8"
-    );
+    const snapshot = {
+      filePath: this.librarySubscriptionsPath(),
+      data: Buffer.from(
+        `${JSON.stringify({ schemaVersion: 1, subscriptions }, null, 2)}\n`,
+        "utf8"
+      )
+    };
+    await writeFile(snapshot.filePath, snapshot.data);
+    onCommitted?.(snapshot);
   }
 
   private async readLibraryRegistryTokenSubscriptions(): Promise<LibraryRegistryTokenSubscription[]> {
@@ -3493,7 +3506,8 @@ export class FileStorage {
     fileId: string,
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryItem,
-    idPrefix: string | undefined
+    idPrefix: string | undefined,
+    onCommitted?: (snapshot: StoragePathSnapshot) => void
   ): Promise<void> {
     assertSafeStorageId(fileId);
     const subscriptions = await this.readLibraryRegistrySubscriptions();
@@ -3523,7 +3537,7 @@ export class FileStorage {
         a.libraryName.localeCompare(b.libraryName) ||
         a.libraryId.localeCompare(b.libraryId)
     );
-    await this.writeLibraryRegistrySubscriptions(nextSubscriptions);
+    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted);
   }
 
   private async upsertLibraryRegistryTokenSubscription(
