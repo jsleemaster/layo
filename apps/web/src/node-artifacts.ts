@@ -1615,7 +1615,7 @@ function openPathMarkerGeometry(pathData: string) {
       ? end.control2
       : end.type === "Q"
         ? end.control
-        : previous && previous.type !== "Z"
+        : previous
           ? previous
           : start;
   return {
