@@ -34,7 +34,7 @@ const multiStrokeNode: RendererNode = {
         opacity: 1,
         width: 2,
         position: "inside",
-        style: "solid",
+        style: "dotted",
         visible: true,
         dasharray: [],
         cap: "butt",
@@ -74,6 +74,7 @@ describe("first-class multi-stroke artifacts", () => {
     expect(svg).toContain('stroke-dasharray="8 4"');
     expect(svg).toContain('data-stroke-position="outside"');
     expect(svg).toContain('data-stroke-position="inside"');
+    expect(svg).toContain('stroke-dasharray="0 4"');
     expect(svg).not.toContain('data-stroke-id="hidden"');
     expect(svg).not.toContain("#22c55e");
   });
@@ -87,6 +88,7 @@ describe("first-class multi-stroke artifacts", () => {
       pdfText.indexOf("% Layo stroke inner inside")
     );
     expect(pdfText).toContain("/CA 0.5");
+    expect(pdfText).toContain("[0 4] 0 d");
     expect(pdfText).not.toContain("% Layo stroke hidden");
   });
 });
