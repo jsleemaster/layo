@@ -4261,7 +4261,11 @@ function normalizeLibraryPublicationIdempotencyKey(value: string | undefined) {
   if (idempotencyKey.length > 128) {
     throw inputValidationError("library publication idempotency key must be 128 characters or fewer");
   }
-  assertSafeStorageId(idempotencyKey);
+  if (!/^[a-zA-Z0-9_-]+$/.test(idempotencyKey)) {
+    throw inputValidationError(
+      "library publication idempotency key may contain only letters, numbers, underscores, and hyphens"
+    );
+  }
   return idempotencyKey;
 }
 
