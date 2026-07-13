@@ -77,7 +77,11 @@ References:
       recovery, and external-byte conflict proof.
 - [x] Scope startup recovery to one shared promise per storage instance so
       project reads cannot roll back an active same-process journal.
-- [x] Add cross-process mutation locking with safe stale-lock recovery.\n- [x] Hold the process lock across each document read-modify-write operation\n      so final-write serialization cannot lose edits read from stale JSON.\n- [ ] Make archive, registry metadata, and event publication one crash-recoverable\n      cross-process transaction.
+- [x] Add cross-process mutation locking with safe stale-lock recovery.
+- [x] Hold the process lock across each document read-modify-write operation
+      so final-write serialization cannot lose edits read from stale JSON.
+- [x] Make archive, registry metadata, and event publication one
+      crash-recoverable cross-process transaction.
 
 Evidence is recorded in
 `docs/product/penpot-library-in-use-deletion-guard-delta.md` and
@@ -86,6 +90,9 @@ Evidence is recorded in
 `docs/product/penpot-library-update-rollback-delta.md`, and
 `docs/product/penpot-library-concurrent-writer-guard-delta.md`, and
 `docs/product/penpot-library-subscription-writer-guard-delta.md`, and
-`docs/product/penpot-library-crash-recovery-journal-delta.md`. The plan remains
-active; do not treat PR #290 as completion of the broader recovery goal.
-Cross-process mutation locking and stale-lock recovery are next.
+`docs/product/penpot-library-crash-recovery-journal-delta.md`,
+`docs/product/penpot-cross-process-storage-lock-delta.md`, and
+`docs/product/penpot-library-publication-transaction-delta.md`. The local
+single-host conflict and recovery plan is complete after the publication PR
+merges. Hosted multi-instance ownership, auth, transactional object storage,
+backup retention, and pub/sub belong to the next explicit maturity plan.
