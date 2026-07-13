@@ -989,13 +989,19 @@ describe("Penpot component instance migration", () => {
         name: "Shape library"
       });
 
-      const internals = storage as unknown as {
+      type LibraryArchiveReader = {
         readAccessibleLibraryRegistryArchive(
           fileId: string,
           libraryId: string
         ): Promise<unknown>;
       };
-      const readArchive = internals.readAccessibleLibraryRegistryArchive.bind(storage);
+      const secondStorage = new FileStorage(root);
+      const firstInternals = storage as unknown as LibraryArchiveReader;
+      const secondInternals = secondStorage as unknown as LibraryArchiveReader;
+      const firstReadArchive =
+        firstInternals.readAccessibleLibraryRegistryArchive.bind(storage);
+      const secondReadArchive =
+        secondInternals.readAccessibleLibraryRegistryArchive.bind(secondStorage);
       let readCount = 0;
       let releaseFirst!: () => void;
       const firstGate = new Promise<void>((resolve) => {
@@ -1009,15 +1015,16 @@ describe("Penpot component instance migration", () => {
       const secondEntered = new Promise<void>((resolve) => {
         markSecondEntered = resolve;
       });
-      internals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+      firstInternals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
         readCount += 1;
-        if (readCount === 1) {
-          markFirstEntered();
-          await firstGate;
-        } else {
-          markSecondEntered();
-        }
-        return readArchive(fileId, libraryId);
+        markFirstEntered();
+        await firstGate;
+        return firstReadArchive(fileId, libraryId);
+      };
+      secondInternals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+        readCount += 1;
+        markSecondEntered();
+        return secondReadArchive(fileId, libraryId);
       };
 
       const firstUpdate = storage.updateLibraryRegistryItem(
@@ -1025,7 +1032,7 @@ describe("Penpot component instance migration", () => {
         libraryDocumentId
       );
       await firstEntered;
-      const secondUpdate = storage.updateLibraryRegistryItem(
+      const secondUpdate = secondStorage.updateLibraryRegistryItem(
         "penpot-update-lock-target",
         libraryDocumentId
       );
