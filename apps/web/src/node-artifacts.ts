@@ -71,6 +71,7 @@ interface PdfImageEntry {
 interface PdfGradientFillEntry {
   type: "gradientFill";
   node: RendererNode;
+  fillId?: string;
   source: NodePaintSource;
   gradient: NodePaintGradient;
   stops: NodePaintStop[];
@@ -99,6 +100,21 @@ interface PdfGradientStrokeEntry {
   graphicsStateId?: number;
 }
 
+interface PdfImageFillEntry {
+  type: "imageFill";
+  node: RendererNode;
+  fill: NodeFill;
+  asset: NodeArtifactAsset;
+  x: number;
+  y: number;
+  pageHeight: number;
+  xObjectName?: string;
+  xObjectId?: number;
+  sMaskId?: number;
+  patternName?: string;
+  patternId?: number;
+}
+
 interface PdfImageStrokeEntry {
   type: "imageStroke";
   node: RendererNode;
@@ -116,7 +132,7 @@ interface PdfImageStrokeEntry {
 
 type PdfGradientPaintEntry = PdfGradientFillEntry | PdfGradientStrokeEntry;
 
-type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfImageStrokeEntry | PdfShadowEntry | PdfGradientPaintEntry;
+type PdfEntry = PdfCommandEntry | PdfImageEntry | PdfImageFillEntry | PdfImageStrokeEntry | PdfShadowEntry | PdfGradientPaintEntry;
 
 interface ArtifactBounds {
   minX: number;
@@ -2217,6 +2233,7 @@ function pdfGradientFillCommands(entry: PdfGradientPaintEntry) {
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
   const transform = pdfGradientTransformCommand(entry);
   return [
+    `% Layo fill paint ${entry.fillId ?? "legacy"} gradient`,
     "q",
     ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
     pdfClipOperatorForNode(entry.node),
@@ -2547,7 +2564,50 @@ function collectPdfEntries(
     const fillGradient = pdfFillGradientForNode(node);
     const strokeGradient = pdfStrokeGradientForNode(node);
 
-    if (fillGradient) {
+    if (node.style.fills) {
+      visibleFillsForNode(node).forEach((fill, index) => {
+        if (fill.paint?.type === "gradient" && pdfSupportsGradient(fill.paint.gradient)) {
+          const stops = gradientStopsForGradient(fill.paint.gradient);
+          if (stops.length >= 2 && pdfGradientStops(stops)) {
+            entries.push({
+              type: "gradientFill",
+              node,
+              fillId: fill.id,
+              source: {
+                origin: "penpot",
+                kind: "fill",
+                paintType: "gradient",
+                index,
+                opacity: fill.opacity,
+                blendMode: fill.blend_mode,
+                gradient: fill.paint.gradient
+              },
+              gradient: fill.paint.gradient,
+              stops,
+              x,
+              y,
+              pageHeight
+            });
+            return;
+          }
+        }
+        if (fill.paint?.type === "image") {
+          const asset = options.assets?.[fill.paint.asset_id];
+          if (asset?.dataBase64) {
+            entries.push({ type: "imageFill", node, fill, asset, x, y, pageHeight });
+            return;
+          }
+        }
+        const solidNode = {
+          ...node,
+          style: { ...node.style, fills: undefined, fill: fillPaintColor(fill), opacity: node.style.opacity * fill.opacity }
+        };
+        entries.push({
+          type: "commands",
+          commands: [`% Layo fill paint ${fill.id} solid`, ...pdfFillCommands(solidNode, pageHeight, x, y)]
+        });
+      });
+    } else if (fillGradient) {
       entries.push({ type: "gradientFill", node, ...fillGradient, x, y, pageHeight });
     } else {
       entries.push({ type: "commands", commands: pdfFillCommands(node, pageHeight, x, y) });
@@ -2632,6 +2692,28 @@ function pdfImageCommands(entry: PdfImageEntry) {
   return ["q", `${width} 0 0 ${height} ${formatNumber(entry.x)} ${formatNumber(pdfY)} cm`, `/${entry.xObjectName} Do`, "Q"];
 }
 
+function pdfImageFillCommands(entry: PdfImageFillEntry) {
+  if (!entry.patternName) {
+    const fallbackNode = {
+      ...entry.node,
+      style: { ...entry.node.style, fills: undefined, fill: entry.fill.color }
+    };
+    return [`% Layo fill paint ${entry.fill.id} image`, ...pdfFillCommands(fallbackNode, entry.pageHeight, entry.x, entry.y)];
+  }
+  return [
+    `% Layo fill paint ${entry.fill.id} image`,
+    "q",
+    ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
+    pdfClipOperatorForNode(entry.node),
+    "n",
+    "/Pattern cs",
+    `/${entry.patternName} scn`,
+    ...pdfShapePathCommandsForNode(entry.node, entry.pageHeight, entry.x, entry.y),
+    pdfFillOperatorForNode(entry.node),
+    "Q"
+  ];
+}
+
 function pdfImageStrokeCommands(entry: PdfImageStrokeEntry) {
   const strokeNode = nodeWithStroke(entry.node, entry.stroke);
   const effectivePosition = effectiveStrokePositionForNode(entry.node, entry.stroke);
@@ -2681,6 +2763,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
       }
       if (entry.type === "gradientStroke") {
         return pdfGradientStrokeCommands(entry);
+      }
+      if (entry.type === "imageFill") {
+        return pdfImageFillCommands(entry);
       }
       if (entry.type === "imageStroke") {
         return pdfImageStrokeCommands(entry);
@@ -2835,6 +2920,47 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     }
   });
 
+  const imageFillEntries = entries.filter((entry): entry is PdfImageFillEntry => entry.type === "imageFill");
+  imageFillEntries.forEach((entry, index) => {
+    const assetBytes = bytesFromBase64(entry.asset.dataBase64);
+    const previewBytes = entry.asset.pdfPreviewPngBase64 ? bytesFromBase64(entry.asset.pdfPreviewPngBase64) : null;
+    const png = entry.asset.mimeType === "image/png" ? decodePng(assetBytes) : previewBytes ? decodePng(previewBytes) : null;
+    entry.xObjectName = `FillIm${index + 1}`;
+    if (png) {
+      const rgbBytes = zlibSync(png.rgb);
+      if (png.alpha) {
+        const alphaBytes = zlibSync(png.alpha);
+        entry.sMaskId = addPdfObject(objects, [
+          `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length ${alphaBytes.length} >>\nstream\n`,
+          alphaBytes,
+          "\nendstream"
+        ]);
+      }
+      const sMaskClause = entry.sMaskId ? ` /SMask ${entry.sMaskId} 0 R` : "";
+      entry.xObjectId = addPdfObject(objects, [
+        `<< /Type /XObject /Subtype /Image /Width ${png.width} /Height ${png.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode${sMaskClause} /Length ${rgbBytes.length} >>\nstream\n`,
+        rgbBytes,
+        "\nendstream"
+      ]);
+    } else if (entry.asset.mimeType === "image/jpeg") {
+      entry.xObjectId = addPdfObject(objects, [
+        `<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${assetBytes.length} >>\nstream\n`,
+        assetBytes,
+        "\nendstream"
+      ]);
+    }
+    if (entry.xObjectId) {
+      const tileWidth = Math.max(1, Math.round(entry.node.size.width));
+      const tileHeight = Math.max(1, Math.round(entry.node.size.height));
+      const stream = `q ${tileWidth} 0 0 ${tileHeight} 0 0 cm /${entry.xObjectName} Do Q`;
+      entry.patternName = `FillPattern${index + 1}`;
+      entry.patternId = addPdfObject(
+        objects,
+        `<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ${tileWidth} ${tileHeight}] /XStep ${tileWidth} /YStep ${tileHeight} /Resources << /XObject << /${entry.xObjectName} ${entry.xObjectId} 0 R >> >> /Length ${stream.length} >>\nstream\n${stream}\nendstream`
+      );
+    }
+  });
+
   const imageStrokeEntries = entries.filter((entry): entry is PdfImageStrokeEntry => entry.type === "imageStroke");
   imageStrokeEntries.forEach((entry, index) => {
     const assetBytes = bytesFromBase64(entry.asset.dataBase64);
@@ -2890,7 +3016,7 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
     .filter((entry) => entry.shadingName && entry.shadingId)
     .map((entry) => `/${entry.shadingName} ${entry.shadingId} 0 R`);
   const shadingClause = shadingEntries.length > 0 ? ` /Shading << ${shadingEntries.join(" ")} >>` : "";
-  const patternEntries = imageStrokeEntries
+  const patternEntries = [...imageFillEntries, ...imageStrokeEntries]
     .filter((entry) => entry.patternName && entry.patternId)
     .map((entry) => `/${entry.patternName} ${entry.patternId} 0 R`);
   const patternClause = patternEntries.length > 0 ? ` /Pattern << ${patternEntries.join(" ")} >>` : "";
