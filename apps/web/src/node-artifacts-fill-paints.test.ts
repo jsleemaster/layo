@@ -93,6 +93,10 @@ describe("first-class fill paint artifacts", () => {
     expect(pdf).toContain("/Shading");
     expect(pdf).toContain("/Pattern");
     expect(pdf).toContain("/Image");
+    expect(pdf).toContain("/BM /Multiply");
+    expect(pdf).toContain("/BM /Screen");
+    expect(pdf).toContain("/ca 0.8");
+    expect(pdf).toContain("/ca 0.6");
     expect(pdf.indexOf("% Layo fill paint solid solid")).toBeLessThan(
       pdf.indexOf("% Layo fill paint gradient gradient")
     );
