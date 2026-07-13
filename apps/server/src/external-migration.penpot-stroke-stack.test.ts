@@ -292,9 +292,13 @@ test("reviews imports and persists first-class Penpot stroke paints", async () =
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: expectedMixedGradientStrokeColor,
+      stroke: "#ff0000",
       stroke_width: expectedMixedGradientStrokeWidth,
-      opacity: 1
+      opacity: 1,
+      strokes: [
+        { paint: { type: "solid", color: "#ff0000" } },
+        { paint: { type: "gradient" } }
+      ]
     }
   });
 });
