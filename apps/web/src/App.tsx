@@ -6627,7 +6627,7 @@ function Inspector({
       ...current,
       {
         id: `stroke-${crypto.randomUUID()}`,
-        color: source?.color ?? selectedNode.style.stroke ?? "#111827",
+        color: source?.color ?? selectedNode.style.stroke ?? selectedNode.style.fill,
         opacity: source?.opacity ?? 1,
         width: source?.width ?? Math.max(1, selectedNode.style.stroke_width || 1),
         position: source?.position ?? "center",
