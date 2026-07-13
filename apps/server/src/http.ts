@@ -8,6 +8,7 @@ import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./
 import {
   authenticateTeamMember,
   authorizeTeamLibraryRead,
+  filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
   type TeamAuthorizationConfig
@@ -233,18 +234,18 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           await storage.getTeamIdForFile(request.query.fileId)
         );
       }
+      const libraries = await storage.listLibraryRegistry(request.query.fileId);
       return {
-        libraries: await storage.listLibraryRegistry(request.query.fileId)
+        libraries: member
+          ? filterAuthorizedTeamLibraries(member, libraries)
+          : libraries
       };
     }
 
     const libraries = await storage.listLibraryRegistry();
     return {
       libraries: member
-        ? libraries.filter(
-            (library) =>
-              library.teamId !== undefined && member.teamIds.includes(library.teamId)
-          )
+        ? filterAuthorizedTeamLibraries(member, libraries)
         : libraries
     };
   });
