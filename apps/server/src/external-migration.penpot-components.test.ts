@@ -724,6 +724,38 @@ describe("Penpot component instance migration", () => {
         ]
       });
 
+      const server = createHttpServer(storage, { webDistDir: null });
+      try {
+        const reviewResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-override-target/import/library/registry/update/review",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(reviewResponse.statusCode).toBe(200);
+        expect(reviewResponse.json().review).toMatchObject({
+          canUpdate: false,
+          blockedBy: ["library_component_override_target_missing"],
+          conflictedComponents: [
+            {
+              sourceComponentId: `penpot-component-${circleComponentId}`,
+              missingOverrideNodeIds: [`penpot-${circleMainId}`]
+            }
+          ]
+        });
+
+        const updateResponse = await server.inject({
+          method: "POST",
+          url: "/files/penpot-override-target/import/library/registry/update",
+          payload: { libraryId: libraryDocumentId }
+        });
+        expect(updateResponse.statusCode).toBe(400);
+        expect(updateResponse.json()).toEqual({
+          error: expect.stringMatching(/override target.*missing/i)
+        });
+      } finally {
+        await server.close();
+      }
+
       await expect(
         storage.updateLibraryRegistryItem("penpot-override-target", libraryDocumentId)
       ).rejects.toThrow(/override target.*missing/i);
