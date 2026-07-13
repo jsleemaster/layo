@@ -311,6 +311,16 @@ multi-instance registry ownership, authorization, transactional object storage,
 receipt retention, backup automation, and durable pub/sub remain deliberately
 open.
 
+PR #295 begins hosted ownership by adapting Penpot's owner/editor/viewer team
+roles to Layo's existing member-token model. Configured HTTP, browser, and MCP
+publication paths now require an exact-team owner or editor before the registry
+write; viewer, invalid-token, wrong-team, and private-source cases fail first.
+The unconfigured local-first mode remains deliberately open, and runtime
+credentials remain outside exported team manifests. See
+`docs/product/penpot-library-publish-authorization-delta.md`. Authenticated
+import/update/token mutations, principal-filtered reads, shared transactional
+storage, revocation, receipt retention, and durable pub/sub remain open.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
