@@ -458,6 +458,10 @@ function shadowBoundsForNode(node: RendererNode): ArtifactBounds | null {
 }
 
 function strokeBoundsForNode(node: RendererNode): ArtifactBounds | null {
+  // Preserve legacy artifact origins; first-class stacks opt into aligned box bounds.
+  if (!node.style.strokes && node.kind !== "path") {
+    return null;
+  }
   const strokes = visibleStrokesForNode(node);
   if (strokes.length === 0) {
     return null;
