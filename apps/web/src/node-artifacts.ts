@@ -965,7 +965,7 @@ function svgAlignedPathStrokeDefinitionLinesForNode(node: RendererNode, depth: n
   const lines: string[] = [];
   if (hasInside) {
     lines.push(
-      indent(`<clipPath id="${alignedPathStrokeClipId(node)}-inside">`.replace("-inside-inside", "-inside"), depth),
+      indent(`<clipPath id="${alignedPathStrokeClipId(node)}">`, depth),
       indent(`<path d="${escapeSvgText(pathData)}"${svgPathClipRuleAttributeForNode(node)} />`, depth + 1),
       indent("</clipPath>", depth)
     );
