@@ -1,6 +1,6 @@
 import { unzlibSync, zlibSync } from "fflate";
-import type { NodePaintGradient, NodePaintSource, NodePaintStop, NodeStroke, RendererNode } from "@layo/renderer";
-import { parseEditablePath, pathHasOnlyClosedSubpaths } from "./path-editor";
+import { pathHasOnlyClosedSubpaths, type NodePaintGradient, type NodePaintSource, type NodePaintStop, type NodeStroke, type RendererNode } from "@layo/renderer";
+import { parseEditablePath } from "./path-editor";
 
 export interface NodeArtifactAsset {
   assetId: string;
