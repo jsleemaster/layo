@@ -9515,6 +9515,7 @@ export function App() {
   const componentVariantAreaGapClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const componentVariantSourceReorderClientPointRef = useRef<{ x: number; y: number } | null>(null);
   const gridTrackDragRef = useRef<GridTrackDragState | null>(null);
+  const gridTrackDispatchRef = useRef<(command: Parameters<typeof executeEditorCommand>[1]) => void>(() => {});
   const areaSelectionRef = useRef<AreaSelectionSession | null>(null);
   const dragSessionRef = useRef<NodeDragSession | null>(null);
   const panSessionRef = useRef<{
@@ -11598,6 +11599,8 @@ export function App() {
     setEditor(nextState);
   };
 
+  gridTrackDispatchRef.current = dispatch;
+
   const updateComponentInstanceVariant = (nodeId: string, variantId: string) => {
     dispatch({ type: "set_component_instance_variant", nodeId, variantId });
     if (!currentProject) {
@@ -13373,7 +13376,7 @@ export function App() {
         return;
       }
 
-      dispatch({
+      gridTrackDispatchRef.current({
         type: "reorder_grid_track_with_children",
         nodeId: session.nodeId,
         axis: session.axis,
@@ -13395,7 +13398,7 @@ export function App() {
       window.removeEventListener("blur", cancelGridTrackReorder);
       cancelGridTrackReorder();
     };
-  }, [dispatch]);
+  }, []);
 
   const layoutForGridTrackContextAction = (
     state: EditorState,
