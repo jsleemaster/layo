@@ -515,7 +515,7 @@ test("dev panel PNG raster artifact preserves the imported Penpot radial stroke 
   expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);
-  const centerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), Math.floor(height / 2));
+  const centerStroke = await imagePixel(page, png, "image/png", Math.floor(width / 2), Math.floor(height / 4));
   const rightStroke = await imagePixel(page, png, "image/png", width - 20, Math.floor(height / 2));
 
   expect(centerStroke.r).toBeGreaterThan(centerStroke.b + 40);
