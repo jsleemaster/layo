@@ -2144,6 +2144,35 @@ function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode["style"
   if (!Number.isFinite(style.opacity) || style.opacity < 0 || style.opacity > 1) {
     throw new Error(`opacity must be between 0 and 1`);
   }
+  const strokeCaps = new Set(["butt", "round", "square"]);
+  const strokeJoins = new Set(["miter", "round", "bevel"]);
+  const strokeMarkers = new Set(["none", "line_arrow", "triangle", "square", "circle", "diamond"]);
+  if (style.stroke_cap !== undefined && !strokeCaps.has(style.stroke_cap)) {
+    throw new Error("stroke_cap is invalid");
+  }
+  if (style.stroke_join !== undefined && !strokeJoins.has(style.stroke_join)) {
+    throw new Error("stroke_join is invalid");
+  }
+  if (
+    style.stroke_start_marker !== undefined &&
+    !strokeMarkers.has(style.stroke_start_marker)
+  ) {
+    throw new Error("stroke_start_marker is invalid");
+  }
+  if (
+    style.stroke_end_marker !== undefined &&
+    !strokeMarkers.has(style.stroke_end_marker)
+  ) {
+    throw new Error("stroke_end_marker is invalid");
+  }
+  if (
+    style.stroke_dasharray !== undefined &&
+    (!Array.isArray(style.stroke_dasharray) ||
+      style.stroke_dasharray.some((value) => !Number.isFinite(value) || value < 0) ||
+      (style.stroke_dasharray.length > 0 && !style.stroke_dasharray.some((value) => value > 0)))
+  ) {
+    throw new Error("stroke_dasharray must contain non-negative numbers and at least one positive value");
+  }
   const hasEffectShadows = Object.prototype.hasOwnProperty.call(style, "effect_shadows");
   const effectShadows = hasEffectShadows ? normalizeNullableEffectShadowStack(style.effect_shadows) : undefined;
   const effectShadow = effectShadows
@@ -2157,6 +2186,13 @@ function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode["style"
     fill_style: style.fill_style ?? null,
     stroke: style.stroke ?? null,
     stroke_width: style.stroke_width,
+    ...(style.stroke_cap !== undefined ? { stroke_cap: style.stroke_cap } : {}),
+    ...(style.stroke_join !== undefined ? { stroke_join: style.stroke_join } : {}),
+    ...(style.stroke_dasharray !== undefined ? { stroke_dasharray: [...style.stroke_dasharray] } : {}),
+    ...(style.stroke_start_marker !== undefined
+      ? { stroke_start_marker: style.stroke_start_marker }
+      : {}),
+    ...(style.stroke_end_marker !== undefined ? { stroke_end_marker: style.stroke_end_marker } : {}),
     opacity: style.opacity,
     ...(effectShadow ? { effect_shadow: effectShadow } : {}),
     ...(hasEffectShadows ? { effect_shadows: effectShadows } : {}),
