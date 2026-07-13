@@ -1683,9 +1683,37 @@ export class FileStorage {
       id: documentId,
       name: documentName
     };
+    const importedLibraries = imported.importedLibraries ?? [];
+    const libraryFiles = importedLibraries.map((library) => ({
+      sourceFileId: library.sourceFileId,
+      file: structuredClone(library.file)
+    }));
+    const libraryFileIds = new Set<string>();
+    for (const library of libraryFiles) {
+      assertSafeStorageId(library.file.id);
+      if (library.file.id === documentId || libraryFileIds.has(library.file.id)) {
+        throw inputValidationError(`external migration library document id is ambiguous: ${library.file.id}`);
+      }
+      if (await pathExists(this.filePathFor(library.file.id))) {
+        throw inputValidationError(`document already exists: ${library.file.id}`);
+      }
+      libraryFileIds.add(library.file.id);
+    }
 
     await Promise.all(imported.importedAssets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
     await this.writeFile(documentId, file);
+    for (const library of libraryFiles) {
+      await this.writeFile(library.file.id, library.file);
+    }
+    const documents: ProjectDocumentSummary[] = [
+      { documentId, name: documentName, createdAt: now, updatedAt: now },
+      ...libraryFiles.map((library) => ({
+        documentId: library.file.id,
+        name: library.file.name,
+        createdAt: now,
+        updatedAt: now
+      }))
+    ];
     const project = await this.writeProject({
       schemaVersion: 1,
       projectId,
@@ -1693,16 +1721,42 @@ export class FileStorage {
       createdAt: now,
       updatedAt: now,
       currentDocumentId: documentId,
-      documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
+      documents,
       sharing: { mode: "private" }
     });
+
+    for (const library of libraryFiles) {
+      const entry = await this.publishLibraryToRegistry(library.file.id, {
+        libraryId: library.file.id,
+        name: library.file.name
+      });
+      const componentIdMap = Object.fromEntries(
+        (library.file.components ?? []).map((component) => [component.id, component.id])
+      );
+      await this.upsertLibraryRegistrySubscription(
+        documentId,
+        entry,
+        {
+          fileId: documentId,
+          originalFileId: library.sourceFileId,
+          originalName: library.file.name,
+          componentCount: library.file.components?.length ?? 0,
+          tokenCount: library.file.tokens?.length ?? 0,
+          assetCount: 0,
+          componentIdMap,
+          tokenIdMap: {},
+          libraryId: entry.libraryId,
+          libraryName: entry.name
+        },
+        undefined
+      );
+    }
 
     return {
       project,
       file,
       source: imported.source,
       sourceLabel: imported.sourceLabel,
-      assetCount: imported.importedAssets.length,
       mappedNodeCount: imported.mappedNodeCount,
       skippedNodeCount: imported.skippedNodeCount,
       warnings: imported.warnings
