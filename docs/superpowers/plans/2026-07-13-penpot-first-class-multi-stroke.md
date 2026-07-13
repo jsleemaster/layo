@@ -11,23 +11,23 @@ References:
 
 ## Task 1: Exact RED cases
 
-- [ ] Add ordered two-stroke document, API, canvas, SVG, PDF, and PNG fixtures.
-- [ ] Add inside, center, outside, hidden, and per-stroke opacity cases.
-- [ ] Add direct Inspector add, reorder, duplicate, hide, and delete workflows.
+- [x] Add ordered two-stroke document, API, canvas, SVG, PDF, and PNG fixtures.
+- [x] Add inside, center, outside, hidden, and per-stroke opacity cases.
+- [x] Add direct Inspector add, reorder, duplicate, hide, and delete workflows.
 
 ## Task 2: Model and deterministic commands
 
-- [ ] Define the Rust and TypeScript ordered stroke-stack contract with single-stroke migration compatibility.
-- [ ] Add MCP/HTTP dry-run/apply, validation, summaries, persistence, and collaboration mapping.
-- [ ] Preserve component instance overrides and code-export metadata.
+- [x] Define the Rust and TypeScript ordered stroke-stack contract with single-stroke migration compatibility.
+- [x] Add MCP/HTTP dry-run/apply, validation, summaries, persistence, and collaboration mapping.
+- [x] Preserve component instance overrides and code-export metadata.
 
 ## Task 3: Product surfaces
 
-- [ ] Render ordered strokes on canvas without losing fills, gradients, or endpoints.
-- [ ] Export faithful SVG/PDF/PNG bounds and paint order.
-- [ ] Add Korean-first Inspector controls with undo/redo and reload proof.
+- [x] Render ordered strokes on canvas without losing fills, gradients, or endpoints.
+- [x] Export faithful SVG/PDF/PNG bounds and paint order.
+- [x] Add Korean-first Inspector controls with undo/redo and reload proof.
 
 ## Task 4: Close and route
 
-- [ ] Run the failure-learning loop and full verification.
-- [ ] Review, merge, post-merge clean, and route the next exact Penpot gap.
+- [x] Run the failure-learning loop and full verification.
+- [x] Review, merge, post-merge clean, and route the next exact Penpot gap.
