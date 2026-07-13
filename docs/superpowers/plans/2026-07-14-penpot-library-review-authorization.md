@@ -38,7 +38,7 @@ References:
 
 ## Evidence
 
-- RED: pending.
+- RED `29293745767`: unauthenticated team-beta registry review returned 200 instead of 401.
 - GREEN: pending.
 
 ## Remaining Boundary
