@@ -61,7 +61,9 @@ function componentArchive(options: { copyShapeRef?: string } = {}) {
         content: "Submit",
         fontSize: 16,
         fontFamily: "Inter",
-        fills: [{ fillColor: "#ffffff", fillOpacity: 1 }]
+        opacity: 1,
+        fills: [{ fillColor: "#ffffff", fillOpacity: 1 }],
+        strokes: [{ strokeColor: "#111827", strokeWidth: 1 }]
       })
     },
     {
@@ -88,16 +90,18 @@ function componentArchive(options: { copyShapeRef?: string } = {}) {
         id: copyLabelId,
         name: "Label",
         type: "text",
-        x: 352,
-        y: 112,
-        width: 116,
-        height: 24,
+        x: 360,
+        y: 118,
+        width: 126,
+        height: 28,
         "shape-ref": mainLabelId,
-        touched: ["text-content-group", "fill-group"],
+        touched: ["text-content-group", "fill-group", "stroke-group", "opacity-group", "geometry-group"],
         content: "Continue",
         fontSize: 16,
         fontFamily: "Inter",
-        fills: [{ fillColor: "#f97316", fillOpacity: 0.8 }]
+        opacity: 0.6,
+        fills: [{ fillColor: "#f97316", fillOpacity: 0.8 }],
+        strokes: [{ strokeColor: "#22c55e", strokeWidth: 2 }]
       })
     }
   ]);
@@ -268,7 +272,47 @@ describe("Penpot component instance migration", () => {
             node_id: `penpot-${mainLabelId}`,
             field: "fills",
             value: expect.stringContaining("#f97316")
-          })
+          }),
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "stroke",
+            value: "#22c55e"
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "stroke_width",
+            value: "2"
+          },
+          expect.objectContaining({
+            node_id: `penpot-${mainLabelId}`,
+            field: "strokes",
+            value: expect.stringContaining("#22c55e")
+          }),
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "opacity",
+            value: "0.6"
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "x",
+            value: "40"
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "y",
+            value: "22"
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "width",
+            value: "126"
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "height",
+            value: "28"
+          }
         ])
       }
     });
@@ -281,8 +325,16 @@ describe("Penpot component instance migration", () => {
           fill: "#f97316",
           fills: [
             expect.objectContaining({ color: "#f97316", opacity: 0.8 })
-          ]
-        })
+          ],
+          stroke: "#22c55e",
+          stroke_width: 2,
+          strokes: [
+            expect.objectContaining({ color: "#22c55e", width: 2 })
+          ],
+          opacity: 0.6
+        }),
+        transform: expect.objectContaining({ x: 40, y: 22 }),
+        size: { width: 126, height: 28 }
       })
     ]);
   });
