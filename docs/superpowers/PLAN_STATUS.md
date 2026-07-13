@@ -28,7 +28,7 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file ownership; PR #284 guards in-use deletion; PR #285 guards same-id source-node and swap-only override conflicts. PR #286 binds compatibility review and apply to one immutable registry archive, parsed library, and target snapshot so concurrent publication cannot inject unreviewed bytes. RED `29253847729` proved two archive reads after an infrastructure-only first attempt; GREEN `29254347531` passed 251 web tests, 265 server tests, Rust workspace tests, and 192 Playwright cases after an unrelated flaky E2E rerun. Stale subscription metadata, atomic partial-write rollback, retry, and version recovery remain active. Deployment remains non-gating. |
+| `2026-07-13-penpot-library-update-conflict-recovery.md` | Active | PR #283 proves packaged cross-file ownership; PR #284 guards in-use deletion; PR #285 guards same-id source-node and swap-only override conflicts; PR #286 binds review and apply to one immutable archive and target snapshot. PR #287 restores exact asset, document, and subscription bytes after caught partial-write failures, permits identical retry, and preserves saved-version plus recovery-version flows. RED `29257315822` proved the rejected update left changed document state; GREEN `29258125418` passed 251 web tests, 266 server tests, Rust workspace tests, and 192 Playwright cases after an unrelated browser-state rerun. Stale subscription concurrency, concurrent-writer rollback protection, and crash-level journal or atomic commit recovery remain active. Deployment remains non-gating. |
 
 ## Completed Plans
 
