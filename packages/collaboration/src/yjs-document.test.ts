@@ -260,6 +260,68 @@ describe("collaborative design document", () => {
     second.destroy();
   });
 
+  test("syncs ordered gradient and image stroke paint ownership", () => {
+    const first = createCollaborativeDesignDocument({ document: sampleDocument() });
+    const second = createCollaborativeDesignDocument({ document: sampleDocument() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    first.transact("set-stroke-paints", (current) => {
+      const next = structuredClone(current);
+      const node = next.pages[0]?.children[0];
+      if (!node) throw new Error("missing node");
+      node.style.strokes = [
+        {
+          id: "gradient",
+          color: "#111827",
+          paint: {
+            type: "gradient",
+            gradient: {
+              type: "linear",
+              stops: [
+                { color: "#ef4444", opacity: 1, offset: 0 },
+                { color: "#2563eb", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          opacity: 1,
+          width: 4,
+          position: "center",
+          style: "solid",
+          visible: true,
+          dasharray: [],
+          cap: "butt",
+          join: "miter",
+          start_marker: "none",
+          end_marker: "none"
+        },
+        {
+          id: "image",
+          color: "#111827",
+          paint: { type: "image", asset_id: "asset-border" },
+          opacity: 0.8,
+          width: 8,
+          position: "outside",
+          style: "dashed",
+          visible: true,
+          dasharray: [8, 4],
+          cap: "round",
+          join: "round",
+          start_marker: "none",
+          end_marker: "none"
+        }
+      ];
+      return next;
+    });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    expect(second.getDocument().pages[0]?.children[0]?.style.strokes).toEqual(
+      first.getDocument().pages[0]?.children[0]?.style.strokes
+    );
+
+    first.destroy();
+    second.destroy();
+  });
+
   test("rejects invalid document payloads", () => {
     const document = createCollaborativeDesignDocument({ document: sampleDocument() });
 
