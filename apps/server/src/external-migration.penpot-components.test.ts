@@ -458,7 +458,7 @@ describe("Penpot component instance migration", () => {
     expect(inspection.nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: `penpot-${outerCopySlotId}`,
+          id: `penpot-${outerCopyId}__penpot-${outerMainSlotId}`,
           componentDefinitionId: `penpot-component-${circleComponentId}`
         })
       ])
