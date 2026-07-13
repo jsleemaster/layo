@@ -659,6 +659,47 @@ pub enum StrokeStyle {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
 #[ts(export)]
+pub struct NodePaintPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct NodePaintStop {
+    pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint: Option<NodeStrokePaint>,
+    pub opacity: f64,
+    pub offset: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
+pub struct NodePaintGradient {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<NodePaintPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<NodePaintPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stops: Option<Vec<NodePaintStop>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum NodeStrokePaint {
+    Solid { color: String },
+    Gradient { gradient: NodePaintGradient },
+    Image { asset_id: String },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[ts(export)]
 pub struct NodeStroke {
     pub id: String,
     pub color: String,
