@@ -58,6 +58,9 @@ Penpot reference commit:
   caught an over-broad recovery lock that delayed three existing same-process
   update-recovery tests past five seconds. The lock was narrowed to publication
   journals; the existing update-journal path remains immediate.
+- Follow-up run `29277515496` passed 278 of 279 server tests and caught a
+  changed update-recovery conflict message. Recovery now preserves the existing
+  update contract while naming publication conflicts separately.
 - Final PR-head Full Verification is the merge gate. This storage-only change
   has no new browser interaction; the complete Playwright CLI suite remains the
   browser regression proof.
