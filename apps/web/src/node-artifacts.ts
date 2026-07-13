@@ -716,11 +716,12 @@ function normalizedStrokeDasharray(node: RendererNode) {
   );
 }
 
-function svgStrokeMarkerId(node: RendererNode, position: "start" | "end", marker: string) {
-  return `layo-marker-${safeSvgIdSuffix(node.id)}-${position}-${marker}`;
+function svgStrokeMarkerId(node: RendererNode, position: "start" | "end", marker: string, strokeId?: string) {
+  const suffix = strokeId ? `-${safeSvgIdSuffix(strokeId)}` : "";
+  return `layo-marker-${safeSvgIdSuffix(node.id)}${suffix}-${position}-${marker}`;
 }
 
-function svgStrokePresentationAttributes(node: RendererNode) {
+function svgStrokePresentationAttributes(node: RendererNode, strokeId?: string) {
   const cap = node.style.stroke_cap ?? "butt";
   const join = node.style.stroke_join ?? "miter";
   const dasharray = normalizedStrokeDasharray(node);
@@ -731,10 +732,10 @@ function svgStrokePresentationAttributes(node: RendererNode) {
     node.style.stroke_join ? ` stroke-linejoin="${join}"` : "",
     dasharray.length > 0 ? ` stroke-dasharray="${dasharray.map(formatNumber).join(" ")}"` : "",
     startMarker !== "none"
-      ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker)})"`
+      ? ` marker-start="url(#${svgStrokeMarkerId(node, "start", startMarker, strokeId)})"`
       : "",
     endMarker !== "none"
-      ? ` marker-end="url(#${svgStrokeMarkerId(node, "end", endMarker)})"`
+      ? ` marker-end="url(#${svgStrokeMarkerId(node, "end", endMarker, strokeId)})"`
       : ""
   ].join("");
 }
@@ -755,31 +756,41 @@ function svgStrokeMarkerShape(marker: string) {
   return '<path d="M0.8 1 L9.2 5 L0.8 9 Z" />';
 }
 
-function svgStrokeMarkerLinesForNode(node: RendererNode, depth: number) {
-  if (!node.style.stroke || node.style.stroke_width <= 0) {
-    return [];
-  }
+function svgStrokeMarkerDefinitionLines(
+  node: RendererNode,
+  stroke: NodeStroke,
+  depth: number,
+  strokeId?: string
+) {
   const entries = [
-    ["start", node.style.stroke_start_marker ?? "none"],
-    ["end", node.style.stroke_end_marker ?? "none"]
+    ["start", stroke.start_marker],
+    ["end", stroke.end_marker]
   ] as const;
   return entries.flatMap(([position, marker]) =>
     marker === "none"
       ? []
       : [
           indent(
-            `<marker id="${svgStrokeMarkerId(node, position, marker)}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" markerUnits="strokeWidth">`,
+            `<marker id="${svgStrokeMarkerId(node, position, marker, strokeId)}" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="3" markerHeight="3" orient="auto-start-reverse" markerUnits="strokeWidth">`,
             depth
           ),
           indent(
-            `<g fill="${escapeSvgText(node.style.stroke ?? "none")}" stroke="${escapeSvgText(
-              node.style.stroke ?? "none"
-            )}">${svgStrokeMarkerShape(marker)}</g>`,
+            `<g fill="${escapeSvgText(stroke.color)}" stroke="${escapeSvgText(stroke.color)}" fill-opacity="${formatNumber(stroke.opacity)}" stroke-opacity="${formatNumber(stroke.opacity)}">${svgStrokeMarkerShape(marker)}</g>`,
             depth + 1
           ),
           indent("</marker>", depth)
         ]
   );
+}
+
+function svgStrokeMarkerLinesForNode(node: RendererNode, depth: number) {
+  if (node.style.strokes) {
+    return visibleStrokesForNode(node).flatMap((stroke) =>
+      svgStrokeMarkerDefinitionLines(node, stroke, depth, stroke.id)
+    );
+  }
+  const legacy = legacyStrokeForNode(node);
+  return legacy ? svgStrokeMarkerDefinitionLines(node, legacy, depth) : [];
 }
 
 function svgStrokeMarkerLinesForTree(node: RendererNode, depth: number): string[] {
