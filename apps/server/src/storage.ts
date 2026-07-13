@@ -4081,16 +4081,6 @@ export class FileStorage {
     };
   }
 
-  private async appendLibraryRegistryEvent(
-    entry: LibraryRegistryEntry,
-    exported: ExportedLibraryArchive
-  ): Promise<LibraryRegistryEvent> {
-    const events = await this.readLibraryRegistryEvents();
-    const event = this.createLibraryRegistryEvent(entry, exported, events);
-    await this.writeLibraryRegistryEvents([...events, event]);
-    return event;
-  }
-
   private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
     assertSafeStorageId(fileId);
     const projects = await this.listProjects();
