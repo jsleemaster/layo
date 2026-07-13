@@ -248,7 +248,7 @@ test("imports Penpot frame stroke-image records as packaged background image ass
   });
 });
 
-test("imports Penpot frame fill-image and stroke-image records as separate packaged image children", () => {
+test("imports Penpot frame fill-image and stroke-image records on the owning frame", () => {
   const archive = createPenpotFrameStrokeImageExportArchive({ includeFrameFillImage: true });
   const review = reviewExternalMigrationArchive(archive, { fileName: "frame-dual-image-paints.penpot" });
   expect(review).toMatchObject({
@@ -269,7 +269,7 @@ test("imports Penpot frame fill-image and stroke-image records as separate packa
   expect(imported).toMatchObject({
     source: "penpot",
     sourceLabel: "Penpot",
-    mappedNodeCount: 3,
+    mappedNodeCount: 2,
     skippedNodeCount: 0
   });
   expect(imported.importedAssets.map((asset) => asset.metadata.assetId).sort()).toEqual(
@@ -278,29 +278,19 @@ test("imports Penpot frame fill-image and stroke-image records as separate packa
 
   const frame = imported.file.pages[0].children[0];
   expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Frame stroke image board" });
-  expect(frame.children).toHaveLength(2);
-  expect(frame.children[0]).toMatchObject({
-    id: expectedFrameFillImageNodeId,
-    kind: "image",
-    name: "Frame stroke image board background",
-    transform: { x: 0, y: 0, rotation: 0 },
-    size: { width: 240, height: 160 },
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.35 },
-    content: {
-      type: "image",
-      asset_id: expectedFrameFillImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
-  });
+  expect(frame.style.fills).toMatchObject([{
+    id: "penpot-fill-1",
+    paint: { type: "image", asset_id: expectedFrameFillImageAssetId },
+    opacity: 0.35
+  }]);
+  expect(frame.children).toHaveLength(1);
   expect(frame.style.strokes).toMatchObject([{
     paint: { type: "image", asset_id: expectedFrameStrokeImageAssetId },
     opacity: 0.55,
     width: 14,
     position: "outside"
   }]);
-  expect(frame.children[1]).toMatchObject({
+  expect(frame.children[0]).toMatchObject({
     id: `penpot-${foregroundRectId}`,
     kind: "rectangle",
     name: "Foreground card",
@@ -450,7 +440,7 @@ test("reviews imports and persists Penpot frame fill-image plus stroke-image rec
     source: "penpot",
     sourceLabel: "Penpot",
     assetCount: 2,
-    mappedNodeCount: 3,
+    mappedNodeCount: 2,
     skippedNodeCount: 0,
     project: { name: "Penpot Frame Stroke Image Board" },
     file: { name: "Penpot Frame Stroke Image Board", pages: [{ name: "Frame stroke images" }] }
@@ -459,38 +449,26 @@ test("reviews imports and persists Penpot frame fill-image plus stroke-image rec
   const projects = await storage.listProjects();
   const persisted = await storage.readFile(projects[0].currentDocumentId);
   const frame = persisted.pages[0].children[0];
-  expect(frame.children).toHaveLength(2);
-  const fillImageNode = frame.children[0];
-  expect(fillImageNode).toMatchObject({
-    id: expectedFrameFillImageNodeId,
-    kind: "image",
-    name: "Frame stroke image board background",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.35 },
-    content: {
-      type: "image",
-      asset_id: expectedFrameFillImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
-  });
+  expect(frame.style.fills).toMatchObject([{
+    id: "penpot-fill-1",
+    paint: { type: "image", asset_id: expectedFrameFillImageAssetId },
+    opacity: 0.35
+  }]);
+  expect(frame.children).toHaveLength(1);
   expect(frame.style.strokes).toMatchObject([{
     paint: { type: "image", asset_id: expectedFrameStrokeImageAssetId },
     opacity: 0.55,
     width: 14,
     position: "outside"
   }]);
-  expect(frame.children[1]).toMatchObject({
+  expect(frame.children[0]).toMatchObject({
     id: `penpot-${foregroundRectId}`,
     kind: "rectangle",
     name: "Foreground card",
     style: { fill: "#dbeafe", stroke: null, stroke_width: 0, opacity: 1 }
   });
 
-  if (fillImageNode.content.type !== "image") {
-    throw new Error("expected Penpot frame fill-image import to persist an image node");
-  }
-  const fillAsset = await storage.readAsset(fillImageNode.content.asset_id);
+  const fillAsset = await storage.readAsset(expectedFrameFillImageAssetId);
   const strokeAsset = await storage.readAsset(expectedFrameStrokeImageAssetId);
   expect(fillAsset).toMatchObject({ assetId: expectedFrameFillImageAssetId, name: "frame-background-texture.png" });
   expect(strokeAsset).toMatchObject({ assetId: expectedFrameStrokeImageAssetId, name: "frame-border-texture.png" });
