@@ -236,6 +236,30 @@ function penpotComponentRelationErrors(pages: PenpotPage[]): string[] {
         errors.push(
           `Penpot component copy ${shape.name} has a missing or ambiguous main-instance relation.`
         );
+        continue;
+      }
+
+      const sourceShapeIds = new Set(
+        collectPenpotShapeTree(mains[0], page.shapesById).map((candidate) => candidate.id)
+      );
+      const connectedSourceIds = new Set<string>();
+      for (const copyShape of collectPenpotShapeTree(shape, page.shapesById).slice(1)) {
+        const connectedShapeRef = stringValue(valueFor(copyShape.json, 'shapeRef', 'shape-ref'));
+        const touched = valueFor(copyShape.json, 'touched');
+        const hasTouchedGroups = Array.isArray(touched) && touched.some((value) => typeof value === 'string');
+        if (
+          (hasTouchedGroups && !connectedShapeRef)
+          || (connectedShapeRef && !sourceShapeIds.has(connectedShapeRef))
+          || (connectedShapeRef && connectedSourceIds.has(connectedShapeRef))
+        ) {
+          errors.push(
+            `Penpot component copy layer ${copyShape.name} has an unresolved or ambiguous connected layer relation.`
+          );
+          continue;
+        }
+        if (connectedShapeRef) {
+          connectedSourceIds.add(connectedShapeRef);
+        }
       }
     }
   }
