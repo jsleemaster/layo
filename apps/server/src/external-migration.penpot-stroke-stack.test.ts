@@ -186,7 +186,7 @@ test("preserves Penpot ordered solid and gradient stroke paints", () => {
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: "#ff0000",
+      stroke: "#804040",
       stroke_width: expectedMixedGradientStrokeWidth,
       opacity: 1,
       strokes: [
@@ -291,7 +291,7 @@ test("reviews imports and persists first-class Penpot stroke paints", async () =
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: "#ff0000",
+      stroke: "#804040",
       stroke_width: expectedMixedGradientStrokeWidth,
       opacity: 1,
       strokes: [
