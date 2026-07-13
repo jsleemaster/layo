@@ -512,24 +512,21 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const projects = await storage.listProjects();
     const persisted = await storage.readFile(projects[0].currentDocumentId);
     const frame = persisted.pages[0].children[0];
-    const imageNode = frame.children[0];
-    expect(imageNode).toMatchObject({
+    const fillNode = frame.children[0];
+    expect(fillNode).toMatchObject({
       id: `penpot-${fillRectId}`,
-      kind: "image",
+      kind: "rectangle",
       name: "Hero fill",
-      style: { opacity: 0.75 },
-      content: {
-        type: "image",
-        asset_id: expectedFillAssetId,
-        natural_width: 1,
-        natural_height: 1,
-        fit_mode: "fill"
-      }
+      style: {
+        opacity: 1,
+        fills: [
+          { id: "penpot-fill-1", paint: { type: "gradient" }, opacity: 0.4 },
+          { id: "penpot-fill-2", paint: { type: "image", asset_id: expectedFillAssetId }, opacity: 0.75 }
+        ]
+      },
+      content: { type: "empty" }
     });
-    if (imageNode.content.type !== "image") {
-      throw new Error("expected Penpot fill-image import to persist an image node");
-    }
-    const asset = await storage.readAsset(imageNode.content.asset_id);
+    const asset = await storage.readAsset(expectedFillAssetId);
     expect(asset).toMatchObject({
       assetId: expectedFillAssetId,
       name: "hero-fill.png",
@@ -561,7 +558,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
       source: "penpot",
       sourceLabel: "Penpot",
       assetCount: 1,
-      mappedNodeCount: 3,
+      mappedNodeCount: 2,
       skippedNodeCount: 0,
       project: { name: "Penpot Frame Background Board" },
       file: { name: "Penpot Frame Background Board", pages: [{ name: "Frame backgrounds" }] }
@@ -571,25 +568,12 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const persisted = await storage.readFile(projects[0].currentDocumentId);
     const frame = persisted.pages[0].children[0];
     expect(frame).toMatchObject({ id: `penpot-${frameId}`, kind: "frame", name: "Hero frame" });
-    expect(frame.children).toHaveLength(2);
-    const background = frame.children[0];
-    expect(background).toMatchObject({
-      id: `penpot-${frameId}-fill-image`,
-      kind: "image",
-      name: "Hero frame background",
-      content: {
-        type: "image",
-        asset_id: expectedFrameBackgroundAssetId,
-        natural_width: 1,
-        natural_height: 1,
-        fit_mode: "fill"
-      }
-    });
-    expect(frame.children[1]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: "rectangle", name: "Foreground card" });
-    if (background.content.type !== "image") {
-      throw new Error("expected Penpot frame background import to persist an image node");
-    }
-    const asset = await storage.readAsset(background.content.asset_id);
+    expect(frame.style.fills).toMatchObject([
+      { id: "penpot-fill-1", paint: { type: "image", asset_id: expectedFrameBackgroundAssetId } }
+    ]);
+    expect(frame.children).toHaveLength(1);
+    expect(frame.children[0]).toMatchObject({ id: `penpot-${foregroundRectId}`, kind: "rectangle", name: "Foreground card" });
+    const asset = await storage.readAsset(expectedFrameBackgroundAssetId);
     expect(asset).toMatchObject({
       assetId: expectedFrameBackgroundAssetId,
       name: "frame-bg.png",
