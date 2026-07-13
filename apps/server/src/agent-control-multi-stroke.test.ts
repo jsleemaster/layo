@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { DesignNode } from "./storage";
+import type { DesignNode, NodeStroke } from "./storage";
 import { normalizeAgentNodeStyle, normalizeAgentNodeStyleForNode } from "./agent-control-base";
 
 const baseStyle: DesignNode["style"] = {
