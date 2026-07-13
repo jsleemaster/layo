@@ -83,7 +83,7 @@ test("Inspector manages an ordered multi-stroke stack and persists it across rel
   await stack.getByRole("button", { name: "선 숨기기" }).first().click();
   await expect(stack.getByRole("button", { name: "선 보이기" })).toHaveCount(1);
 
-  await stack.getByRole("button", { name: "선 삭제" }).last().click();
+  await stack.getByTestId("inspector-stroke-row-1").getByRole("button", { name: "선 삭제" }).click();
   await expect(stack.locator('[data-testid^="inspector-stroke-row-"]')).toHaveCount(2);
 
   await stack.getByTestId("inspector-stroke-add").click();
