@@ -5,6 +5,7 @@ import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
 import {
   authenticateTeamMember,
+  authorizeTeamLibraryRead,
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
   type TeamAuthorizationConfig
@@ -498,16 +499,20 @@ export interface McpServerOptions {
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
+  const authenticateLibraryMember = () =>
+    options.libraryRegistryAuth
+      ? authenticateTeamMember(
+          options.libraryRegistryAuth,
+          options.libraryRegistryPrincipal?.userId,
+          options.libraryRegistryPrincipal?.memberToken
+        )
+      : undefined;
+
   const authorizeLibraryWrite = async (fileId: string) => {
-    if (!options.libraryRegistryAuth) {
-      return;
+    const member = authenticateLibraryMember();
+    if (member) {
+      authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
-    const member = authenticateTeamMember(
-      options.libraryRegistryAuth,
-      options.libraryRegistryPrincipal?.userId,
-      options.libraryRegistryPrincipal?.memberToken
-    );
-    authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
   };
 
   const server = new McpServer({
@@ -934,20 +939,32 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           .describe("Optional target design file id; when present, only libraries accessible to that file's team are returned")
       }
     },
-    async ({ fileId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              libraries: fileId ? await storage.listLibraryRegistry(fileId) : await storage.listLibraryRegistry()
-            },
-            null,
-            2
-          )
+    async ({ fileId }) => {
+      const member = authenticateLibraryMember();
+      let libraries;
+      if (fileId) {
+        if (member) {
+          authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
         }
-      ]
-    })
+        libraries = await storage.listLibraryRegistry(fileId);
+      } else {
+        libraries = await storage.listLibraryRegistry();
+        if (member) {
+          libraries = libraries.filter(
+            (library) =>
+              library.teamId !== undefined && member.teamIds.includes(library.teamId)
+          );
+        }
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ libraries }, null, 2)
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
