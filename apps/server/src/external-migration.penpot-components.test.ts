@@ -973,6 +973,82 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("serializes concurrent library updates for the same target", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-update-lock-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-update-lock-project",
+        documentId: "penpot-update-lock-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        readAccessibleLibraryRegistryArchive(
+          fileId: string,
+          libraryId: string
+        ): Promise<unknown>;
+      };
+      const readArchive = internals.readAccessibleLibraryRegistryArchive.bind(storage);
+      let readCount = 0;
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let markFirstEntered!: () => void;
+      const firstEntered = new Promise<void>((resolve) => {
+        markFirstEntered = resolve;
+      });
+      let markSecondEntered!: () => void;
+      const secondEntered = new Promise<void>((resolve) => {
+        markSecondEntered = resolve;
+      });
+      internals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+        readCount += 1;
+        if (readCount === 1) {
+          markFirstEntered();
+          await firstGate;
+        } else {
+          markSecondEntered();
+        }
+        return readArchive(fileId, libraryId);
+      };
+
+      const firstUpdate = storage.updateLibraryRegistryItem(
+        "penpot-update-lock-target",
+        libraryDocumentId
+      );
+      await firstEntered;
+      const secondUpdate = storage.updateLibraryRegistryItem(
+        "penpot-update-lock-target",
+        libraryDocumentId
+      );
+      const secondState = await Promise.race([
+        secondEntered.then(() => "entered" as const),
+        new Promise<"blocked">((resolve) => {
+          setTimeout(() => resolve("blocked"), 50);
+        })
+      ]);
+      releaseFirst();
+      const results = await Promise.allSettled([firstUpdate, secondUpdate]);
+
+      expect(secondState).toBe("blocked");
+      expect(results).toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" })
+      ]);
+      expect(readCount).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("does not roll back over a concurrent target writer", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-concurrent-writer-"));
     try {
