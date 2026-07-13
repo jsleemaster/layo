@@ -84,24 +84,24 @@ async function acquireStorageProcessMutationLock(
   const timeoutMs = normalizeStorageProcessLockTimeout(
     process.env.LAYO_STORAGE_LOCK_TIMEOUT_MS
   );
+  const staleMs = normalizeStorageProcessLockStale(
+    process.env.LAYO_STORAGE_LOCK_STALE_MS
+  );
   const startedAt = Date.now();
 
   await mkdir(locksDir, { recursive: true });
   while (true) {
+    const candidateDir = path.join(locksDir, `${lockName}.candidate-${owner.token}`);
+    const candidateOwnerPath = path.join(candidateDir, "owner.json");
+    await mkdir(candidateDir);
     try {
-      await mkdir(lockDir);
-      try {
-        await writeFile(ownerPath, `${JSON.stringify(owner, null, 2)}\n`, {
-          encoding: "utf8",
-          flag: "wx"
-        });
-        await syncDirectory(lockDir);
-        await syncDirectory(locksDir);
-      } catch (error) {
-        await rm(lockDir, { recursive: true, force: true });
-        await syncDirectory(locksDir);
-        throw error;
-      }
+      await writeFile(candidateOwnerPath, `${JSON.stringify(owner, null, 2)}\n`, {
+        encoding: "utf8",
+        flag: "wx"
+      });
+      await syncDirectory(candidateDir);
+      await rename(candidateDir, lockDir);
+      await syncDirectory(locksDir);
 
       return async () => {
         const currentOwner = parseStorageProcessLockOwner(
@@ -119,14 +119,89 @@ async function acquireStorageProcessMutationLock(
         await syncDirectory(locksDir);
       };
     } catch (error) {
-      if ((error as { code?: string }).code !== "EEXIST") {
+      await rm(candidateDir, { recursive: true, force: true });
+      if (!isStorageProcessLockContention(error)) {
         throw error;
       }
-      if (Date.now() - startedAt >= timeoutMs) {
-        throw new Error(`storage process mutation lock timed out: ${lockDir}`);
-      }
-      await delay(STORAGE_PROCESS_LOCK_RETRY_MS);
     }
+
+    if (await recoverAbandonedStorageProcessLock(lockDir, locksDir, staleMs)) {
+      continue;
+    }
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`storage process mutation lock timed out: ${lockDir}`);
+    }
+    await delay(STORAGE_PROCESS_LOCK_RETRY_MS);
+  }
+}
+
+function isStorageProcessLockContention(error: unknown): boolean {
+  const code = (error as { code?: string }).code;
+  return code === "EEXIST" || code === "ENOTEMPTY";
+}
+
+async function recoverAbandonedStorageProcessLock(
+  lockDir: string,
+  locksDir: string,
+  staleMs: number
+): Promise<boolean> {
+  let owner: StorageProcessLockOwner;
+  try {
+    owner = parseStorageProcessLockOwner(
+      JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8"))
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
+
+  if (
+    Date.now() - Date.parse(owner.acquiredAt) < staleMs
+    || owner.hostname !== hostname()
+    || isProcessAlive(owner.pid)
+  ) {
+    return false;
+  }
+
+  const abandonedDir = `${lockDir}.abandoned-${owner.token}-${randomUUID()}`;
+  try {
+    await rename(lockDir, abandonedDir);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") {
+      return true;
+    }
+    throw error;
+  }
+
+  try {
+    const movedOwner = parseStorageProcessLockOwner(
+      JSON.parse(await readFile(path.join(abandonedDir, "owner.json"), "utf8"))
+    );
+    if (movedOwner.token !== owner.token) {
+      throw new Error("storage process mutation lock changed during stale recovery");
+    }
+    await rm(abandonedDir, { recursive: true, force: true });
+    await syncDirectory(locksDir);
+    return true;
+  } catch (error) {
+    try {
+      await rename(abandonedDir, lockDir);
+    } catch {
+      // Preserve the primary stale-recovery failure.
+    }
+    throw error;
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    return code === "EPERM";
   }
 }
 
@@ -135,6 +210,13 @@ function normalizeStorageProcessLockTimeout(value: string | undefined): number {
   return Number.isFinite(parsed) && parsed >= 100
     ? Math.floor(parsed)
     : STORAGE_PROCESS_LOCK_TIMEOUT_MS;
+}
+
+function normalizeStorageProcessLockStale(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 50
+    ? Math.floor(parsed)
+    : 5_000;
 }
 
 function parseStorageProcessLockOwner(value: unknown): StorageProcessLockOwner {
