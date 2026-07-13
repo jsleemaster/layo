@@ -1461,6 +1461,104 @@ describe("Penpot component instance migration", () => {
     }
   }, 10_000);
 
+  test("preserves concurrent read-modify-write geometry edits across processes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-process-rmw-"));
+    const releasePath = path.join(root, "release-writers");
+    const workerPath = fileURLToPath(new URL("./storage-process-lock-worker.ts", import.meta.url));
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const exits: Promise<void>[] = [];
+    const spawnWorker = (mode: "geometry-x" | "geometry-y") => {
+      const child = spawn(process.execPath, [
+        "--import",
+        "tsx",
+        workerPath,
+        mode,
+        root,
+        "penpot-process-rmw-target",
+        `penpot-${copyId}`,
+        releasePath
+      ], {
+        stdio: ["pipe", "pipe", "pipe"],
+        env: process.env
+      });
+      children.push(child);
+      exits.push(new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`storage geometry worker exited ${code}: ${stderr}`));
+          }
+        });
+      }));
+      return child;
+    };
+    const waitForMarker = (child: ChildProcessWithoutNullStreams, markerText: string) =>
+      new Promise<void>((resolve, reject) => {
+        let output = "";
+        const onData = (chunk: Buffer) => {
+          output += chunk.toString();
+          if (output.includes(markerText)) {
+            cleanup();
+            resolve();
+          }
+        };
+        const onExit = (code: number | null) => {
+          cleanup();
+          reject(new Error(`worker exited ${code} before marker ${markerText}: ${output}`));
+        };
+        const cleanup = () => {
+          child.stdout.off("data", onData);
+          child.off("exit", onExit);
+        };
+        child.stdout.on("data", onData);
+        child.on("exit", onExit);
+      });
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "penpot-process-rmw-project",
+        documentId: "penpot-process-rmw-target",
+        documentName: "Product file",
+        fileName: "component.penpot"
+      });
+
+      const xWorker = spawnWorker("geometry-x");
+      await waitForMarker(xWorker, "geometry-x-ready");
+      const yWorker = spawnWorker("geometry-y");
+      const yRead = waitForMarker(yWorker, "geometry-y-ready");
+      const yReadBeforeRelease = await Promise.race([
+        yRead.then(() => true),
+        delay(500).then(() => false)
+      ]);
+      expect(yReadBeforeRelease).toBe(false);
+
+      await writeRawFile(releasePath, "release\n", "utf8");
+      await Promise.all(exits);
+
+      const target = await storage.readFile("penpot-process-rmw-target");
+      const node = target.pages[0].children.find(
+        (candidate) => candidate.id === `penpot-${copyId}`
+      );
+      expect(node?.transform).toMatchObject({ x: 111, y: 222 });
+    } finally {
+      await writeRawFile(releasePath, "release\n", "utf8").catch(() => undefined);
+      await Promise.allSettled(exits);
+      for (const child of children) {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   test("recovers an abandoned process lock before the bounded wait expires", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-abandoned-process-lock-"));
     const releasePath = path.join(root, "unused-release");

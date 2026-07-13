@@ -1855,6 +1855,22 @@ export class FileStorage {
     );
   }
 
+  private async mutateFile<T>(
+    fileId: string,
+    mutation: (document: DesignFile) => Promise<T> | T,
+    recordAutoVersion = true
+  ): Promise<T> {
+    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+      const document = await this.readFile(fileId);
+      const result = await mutation(document);
+      await this.writeFileWithoutMutationLock(fileId, document);
+      if (recordAutoVersion) {
+        await this.recordFileEditForAutoVersion(fileId, document);
+      }
+      return result;
+    });
+  }
+
   private async writeFileWithoutMutationLock(
     fileId: string,
     document: DesignFile
@@ -2319,7 +2335,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryArchive> {
-    const target = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (target) => {
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const idPrefix = options.idPrefix?.trim() ? normalizeLibraryIdPrefix(options.idPrefix) : undefined;
     const tokenIdMap = createLibraryTokenIdMap(target, library.library.tokens, idPrefix);
@@ -2349,9 +2365,8 @@ export class FileStorage {
 
     target.tokens = targetTokens;
     target.components = [...(target.components ?? []), ...importedComponents];
-    await this.writeFile(fileId, target);
 
-    return {
+      return {
       fileId,
       originalFileId: library.manifest.fileId,
       originalName: library.manifest.name,
@@ -2363,6 +2378,7 @@ export class FileStorage {
       componentIdMap,
       tokenIdMap
     };
+    }, false);
   }
 
   async publishLibraryToRegistry(
@@ -2590,7 +2606,7 @@ export class FileStorage {
     entry: LibraryRegistryEntry,
     archive: Buffer
   ): Promise<ImportedLibraryRegistryTokens> {
-    const target = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (target) => {
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const replacedTokenCount = (target.tokens ?? []).length;
     const replacedTokenSetCount = (target.token_sets ?? []).length;
@@ -2599,9 +2615,8 @@ export class FileStorage {
     target.tokens = structuredClone(library.library.tokens);
     target.token_sets = structuredClone(library.library.token_sets);
     target.token_themes = structuredClone(library.library.token_themes);
-    await this.writeFile(fileId, target);
 
-    return {
+      return {
       fileId,
       libraryId: entry.libraryId,
       libraryName: entry.name,
@@ -2614,6 +2629,7 @@ export class FileStorage {
       replacedTokenSetCount,
       replacedTokenThemeCount
     };
+    }, false);
   }
 
   async reviewLibraryRegistryItemUpdate(
@@ -2919,18 +2935,20 @@ export class FileStorage {
 
   async restoreFileVersion(fileId: string, versionId: string): Promise<RestoreFileVersionResult> {
     const restoredVersion = await this.readFileVersion(fileId, versionId);
-    const currentDocument = await this.readFile(fileId);
-    const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
-      message: "복원 전 자동 저장",
-      source: "restore"
+    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+      const currentDocument = await this.readFile(fileId);
+      const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
+        message: "복원 전 자동 저장",
+        source: "restore"
+      });
+      const restoredDocument = { ...structuredClone(restoredVersion.document), id: fileId };
+      await this.writeFileWithoutMutationLock(fileId, restoredDocument);
+      return {
+        file: restoredDocument,
+        restoredVersion: summarizeStoredFileVersion(restoredVersion),
+        recoveryVersion
+      };
     });
-    const restoredDocument = { ...structuredClone(restoredVersion.document), id: fileId };
-    await this.writeFile(fileId, restoredDocument);
-    return {
-      file: restoredDocument,
-      restoredVersion: summarizeStoredFileVersion(restoredVersion),
-      recoveryVersion
-    };
   }
 
   async listCommentThreads(
@@ -3168,7 +3186,7 @@ export class FileStorage {
     fileId: string,
     tokensDocument: unknown
   ): Promise<{ file: DesignFile; tokens: DesignToken[]; tokenSets: DesignTokenSet[]; tokenThemes: DesignTokenTheme[] }> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const imported = importDesignTokenDocumentFromDtcg(tokensDocument);
     document.tokens = imported.tokens;
     if (imported.tokenSets.length) {
@@ -3181,13 +3199,12 @@ export class FileStorage {
     } else {
       delete document.token_themes;
     }
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return { file: document, tokens: imported.tokens, tokenSets: imported.tokenSets, tokenThemes: imported.tokenThemes };
+      return { file: document, tokens: imported.tokens, tokenSets: imported.tokenSets, tokenThemes: imported.tokenThemes };
+    });
   }
 
   async updateNodeGeometry(fileId: string, nodeId: string, patch: GeometryPatch): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3208,13 +3225,12 @@ export class FileStorage {
     relayoutDesignFile(document);
     syncComponentInstanceGeometryOverrides(document, nodeId, patch);
 
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async setNodeFill(fileId: string, nodeId: string, fill: string): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3238,13 +3254,12 @@ export class FileStorage {
       fills ? ["fill", "fills"] : ["fill"]
     );
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async updateText(fileId: string, nodeId: string, value: string): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3257,9 +3272,8 @@ export class FileStorage {
     node.content = { ...node.content, value };
     syncComponentInstanceTextOverride(document, nodeId, value);
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async replaceImageAsset(
@@ -3267,7 +3281,7 @@ export class FileStorage {
     nodeId: string,
     input: { assetId: string; naturalWidth?: number; naturalHeight?: number }
   ): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3291,9 +3305,8 @@ export class FileStorage {
 
     node.content = content;
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async setImageFitMode(
@@ -3301,7 +3314,7 @@ export class FileStorage {
     nodeId: string,
     fitMode: ImageFitMode
   ): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3313,13 +3326,12 @@ export class FileStorage {
 
     node.content = { ...node.content, fit_mode: fitMode };
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async createNode(fileId: string, parentId: string, node: DesignNode): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const parent = findParentChildren(document, parentId);
     if (!parent) {
       throw new Error(`parent not found: ${parentId}`);
@@ -3327,9 +3339,8 @@ export class FileStorage {
 
     parent.children.push(node);
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async createAsset(input: CreateAssetInput): Promise<StoredAsset> {
@@ -3406,7 +3417,7 @@ export class FileStorage {
     fileId: string,
     mappings: CodeComponentMapping[]
   ): Promise<CodeComponentMapping[]> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const componentIds = new Set((document.components ?? []).map((component) => component.id));
     const parsed = mappings.map((mapping) => parseCodeComponentMapping(mapping));
 
@@ -3417,9 +3428,8 @@ export class FileStorage {
     }
 
     document.code_mappings = parsed;
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return parsed;
+      return parsed;
+    });
   }
 
   async createComponent(
@@ -3427,7 +3437,7 @@ export class FileStorage {
     nodeId: string,
     input: { componentId: string; name: string }
   ): Promise<ComponentDefinition> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3444,16 +3454,15 @@ export class FileStorage {
     document.components = document.components ?? [];
     document.components.push(component);
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return component;
+      return component;
+    });
   }
 
   async createComponentInstance(
     fileId: string,
     input: { parentId: string; definitionId: string; instanceId: string; x: number; y: number }
   ): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const parent = findParentChildren(document, input.parentId);
     if (!parent) {
       throw new Error(`parent not found: ${input.parentId}`);
@@ -3478,9 +3487,8 @@ export class FileStorage {
     });
     parent.children.push(node);
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async setComponentVariants(
@@ -3493,7 +3501,7 @@ export class FileStorage {
       source_node?: DesignNode | null;
     }>
   ): Promise<ComponentDefinition> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const component = (document.components ?? []).find((candidate) => candidate.id === componentId);
     if (!component) {
       throw new Error(`component not found: ${componentId}`);
@@ -3534,9 +3542,8 @@ export class FileStorage {
         replaceNodeById(document, node.id, nextNode);
       }
     });
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return component;
+      return component;
+    });
   }
 
   async setComponentVariantArea(
@@ -3544,7 +3551,7 @@ export class FileStorage {
     componentId: string,
     area: ComponentVariantArea | null
   ): Promise<ComponentDefinition> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const component = (document.components ?? []).find((candidate) => candidate.id === componentId);
     if (!component) {
       throw new Error(`component not found: ${componentId}`);
@@ -3553,13 +3560,12 @@ export class FileStorage {
     const previousArea = structuredClone(component.variant_area ?? null);
     component.variant_area = normalizeComponentVariantArea(area);
     reflowComponentVariantArea(document, component, previousArea);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return component;
+      return component;
+    });
   }
 
   async setComponentInstanceVariant(fileId: string, nodeId: string, variantId: string): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3593,13 +3599,12 @@ export class FileStorage {
       exportPresets: node.export_presets
     });
     replaceNodeById(document, nodeId, nextNode);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return nextNode;
+      return nextNode;
+    });
   }
 
   async detachInstance(fileId: string, nodeId: string): Promise<DesignNode> {
-    const document = await this.readFile(fileId);
+    return this.mutateFile(fileId, async (document) => {
     const node = findNodeById(document, nodeId);
     if (!node) {
       throw new Error(`node not found: ${nodeId}`);
@@ -3611,9 +3616,8 @@ export class FileStorage {
     node.kind = "frame";
     node.component_instance = null;
     relayoutDesignFile(document);
-    await this.writeFile(fileId, document);
-    await this.recordFileEditForAutoVersion(fileId, document);
-    return node;
+      return node;
+    });
   }
 
   async inspectCanvas(fileId: string): Promise<CanvasInspection> {
@@ -3634,40 +3638,46 @@ export class FileStorage {
   }
 
   async applyAgentCommands(fileId: string, input: AgentBatchInput): Promise<AgentBatchResult> {
-    const before = await this.readFile(fileId);
     const persisted = !(input.dryRun ?? false);
-
-    if (persisted && input.collaboration) {
-      const collaborativeResult = await applyAgentCommandsToCollaboration({
-        target: input.collaboration,
-        fallbackDocument: before,
-        commands: input.commands
-      });
-      const result = createAgentBatchResult(
-        fileId,
-        collaborativeResult.before,
-        collaborativeResult.preview,
-        input,
-        true,
-        collaborativeResult.changedNodeIds
+    if (!persisted) {
+      const before = await this.readFile(fileId);
+      const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
+        before,
+        input.commands
       );
-      await this.writeFile(fileId, collaborativeResult.preview);
-      await this.recordFileEditForAutoVersion(fileId, collaborativeResult.preview);
-      return result;
+      return createAgentBatchResult(fileId, before, preview, input, false, changedNodeIds);
     }
 
-    const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
-      before,
-      input.commands
-    );
-    const result = createAgentBatchResult(fileId, before, preview, input, persisted, changedNodeIds);
+    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+      const before = await this.readFile(fileId);
+      if (input.collaboration) {
+        const collaborativeResult = await applyAgentCommandsToCollaboration({
+          target: input.collaboration,
+          fallbackDocument: before,
+          commands: input.commands
+        });
+        const result = createAgentBatchResult(
+          fileId,
+          collaborativeResult.before,
+          collaborativeResult.preview,
+          input,
+          true,
+          collaborativeResult.changedNodeIds
+        );
+        await this.writeFileWithoutMutationLock(fileId, collaborativeResult.preview);
+        await this.recordFileEditForAutoVersion(fileId, collaborativeResult.preview);
+        return result;
+      }
 
-    if (persisted) {
-      await this.writeFile(fileId, preview);
+      const { document: preview, changedNodeIds } = applyAgentCommandsToDocument(
+        before,
+        input.commands
+      );
+      const result = createAgentBatchResult(fileId, before, preview, input, true, changedNodeIds);
+      await this.writeFileWithoutMutationLock(fileId, preview);
       await this.recordFileEditForAutoVersion(fileId, preview);
-    }
-
-    return result;
+      return result;
+    });
   }
 
   async exportCode(fileId: string, options: CodeExportOptions = {}): Promise<CodeExportResult> {

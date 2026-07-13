@@ -61,6 +61,27 @@ Penpot reference commit:
   required clean PR-head check rather than being hidden by the retry.
 - Deployment remains non-gating while Vercel build-rate limits are deferred.
 
+## Post-Merge Review Failure Loop
+
+PR #291's automated review found that the first lock covered only the final
+`writeFile`, while public mutations such as `updateNodeGeometry` still read
+the document before acquiring that lock. Two processes could therefore read the
+same old JSON, serialize only their final writes, and silently lose one edit.
+
+RED Full Verification `29274040649` proved the loss: concurrent x/y geometry
+updates finished as `{ x: 111, y: 96 }` instead of preserving `y: 222`.
+The repair moved normal document mutations to one `mutateFile` transaction
+that acquires the resource lock before the latest read and holds it through
+mutation, write, and automatic version accounting. Library imports, token
+replacement, version restore, and persisted agent-command writes use the same
+operation-level boundary.
+
+Failure-learning run `29274598077` exposed nested target-lock writes left by
+the remote mechanical refactor, causing 15 library tests to time out. Removing
+those two inner writes produced GREEN Full Verification `29274757103`: 251
+web tests, 277 server tests, Rust workspace tests, and 192 Playwright cases
+passed cleanly.
+
 ## Remaining Gap
 
 The target and subscription mutation is now serialized across local processes,

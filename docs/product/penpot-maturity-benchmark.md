@@ -58,7 +58,10 @@ implementation slice reveals a new gap.
 transaction and row-lock ownership principle to Layo's local-first filesystem.
 Resource-keyed owner locks now serialize same-target writes across Node
 processes, enforce `subscriptions -> target` acquisition order for library
-updates, and recover only bounded same-host owners whose PID is dead. Automatic
+updates, and recover only bounded same-host owners whose PID is dead. Normal
+document, library/token import, version restore, and persisted agent mutations
+hold that lock from the latest read through mutation and write so stale JSON
+cannot silently overwrite a concurrent edit. Automatic
 cross-host lock stealing deliberately remains unsupported. Atomic publication
 across registry archive bytes, registry metadata, and events is the next exact
 design-system and import/export recovery gap.
