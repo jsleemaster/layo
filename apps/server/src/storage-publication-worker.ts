@@ -32,6 +32,14 @@ if (mode === "publish-paused") {
     await waitForRelease();
     await originalWriteEntries(entries);
   };
+} else if (mode === "publish-crash-after-archive") {
+  const internals = storage as unknown as {
+    writeLibraryRegistryEntries(entries: unknown[]): Promise<void>;
+  };
+  internals.writeLibraryRegistryEntries = async () => {
+    process.stdout.write("publish-crashing\n", () => process.exit(86));
+    await new Promise<never>(() => undefined);
+  };
 } else if (mode !== "publish") {
   throw new Error(`unknown storage publication worker mode: ${mode}`);
 }
