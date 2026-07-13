@@ -26,17 +26,13 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-07-14-penpot-library-read-authorization.md` is active in PR #297.
-RED `29288230571` proved unauthenticated hosted registry lists return 200 and
-can expose unrelated-team libraries. Contract RED `29288538333` proved the
-web API did not model read credentials. The completion gate is HTTP/web/MCP
-principal-team filtering, file-scoped read authorization, direct Playwright
-proof, full verification, review, merge, and cleanup.
+None.
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-14-penpot-library-read-authorization.md` | Completed by PR #297 merge gate | Configured HTTP, web, and MCP registry reads require a member principal, filter unscoped results to authorized team ids, reject file-scoped cross-team reads, and preserve same-team viewer access. RED `29288230571` proved unauthenticated disclosure and contract RED `29288538333` proved missing web credentials. Failure-learning RED `29290200053` reproduced grid drag cancellation across a rerender; GREEN `29290833407` passed 251 web, 292 server, Rust workspace, and 193 Playwright CLI tests without retry. Restore `29290833400` and retention `29290833356` passed. Product evidence is `docs/product/penpot-library-read-authorization-delta.md`. Authenticated review/preflight reads and registry events remain next. |
 | `2026-07-14-penpot-library-mutation-authorization.md` | Completed by PR #296 merge gate | Extends the Penpot owner/editor/viewer boundary to component/token registry import and update across HTTP, web, and MCP. RED `29286183142` proved viewer import wrote target state. GREEN `29286759478` passed 251 web, 290 server, Rust workspace, and 193 Playwright CLI tests; restore `29286759480` and retention `29286759454` passed. Product evidence is `docs/product/penpot-library-mutation-authorization-delta.md`. Principal-filtered reads and hosted shared storage remain next. |
 | `2026-07-14-penpot-library-publish-authorization.md` | Completed by PR #295 merge gate | Adapts Penpot owner/editor/viewer library roles to Layo's team member-token model across HTTP, web, and MCP publication. RED `29283071209` proved viewer writes, `29283735052` proved missing browser credentials, `29283903958` proved missing MCP principal, and `29284023373` proved blank identity acceptance. GREEN `29284459320` passed 251 web, 288 server, Rust workspace, and 193 Playwright CLI tests; restore `29284459310` and retention `29284459291` passed. Product evidence is `docs/product/penpot-library-publish-authorization-delta.md`. Remaining registry mutations and hosted shared storage are routed next. |
 | `2026-07-14-penpot-idempotent-library-publication.md` | Completed by PR #294 merge gate | Adapts Penpot 2.14.1 idempotent RPC retry behavior with a durable receipt committed in the archive/metadata/event recovery transaction. RED `29279535916` proved duplicate storage publication, MCP RED `29280506268` proved the agent tool discarded the key, and validation RED `29280727694` proved unsafe keys surfaced as 500. GREEN `29281150206` passed maturity/design gates, typecheck, build, 251 web, 282 server, Rust workspace, and 192 Playwright tests; restore `29281150135` and retention `29281150115` passed. Product evidence is `docs/product/penpot-idempotent-library-publication-delta.md`. Hosted identity, shared transactions, receipt retention, and durable pub/sub remain next. |
