@@ -941,6 +941,27 @@ describe("HTTP server", () => {
         teamId: "team-alpha"
       })
     ]);
+
+    const wrongTeamFile = await server.inject({
+      method: "GET",
+      url: "/libraries?fileId=beta-file",
+      headers: {
+        authorization: "Bearer alpha-token",
+        "x-layo-user-id": "alpha-viewer"
+      }
+    });
+    expect(wrongTeamFile.statusCode).toBe(403);
+
+    const sameTeamFile = await server.inject({
+      method: "GET",
+      url: "/libraries?fileId=alpha-file",
+      headers: {
+        authorization: "Bearer alpha-token",
+        "x-layo-user-id": "alpha-viewer"
+      }
+    });
+    expect(sameTeamFile.statusCode).toBe(200);
+    expect(sameTeamFile.json().libraries).toHaveLength(1);
   });
 
   test("authorizes team library publication by member token and editor role", async () => {
