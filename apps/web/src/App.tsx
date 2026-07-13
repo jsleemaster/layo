@@ -14018,9 +14018,19 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("라이브러리 게시 중");
-      const published = await publishLibraryToRegistry(currentProject.currentDocumentId, {
-        name: libraryRegistryName.trim() || editor.document.name
-      });
+      const published = await publishLibraryToRegistry(
+        currentProject.currentDocumentId,
+        {
+          name: libraryRegistryName.trim() || editor.document.name
+        },
+        undefined,
+        collabSession && memberToken.trim()
+          ? {
+              userId: collabSession.team.currentUserId,
+              memberToken
+            }
+          : undefined
+      );
       setLibraryRegistryName(published.name);
       await refreshLibraryRegistry(`${published.name} 게시됨`);
       setProjectStatus(`${published.name} 게시됨`);
