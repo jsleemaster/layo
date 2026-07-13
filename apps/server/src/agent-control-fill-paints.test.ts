@@ -9,7 +9,7 @@ const baseStyle: DesignNode["style"] = {
   opacity: 1
 };
 
-const orderedFills = [
+const orderedFills: NonNullable<DesignNode["style"]["fills"]> = [
   {
     id: "solid",
     color: "#111827",
