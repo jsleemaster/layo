@@ -812,6 +812,92 @@ describe("MCP AI editing workflow", () => {
     ]);
   });
 
+  test("authorizes MCP registry review reads by target team", async () => {
+    const setupStorage = async (storage: FileStorage) => {
+      await storage.createProject({
+        projectId: "beta-source-project",
+        name: "Beta Source",
+        documentId: "beta-source-file",
+        documentName: "Beta Source"
+      });
+      await storage.setProjectSharing("beta-source-project", {
+        mode: "team",
+        teamId: "team-beta"
+      });
+      await storage.publishLibraryToRegistry("beta-source-file", {
+        libraryId: "beta-kit",
+        name: "Beta Kit"
+      });
+      await storage.createProject({
+        projectId: "beta-target-project",
+        name: "Beta Target",
+        documentId: "beta-target-file",
+        documentName: "Beta Target"
+      });
+      await storage.setProjectSharing("beta-target-project", {
+        mode: "team",
+        teamId: "team-beta"
+      });
+    };
+    const wrongTeam = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "alpha-viewer",
+        memberToken: "alpha-token"
+      },
+      setupStorage
+    });
+
+    const blocked = await wrongTeam.callTool({
+      name: "review_library_registry_item",
+      arguments: {
+        fileId: "beta-target-file",
+        libraryId: "beta-kit"
+      }
+    });
+    expect(blocked).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/not authorized/) })]
+    });
+
+    const sameTeam = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "beta-viewer",
+            role: "viewer",
+            teamIds: ["team-beta"],
+            token: "beta-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "beta-viewer",
+        memberToken: "beta-token"
+      },
+      setupStorage
+    });
+    const allowed = parseToolJson(
+      await sameTeam.callTool({
+        name: "review_library_registry_item",
+        arguments: {
+          fileId: "beta-target-file",
+          libraryId: "beta-kit"
+        }
+      })
+    );
+    expect(allowed.review).toMatchObject({ libraryId: "beta-kit" });
+  });
+
   test("blocks viewer MCP publication before writing the team library registry", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {
