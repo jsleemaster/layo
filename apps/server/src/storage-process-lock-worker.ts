@@ -39,6 +39,16 @@ if (mode === "update") {
   };
   await storage.updateLibraryRegistryItem(targetFileId, libraryId);
   process.stdout.write("update-done\n");
+} else if (mode === "hold") {
+  const document = await storage.readFile(targetFileId);
+  const internals = storage as unknown as {
+    writeFileWithoutMutationLock(fileId: string, document: unknown): Promise<unknown>;
+  };
+  internals.writeFileWithoutMutationLock = async () => {
+    process.stdout.write("hold-acquired\n");
+    await new Promise<void>(() => undefined);
+  };
+  await storage.writeFile(targetFileId, document);
 } else if (mode === "write") {
   const document = await storage.readFile(targetFileId);
   document.name = "Concurrent process write";
