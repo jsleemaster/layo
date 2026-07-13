@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
 import { importExternalMigrationArchive, reviewExternalMigrationArchive } from "./external-migration";
+import { FileStorage } from "./storage";
 
 const fileId = "11111111-1111-1111-1111-111111111111";
 const pageId = "22222222-2222-2222-2222-222222222222";
@@ -400,6 +404,55 @@ describe("Penpot component instance migration", () => {
         }
       ])
     );
+  });
+
+  test("persists packaged libraries as registry-owned project documents and subscriptions", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-"));
+    try {
+      const storage = new FileStorage(root);
+      const imported = await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-library-project",
+        documentId: "penpot-product-document",
+        name: "Penpot library project",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+
+      expect(imported.project.documents).toEqual([
+        expect.objectContaining({ documentId: "penpot-product-document", name: "Product file" }),
+        expect.objectContaining({ documentId: libraryDocumentId, name: "Shape library" })
+      ]);
+      await expect(storage.readFile(libraryDocumentId)).resolves.toMatchObject({
+        id: libraryDocumentId,
+        name: "Shape library",
+        components: [
+          expect.objectContaining({ id: `penpot-component-${rectangleComponentId}` }),
+          expect.objectContaining({ id: `penpot-component-${circleComponentId}` })
+        ]
+      });
+      expect(await storage.listLibraryRegistry("penpot-product-document")).toEqual([
+        expect.objectContaining({
+          libraryId: libraryDocumentId,
+          sourceFileId: libraryDocumentId,
+          name: "Shape library",
+          componentCount: 2
+        })
+      ]);
+      expect(await storage.listLibraryRegistrySubscriptions("penpot-product-document")).toEqual([
+        expect.objectContaining({
+          fileId: "penpot-product-document",
+          libraryId: libraryDocumentId,
+          sourceFileId: libraryDocumentId,
+          componentIdMap: {
+            [`penpot-component-${rectangleComponentId}`]: `penpot-component-${rectangleComponentId}`,
+            [`penpot-component-${circleComponentId}`]: `penpot-component-${circleComponentId}`
+          }
+        })
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("reviews readable main and copy relations as structurally importable", () => {
