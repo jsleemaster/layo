@@ -1,6 +1,6 @@
 # Penpot Team Library Mutation Authorization Plan
 
-Status: Active  
+Status: Completed by PR #296 merge gate  
 Date: 2026-07-14  
 PR: #296
 
@@ -34,7 +34,9 @@ References:
 ## Evidence
 
 - RED `29286183142`: viewer import returned 200 instead of 403.
-- GREEN: pending.
+- GREEN `29286759478`: maturity/design gates, typecheck, build, 251 web,
+  290 server, Rust workspace, and 193 Playwright CLI tests passed.
+- Restore drill `29286759480` and retention `29286759454` passed.
 
 ## Remaining Boundary
 
