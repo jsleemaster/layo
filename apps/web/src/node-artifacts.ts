@@ -400,7 +400,7 @@ function shadowBoundsForNode(node: RendererNode): ArtifactBounds | null {
 }
 
 function strokeBoundsForNode(node: RendererNode): ArtifactBounds | null {
-  if (!node.style.stroke || node.style.stroke_width <= 0 || node.kind === "group") {
+  if (!node.style.stroke || node.style.stroke_width <= 0 || node.kind !== "path") {
     return null;
   }
   const width = Math.max(1, Math.round(node.size.width));
