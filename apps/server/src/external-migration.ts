@@ -190,9 +190,12 @@ function enrichPenpotPaintSources(
     if (!node) {
       continue;
     }
+    const fillPaintSources = paintSources.filter((source) => source.kind === "fill");
     node.style = {
       ...node.style,
-      paint_sources: paintSources.map((source) => structuredClone(source))
+      ...(fillPaintSources.length > 0
+        ? { paint_sources: fillPaintSources.map((source) => structuredClone(source)) }
+        : {})
     };
   }
 
