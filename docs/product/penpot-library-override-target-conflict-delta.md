@@ -30,8 +30,8 @@ replacement was accepted instead of returning
 - The update preview now reports `conflictedComponents` with source and target
   component ids, affected instance ids, and missing override node ids.
 - Compatibility checks include the component source tree and variant-owned source
-  trees, while excluding `component_swap` values from direct-node override
-  validation.
+  trees. Every override `node_id` is validated; a `component_swap` value remains
+  a separate component reference and is not mistaken for a source-node id.
 - Deletion and override conflicts can be reported together in deterministic
   blocker order.
 - Storage and HTTP apply routes reject missing override targets before writes.
@@ -61,9 +61,17 @@ compatibility evidence. Local overrides actually depend on stable source-node
 identity as well.
 
 **Durable guard:** the regression fixture replaces only the source root id while
-preserving the component id, then checks preview details, apply rejection, and
-zero state mutation. Browser proof separately confirms that visible UI actions
-never reach the apply endpoint.
+preserving the component id. It includes one fill override and a separate
+`component_swap`-only instance, then checks both affected instance ids, preview
+details, apply rejection, and zero state mutation. Browser proof separately
+confirms that visible UI actions never reach the apply endpoint.
+
+**Review correction:** the first review RED run `29252670196` assumed the nested
+swap's parent component belonged to the external library, but that definition is
+owned by the target product file. The corrected fixture creates a direct
+library-component instance with only a swap override. RED `29252869887` then
+proved the implementation skipped that instance because it excluded the whole
+`component_swap` override instead of validating its `node_id`.
 
 **Remaining risk:** preview and apply still read registry state in separate
 operations. A publisher can change the archive after a successful preview, and
