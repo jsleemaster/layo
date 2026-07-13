@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile as writeRawFile } from "node:fs/promises";
+import { mkdtemp, readFile as readRawFile, rm, writeFile as writeRawFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -1182,6 +1182,96 @@ describe("Penpot component instance migration", () => {
       expect((await storage.readFile("penpot-concurrent-target")).name).toBe(
         "Concurrent product edit"
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not roll back over a concurrent subscription writer", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-subscription-writer-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-subscription-project",
+        documentId: "penpot-subscription-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#f97316";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      type SubscriptionCommit = (snapshot: unknown) => void;
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(
+          subscriptions: unknown[],
+          onCommitted?: SubscriptionCommit
+        ): Promise<void>;
+        librarySubscriptionsPath(): string;
+      };
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let failAfterExternalWrite = true;
+      internals.writeLibraryRegistrySubscriptions = async (
+        subscriptions,
+        onCommitted
+      ) => {
+        await writeSubscriptions(subscriptions, onCommitted);
+        if (failAfterExternalWrite) {
+          failAfterExternalWrite = false;
+          const subscriptionPath = internals.librarySubscriptionsPath();
+          const current = JSON.parse(
+            await readRawFile(subscriptionPath, "utf8")
+          ) as { schemaVersion: number; subscriptions: Array<Record<string, unknown>> };
+          const seed = current.subscriptions[0];
+          if (!seed) {
+            throw new Error("expected imported library subscription");
+          }
+          current.subscriptions.push({
+            ...seed,
+            fileId: "penpot-external-subscription-writer",
+            importedAt: "2026-07-13T16:10:00.000Z"
+          });
+          await writeRawFile(
+            subscriptionPath,
+            `${JSON.stringify(current, null, 2)}\n`,
+            "utf8"
+          );
+          throw new Error("injected failure after concurrent subscription write");
+        }
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-subscription-target", libraryDocumentId)
+      ).rejects.toThrow("rollback conflicted with concurrent writes");
+
+      expect(
+        (await storage.listLibraryRegistrySubscriptions()).some(
+          (subscription) => subscription.fileId === "penpot-external-subscription-writer"
+        )
+      ).toBe(true);
+      expect(
+        (await storage.readFile("penpot-subscription-target")).components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#f97316");
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-subscription-target", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2 });
+      expect(
+        (await storage.listLibraryRegistrySubscriptions()).some(
+          (subscription) => subscription.fileId === "penpot-external-subscription-writer"
+        )
+      ).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
