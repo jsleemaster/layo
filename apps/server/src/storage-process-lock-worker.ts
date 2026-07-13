@@ -49,6 +49,22 @@ if (mode === "update") {
     await new Promise<void>(() => undefined);
   };
   await storage.writeFile(targetFileId, document);
+} else if (mode === "geometry-x" || mode === "geometry-y") {
+  if (!libraryId) {
+    throw new Error("geometry worker requires a node id");
+  }
+  const originalWriteFile = storage.writeFile.bind(storage);
+  storage.writeFile = async (fileId, document) => {
+    process.stdout.write(`${mode}-ready\n`);
+    await waitForRelease();
+    return originalWriteFile(fileId, document);
+  };
+  await storage.updateNodeGeometry(
+    targetFileId,
+    libraryId,
+    mode === "geometry-x" ? { x: 111 } : { y: 222 }
+  );
+  process.stdout.write(`${mode}-done\n`);
 } else if (mode === "write") {
   const document = await storage.readFile(targetFileId);
   document.name = "Concurrent process write";
