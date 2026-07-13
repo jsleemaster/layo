@@ -738,6 +738,57 @@ describe("MCP AI editing workflow", () => {
     ]);
   });
 
+  test("filters MCP registry lists to the configured principal teams", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "alpha-viewer",
+        memberToken: "alpha-token"
+      },
+      setupStorage: async (storage) => {
+        for (const [teamId, fileId] of [
+          ["team-alpha", "alpha-file"],
+          ["team-beta", "beta-file"]
+        ] as const) {
+          const projectId = `${teamId}-project`;
+          await storage.createProject({
+            projectId,
+            name: teamId,
+            documentId: fileId,
+            documentName: fileId
+          });
+          await storage.setProjectSharing(projectId, { mode: "team", teamId });
+          await storage.publishLibraryToRegistry(fileId, {
+            libraryId: `${teamId}-kit`,
+            name: `${teamId} Kit`
+          });
+        }
+      }
+    });
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: {}
+      })
+    );
+    expect(listed.libraries).toEqual([
+      expect.objectContaining({
+        libraryId: "team-alpha-kit",
+        teamId: "team-alpha"
+      })
+    ]);
+  });
+
   test("blocks viewer MCP publication before writing the team library registry", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {
