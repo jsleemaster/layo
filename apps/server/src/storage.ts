@@ -4637,6 +4637,133 @@ function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
   return [...new Set(documents.flatMap((document) => collectImageAssetIds(document)))].sort();
 }
 
+interface SerializedRecoverySnapshot {
+  relativePath: string;
+  data: string | null;
+}
+
+interface LibraryUpdateRecoveryJournal {
+  schemaVersion: 1;
+  kind: "library-registry-update";
+  fileId: string;
+  original: SerializedRecoverySnapshot[];
+  intended: SerializedRecoverySnapshot[];
+}
+
+function serializeRecoverySnapshot(
+  rootDir: string,
+  snapshot: StoragePathSnapshot
+): SerializedRecoverySnapshot {
+  const relativePath = path.relative(rootDir, snapshot.filePath);
+  resolveRecoverySnapshotPath(rootDir, relativePath);
+  return {
+    relativePath,
+    data: snapshot.data?.toString("base64") ?? null
+  };
+}
+
+function deserializeRecoverySnapshot(
+  rootDir: string,
+  snapshot: SerializedRecoverySnapshot
+): StoragePathSnapshot {
+  return {
+    filePath: resolveRecoverySnapshotPath(rootDir, snapshot.relativePath),
+    data: snapshot.data === null ? null : Buffer.from(snapshot.data, "base64")
+  };
+}
+
+function resolveRecoverySnapshotPath(rootDir: string, relativePath: string): string {
+  if (!relativePath || path.isAbsolute(relativePath)) {
+    throw new Error("invalid recovery snapshot path");
+  }
+  const resolvedRoot = path.resolve(rootDir);
+  const resolved = path.resolve(resolvedRoot, relativePath);
+  const relativeToRoot = path.relative(resolvedRoot, resolved);
+  if (
+    relativeToRoot === ".."
+    || relativeToRoot.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeToRoot)
+  ) {
+    throw new Error(`recovery snapshot path escapes storage root: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecoveryJournal {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid library update recovery journal");
+  }
+  const candidate = value as Partial<LibraryUpdateRecoveryJournal>;
+  if (
+    candidate.schemaVersion !== 1
+    || candidate.kind !== "library-registry-update"
+    || typeof candidate.fileId !== "string"
+    || !Array.isArray(candidate.original)
+    || !Array.isArray(candidate.intended)
+  ) {
+    throw new Error("invalid library update recovery journal");
+  }
+  assertSafeStorageId(candidate.fileId);
+  return {
+    schemaVersion: 1,
+    kind: "library-registry-update",
+    fileId: candidate.fileId,
+    original: candidate.original.map(parseSerializedRecoverySnapshot),
+    intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseSerializedRecoverySnapshot(value: unknown): SerializedRecoverySnapshot {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid recovery snapshot");
+  }
+  const candidate = value as Partial<SerializedRecoverySnapshot>;
+  if (
+    typeof candidate.relativePath !== "string"
+    || (candidate.data !== null && typeof candidate.data !== "string")
+  ) {
+    throw new Error("invalid recovery snapshot");
+  }
+  return {
+    relativePath: candidate.relativePath,
+    data: candidate.data
+  };
+}
+
+function storageSnapshotDataEquals(left: Buffer | null, right: Buffer | null): boolean {
+  if (left === null || right === null) {
+    return left === right;
+  }
+  return left.equals(right);
+}
+
+async function durablyReplaceFile(filePath: string, data: Buffer): Promise<void> {
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const handle = await open(temporaryPath, "w");
+  try {
+    await handle.writeFile(data);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporaryPath, filePath);
+    await syncDirectory(path.dirname(filePath));
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+async function syncDirectory(directoryPath: string): Promise<void> {
+  const handle = await open(directoryPath, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 interface StoragePathSnapshot {
   filePath: string;
   data: Buffer | null;
