@@ -998,7 +998,8 @@ function parseGridAreaToken(token: string): GridArea | null {
   return {
     name,
     column: Math.max(1, Math.round(column)),
-    row: Math.max(1, Math.round(row)),    column_span: Math.max(1, Math.round(columnSpan)),
+    row: Math.max(1, Math.round(row)),
+    column_span: Math.max(1, Math.round(columnSpan)),
     row_span: Math.max(1, Math.round(rowSpan))
   };
 }
@@ -1997,7 +1998,8 @@ async function persistComponentVariantArea(fileId: string, componentId: string, 
 
 type BooleanPathAgentCommand =
   | {
-      type: "create_boolean_path";      nodeId: string;
+      type: "create_boolean_path";
+      nodeId: string;
       name: string;
       operation: BooleanPathOperation;
       sourceNodeIds: string[];
@@ -2996,7 +2998,8 @@ function createMeasurementOverlay(
   return {
     target,
     size: {
-      left: target.left,      top: sizeTop,
+      left: target.left,
+      top: sizeTop,
       text: `${Math.round(targetBounds.width)} x ${Math.round(targetBounds.height)}`
     },
     horizontal,
@@ -3996,6 +3999,7 @@ function resizePatchFromHandle(
   if (nextTop !== absolute.y) {
     patch.y = Math.round(node.transform.y + nextTop - absolute.y);
   }
+
   return patch;
 }
 
@@ -5055,7 +5059,8 @@ function InspectorTokenControls({
                                   data-testid={`token-theme-matrix-cell-${theme.id}-${tokenSet.id}`}
                                   type="checkbox"
                                   checked={included}
-                                  disabled={!canEdit}                                  aria-label={`${theme.name} ${tokenSet.name} 토큰 세트`}
+                                  disabled={!canEdit}
+                                  aria-label={`${theme.name} ${tokenSet.name} 토큰 세트`}
                                   onChange={(event) =>
                                     updateTokenThemeSetMembership(theme, tokenSet.id, event.currentTarget.checked)
                                   }
@@ -6054,7 +6059,8 @@ function styleTypeLabel(styleType: DesignStyle["type"]) {
   if (styleType === "typography") {
     return "타이포";
   }
-  return "효과";}
+  return "효과";
+}
 
 function countStyleUsage(document: RendererDocument | null): Record<string, number> {
   const counts: Record<string, number> = {};
@@ -7058,7 +7064,8 @@ function Inspector({
     if (selectedComponentDefinition) {
       onComponentDefinitionVariantsChange(selectedComponentDefinition.id, variants);
     }
-  };  const updateComponentDefinitionVariantArea = (patch: Partial<ComponentVariantArea>) => {
+  };
+  const updateComponentDefinitionVariantArea = (patch: Partial<ComponentVariantArea>) => {
     if (!selectedComponentDefinition) {
       return;
     }
@@ -8062,7 +8069,8 @@ function Inspector({
           ) : null}
           <label className="stacked-field">
             타이포그래피 스타일
-            <select              data-testid="inspector-text-typography-style"
+            <select
+              data-testid="inspector-text-typography-style"
               value={selectedNode.content.typography_style ?? ""}
               onChange={(event) => {
                 if (event.currentTarget.value) {
@@ -9061,7 +9069,8 @@ export function App() {
   ) => {
     try {
       const threads = await listCommentThreads(fileId, false, fetch, LOCAL_COMMENT_VIEWER_ID);
-      const unreadCount = threads.filter((thread) => thread.unread).length;      setCommentThreads(threads);
+      const unreadCount = threads.filter((thread) => thread.unread).length;
+      setCommentThreads(threads);
       if (!options.preserveStatus) {
         setCommentStatus(
           status ??
@@ -10060,7 +10069,8 @@ export function App() {
   const pasteContextStyle = () => {
     const style = styleClipboardRef.current;
     const currentEditor = editorRef.current;
-    const scopedState = currentEditor ? scopeStateToContextNode(currentEditor) : null;    const targetNodeId = scopedState?.selection.nodeId ?? null;
+    const scopedState = currentEditor ? scopeStateToContextNode(currentEditor) : null;
+    const targetNodeId = scopedState?.selection.nodeId ?? null;
     const targetNode = targetNodeId && scopedState ? findNodeById(scopedState.document, targetNodeId) : null;
     if (!style || !targetNode || isNodeLocked(targetNode)) {
       setObjectContextMenu(null);
@@ -11059,7 +11069,8 @@ export function App() {
       return;
     }
 
-    const fileId = currentProject.currentDocumentId;    componentVariantSaveRef.current = componentVariantSaveRef.current
+    const fileId = currentProject.currentDocumentId;
+    componentVariantSaveRef.current = componentVariantSaveRef.current
       .catch(() => undefined)
       .then(() => persistComponentVariants(fileId, componentId, variants));
     void componentVariantSaveRef.current
@@ -12058,7 +12069,8 @@ export function App() {
       nodeIds: activeDrag.selectedNodeIds,
       delta: rawDelta
     });
-    setSnapGuides(snapped.guides);    return { delta: rawDelta, guides: snapped.guides };
+    setSnapGuides(snapped.guides);
+    return { delta: rawDelta, guides: snapped.guides };
   };
 
   const finishNodeDrag = (nodeId: string, event: KonvaEventObject<DragEvent>) => {
@@ -13057,7 +13069,8 @@ export function App() {
     gridResizeSessionRef.current = nextSession;
     gridResizeClientPointRef.current = { x: event.clientX, y: event.clientY };
     setGridResizeSession(nextSession);
-    document.body.style.cursor = handle.cursor;  };
+    document.body.style.cursor = handle.cursor;
+  };
 
   useEffect(() => {
     if (!gridResizeSession) {
@@ -14056,7 +14069,8 @@ export function App() {
 
   const markCurrentFileCommentsRead = async () => {
     if (!currentProject) {
-      setProjectStatus("프로젝트 없음");      return;
+      setProjectStatus("프로젝트 없음");
+      return;
     }
 
     try {
@@ -15055,7 +15069,8 @@ export function App() {
                       </div>
                       <div className="file-archive-review-body">
                         <strong>{fileArchiveReview.review.originalName}</strong>
-                        <span>                          페이지 {fileArchiveReview.review.pageCount}개 · 객체 {fileArchiveReview.review.nodeCount}개 ·
+                        <span>
+                          페이지 {fileArchiveReview.review.pageCount}개 · 객체 {fileArchiveReview.review.nodeCount}개 ·
                           에셋 {fileArchiveReview.review.assetCount}개
                         </span>
                         <span>원본 파일 {fileArchiveReview.review.originalFileId}</span>
@@ -16055,3 +16070,1083 @@ export function App() {
                 onClick={() => applyBooleanPathOperation("intersection")}
               >
                 ∩
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 제외"
+                title="불리언 제외"
+                disabled={!canApplyBooleanPath}
+                onClick={() => applyBooleanPathOperation("exclusion")}
+              >
+                ⊕
+              </button>
+              <button
+                type="button"
+                aria-label="경로 평탄화"
+                title="경로 평탄화 (Ctrl/Cmd+E)"
+                disabled={!canFlattenPath}
+                onClick={flattenSelectedPaths}
+              >
+                ▱
+              </button>
+              <button
+                type="button"
+                aria-label="불리언 분리"
+                title="불리언 분리"
+                disabled={!selectedBooleanPath || isNodeLocked(selectedBooleanPath)}
+                onClick={detachSelectedBooleanPath}
+              >
+                ⧉
+              </button>
+            </>
+          ) : null}
+          <button
+            type="button"
+            aria-label="왼쪽으로 이동"
+            onClick={() => updateViewportFromInteraction((current) => panViewport(current, { x: -40, y: 0 }))}
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            aria-label="오른쪽으로 이동"
+            onClick={() => updateViewportFromInteraction((current) => panViewport(current, { x: 40, y: 0 }))}
+          >
+            →
+          </button>
+          <button
+            type="button"
+            aria-label="축소"
+            onClick={() => updateViewportFromInteraction((current) => zoomViewport(current, -ZOOM_STEP))}
+          >
+            −
+          </button>
+          <span className="zoom-readout">{Math.round((editor?.viewport.scale ?? 1) * 100)}%</span>
+          <button
+            type="button"
+            aria-label="확대"
+            onClick={() => updateViewportFromInteraction((current) => zoomViewport(current, ZOOM_STEP))}
+          >
+            +
+          </button>
+        </div>
+        <div className="canvas-area" data-testid="canvas-area">
+          <div
+            ref={stageFrameRef}
+            className={`stage-frame${isSpacePanning ? " is-panning" : ""}`}
+            data-testid="stage-frame"
+            onWheel={handleCanvasWheel}
+            onDragOver={handleImageDragOver}
+            onDrop={handleImageDrop}
+            onMouseLeave={clearCursorPresence}
+          >
+            <Stage
+              ref={konvaStageRef}
+              width={stageSize.width}
+              height={stageSize.height}
+              scaleX={editor?.viewport.scale ?? 1}
+              scaleY={editor?.viewport.scale ?? 1}
+              x={editor?.viewport.x ?? 0}
+              y={editor?.viewport.y ?? 0}
+              onMouseDown={(event) => {
+                if (startCanvasPan(event.evt)) {
+                  return;
+                }
+
+                if (startResizeFromPointer(event)) {
+                  return;
+                }
+
+                if (event.target === event.target.getStage()) {
+                  startAreaSelectionFromPointer(event);
+                }
+              }}
+              onTouchStart={(event) => {
+                if (startCanvasPan(event.evt)) {
+                  return;
+                }
+              }}
+              onContextMenu={openObjectContextMenuFromPointer}
+              onMouseMove={(event) => {
+                if (continueCanvasPan(event.evt)) {
+                  return;
+                }
+
+                if (continueAreaSelection(event)) {
+                  return;
+                }
+
+                const isResizeHandleHover = updateResizeCursorFromPointer(event);
+                if (isResizeHandleHover) {
+                  setMeasurementTargetNodeId(null);
+                } else {
+                  updateMeasurementTargetFromPointer(event);
+                }
+                updateCursorFromPointer(event);
+              }}
+              onTouchMove={(event) => {
+                if (continueCanvasPan(event.evt)) {
+                  return;
+                }
+
+                updateMeasurementTargetFromPointer(event);
+                updateCursorFromPointer(event);
+              }}
+              onMouseUp={(event) => {
+                if (endCanvasPan()) {
+                  return;
+                }
+
+                if (finishAreaSelection()) {
+                  return;
+                }
+
+                finishResize(event);
+              }}
+              onTouchEnd={(event) => {
+                if (endCanvasPan()) {
+                  return;
+                }
+
+                finishResize(event);
+              }}
+            >
+              <Layer>
+                {orderedAppChildrenForPaint(editor?.document.pages[0]?.children ?? []).map((node) =>
+                  renderNode({
+                    node,
+                    selectedNodeId: editor?.selection.nodeId ?? null,
+                    selectedNodeIds: editor?.selection.nodeIds ?? [],
+                    isCanvasPanning: isSpacePanning,
+                    dragPreview,
+                    onSelect: selectNode,
+                    onGeometryChange: updateGeometry,
+                    onResizeStart: (nodeId, handle) => {
+                      const nextResizeSession = { nodeId, handle };
+                      resizeSessionRef.current = nextResizeSession;
+                      setResizeSession(nextResizeSession);
+                    },
+                    onTextEditStart: startInlineTextEdit,
+                    onPathEditStart: startPathEdit,
+                    onDragStart: startNodeDrag,
+                    onDragMove: updateNodeDragPreview,
+                    onDragEnd: finishNodeDrag
+                  })
+                )}
+              </Layer>
+            </Stage>
+            {pathEditorOverlay ? (
+              <div
+                className="path-editor-overlay"
+                data-testid="path-editor-overlay"
+                aria-label="경로 노드 편집"
+              >
+                <div className="path-editor-toolbar" data-testid="path-editor-toolbar">
+                  <button type="button" aria-label="경로 점 추가" title="경로 점 추가" onClick={() => applyPathTopologyEdit("insert")}>+</button>
+                  <button type="button" aria-label="경로 점 삭제" title="경로 점 삭제" onClick={() => applyPathTopologyEdit("delete")}>−</button>
+                  <button type="button" aria-label="모서리로 변환" title="모서리로 변환" onClick={() => applyPathTopologyEdit("corner")}>X</button>
+                  <button type="button" aria-label="곡선으로 변환" title="곡선으로 변환" onClick={() => applyPathTopologyEdit("curve")}>C</button>
+                  <button type="button" aria-label="경로 연결" title="경로 연결" onClick={() => applyPathTopologyEdit("join")}>J</button>
+                  <button type="button" aria-label="점 병합" title="점 병합" disabled={selectedPathAnchorIndices.length !== 2} onClick={() => applyPathTopologyEdit("merge")}>⌘J</button>
+                  <button type="button" aria-label="경로 분리" title="경로 분리" onClick={() => applyPathTopologyEdit("separate")}>K</button>
+                </div>
+                {pathEditorOverlay.controls.map((point, index) => (
+                  <button
+                    key={point.id}
+                    type="button"
+                    className="path-editor-control"
+                    data-testid={point.id}
+                    aria-label={`베지어 조절점 ${index + 1}`}
+                    title={`베지어 조절점 ${index + 1}`}
+                    style={{ left: point.left, top: point.top }}
+                    onPointerDown={(event) => startPathPointDrag(point, event)}
+                    onPointerUp={finishPathPointDrag}
+                  />
+                ))}
+                {pathEditorOverlay.anchors.map((point, index) => (
+                  <button
+                    key={point.id}
+                    type="button"
+                    className={`path-editor-anchor${point.anchorIndex !== undefined && selectedPathAnchorIndices.includes(point.anchorIndex) ? " is-selected" : ""}`}
+                    data-testid={point.id}
+                    aria-label={`경로 점 ${index + 1}`}
+                    title={`경로 점 ${index + 1}`}
+                    style={{ left: point.left, top: point.top }}
+                    onPointerDown={(event) => startPathPointDrag(point, event)}
+                    onPointerUp={finishPathPointDrag}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {inlineTextEditorOverlay ? (
+              <textarea
+                ref={inlineTextEditorRef}
+                className="inline-text-editor"
+                data-testid="inline-text-editor"
+                aria-label="텍스트 직접 편집"
+                value={inlineTextEditorOverlay.value}
+                onChange={(event) =>
+                  updateInlineText(inlineTextEditorOverlay.nodeId, event.currentTarget.value)
+                }
+                onBlur={stopInlineTextEdit}
+                onKeyDown={handleInlineTextKeyDown}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                style={{
+                  left: inlineTextEditorOverlay.left,
+                  top: inlineTextEditorOverlay.top,
+                  width: inlineTextEditorOverlay.width,
+                  height: inlineTextEditorOverlay.height,
+                  fontSize: inlineTextEditorOverlay.fontSize,
+                  fontFamily: inlineTextEditorOverlay.fontFamily,
+                  color: inlineTextEditorOverlay.color
+                }}
+              />
+            ) : null}
+            {editor ? (
+              <RemotePresenceOverlay
+                localSessionId={localSessionId}
+                nowMs={presenceClock}
+                presence={presence}
+                viewport={editor.viewport}
+              />
+            ) : null}
+            {snapGuideOverlays.map((guide) => (
+              <div
+                key={guide.id}
+                className={`snap-guide snap-guide-${guide.orientation}`}
+                data-testid={
+                  guide.orientation === "vertical"
+                    ? "snap-guide-vertical"
+                    : "snap-guide-horizontal"
+                }
+                aria-hidden="true"
+                style={
+                  guide.orientation === "vertical"
+                    ? {
+                        left: guide.left,
+                        top: guide.top,
+                        height: guide.height
+                      }
+                    : {
+                        left: guide.left,
+                        top: guide.top,
+                        width: guide.width
+                      }
+                }
+              />
+            ))}
+            {gridViewportOverlay ? (
+              <div className="grid-viewport-overlay" data-testid="grid-viewport-overlay">
+                {gridViewportOverlay.cellControls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className="grid-cell-hit-zone"
+                    data-testid={control.testId}
+                    aria-label={control.title}
+                    title={control.title}
+                    style={{
+                      left: control.left,
+                      top: control.top,
+                      width: control.width,
+                      height: control.height
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => selectGridCellRangeFromCell(control, event)}
+                    onContextMenu={(event) => openGridCellContextMenuFromCell(control, event)}
+                  />
+                ))}
+                {gridCellSelectionBox ? (
+                  <div
+                    className="grid-cell-selection-range"
+                    data-testid="grid-cell-selection-range"
+                    aria-hidden="true"
+                    style={{
+                      left: gridCellSelectionBox.left,
+                      top: gridCellSelectionBox.top,
+                      width: gridCellSelectionBox.width,
+                      height: gridCellSelectionBox.height
+                    }}
+                  />
+                ) : null}
+                {gridViewportOverlay.lines.map((line) => (
+                  <div
+                    key={line.id}
+                    className={`grid-viewport-line grid-viewport-line-${line.orientation}`}
+                    aria-hidden="true"
+                    style={
+                      line.orientation === "vertical"
+                        ? {
+                            left: line.left,
+                            top: line.top,
+                            height: line.height
+                          }
+                        : {
+                            left: line.left,
+                            top: line.top,
+                            width: line.width
+                          }
+                    }
+                  />
+                ))}
+                {gridViewportOverlay.headerControls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className={`grid-track-header grid-track-header-${control.axis}`}
+                    data-testid={control.testId}
+                    aria-label={control.title}
+                    title={control.title}
+                    data-grid-track-header="true"
+                    data-grid-track-node-id={gridViewportOverlay.nodeId}
+                    data-grid-track-axis={control.axis}
+                    data-grid-track-index={control.index}
+                    style={{
+                      left: control.left,
+                      top: control.top
+                    }}
+                    onMouseDown={(event) => startGridTrackReorderFromHeader(control, event)}
+                    onContextMenu={(event) => openGridTrackContextMenuFromHeader(control, event)}
+                  >
+                    {control.label}
+                  </button>
+                ))}
+                {gridViewportOverlay.addControls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className={`grid-add-control grid-add-control-${control.axis}`}
+                    data-testid={control.testId}
+                    aria-label={control.title}
+                    title={control.title}
+                    style={{
+                      left: control.left,
+                      top: control.top
+                    }}
+                    onClick={(event) => addGridTrackFromViewportControl(control, event)}
+                  >
+                    {control.label}
+                  </button>
+                ))}
+                {gridViewportOverlay.removeControls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className={`grid-remove-control grid-remove-control-${control.axis}`}
+                    data-testid={control.testId}
+                    aria-label={control.title}
+                    title={control.title}
+                    style={{
+                      left: control.left,
+                      top: control.top
+                    }}
+                    onClick={(event) => removeGridTrackFromViewportControl(control, event)}
+                  >
+                    {control.label}
+                  </button>
+                ))}
+                {gridViewportOverlay.handles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`grid-resize-handle grid-resize-handle-${handle.axis}`}
+                    data-testid={handle.testId}
+                    aria-hidden="true"
+                    style={{
+                      left: handle.left,
+                      top: handle.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startGridResize(handle, event)}
+                  />
+                ))}
+                {gridViewportOverlay.areaBoundaryHandles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`grid-area-boundary-handle grid-area-boundary-handle-${handle.edge}`}
+                    data-testid={handle.testId}
+                    aria-label={handle.title}
+                    title={handle.title}
+                    style={{
+                      left: handle.left,
+                      top: handle.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startGridAreaBoundaryResize(handle, event)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {measurementOverlay ? (
+              <div className="measurement-overlay" data-testid="measurement-overlay" aria-hidden="true">
+                <div
+                  className="measurement-target-outline"
+                  style={{
+                    left: measurementOverlay.target.left,
+                    top: measurementOverlay.target.top,
+                    width: measurementOverlay.target.width,
+                    height: measurementOverlay.target.height
+                  }}
+                />
+                <div
+                  className="measurement-label measurement-size-label"
+                  data-testid="measurement-size-label"
+                  style={{
+                    left: measurementOverlay.size.left,
+                    top: measurementOverlay.size.top
+                  }}
+                >
+                  {measurementOverlay.size.text}
+                </div>
+                {measurementOverlay.horizontal ? (
+                  <>
+                    <div
+                      className="measurement-line measurement-line-horizontal"
+                      style={{
+                        left: measurementOverlay.horizontal.left,
+                        top: measurementOverlay.horizontal.top,
+                        width: measurementOverlay.horizontal.width
+                      }}
+                    />
+                    <div
+                      className="measurement-label"
+                      data-testid="measurement-distance-horizontal"
+                      style={{
+                        left: measurementOverlay.horizontal.labelLeft,
+                        top: measurementOverlay.horizontal.labelTop
+                      }}
+                    >
+                      {measurementOverlay.horizontal.text}
+                    </div>
+                  </>
+                ) : null}
+                {measurementOverlay.vertical ? (
+                  <>
+                    <div
+                      className="measurement-line measurement-line-vertical"
+                      style={{
+                        left: measurementOverlay.vertical.left,
+                        top: measurementOverlay.vertical.top,
+                        height: measurementOverlay.vertical.height
+                      }}
+                    />
+                    <div
+                      className="measurement-label"
+                      data-testid="measurement-distance-vertical"
+                      style={{
+                        left: measurementOverlay.vertical.labelLeft,
+                        top: measurementOverlay.vertical.labelTop
+                      }}
+                    >
+                      {measurementOverlay.vertical.text}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+            {componentVariantAreaOverlay ? (
+              <div
+                className="component-variant-area-outline"
+                data-testid="component-variant-area-outline"
+                style={{
+                  left: componentVariantAreaOverlay.left,
+                  top: componentVariantAreaOverlay.top,
+                  width: componentVariantAreaOverlay.width,
+                  height: componentVariantAreaOverlay.height
+                }}
+              >
+                <span>{componentVariantAreaOverlay.label}</span>
+                {componentVariantAreaOverlay.sourceHandles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className="component-variant-source-reorder-handle"
+                    data-testid={handle.testId}
+                    aria-label={handle.title}
+                    title={handle.title}
+                    style={{
+                      left: handle.left - componentVariantAreaOverlay.left,
+                      top: handle.top - componentVariantAreaOverlay.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startComponentVariantSourceReorder(handle, event)}
+                  />
+                ))}
+                {componentVariantAreaOverlay.gapHandles.map((handle) => (
+                  <div
+                    key={handle.id}
+                    className={`component-variant-area-gap-handle component-variant-area-gap-handle-${handle.axis}`}
+                    data-testid={handle.testId}
+                    aria-label={handle.title}
+                    title={handle.title}
+                    style={{
+                      left: handle.left - componentVariantAreaOverlay.left,
+                      top: handle.top - componentVariantAreaOverlay.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                    onMouseDown={(event) => startComponentVariantAreaGapResize(handle, event)}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {selectionChromeOverlay ? (
+              <div className="selection-chrome-overlay" aria-hidden="true">
+                {selectionChromeOverlay.isMultiSelection ? (
+                  <div
+                    className="multi-selection-bounds"
+                    data-testid="multi-selection-bounds"
+                    style={{
+                      left: selectionChromeOverlay.bounds.left,
+                      top: selectionChromeOverlay.bounds.top,
+                      width: selectionChromeOverlay.bounds.width,
+                      height: selectionChromeOverlay.bounds.height
+                    }}
+                  />
+                ) : null}
+                {selectionChromeOverlay.handles.map((handle) => (
+                  <div
+                    key={handle.handle}
+                    className="selection-resize-handle"
+                    data-testid={`resize-handle-${handle.handle}`}
+                    style={{
+                      left: handle.left,
+                      top: handle.top,
+                      width: handle.width,
+                      height: handle.height,
+                      cursor: handle.cursor
+                    }}
+                  />
+                ))}
+                <div
+                  className="selection-size-badge"
+                  data-testid="selection-size-badge"
+                  style={{
+                    left: selectionChromeOverlay.badge.left,
+                    top: selectionChromeOverlay.badge.top
+                  }}
+                >
+                  {selectionChromeOverlay.badge.text}
+                </div>
+              </div>
+            ) : null}
+            {commentBubbleOverlays.length > 0 ? (
+              <div className="comment-bubble-layer" data-testid="comment-bubble-layer" aria-label="캔버스 코멘트">
+                {commentBubbleOverlays.map((bubble) => (
+                  <button
+                    key={bubble.nodeId}
+                    type="button"
+                    className="comment-bubble"
+                    data-testid={`comment-bubble-${bubble.nodeId}`}
+                    aria-label={`${bubble.nodeName} 활성 코멘트 ${bubble.count}개`}
+                    title={`${bubble.nodeName} 활성 코멘트 ${bubble.count}개`}
+                    style={{
+                      left: bubble.left,
+                      top: bubble.top
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      selectNode(bubble.nodeId);
+                    }}
+                  >
+                    {bubble.count}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {frameSpacingOverlay ? (
+              <div className="frame-spacing-overlay" data-testid="frame-spacing-overlay">
+                {frameSpacingOverlay.segments.map((segment) => (
+                  <div key={segment.id}>
+                    <div
+                      className={`frame-spacing-line frame-spacing-line-${segment.orientation}`}
+                      style={
+                        segment.orientation === "horizontal"
+                          ? {
+                              left: segment.left,
+                              top: segment.top,
+                              width: segment.width
+                            }
+                          : {
+                              left: segment.left,
+                              top: segment.top,
+                              height: segment.height
+                            }
+                      }
+                    />
+                    <div
+                      className="frame-spacing-label"
+                      data-testid={segment.testId}
+                      role="button"
+                      tabIndex={0}
+                      aria-label="프레임 간격 드래그"
+                      title="프레임 간격 드래그"
+                      style={{
+                        left: segment.labelLeft,
+                        top: segment.labelTop,
+                        cursor: segment.orientation === "horizontal" ? "ew-resize" : "ns-resize"
+                      }}
+                      onMouseDown={(event) => startFrameSpacingDrag(segment, event)}
+                    >
+                      {segment.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {areaSelectionBox ? (
+              <div
+                className="area-selection-box"
+                data-testid="area-selection-box"
+                style={{
+                  left: areaSelectionBox.left,
+                  top: areaSelectionBox.top,
+                  width: areaSelectionBox.width,
+                  height: areaSelectionBox.height
+                }}
+              />
+            ) : null}
+          </div>
+        </div>
+      </section>
+      <Inspector
+        activeTab={inspectorTab}
+        selectedNode={selectedNode}
+        selectedNodes={selectedNodes}
+        componentDefinition={selectedComponentInstanceDefinition}
+        selectedComponentDefinition={selectedComponent ?? null}
+        pageName={activePage?.name ?? currentDocumentName}
+        pageExportNodes={nodes}
+        pageExportReviewItems={pageExportReviewItems}
+        selectedParentNode={selectedParentNode}
+        selectedNodeCount={selectedNodeIds.length}
+        codeExport={codeExportPayload}
+        codeExportStatus={codeExportStatus}
+        documentTokens={editor?.document.tokens ?? []}
+        documentTokenSets={editor?.document.token_sets ?? []}
+        documentTokenThemes={editor?.document.token_themes ?? []}
+        documentStyles={editor?.document.styles ?? []}
+        documentStyleUsageCounts={countStyleUsage(editor?.document ?? null)}
+        canAlign={canAlignInspectorSelection}
+        canDistribute={canDistributeSelection}
+        zoomLabel={`${Math.round((editor?.viewport.scale ?? 1) * 100)}%`}
+        canShare={Boolean(currentProject && collabSession)}
+        onShare={linkProjectToCurrentTeam}
+        tokenDtcgDraft={tokenDtcgDraft}
+        tokenDtcgStatus={tokenDtcgStatus}
+        canEditTokens={Boolean(currentProject && editor)}
+        commentThreads={selectedNodeCommentThreads}
+        commentBody={commentBody}
+        commentReplyBodies={commentReplyBodies}
+        commentStatus={commentStatus}
+        canComment={Boolean(currentProject && editor && selectedNode)}
+        onTokenDtcgDraftChange={setTokenDtcgDraft}
+        onExportTokensDtcg={() => void exportCurrentDocumentTokensDtcg()}
+        onImportTokensDtcg={() => void importCurrentDocumentTokensDtcg()}
+        onTokenSetEnabledChange={updateTokenSetEnabled}
+        onTokenThemeEnabledChange={updateTokenThemeEnabled}
+        onTokenThemeUpsert={upsertTokenTheme}
+        onTokenThemeDelete={deleteTokenTheme}
+        onTokenThemeReorder={reorderTokenTheme}
+        onTokenThemeSetReorder={reorderTokenThemeSet}
+        onCommentBodyChange={setCommentBody}
+        onCommentReplyBodyChange={(threadId, value) =>
+          setCommentReplyBodies((current) => ({ ...current, [threadId]: value }))
+        }
+        onCreateComment={(nodeId) => void createSelectedNodeComment(nodeId)}
+        onCreateCommentReply={(threadId) => void createSelectedNodeCommentReply(threadId)}
+        onResolveComment={(threadId) => void resolveSelectedNodeComment(threadId)}
+        onMarkCommentRead={(threadId) => void markSelectedNodeCommentRead(threadId)}
+        onDownloadSelectedPng={downloadSelectedNodePngFromDevPanel}
+        onDownloadSelectedJpeg={downloadSelectedNodeJpegFromDevPanel}
+        onDownloadSelectedWebp={downloadSelectedNodeWebpFromDevPanel}
+        onDownloadSelectedRaster={downloadSelectedNodeRasterFromDevPanel}
+        onDownloadNodeRaster={downloadNodeRasterFromDevPanel}
+        onExportPresetsChange={updateExportPresets}
+        onTabChange={setInspectorTab}
+        onGeometryChange={updateGeometry}
+        onFillChange={(nodeId, fill) => dispatch({ type: "set_fill", nodeId, fill })}
+        onNodeStyleChange={updateNodeStyle}
+        onFillStyleChange={updateFillStyle}
+        onEffectShadowTokenChange={updateEffectShadowToken}
+        onEffectShadowStyleChange={updateEffectShadowStyle}
+        onEffectShadowStackChange={updateEffectShadowStack}
+        onCreateFillStyle={createFillStyle}
+        onCreateEffectStyle={createEffectStyle}
+        onRenameStyle={renameStyle}
+        onDuplicateStyle={duplicateStyle}
+        onDeleteStyle={deleteStyle}
+        onTextChange={updateTextNode}
+        onTextWritingModeChange={updateTextWritingMode}
+        onTextOrientationChange={updateTextOrientation}
+        onTextTypographyTokenChange={updateTextTypographyToken}
+        onTextTypographyStyleChange={updateTextTypographyStyle}
+        onCreateTypographyStyle={createTypographyStyle}
+        onLayoutChange={updateLayout}
+        onLayoutItemChange={updateLayoutItem}
+        onConstraintsChange={updateConstraints}
+        onComponentVariantChange={updateComponentInstanceVariant}
+        onComponentDefinitionVariantsChange={updateComponentDefinitionVariants}
+        onComponentDefinitionVariantAreaChange={updateComponentDefinitionVariantArea}
+        onAlign={(mode) =>
+          updateViewportFromInteraction((current) =>
+            current.selection.nodeIds.length === 1
+              ? alignSelectedNodeToParent(current, mode)
+              : alignSelectedNodes(current, mode)
+          )
+        }
+        onDistribute={(mode) =>
+          updateViewportFromInteraction((current) => distributeSelectedNodes(current, mode))
+        }
+      />
+      {objectContextMenu ? (
+        <div
+          className="object-context-menu"
+          data-testid="object-context-menu"
+          role="menu"
+          aria-label="객체 메뉴"
+          onContextMenu={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: objectContextMenu.left, top: objectContextMenu.top }}
+        >
+          <ContextMenuSection label="클립보드">
+            <ContextMenuItem
+              label="잘라내기"
+              shortcut="⌘X"
+              disabled={!canMutateContextMenuNode}
+              onClick={cutContextSelection}
+            />
+            <ContextMenuItem
+              label="복사"
+              shortcut="⌘C"
+              disabled={!contextMenuNode}
+              onClick={copyContextSelection}
+            />
+            <ContextMenuItem
+              label="스타일 복사"
+              shortcut="⌥⌘C"
+              disabled={!contextMenuNode}
+              onClick={copyContextStyle}
+            />
+            <ContextMenuItem
+              label="스타일 붙여넣기"
+              shortcut="⌥⌘V"
+              disabled={!canPasteContextStyle}
+              onClick={pasteContextStyle}
+            />
+            <ContextMenuItem
+              label="붙여넣기"
+              shortcut="⌘V"
+              disabled={!objectClipboardRef.current}
+              onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
+            />
+            <ContextMenuItem
+              label="여기에 붙여넣기"
+              disabled={!objectClipboardRef.current || !objectContextMenu.documentPoint}
+              onClick={pasteContextSelectionAtMenuPoint}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="선택 및 내보내기">
+            <ContextMenuItem label="전체 선택" shortcut="⌘A" disabled={!editor} onClick={selectAllContextNodes} />
+            <ContextMenuItem
+              label="같은 종류 선택"
+              shortcut="⇧⌘A"
+              disabled={!contextMenuNode}
+              onClick={selectSameKindContextNodes}
+            />
+            <ContextMenuItem
+              label="선택 영역 확대"
+              shortcut="⇧1"
+              disabled={!contextMenuNode}
+              onClick={fitContextSelectionToViewport}
+            />
+            <ContextMenuItem
+              label="코드로 내보내기"
+              disabled={!currentProject}
+              onClick={() => void downloadContextCodeExport()}
+            />
+            <ContextMenuItem
+              label="PNG로 내보내기"
+              disabled={!contextMenuNode}
+              onClick={downloadContextSelectionPng}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="편집">
+            <ContextMenuItem
+              label="복제"
+              shortcut="⌘D"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => runContextMenuStateAction(duplicateSelectedNode)}
+            />
+            <ContextMenuItem
+              label="삭제"
+              shortcut="Delete"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => runContextMenuStateAction(deleteSelectedNode)}
+            />
+            <ContextMenuItem
+              label="이름 변경"
+              shortcut="⌘R"
+              disabled={!canMutateContextMenuNode}
+              onClick={renameContextSelection}
+            />
+            <ContextMenuItem
+              label="그룹으로 묶기"
+              shortcut="⌘G"
+              disabled={!canGroupContextSelection}
+              onClick={groupContextSelection}
+            />
+            <ContextMenuItem
+              label="선택 영역 프레임 만들기"
+              disabled={!canFrameContextSelection}
+              onClick={frameContextSelection}
+            />
+            <ContextMenuItem
+              label="그룹 해제"
+              shortcut="⇧⌘G"
+              disabled={!canUngroupContextSelection}
+              onClick={ungroupContextSelection}
+            />
+          </ContextMenuSection>
+          {contextMenuNode?.kind === "image" ? (
+            <ContextMenuSection label="이미지">
+              <ContextMenuItem
+                label="이미지 바꾸기"
+                disabled={!canReplaceContextImage}
+                onClick={startContextImageReplacement}
+              />
+              <ContextMenuItem
+                label="원본 크기로 맞춤"
+                disabled={!canResizeContextImageToNaturalSize}
+                onClick={resizeContextImageToNaturalSize}
+              />
+              <ContextMenuItem
+                label="이미지 채우기"
+                disabled={!canReplaceContextImage || contextImageFitMode === "fill"}
+                onClick={() => void setContextImageFitMode("fill")}
+              />
+              <ContextMenuItem
+                label="이미지 맞춤"
+                disabled={!canReplaceContextImage || contextImageFitMode === "fit"}
+                onClick={() => void setContextImageFitMode("fit")}
+              />
+            </ContextMenuSection>
+          ) : null}
+          <ContextMenuSection label="상태">
+            <ContextMenuItem
+              label={contextMenuNodeIsLocked ? "잠금 해제" : "잠그기"}
+              disabled={!contextMenuNode}
+              onClick={toggleContextNodeLocked}
+            />
+            <ContextMenuItem
+              label={contextMenuNodeIsHidden ? "표시" : "숨기기"}
+              disabled={!contextMenuNode}
+              onClick={toggleContextNodeVisible}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="레이어 순서">
+            <ContextMenuItem
+              label="맨 앞으로 가져오기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("front")}
+            />
+            <ContextMenuItem
+              label="앞으로 가져오기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("forward")}
+            />
+            <ContextMenuItem
+              label="뒤로 보내기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("backward")}
+            />
+            <ContextMenuItem
+              label="맨 뒤로 보내기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => reorderContextSelection("back")}
+            />
+            <ContextMenuItem
+              label="가로 뒤집기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => flipContextSelection("horizontal")}
+            />
+            <ContextMenuItem
+              label="세로 뒤집기"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => flipContextSelection("vertical")}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="컴포넌트">
+            <ContextMenuItem
+              label="컴포넌트 만들기"
+              disabled={!canMutateContextMenuNode || contextMenuNode?.kind === "component_instance"}
+              onClick={createContextComponent}
+            />
+            <ContextMenuItem
+              label="인스턴스 만들기"
+              disabled={
+                !canMutateContextMenuNode ||
+                !components.some((component) => component.source_node.id === contextMenuNode?.id)
+              }
+              onClick={createContextInstance}
+            />
+            <ContextMenuItem
+              label="변형으로 결합"
+              disabled={!canMutateContextMenuNode || !canCombineSelectedComponentsAsVariants}
+              onClick={combineContextComponentsAsVariants}
+            />
+            <ContextMenuItem
+              label="인스턴스 분리"
+              disabled={!canMutateContextMenuNode || !contextMenuNode?.component_instance}
+              onClick={detachContextInstance}
+            />
+          </ContextMenuSection>
+          <ContextMenuSection label="정렬 및 배치">
+            <ContextMenuItem
+              label="왼쪽 맞춤"
+              shortcut="⌥A"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("left")}
+            />
+            <ContextMenuItem
+              label="가운데 맞춤"
+              shortcut="⌥H"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("center")}
+            />
+            <ContextMenuItem
+              label="오른쪽 맞춤"
+              shortcut="⌥D"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("right")}
+            />
+            <ContextMenuItem
+              label="위쪽 맞춤"
+              shortcut="⌥W"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("top")}
+            />
+            <ContextMenuItem
+              label="세로 가운데 맞춤"
+              shortcut="⌥V"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("middle")}
+            />
+            <ContextMenuItem
+              label="아래쪽 맞춤"
+              shortcut="⌥S"
+              disabled={!canMutateContextMenuNode}
+              onClick={() => alignContextSelection("bottom")}
+            />
+            <ContextMenuItem
+              label="가로 간격 균등"
+              disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
+              onClick={() => distributeContextSelection("horizontal")}
+            />
+            <ContextMenuItem
+              label="세로 간격 균등"
+              disabled={selectedNodeIds.length < 3 || !canMutateContextMenuNode}
+              onClick={() => distributeContextSelection("vertical")}
+            />
+          </ContextMenuSection>
+        </div>
+      ) : null}
+      {gridTrackContextMenu ? (
+        <div
+          className="object-context-menu"
+          data-testid="grid-track-context-menu"
+          role="menu"
+          aria-label={gridTrackContextMenu.axis === "column" ? "그리드 열 메뉴" : "그리드 행 메뉴"}
+          onContextMenu={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: gridTrackContextMenu.left, top: gridTrackContextMenu.top }}
+        >
+          {gridTrackContextMenu.axis === "column" ? (
+            <ContextMenuSection label="열">
+              <ContextMenuItem label="열 복제" onClick={() => applyGridTrackContextAction("duplicate")} />
+              <ContextMenuItem
+                label="왼쪽에 열 추가"
+                onClick={() => applyGridTrackContextAction("insert-before")}
+              />
+              <ContextMenuItem
+                label="오른쪽에 열 추가"
+                onClick={() => applyGridTrackContextAction("insert-after")}
+              />
+              <ContextMenuItem
+                label="열 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete")}
+              />
+              <ContextMenuItem
+                label="열과 객체 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete-with-children")}
+              />
+            </ContextMenuSection>
+          ) : (
+            <ContextMenuSection label="행">
+              <ContextMenuItem label="행 복제" onClick={() => applyGridTrackContextAction("duplicate")} />
+              <ContextMenuItem
+                label="위에 행 추가"
+                onClick={() => applyGridTrackContextAction("insert-before")}
+              />
+              <ContextMenuItem
+                label="아래에 행 추가"
+                onClick={() => applyGridTrackContextAction("insert-after")}
+              />
+              <ContextMenuItem
+                label="행 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete")}
+              />
+              <ContextMenuItem
+                label="행과 객체 삭제"
+                disabled={!canDeleteGridTrackFromContextMenu}
+                onClick={() => applyGridTrackContextAction("delete-with-children")}
+              />
+            </ContextMenuSection>
+          )}
+        </div>
+      ) : null}
+      {gridCellContextMenu ? (
+        <div
+          className="object-context-menu"
+          data-testid="grid-cell-context-menu"
+          role="menu"
+          aria-label="그리드 셀 메뉴"
+          onContextMenu={(event) => event.preventDefault()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{ left: gridCellContextMenu.left, top: gridCellContextMenu.top }}
+        >
+          <ContextMenuSection label="셀">
+            <ContextMenuItem label="셀 병합 영역 만들기" onClick={applyGridCellMergeAction} />
+            <ContextMenuItem
+              label="병합 영역 분리"
+              disabled={!gridCellContextMenu.areaName}
+              onClick={applyGridCellSplitAction}
+            />
+          </ContextMenuSection>
+        </div>
+      ) : null}
+      <input
+        ref={imageReplacementFileInputRef}
+        data-testid="image-replacement-file"
+        className="visually-hidden"
+        type="file"
+        accept="image/*"
+        onChange={replaceContextImageFromFile}
+      />
+    </main>
+  );
+}
