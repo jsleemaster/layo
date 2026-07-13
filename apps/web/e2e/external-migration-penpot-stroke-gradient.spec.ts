@@ -335,7 +335,7 @@ function createPenpotRadialStrokeGradientExportArchive(): Buffer {
   ]);
 }
 
-test("file panel imports a Penpot stroke gradient as a flattened visible stroke", async ({ page }, testInfo) => {
+test("file panel imports a Penpot stroke gradient as a first-class visible paint", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("stroke-gradients.penpot");
   await writeFile(penpotZipPath, createPenpotStrokeGradientExportArchive());
@@ -367,7 +367,13 @@ test("file panel imports a Penpot stroke gradient as a flattened visible stroke"
     id: `penpot-${strokeGradientRectId}`,
     kind: "rectangle",
     name: "Gradient stroke card",
-    style: { fill: "#ffffff", stroke: expectedStrokeGradientColor, stroke_width: 4, opacity: 1 }
+    style: {
+      fill: "#ffffff",
+      stroke: expectedStrokeGradientColor,
+      stroke_width: 4,
+      opacity: 1,
+      strokes: [{ paint: { type: "gradient" }, width: 4 }]
+    }
   });
 });
 
