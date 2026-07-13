@@ -6,6 +6,12 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
 import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./external-migration.js";
 import {
+  authenticateTeamMember,
+  authorizeTeamLibraryWrite,
+  bearerToken,
+  type TeamAuthorizationConfig
+} from "./team-authorization.js";
+import {
   FILE_ARCHIVE_MIME_TYPE,
   FileStorage,
   INPUT_VALIDATION_ERROR_CODE,
@@ -21,6 +27,7 @@ import {
 export interface HttpServerOptions {
   webBasePath?: string;
   webDistDir?: string | null;
+  libraryRegistryAuth?: TeamAuthorizationConfig;
 }
 
 const DEFAULT_WEB_BASE_PATH = "/app/";
@@ -49,7 +56,10 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.addHook("onRequest", async (_request, reply) => {
     reply.header("Access-Control-Allow-Origin", "*");
     reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-    reply.header("Access-Control-Allow-Headers", "Content-Type");
+    reply.header(
+      "Access-Control-Allow-Headers",
+      "Authorization, Content-Type, Idempotency-Key, X-Layo-User-Id"
+    );
   });
 
   server.get("/health", async () => ({ ok: true }));
@@ -197,6 +207,16 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Body: { fileId: string; libraryId?: string; name?: string };
   }>("/libraries", async (request) => {
+    if (options.libraryRegistryAuth) {
+      const member = authenticateTeamMember(
+        options.libraryRegistryAuth,
+        Array.isArray(request.headers["x-layo-user-id"])
+          ? request.headers["x-layo-user-id"][0]
+          : request.headers["x-layo-user-id"],
+        bearerToken(request.headers.authorization)
+      );
+      authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(request.body.fileId));
+    }
     const idempotencyHeader = request.headers["idempotency-key"];
     return {
       library: await storage.publishLibraryToRegistry(request.body.fileId, {
