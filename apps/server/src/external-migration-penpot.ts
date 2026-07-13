@@ -239,8 +239,11 @@ function penpotComponentRelationErrors(pages: PenpotPage[]): string[] {
         continue;
       }
 
+      const mainPage = pages.find((candidate) => candidate.shapesById.get(mains[0].id) === mains[0]);
       const sourceShapeIds = new Set(
-        collectPenpotShapeTree(mains[0], page.shapesById).map((candidate) => candidate.id)
+        mainPage
+          ? collectPenpotShapeTree(mains[0], mainPage.shapesById).map((candidate) => candidate.id)
+          : []
       );
       const connectedSourceIds = new Set<string>();
       for (const copyShape of collectPenpotShapeTree(shape, page.shapesById).slice(1)) {
