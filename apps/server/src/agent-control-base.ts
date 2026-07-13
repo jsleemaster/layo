@@ -2250,10 +2250,11 @@ function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] 
         (stroke.dasharray.length > 0 && !stroke.dasharray.some((value) => value > 0))) {
       throw new Error(`strokes[${index}].dasharray is invalid`);
     }
+    const paint = stroke.paint !== undefined ? normalizeAgentStrokePaint(stroke.paint, index) : undefined;
     return {
       id,
-      color: stroke.paint?.type === "solid" ? stroke.paint.color.trim() : stroke.color.trim(),
-      ...(stroke.paint !== undefined ? { paint: normalizeAgentStrokePaint(stroke.paint, index) } : {}),
+      color: paint?.type === "solid" ? paint.color : stroke.color.trim(),
+      ...(paint !== undefined ? { paint } : {}),
       opacity: stroke.opacity,
       width: stroke.width,
       position: stroke.position,
