@@ -94,20 +94,20 @@ describe("team library authorization", () => {
       ]
     };
 
-    expect(() => authenticateTeamMember(config, undefined, undefined)).toMatchObject({
+    expect(captureError(() => authenticateTeamMember(config, undefined, undefined))).toMatchObject({
       statusCode: 401
     });
-    expect(() => authenticateTeamMember(config, "viewer-user", "wrong-token")).toMatchObject({
+    expect(captureError(() => authenticateTeamMember(config, "viewer-user", "wrong-token"))).toMatchObject({
       statusCode: 401
     });
     const viewer = authenticateTeamMember(config, "viewer-user", "viewer-token");
-    expect(() => authorizeTeamLibraryWrite(viewer, "team-alpha")).toMatchObject({
+    expect(captureError(() => authorizeTeamLibraryWrite(viewer, "team-alpha"))).toMatchObject({
       statusCode: 403
     });
-    expect(() => authorizeTeamLibraryWrite({ ...viewer, role: "editor" }, "team-beta")).toMatchObject({
+    expect(captureError(() => authorizeTeamLibraryWrite({ ...viewer, role: "editor" }, "team-beta"))).toMatchObject({
       statusCode: 403
     });
-    expect(() => authorizeTeamLibraryWrite({ ...viewer, role: "editor" }, undefined)).toMatchObject({
+    expect(captureError(() => authorizeTeamLibraryWrite({ ...viewer, role: "editor" }, undefined))).toMatchObject({
       statusCode: 403
     });
   });
@@ -118,3 +118,12 @@ describe("team library authorization", () => {
     expect(bearerToken("Basic member-token")).toBeUndefined();
   });
 });
+
+function captureError(callback: () => unknown): unknown {
+  try {
+    callback();
+  } catch (error) {
+    return error;
+  }
+  throw new Error("expected callback to throw");
+}
