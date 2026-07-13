@@ -61,6 +61,12 @@ Penpot reference commit:
 - Follow-up run `29277515496` passed 278 of 279 server tests and caught a
   changed update-recovery conflict message. Recovery now preserves the existing
   update contract while naming publication conflicts separately.
+- Automated review follow-up RED `29278434439` ran 280 server tests.
+  The retry-before-prepare case passed because publication reaches
+  `listProjects -> prepareProjects` before acquiring the registry lock and
+  therefore recovers pending journals first. The namespace case failed because
+  publication and document-update journals shared one directory; publication
+  journals now live under `recovery/library-publications`.
 - Final PR-head Full Verification is the merge gate. This storage-only change
   has no new browser interaction; the complete Playwright CLI suite remains the
   browser regression proof.
