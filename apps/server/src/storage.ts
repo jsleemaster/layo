@@ -1495,8 +1495,11 @@ export class FileStorage {
             !storageSnapshotDataEquals(currentData, snapshot.data)
             && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
           ) {
+            const transactionName = journal.kind === "library-registry-publication"
+              ? "library publication"
+              : "library update";
             throw new StorageRollbackConflictError(
-              `interrupted storage transaction path changed outside journal: ${snapshot.filePath}`
+              `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
             );
           }
         }
