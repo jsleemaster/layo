@@ -26,10 +26,14 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No plan is active after the PR #294 merge gate. The next Penpot maturity loop
-must create a new exact failed case for hosted authenticated registry ownership,
-shared transactional storage, receipt retention, or durable pub/sub rather than
-reopening the completed local retry plan.
+`2026-07-14-penpot-library-publish-authorization.md` is active in PR #295.
+HTTP RED `29283071209` proved viewer publication wrote registry state,
+browser RED `29283735052` proved the web API had no credential contract, MCP
+RED `29283903958` proved the agent runtime had no principal, and validation
+RED `29284023373` proved blank member ids passed configuration. The completion
+gate is shared HTTP/web/MCP owner-editor authorization, focused regression
+coverage, direct Playwright interaction proof, full verification, review, and
+merge. Other registry mutations and hosted shared storage remain next.
 
 ## Completed Plans
 
