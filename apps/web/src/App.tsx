@@ -11,9 +11,10 @@ import {
 } from "react";
 import type { KonvaEventObject } from "konva/lib/Node";
 import type { Stage as KonvaStage } from "konva/lib/Stage";
-import { Circle, Group, Image as KonvaImage, Layer, Line, Path as KonvaPath, Rect, RegularPolygon, Stage, Text } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Path as KonvaPath, Rect, RegularPolygon, Shape, Stage, Text } from "react-konva";
 import {
   flattenRendererNodes,
+  pathHasOnlyClosedSubpaths,
   type BooleanPathOperation,
   type DesignStyle,
   type DesignToken,
@@ -4238,6 +4239,68 @@ function CanvasStrokeMarker({
   );
 }
 
+function CanvasAlignedPathStroke({
+  node,
+  stroke,
+  dash
+}: {
+  node: RendererNode;
+  stroke: NodeStroke;
+  dash: number[];
+}) {
+  if (node.content.type !== "path" && node.content.type !== "boolean_path") {
+    return null;
+  }
+
+  const pathContent = node.content;
+  const effectivePosition = pathHasOnlyClosedSubpaths(pathContent.path_data) ? stroke.position : "center";
+  const lineCap = stroke.style === "dotted" ? "round" : stroke.cap;
+  if (effectivePosition === "center") {
+    return (
+      <KonvaPath
+        name={`path-stroke-${stroke.id}-center`}
+        data={node.content.path_data}
+        fill={undefined}
+        stroke={stroke.color}
+        strokeWidth={stroke.width}
+        opacity={node.style.opacity * stroke.opacity}
+        lineCap={lineCap}
+        lineJoin={stroke.join}
+        dash={dash}
+        listening={false}
+      />
+    );
+  }
+
+  return (
+    <Shape
+      name={`path-stroke-${stroke.id}-${effectivePosition}`}
+      listening={false}
+      sceneFunc={(context) => {
+        const canvas = (context as unknown as { _context: CanvasRenderingContext2D })._context;
+        const path = new Path2D(pathContent.path_data);
+        canvas.save();
+        if (effectivePosition === "inside") {
+          canvas.clip(path, pathContent.fill_rule);
+        } else {
+          const inverse = new Path2D();
+          inverse.rect(-100000, -100000, 200000, 200000);
+          inverse.addPath(path);
+          canvas.clip(inverse, "evenodd");
+        }
+        canvas.globalAlpha = node.style.opacity * stroke.opacity;
+        canvas.strokeStyle = stroke.color;
+        canvas.lineWidth = stroke.width * 2;
+        canvas.lineCap = lineCap;
+        canvas.lineJoin = stroke.join;
+        canvas.setLineDash(dash);
+        canvas.stroke(path);
+        canvas.restore();
+      }}
+    />
+  );
+}
+
 function renderNode({
   node,
   selectedNodeId,
@@ -4484,7 +4547,7 @@ function renderNode({
         listening: false
       };
       if (node.kind === "path" && (node.content.type === "path" || node.content.type === "boolean_path")) {
-        return <KonvaPath {...common} data={node.content.path_data} />;
+        return <CanvasAlignedPathStroke key={common.key} node={node} stroke={stroke} dash={dash} />;
       }
       return (
         <Rect
@@ -6613,6 +6676,11 @@ function Inspector({
     );
   }
 
+  const selectedPathSupportsStrokeAlignment =
+    selectedNode.kind !== "path" ||
+    ((selectedNode.content.type === "path" || selectedNode.content.type === "boolean_path") &&
+      pathHasOnlyClosedSubpaths(selectedNode.content.path_data));
+
   const updateNumber = (patchKey: keyof GeometryPatch) => (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = Number(event.currentTarget.value);
     if (Number.isFinite(nextValue)) {
@@ -7659,10 +7727,15 @@ function Inspector({
               </label>
               <label>
                 위치
-                <select data-testid={`inspector-stroke-${index}-position`} value={stroke.position} onChange={(event) => patchStroke(index, { position: event.currentTarget.value as NodeStroke["position"] })}>
-                  <option value="inside">안쪽</option>
+                <select
+                  data-testid={`inspector-stroke-${index}-position`}
+                  data-effective-position={selectedPathSupportsStrokeAlignment ? stroke.position : "center"}
+                  value={selectedPathSupportsStrokeAlignment ? stroke.position : "center"}
+                  onChange={(event) => patchStroke(index, { position: event.currentTarget.value as NodeStroke["position"] })}
+                >
+                  <option value="inside" disabled={!selectedPathSupportsStrokeAlignment}>안쪽</option>
                   <option value="center">가운데</option>
-                  <option value="outside">바깥쪽</option>
+                  <option value="outside" disabled={!selectedPathSupportsStrokeAlignment}>바깥쪽</option>
                 </select>
               </label>
               <label>

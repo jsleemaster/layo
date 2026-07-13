@@ -1,5 +1,5 @@
 import { unzlibSync, zlibSync } from "fflate";
-import type { NodePaintGradient, NodePaintSource, NodePaintStop, NodeStroke, RendererNode } from "@layo/renderer";
+import { pathHasOnlyClosedSubpaths, type NodePaintGradient, type NodePaintSource, type NodePaintStop, type NodeStroke, type RendererNode } from "@layo/renderer";
 import { parseEditablePath } from "./path-editor";
 
 export interface NodeArtifactAsset {
@@ -162,6 +162,26 @@ function visibleStrokesForNode(node: RendererNode) {
   return legacy ? [legacy] : [];
 }
 
+function closedPathDataForStrokeAlignment(node: RendererNode) {
+  const pathData = pathDataForNode(node);
+  return pathData && pathHasOnlyClosedSubpaths(pathData) ? pathData : null;
+}
+
+function effectiveStrokePositionForNode(node: RendererNode, stroke: NodeStroke) {
+  if (node.kind === "path" && !closedPathDataForStrokeAlignment(node)) {
+    return "center" as const;
+  }
+  return stroke.position;
+}
+
+function alignedPathStrokeClipId(node: RendererNode) {
+  return `layo-stroke-clip-${safeSvgIdSuffix(node.id)}-inside`;
+}
+
+function alignedPathStrokeMaskId(node: RendererNode) {
+  return `layo-stroke-mask-${safeSvgIdSuffix(node.id)}-outside`;
+}
+
 function strokeExpansion(stroke: NodeStroke) {
   if (stroke.position === "outside") {
     return stroke.width;
@@ -272,6 +292,14 @@ function svgFillRuleAttributeForNode(node: RendererNode) {
 
 function svgClipRuleAttributeForNode(node: RendererNode) {
   return clipSourceFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
+}
+
+function svgPathClipRuleAttributeForNode(node: RendererNode) {
+  return pathFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
+}
+
+function pdfPathClipOperatorForNode(node: RendererNode) {
+  return pathFillRuleForNode(node) === "evenodd" ? "W*" : "W";
 }
 
 function pdfFillOperatorForNode(node: RendererNode) {
@@ -922,12 +950,53 @@ function svgShadowFilterLinesForTree(node: RendererNode, depth: number): string[
   return [...svgShadowFilterLinesForNode(node, depth), ...node.children.flatMap((child) => svgShadowFilterLinesForTree(child, depth))];
 }
 
+function svgAlignedPathStrokeDefinitionLinesForNode(node: RendererNode, depth: number): string[] {
+  const pathData = closedPathDataForStrokeAlignment(node);
+  if (!pathData) {
+    return [];
+  }
+
+  const strokes = visibleStrokesForNode(node);
+  const hasInside = strokes.some((stroke) => effectiveStrokePositionForNode(node, stroke) === "inside");
+  const outsideExpansion = strokes.reduce(
+    (largest, stroke) => effectiveStrokePositionForNode(node, stroke) === "outside" ? Math.max(largest, stroke.width) : largest,
+    0
+  );
+  const lines: string[] = [];
+  if (hasInside) {
+    lines.push(
+      indent(`<clipPath id="${alignedPathStrokeClipId(node)}">`, depth),
+      indent(`<path d="${escapeSvgText(pathData)}"${svgPathClipRuleAttributeForNode(node)} />`, depth + 1),
+      indent("</clipPath>", depth)
+    );
+  }
+  if (outsideExpansion > 0) {
+    const width = Math.max(1, Math.round(node.size.width));
+    const height = Math.max(1, Math.round(node.size.height));
+    lines.push(
+      indent(`<mask id="${alignedPathStrokeMaskId(node)}" x="${formatNumber(-outsideExpansion)}" y="${formatNumber(-outsideExpansion)}" width="${formatNumber(width + outsideExpansion * 2)}" height="${formatNumber(height + outsideExpansion * 2)}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse">`, depth),
+      indent(`<rect x="${formatNumber(-outsideExpansion)}" y="${formatNumber(-outsideExpansion)}" width="${formatNumber(width + outsideExpansion * 2)}" height="${formatNumber(height + outsideExpansion * 2)}" fill="#fff" />`, depth + 1),
+      indent(`<path d="${escapeSvgText(pathData)}" fill="#000"${svgFillRuleAttributeForNode(node)} />`, depth + 1),
+      indent("</mask>", depth)
+    );
+  }
+  return lines;
+}
+
+function svgAlignedPathStrokeDefinitionLinesForTree(node: RendererNode, depth: number): string[] {
+  return [
+    ...svgAlignedPathStrokeDefinitionLinesForNode(node, depth),
+    ...node.children.flatMap((child) => svgAlignedPathStrokeDefinitionLinesForTree(child, depth))
+  ];
+}
+
 function svgDefsForNode(node: RendererNode, depth: number): string[] {
   const defLines = [
     ...svgGradientLinesForTree(node, depth + 1),
     ...svgStrokeMarkerLinesForTree(node, depth + 1),
     ...svgShadowFilterLinesForTree(node, depth + 1),
-    ...svgClipPathLinesForTree(node, depth + 1)
+    ...svgClipPathLinesForTree(node, depth + 1),
+    ...svgAlignedPathStrokeDefinitionLinesForTree(node, depth + 1)
   ];
   return defLines.length > 0 ? [indent("<defs>", depth), ...defLines, indent("</defs>", depth)] : [];
 }
@@ -999,13 +1068,22 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
       ? `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} stroke="none"${opacity}${filter} />`
       : `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} stroke="none"${opacity}${filter} />`;
 
+  const closedPathData = closedPathDataForStrokeAlignment(node);
   const strokeShapes = strokes.map((stroke) => {
     const strokeNode = nodeWithStroke(node, stroke);
-    const common = `data-stroke-id="${escapeSvgText(stroke.id)}" data-stroke-position="${stroke.position}" fill="none" stroke="${escapeSvgText(stroke.color)}" stroke-opacity="${formatNumber(stroke.opacity)}" stroke-width="${formatNumber(stroke.width)}"${svgStrokePresentationAttributes(strokeNode)}`;
+    const effectivePosition = effectiveStrokePositionForNode(node, stroke);
+    const isAlignedPath = Boolean(pathData && closedPathData && effectivePosition !== "center");
+    const renderedWidth = isAlignedPath ? stroke.width * 2 : stroke.width;
+    const alignmentReference = effectivePosition === "inside"
+      ? ` clip-path="url(#${alignedPathStrokeClipId(node)})"`
+      : effectivePosition === "outside"
+        ? ` mask="url(#${alignedPathStrokeMaskId(node)})"`
+        : "";
+    const common = `data-stroke-id="${escapeSvgText(stroke.id)}" data-stroke-position="${stroke.position}" data-effective-stroke-position="${effectivePosition}" fill="none" stroke="${escapeSvgText(stroke.color)}" stroke-opacity="${formatNumber(stroke.opacity)}" stroke-width="${formatNumber(renderedWidth)}"${svgStrokePresentationAttributes(strokeNode)}`;
     if (pathData) {
-      return `<path d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)} />`;
+      return `<path d="${escapeSvgText(pathData)}" ${common}${svgFillRuleAttributeForNode(node)}${alignmentReference} />`;
     }
-    const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
+    const inset = effectivePosition === "inside" ? stroke.width / 2 : effectivePosition === "outside" ? -stroke.width / 2 : 0;
     if (nodeClipUsesEllipseShape(node)) {
       return `<ellipse cx="${formatNumber(width / 2)}" cy="${formatNumber(height / 2)}" rx="${formatNumber(Math.max(0, width / 2 - inset))}" ry="${formatNumber(Math.max(0, height / 2 - inset))}" ${common} />`;
     }
@@ -1816,20 +1894,28 @@ function pdfStrokeMarkerCommands(node: RendererNode, pageHeight: number, x: numb
 
 function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
   const strokes = visibleStrokesForNode(node);
+  const closedPathData = closedPathDataForStrokeAlignment(node);
   return strokes.flatMap((stroke, index) => {
     const strokeNode = nodeWithStroke(node, stroke);
-    const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
-    const graphicsState = stroke.opacity < 1
-      ? `/StrokeGs${safeSvgIdSuffix(node.id)}${index + 1} gs`
-      : "";
+    const effectivePosition = effectiveStrokePositionForNode(node, stroke);
+    const isAlignedPath = Boolean(closedPathData && effectivePosition !== "center");
+    const inset = effectivePosition === "inside" ? stroke.width / 2 : effectivePosition === "outside" ? -stroke.width / 2 : 0;
+    const graphicsState = stroke.opacity < 1 ? `/StrokeGs${safeSvgIdSuffix(node.id)}${index + 1} gs` : "";
+    const pathCommands = isAlignedPath ? pdfShapePathCommandsForNode(strokeNode, pageHeight, x, y) : pdfShapePathCommandsForNode(strokeNode, pageHeight, x, y, inset);
+    const clipCommands = !isAlignedPath
+      ? []
+      : effectivePosition === "inside"
+        ? [...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfPathClipOperatorForNode(node), "n"]
+        : ["-100000 -100000 200000 200000 re", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), "W*", "n"];
     return [
-      `% Layo stroke ${stroke.id} ${stroke.position}`,
+      isAlignedPath ? `% Layo aligned path stroke ${effectivePosition}` : `% Layo stroke ${stroke.id} ${effectivePosition}`,
       "q",
+      ...clipCommands,
       graphicsState,
       `${pdfColorOperands(stroke.color)} RG`,
-      `${formatNumber(Math.max(0, stroke.width))} w`,
+      `${formatNumber(Math.max(0, isAlignedPath ? stroke.width * 2 : stroke.width))} w`,
       ...pdfStrokeStyleCommands(strokeNode),
-      ...pdfShapePathCommandsForNode(strokeNode, pageHeight, x, y, inset),
+      ...pathCommands,
       "S",
       ...pdfStrokeMarkerCommands(strokeNode, pageHeight, x, y),
       "Q"
