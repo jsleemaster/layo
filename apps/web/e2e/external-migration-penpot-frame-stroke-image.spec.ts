@@ -17,7 +17,6 @@ const frameStrokeImageStorageObjectId = "26262626-2626-2626-2626-262626262626";
 const frameFillImageMediaId = "27272727-2727-2727-2727-272727272727";
 const frameFillImageStorageObjectId = "28282828-2828-2828-2828-282828282828";
 const expectedFrameStrokeImageAssetId = `penpot-asset-${frameStrokeImageMediaId}`;
-const expectedFrameStrokeImageNodeId = `penpot-${frameId}-stroke-image`;
 const expectedFrameFillImageAssetId = `penpot-asset-${frameFillImageMediaId}`;
 const expectedFrameFillImageNodeId = `penpot-${frameId}-fill-image`;
 const pngImage = Buffer.from(
@@ -215,7 +214,6 @@ test("file panel imports a Penpot frame stroke-image record as a packaged backgr
   await expect(page.getByTestId("project-status")).toContainText("Penpot Frame Stroke Image Board 가져옴");
   await expect(page.getByTestId("project-name")).toHaveValue("Penpot Frame Stroke Image Board");
   await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board");
-  await expect(page.getByTestId("layer-panel")).toContainText("Frame stroke image board stroke image");
   await expect(page.getByTestId("layer-panel")).toContainText("Foreground card");
 
   const importedProjectId = await page.getByTestId("project-switcher").inputValue();
@@ -228,21 +226,14 @@ test("file panel imports a Penpot frame stroke-image record as a packaged backgr
   expect(fileResponse.ok()).toBeTruthy();
   const filePayload = await fileResponse.json();
   const frame = filePayload.file.pages[0].children[0];
-  const strokeImageNode = frame.children[0];
-  const foregroundNode = frame.children[1];
-  expect(strokeImageNode).toMatchObject({
-    id: expectedFrameStrokeImageNodeId,
-    kind: "image",
-    name: "Frame stroke image board stroke image",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.55 },
-    content: {
-      type: "image",
-      asset_id: expectedFrameStrokeImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
-  });
+  expect(frame.children).toHaveLength(1);
+  expect(frame.style.strokes).toMatchObject([{
+    paint: { type: "image", asset_id: expectedFrameStrokeImageAssetId },
+    opacity: 0.55,
+    width: 14,
+    position: "outside"
+  }]);
+  const foregroundNode = frame.children[0];
   expect(foregroundNode).toMatchObject({
     id: `penpot-${foregroundRectId}`,
     kind: "rectangle",
@@ -284,10 +275,15 @@ test("file panel imports Penpot frame fill-image and stroke-image records as sep
   expect(fileResponse.ok()).toBeTruthy();
   const filePayload = await fileResponse.json();
   const frame = filePayload.file.pages[0].children[0];
-  expect(frame.children).toHaveLength(3);
+  expect(frame.children).toHaveLength(2);
+  expect(frame.style.strokes).toMatchObject([{
+    paint: { type: "image", asset_id: expectedFrameStrokeImageAssetId },
+    opacity: 0.55,
+    width: 14,
+    position: "outside"
+  }]);
   const fillImageNode = frame.children[0];
-  const strokeImageNode = frame.children[1];
-  const foregroundNode = frame.children[2];
+  const foregroundNode = frame.children[1];
 
   expect(fillImageNode).toMatchObject({
     id: expectedFrameFillImageNodeId,
@@ -297,19 +293,6 @@ test("file panel imports Penpot frame fill-image and stroke-image records as sep
     content: {
       type: "image",
       asset_id: expectedFrameFillImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
-  });
-  expect(strokeImageNode).toMatchObject({
-    id: expectedFrameStrokeImageNodeId,
-    kind: "image",
-    name: "Frame stroke image board stroke image",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.55 },
-    content: {
-      type: "image",
-      asset_id: expectedFrameStrokeImageAssetId,
       natural_width: 1,
       natural_height: 1,
       fit_mode: "fill"
