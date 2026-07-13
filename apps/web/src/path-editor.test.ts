@@ -1,3 +1,4 @@
+import { pathHasOnlyClosedSubpaths } from "@layo/renderer";
 import { describe, expect, test } from "vitest";
 import {
   editablePathAnchors,
@@ -10,7 +11,6 @@ import {
   moveEditablePathAnchor,
   moveEditablePathControl,
   parseEditablePath,
-  pathHasOnlyClosedSubpaths,
   separateEditablePathAtAnchor,
   serializeEditablePath
 } from "./path-editor";
