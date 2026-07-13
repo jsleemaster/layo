@@ -262,7 +262,7 @@ function packagedLibrarySwapArchive() {
     },
     {
       path: `files/${fileId}/pages/${pageId}/${outerMainSlotId}.json`,
-      data: json(shape(outerMainSlotId, "Shape slot", "rectangle", 112, 112, 64, 64, {
+      data: json(shape(outerMainSlotId, "Shape slot", "frame", 112, 112, 64, 64, {
         "component-id": rectangleComponentId,
         "component-file": libraryFileId,
         "shape-ref": rectangleMainId
@@ -280,7 +280,7 @@ function packagedLibrarySwapArchive() {
     },
     {
       path: `files/${fileId}/pages/${pageId}/${outerCopySlotId}.json`,
-      data: json(shape(outerCopySlotId, "Shape slot", "ellipse", 432, 112, 64, 64, {
+      data: json(shape(outerCopySlotId, "Shape slot", "frame", 432, 112, 64, 64, {
         "component-id": circleComponentId,
         "component-file": libraryFileId,
         "shape-ref": circleMainId,
@@ -294,7 +294,7 @@ function packagedLibrarySwapArchive() {
     },
     {
       path: `files/${libraryFileId}/pages/${libraryPageId}/${rectangleMainId}.json`,
-      data: json(shape(rectangleMainId, "Rectangle", "rectangle", 80, 80, 64, 64, {
+      data: json(shape(rectangleMainId, "Rectangle", "frame", 80, 80, 64, 64, {
         "main-instance": true,
         "component-root": true,
         "component-id": rectangleComponentId,
@@ -304,7 +304,7 @@ function packagedLibrarySwapArchive() {
     },
     {
       path: `files/${libraryFileId}/pages/${libraryPageId}/${circleMainId}.json`,
-      data: json(shape(circleMainId, "Circle", "ellipse", 200, 80, 64, 64, {
+      data: json(shape(circleMainId, "Circle", "frame", 200, 80, 64, 64, {
         "main-instance": true,
         "component-root": true,
         "component-id": circleComponentId,
