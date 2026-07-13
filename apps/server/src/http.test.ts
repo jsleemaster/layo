@@ -906,6 +906,16 @@ describe("HTTP server", () => {
         name: `${teamId} Kit`
       });
     }
+    await storage.createProject({
+      projectId: "private-project",
+      name: "Private",
+      documentId: "private-file",
+      documentName: "Private"
+    });
+    await storage.publishLibraryToRegistry("private-file", {
+      libraryId: "private-kit",
+      name: "Private Kit"
+    });
 
     const server = createHttpServer(storage, {
       libraryRegistryAuth: {
@@ -961,7 +971,12 @@ describe("HTTP server", () => {
       }
     });
     expect(sameTeamFile.statusCode).toBe(200);
-    expect(sameTeamFile.json().libraries).toHaveLength(1);
+    expect(sameTeamFile.json().libraries).toEqual([
+      expect.objectContaining({
+        libraryId: "team-alpha-kit",
+        teamId: "team-alpha"
+      })
+    ]);
   });
 
   test("authorizes team library publication by member token and editor role", async () => {
