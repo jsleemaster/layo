@@ -224,6 +224,8 @@ const outerMainId = "13131313-1313-1313-1313-131313131313";
 const outerMainSlotId = "14141414-1414-1414-1414-141414141414";
 const outerCopyId = "15151515-1515-1515-1515-151515151515";
 const outerCopySlotId = "16161616-1616-1616-1616-161616161616";
+const libraryMediaId = "17171717-1717-1717-1717-171717171717";
+const libraryStorageObjectId = "18181818-1818-1818-1818-181818181818";
 
 function packagedLibrarySwapArchive(options: { includeLibrary?: boolean } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
@@ -317,8 +319,29 @@ function packagedLibrarySwapArchive(options: { includeLibrary?: boolean } = {}) 
         "component-root": true,
         "component-id": circleComponentId,
         "component-file": libraryFileId,
-        fills: [{ fillColor: "#f97316", fillOpacity: 1 }]
+        fills: [
+          { fillColor: "#f97316", fillOpacity: 1 },
+          { "fill-image": { id: libraryMediaId }, "fill-opacity": 1 }
+        ]
       }))
+    },
+    {
+      path: `files/${libraryFileId}/media/${libraryMediaId}.json`,
+      data: json({
+        id: libraryMediaId,
+        "media-id": libraryStorageObjectId,
+        mtype: "image/svg+xml",
+        name: "circle-pattern.svg",
+        width: 64,
+        height: 64
+      })
+    },
+    {
+      path: `objects/${libraryStorageObjectId}.svg`,
+      data: Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><circle cx="32" cy="32" r="24" fill="#f97316"/></svg>',
+        "utf8"
+      )
     }
   ];
   return createZipArchive(
@@ -378,6 +401,22 @@ describe("Penpot component instance migration", () => {
       `penpot-component-${rectangleComponentId}`,
       `penpot-component-${circleComponentId}`
     ]);
+    expect(imported.importedAssets).toEqual([
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          assetId: `penpot-asset-${libraryMediaId}`,
+          name: "circle-pattern.svg",
+          mimeType: "image/svg+xml"
+        })
+      })
+    ]);
+    expect(
+      JSON.stringify(
+        imported.file.components?.find(
+          (component) => component.id === `penpot-component-${circleComponentId}`
+        )
+      )
+    ).toContain(`penpot-asset-${libraryMediaId}`);
 
     const main = imported.file.pages[0].children.find(
       (node) => node.id === `penpot-${outerMainId}`
