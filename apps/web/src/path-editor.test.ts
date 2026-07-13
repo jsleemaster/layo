@@ -10,11 +10,20 @@ import {
   moveEditablePathAnchor,
   moveEditablePathControl,
   parseEditablePath,
+  pathHasOnlyClosedSubpaths,
   separateEditablePathAtAnchor,
   serializeEditablePath
 } from "./path-editor";
 
 describe("editable path geometry", () => {
+  test("requires every subpath to close before enabling area-based stroke alignment", () => {
+    expect(pathHasOnlyClosedSubpaths("M0 0 H100 V100 H0 Z")).toBe(true);
+    expect(pathHasOnlyClosedSubpaths("M0 0 H100 V100 H0 Z M25 25 H75 V75 H25 Z")).toBe(true);
+    expect(pathHasOnlyClosedSubpaths("M0 0 H100 V100 H0 Z M25 25 H75")).toBe(false);
+    expect(pathHasOnlyClosedSubpaths("M0 0 C25 100 75 100 100 0")).toBe(false);
+    expect(pathHasOnlyClosedSubpaths("not-a-path")).toBe(false);
+  });
+
   test("normalizes M/L/H/V/C/Q/Z commands into editable absolute geometry", () => {
     const path = parseEditablePath(
       "M0 0 H100 V50 L25 75 C30 80 40 90 50 100 Q60 110 70 120 Z"
