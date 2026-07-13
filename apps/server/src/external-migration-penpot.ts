@@ -4,7 +4,7 @@ import type {
   ExternalMigrationImportResult,
   ExternalMigrationReviewOptions
 } from './external-migration.js';
-import type { DesignFile, DesignNode, ImageFitMode } from './storage.js';
+import type { DesignFile, DesignNode, ImageFitMode, NodePaintGradient, NodeStroke } from './storage.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -420,13 +420,15 @@ function mapPenpotShape(
     y: roundGeometry(shape.bounds.y - (parentBounds?.y ?? 0)),
     rotation: finiteNumber(valueFor(shape.json, 'rotation'), 0)
   };
-  const renderedImageAsset = svgRawAsset ?? imageAsset;
-  const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame';
+  const renderedImageAsset =
+    svgRawAsset ?? (shape.type === 'image' ? imageAsset : fillImageAsset);
+  const mapsAsImage = Boolean(renderedImageAsset) && shape.type !== 'frame' && shape.type !== 'group';
   const solidFillPaint = mapsAsImage ? null : penpotSolidFillPaint(shape.json);
   const fill = mapsAsImage
     ? '#f3f4f6'
     : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
-  const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
+  const strokeStack = mapsAsImage ? [] : penpotStrokeStack(shape.json, state.assetsById);
+  const stroke = strokeStack[0]?.color ?? (mapsAsImage ? null : penpotStrokeColor(shape.json));
   const imagePaintRecord = fillImageRecord ?? strokeImageRecord;
   const imagePaintOpacity = imagePaintRecord
     ? finiteNumber(valueFor(imagePaintRecord, 'fillOpacity', 'fill-opacity', 'strokeOpacity', 'stroke-opacity', 'opacity'), 1)
@@ -452,7 +454,8 @@ function mapPenpotShape(
     style: {
       fill,
       stroke,
-      stroke_width: stroke ? penpotStrokeWidth(shape.json) : 0,
+      stroke_width: strokeStack[0]?.width ?? (stroke ? penpotStrokeWidth(shape.json) : 0),
+      ...(strokeStack.length > 0 ? { strokes: strokeStack } : {}),
       opacity
     },
     content: mapsAsImage && renderedImageAsset
@@ -477,6 +480,9 @@ function mapPenpotShape(
   if (renderedImageAsset && shape.type !== 'frame') {
     state.usedAssets.set(renderedImageAsset.metadata.assetId, renderedImageAsset);
   }
+  if (strokeImageAsset && strokeStack.some((stroke) => stroke.paint?.type === "image")) {
+    state.usedAssets.set(strokeImageAsset.metadata.assetId, strokeImageAsset);
+  }
 
   if (shape.type === 'frame' || shape.type === 'group') {
     const nextVisiting = new Set(visiting);
@@ -495,13 +501,11 @@ function mapPenpotShape(
     if (fillImageAsset && fillImageRecord) {
       frameImageNodes.push(frameFillImageNode(shape, fillImageAsset, fillImageRecord));
     }
-    if (strokeImageAsset && strokeImageRecord) {
-      frameImageNodes.push(frameStrokeImageNode(shape, strokeImageAsset, strokeImageRecord));
-    }
+
     if (frameImageNodes.length > 0) {
       mapped.children = [...frameImageNodes, ...mappedChildren];
       state.mappedNodeCount += frameImageNodes.length;
-      for (const asset of [fillImageAsset, strokeImageAsset]) {
+      for (const asset of [fillImageAsset]) {
         if (asset) {
           state.usedAssets.set(asset.metadata.assetId, asset);
         }
@@ -1205,6 +1209,77 @@ function clampOpacity(value: number): number {
 
 function roundOpacity(value: number): number {
   return Math.round(clampOpacity(value) * 1000) / 1000;
+}
+
+function penpotGradientDefinition(record: JsonRecord): NodePaintGradient | null {
+  const gradient = asRecord(valueFor(record, 'strokeColorGradient', 'stroke-color-gradient', 'gradient'));
+  if (!gradient) return null;
+  const stops = recordsFor(valueFor(gradient, 'stops')).flatMap((stop) => {
+    const color = colorValue(valueFor(stop, 'color', 'strokeColor', 'stroke-color', 'fillColor', 'fill-color'));
+    if (!color) return [];
+    return [{
+      color,
+      opacity: clampOpacity(finiteNumber(valueFor(stop, 'opacity', 'strokeOpacity', 'stroke-opacity'), 1)),
+      offset: clampOpacity(finiteNumber(valueFor(stop, 'offset'), 0))
+    }];
+  });
+  if (stops.length < 2) return null;
+  const point = (value: unknown) => {
+    const record = asRecord(value);
+    return record
+      ? { x: finiteNumber(valueFor(record, 'x'), 0), y: finiteNumber(valueFor(record, 'y'), 0) }
+      : undefined;
+  };
+  const type = stringValue(valueFor(gradient, 'type'));
+  const start = point(valueFor(gradient, 'start', 'startPoint', 'start-point'));
+  const end = point(valueFor(gradient, 'end', 'endPoint', 'end-point'));
+  const width = finiteNumber(valueFor(gradient, 'width'), Number.NaN);
+  return {
+    ...(type ? { type } : {}),
+    ...(start ? { start } : {}),
+    ...(end ? { end } : {}),
+    ...(Number.isFinite(width) && width >= 0 ? { width } : {}),
+    stops
+  };
+}
+
+function penpotStrokeStack(shape: JsonRecord, assetsById: Map<string, PenpotPackageAsset>): NodeStroke[] {
+  return recordsFor(valueFor(shape, 'strokes')).flatMap((record, index) => {
+    const solidColor = colorValue(valueFor(record, 'strokeColor', 'stroke-color', 'color'));
+    const gradient = penpotGradientDefinition(record);
+    const imageRecord = asRecord(valueFor(record, 'strokeImage', 'stroke-image'));
+    const imageMediaId = imageMediaIdForPaintRecord(imageRecord, 'strokeImage', 'stroke-image');
+    const imageAsset = imageMediaId ? assetsById.get(imageMediaId) : undefined;
+    const fallback = solidColor ?? penpotGradientStrokePaint(record)?.color ?? '#000000';
+    const alignment = (stringValue(valueFor(record, 'strokeAlignment', 'stroke-alignment')) ?? 'center').toLowerCase();
+    const position = alignment.includes('inner') || alignment.includes('inside')
+      ? 'inside'
+      : alignment.includes('outer') || alignment.includes('outside')
+        ? 'outside'
+        : 'center';
+    const styleValue = (stringValue(valueFor(record, 'strokeStyle', 'stroke-style')) ?? 'solid').toLowerCase();
+    const style = styleValue.includes('dot') ? 'dotted' : styleValue.includes('dash') ? 'dashed' : 'solid';
+    const paint = imageAsset
+      ? { type: 'image' as const, asset_id: imageAsset.metadata.assetId }
+      : gradient
+        ? { type: 'gradient' as const, gradient }
+        : { type: 'solid' as const, color: fallback };
+    return [{
+      id: `penpot-stroke-${index + 1}`,
+      color: fallback,
+      paint,
+      opacity: clampOpacity(finiteNumber(valueFor(record, 'strokeOpacity', 'stroke-opacity', 'opacity'), 1)),
+      width: Math.max(0, finiteNumber(valueFor(record, 'strokeWidth', 'stroke-width', 'width'), 1)),
+      position,
+      style,
+      visible: valueFor(record, 'hidden') !== true,
+      dasharray: recordsFor(valueFor(record, 'strokeDasharray', 'stroke-dasharray')).flatMap(() => []),
+      cap: 'butt',
+      join: 'miter',
+      start_marker: 'none',
+      end_marker: 'none'
+    } satisfies NodeStroke];
+  });
 }
 
 function penpotSolidStrokePaint(shape: JsonRecord): PenpotSolidFillPaint | null {
