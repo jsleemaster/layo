@@ -585,6 +585,21 @@ test("file panel sends active team member credentials for library publish and im
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
 
+  const listRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "GET" &&
+      url.pathname === "/libraries" &&
+      url.searchParams.has("fileId")
+    );
+  });
+  await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  const listed = await listRequest;
+  expect(listed.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
+
   const publicationRequest = page.waitForRequest(
     (request) =>
       request.method() === "POST" &&
