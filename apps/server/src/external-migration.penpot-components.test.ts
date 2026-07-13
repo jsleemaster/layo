@@ -1600,6 +1600,14 @@ describe("Penpot component instance migration", () => {
       });
     const waitForExit = (child: ChildProcessWithoutNullStreams) =>
       new Promise<void>((resolve, reject) => {
+        if (child.exitCode !== null) {
+          if (child.exitCode === 0) {
+            resolve();
+          } else {
+            reject(new Error(`publisher exited ${child.exitCode}`));
+          }
+          return;
+        }
         let stderr = "";
         child.stderr.on("data", (chunk) => {
           stderr += chunk.toString();
