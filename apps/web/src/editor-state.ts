@@ -5984,6 +5984,9 @@ function findComponentSourceStyleValue(
   if (field === "effect_shadow") {
     return node.style.effect_shadow ?? null;
   }
+  if (field === "strokes") {
+    return node.style.strokes ? JSON.stringify(node.style.strokes) : null;
+  }
   return node.style[field];
 }
 
