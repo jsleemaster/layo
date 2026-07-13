@@ -75,6 +75,7 @@ test("non-destructive boolean controls preserve operands through every operation
   await page.getByRole("button", { name: "불리언 빼기" }).click();
   await expect.poll(readOperation).toBe("difference");
 
+  await page.getByTestId("inspector-stroke-end-marker").evaluate((element) => (element as HTMLElement).blur());
   await page.keyboard.press("Control+z");
   await expect.poll(readOperation).toBe("union");
   await page.keyboard.press("Control+Shift+z");
