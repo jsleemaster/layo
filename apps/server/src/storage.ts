@@ -322,11 +322,12 @@ export interface ComponentInstance {
   detached: boolean;
 }
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "fills" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
   "fill",
+  "fills",
   "stroke",
   "stroke_width",
   "opacity",
@@ -339,6 +340,7 @@ const componentInstanceGeometryOverrideFields: ComponentInstanceGeometryOverride
   "height"
 ];
 const nullComponentOverrideValue = "__layo_component_override_null__";
+const jsonComponentOverridePrefix = "__layo_component_override_json__:";
 
 export type CodeComponentMappingImportMode = "named" | "default";
 export type CodeComponentMappingPropType = "string";
@@ -2638,8 +2640,23 @@ export class FileStorage {
       throw new Error(`node not found: ${nodeId}`);
     }
 
-    node.style = { ...node.style, fill, fill_token: null, fill_style: null };
-    syncComponentInstanceStyleOverride(document, nodeId, "fill", fill);
+    const fills = node.style.fills
+      ? [{
+          id: node.style.fills[0]?.id ?? "fill-1",
+          color: fill,
+          paint: { type: "solid" as const, color: fill },
+          opacity: 1,
+          visible: true,
+          blend_mode: "normal" as const
+        }]
+      : undefined;
+    node.style = { ...node.style, fill, ...(fills ? { fills } : {}), fill_token: null, fill_style: null };
+    syncComponentInstanceStyleOverrides(
+      document,
+      nodeId,
+      { fill, ...(fills ? { fills } : {}) },
+      fills ? ["fill", "fills"] : ["fill"]
+    );
     relayoutDesignFile(document);
     await this.writeFile(fileId, document);
     await this.recordFileEditForAutoVersion(fileId, document);
@@ -4975,7 +4992,7 @@ function syncComponentInstanceStyleOverride(
   document: DesignFile,
   nodeId: string,
   field: ComponentInstanceStyleOverrideField,
-  value: string | number | null
+  value: DesignNode["style"][ComponentInstanceStyleOverrideField]
 ): void {
   syncComponentInstanceStyleOverrides(document, nodeId, { [field]: value } as Partial<DesignNode["style"]>, [field]);
 }
@@ -5009,7 +5026,7 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = style[field] as string | number | null;
+    const value = style[field];
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -5077,8 +5094,25 @@ function syncComponentInstanceGeometryOverrides(document: DesignFile, nodeId: st
   };
 }
 
-function serializeComponentOverrideValue(value: string | number | null): string {
-  return value === null ? nullComponentOverrideValue : String(value);
+function serializeComponentOverrideValue(value: unknown): string {
+  if (value === null) {
+    return nullComponentOverrideValue;
+  }
+  if (typeof value === "object") {
+    return `${jsonComponentOverridePrefix}${JSON.stringify(value)}`;
+  }
+  return String(value);
+}
+
+function deserializeComponentOverrideValue(value: string): unknown {
+  if (!value.startsWith(jsonComponentOverridePrefix)) {
+    return value;
+  }
+  try {
+    return JSON.parse(value.slice(jsonComponentOverridePrefix.length));
+  } catch {
+    return undefined;
+  }
 }
 
 function findComponentInstanceOwner(
@@ -5157,7 +5191,7 @@ function findComponentSourceStyleValue(
   instance: DesignNode,
   sourceNodeId: string,
   field: ComponentInstanceStyleOverrideField
-): string | number | null | undefined {
+): DesignNode["style"][ComponentInstanceStyleOverrideField] | undefined {
   const sourceNode = componentSourceNodeForInstance(document, instance);
   if (!sourceNode) {
     return undefined;
@@ -5267,6 +5301,11 @@ function applyComponentInstanceOverrides(instance: DesignNode, sourceRootNodeId:
       target.content = { ...target.content, value: override.value };
     } else if (override.field === "fill") {
       target.style = { ...target.style, fill: override.value, fill_token: null, fill_style: null };
+    } else if (override.field === "fills") {
+      const fills = deserializeComponentOverrideValue(override.value);
+      if (Array.isArray(fills)) {
+        target.style = { ...target.style, fills: fills as NodeFill[] };
+      }
     } else if (override.field === "stroke") {
       target.style = {
         ...target.style,
