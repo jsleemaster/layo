@@ -4799,3 +4799,52 @@ describe("path flatten editor history", () => {
     });
   });
 });
+
+
+describe("ordered fill stack history", () => {
+  test("records a secondary fill-only edit with undo and redo", () => {
+    const document = sampleDocument();
+    const text = findNodeById(document, "text-1");
+    if (!text) throw new Error("text fixture missing");
+    text.style.fills = [
+      {
+        id: "primary",
+        color: "#111827",
+        paint: { type: "solid", color: "#111827" },
+        opacity: 1,
+        visible: true,
+        blend_mode: "normal"
+      },
+      {
+        id: "secondary",
+        color: "#ffffff",
+        paint: { type: "solid", color: "#ffffff" },
+        opacity: 1,
+        visible: true,
+        blend_mode: "normal"
+      }
+    ];
+
+    const selected = setSelection(createEditorState(document), "text-1");
+    const nextStyle = structuredClone(text.style);
+    if (!nextStyle.fills) throw new Error("fill fixture missing");
+    nextStyle.fills[1] = {
+      ...nextStyle.fills[1],
+      paint: { type: "image", asset_id: "asset-secondary" }
+    };
+
+    const changed = setSelectedNodeStyle(selected, nextStyle);
+    expect(findNodeById(changed.document, "text-1")?.style.fills?.[1].paint).toEqual({
+      type: "image",
+      asset_id: "asset-secondary"
+    });
+    expect(findNodeById(undo(changed).document, "text-1")?.style.fills?.[1].paint).toEqual({
+      type: "solid",
+      color: "#ffffff"
+    });
+    expect(findNodeById(redo(undo(changed)).document, "text-1")?.style.fills?.[1].paint).toEqual({
+      type: "image",
+      asset_id: "asset-secondary"
+    });
+  });
+});
