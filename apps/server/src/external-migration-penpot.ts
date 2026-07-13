@@ -428,7 +428,7 @@ function mapPenpotShape(
     ? '#f3f4f6'
     : solidFillPaint?.color ?? penpotFillColor(shape.json) ?? defaultFillForPenpotType(shape.type);
   const strokeStack = mapsAsImage ? [] : penpotStrokeStack(shape.json, state.assetsById);
-  const stroke = strokeStack[0]?.color ?? (mapsAsImage ? null : penpotStrokeColor(shape.json));
+  const stroke = mapsAsImage ? null : penpotStrokeColor(shape.json);
   const imagePaintRecord = fillImageRecord ?? strokeImageRecord;
   const imagePaintOpacity = imagePaintRecord
     ? finiteNumber(valueFor(imagePaintRecord, 'fillOpacity', 'fill-opacity', 'strokeOpacity', 'stroke-opacity', 'opacity'), 1)
@@ -454,7 +454,7 @@ function mapPenpotShape(
     style: {
       fill,
       stroke,
-      stroke_width: strokeStack[0]?.width ?? (stroke ? penpotStrokeWidth(shape.json) : 0),
+      stroke_width: stroke ? penpotStrokeWidth(shape.json) : 0,
       ...(strokeStack.length > 0 ? { strokes: strokeStack } : {}),
       opacity
     },
@@ -1247,8 +1247,7 @@ function penpotStrokeStack(shape: JsonRecord, assetsById: Map<string, PenpotPack
   return recordsFor(valueFor(shape, 'strokes')).flatMap((record, index) => {
     const solidColor = colorValue(valueFor(record, 'strokeColor', 'stroke-color', 'color'));
     const gradient = penpotGradientDefinition(record);
-    const imageRecord = asRecord(valueFor(record, 'strokeImage', 'stroke-image'));
-    const imageMediaId = imageMediaIdForPaintRecord(imageRecord, 'strokeImage', 'stroke-image');
+    const imageMediaId = imageMediaIdForPaintRecord(record, 'strokeImage', 'stroke-image');
     const imageAsset = imageMediaId ? assetsById.get(imageMediaId) : undefined;
     const fallback = solidColor ?? penpotGradientStrokePaint(record)?.color ?? '#000000';
     const alignment = (stringValue(valueFor(record, 'strokeAlignment', 'stroke-alignment')) ?? 'center').toLowerCase();
