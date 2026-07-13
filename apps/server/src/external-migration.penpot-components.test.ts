@@ -103,6 +103,106 @@ function componentArchive() {
   ]);
 }
 
+const variantContainerId = "88888888-8888-8888-8888-888888888888";
+const smallComponentId = "99999999-9999-9999-9999-999999999991";
+const largeComponentId = "99999999-9999-9999-9999-999999999992";
+const smallMainId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1";
+const largeMainId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2";
+const variantCopyId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+
+function variantArchive() {
+  const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
+  const shape = (
+    id: string,
+    name: string,
+    x: number,
+    width: number,
+    component: string,
+    variantName: string,
+    extra: Record<string, unknown> = {}
+  ) => ({
+    id,
+    name,
+    type: "frame",
+    x,
+    y: 96,
+    width,
+    height: 56,
+    "component-root": true,
+    "component-id": component,
+    "component-file": fileId,
+    "variant-id": variantContainerId,
+    "variant-name": variantName,
+    fills: [{ fillColor: "#2563eb", fillOpacity: 1 }],
+    ...extra
+  });
+  return createZipArchive([
+    {
+      path: "manifest.json",
+      data: json({
+        type: "penpot/export-files",
+        version: 1,
+        files: [{ id: fileId, name: "Variant migration", features: ["components/v2"] }]
+      })
+    },
+    { path: `files/${fileId}.json`, data: json({ id: fileId, name: "Variant migration" }) },
+    {
+      path: `files/${fileId}/pages/${pageId}.json`,
+      data: json({ id: pageId, name: "Variants", index: 0, objects: {} })
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${variantContainerId}.json`,
+      data: json({
+        id: variantContainerId,
+        name: "Button",
+        type: "frame",
+        x: 48,
+        y: 48,
+        width: 520,
+        height: 152,
+        "is-variant-container": true,
+        shapes: [smallMainId, largeMainId]
+      })
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${smallMainId}.json`,
+      data: json(shape(
+        smallMainId,
+        "Button / Small / Default",
+        80,
+        140,
+        smallComponentId,
+        "Size=Small, State=Default",
+        { "main-instance": true }
+      ))
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${largeMainId}.json`,
+      data: json(shape(
+        largeMainId,
+        "Button / Large / Default",
+        280,
+        220,
+        largeComponentId,
+        "Size=Large, State=Default",
+        { "main-instance": true }
+      ))
+    },
+    {
+      path: `files/${fileId}/pages/${pageId}/${variantCopyId}.json`,
+      data: json(shape(
+        variantCopyId,
+        "Button large copy",
+        640,
+        220,
+        largeComponentId,
+        "Size=Large, State=Default",
+        { "shape-ref": largeMainId }
+      ))
+    }
+  ]);
+}
+
 describe("Penpot component instance migration", () => {
   test("reviews readable main and copy relations as structurally importable", () => {
     const review = reviewExternalMigrationArchive(componentArchive(), {
@@ -169,5 +269,56 @@ describe("Penpot component instance migration", () => {
         content: expect.objectContaining({ value: "Continue" })
       })
     ]);
+
+  test("groups Penpot variant mains and preserves the selected copy combination", () => {
+    const imported = importExternalMigrationArchive(variantArchive(), {
+      fileName: "variants.penpot",
+      fileId: "variant-import"
+    });
+
+    expect(imported.file.components).toEqual([
+      expect.objectContaining({
+        id: `penpot-component-${variantContainerId}`,
+        name: "Button",
+        source_node: expect.objectContaining({ id: `penpot-${smallMainId}`, kind: "component" }),
+        variants: [
+          expect.objectContaining({
+            id: `penpot-variant-${smallComponentId}`,
+            name: "Size=Small, State=Default",
+            properties: [
+              { name: "Size", value: "Small", type: "select" },
+              { name: "State", value: "Default", type: "select" }
+            ]
+          }),
+          expect.objectContaining({
+            id: `penpot-variant-${largeComponentId}`,
+            name: "Size=Large, State=Default",
+            properties: [
+              { name: "Size", value: "Large", type: "select" },
+              { name: "State", value: "Default", type: "select" }
+            ],
+            source_node: expect.objectContaining({ id: `penpot-${largeMainId}`, kind: "component" })
+          })
+        ]
+      })
+    ]);
+
+    const container = imported.file.pages[0].children.find(
+      (node) => node.id === `penpot-${variantContainerId}`
+    );
+    const copy = imported.file.pages[0].children.find(
+      (node) => node.id === `penpot-${variantCopyId}`
+    );
+    expect(container?.children.map((node) => node.kind)).toEqual(["component", "component"]);
+    expect(copy).toMatchObject({
+      kind: "component_instance",
+      component_instance: {
+        definition_id: `penpot-component-${variantContainerId}`,
+        variant_id: `penpot-variant-${largeComponentId}`,
+        overrides: [],
+        detached: false
+      }
+    });
+  });
   });
 });
