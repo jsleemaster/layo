@@ -93,11 +93,11 @@ function componentArchive(options: { copyShapeRef?: string } = {}) {
         width: 116,
         height: 24,
         "shape-ref": mainLabelId,
-        touched: ["text-content-group"],
+        touched: ["text-content-group", "fill-group"],
         content: "Continue",
         fontSize: 16,
         fontFamily: "Inter",
-        fills: [{ fillColor: "#ffffff", fillOpacity: 1 }]
+        fills: [{ fillColor: "#f97316", fillOpacity: 0.8 }]
       })
     }
   ]);
@@ -253,20 +253,36 @@ describe("Penpot component instance migration", () => {
         definition_id: `penpot-component-${componentId}`,
         variant_id: "default",
         detached: false,
-        overrides: [
+        overrides: expect.arrayContaining([
           {
             node_id: `penpot-${mainLabelId}`,
             field: "text",
             value: "Continue"
-          }
-        ]
+          },
+          {
+            node_id: `penpot-${mainLabelId}`,
+            field: "fill",
+            value: "#f97316"
+          },
+          expect.objectContaining({
+            node_id: `penpot-${mainLabelId}`,
+            field: "fills",
+            value: expect.stringContaining("#f97316")
+          })
+        ])
       }
     });
     expect(copy?.children).toEqual([
       expect.objectContaining({
         id: `penpot-${copyId}__penpot-${mainLabelId}`,
         kind: "text",
-        content: expect.objectContaining({ value: "Continue" })
+        content: expect.objectContaining({ value: "Continue" }),
+        style: expect.objectContaining({
+          fill: "#f97316",
+          fills: [
+            expect.objectContaining({ color: "#f97316", opacity: 0.8 })
+          ]
+        })
       })
     ]);
   });
