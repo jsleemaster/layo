@@ -509,6 +509,40 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         )
       : undefined;
 
+  const authorizeLibraryRead = async (fileId: string) => {
+    const member = authenticateLibraryMember();
+    if (member) {
+      authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
+    }
+  };
+
+  const listAuthorizedLibraryRecords = async <T extends { fileId: string }>(
+    fileId: string | undefined,
+    list: (fileId?: string) => Promise<T[]>
+  ): Promise<T[]> => {
+    const member = authenticateLibraryMember();
+    if (fileId) {
+      if (member) {
+        authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
+      }
+      return list(fileId);
+    }
+
+    const records = await list();
+    if (!member) {
+      return records;
+    }
+    const visible = await Promise.all(
+      records.map(async (record) => ({
+        record,
+        teamId: await storage.getTeamIdForFile(record.fileId)
+      }))
+    );
+    return visible.flatMap(({ record, teamId }) =>
+      teamId && member.teamIds.includes(teamId) ? [record] : []
+    );
+  };
+
   const authorizeLibraryWrite = async (fileId: string) => {
     const member = authenticateLibraryMember();
     if (member) {
@@ -979,20 +1013,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         libraryId: z.string().describe("Shared library id returned by list_library_registry")
       }
     },
-    async ({ fileId, libraryId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              review: await storage.reviewLibraryRegistryItem(fileId, libraryId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId }) => {
+      await authorizeLibraryRead(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                review: await storage.reviewLibraryRegistryItem(fileId, libraryId)
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1006,20 +1043,23 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         libraryId: z.string().describe("Shared library id returned by list_library_registry")
       }
     },
-    async ({ fileId, libraryId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              review: await storage.reviewLibraryRegistryTokens(fileId, libraryId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, libraryId }) => {
+      await authorizeLibraryRead(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                review: await storage.reviewLibraryRegistryTokens(fileId, libraryId)
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1101,7 +1141,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           type: "text",
           text: JSON.stringify(
             {
-              subscriptions: await storage.listLibraryRegistryTokenSubscriptions(fileId)
+              subscriptions: await listAuthorizedLibraryRecords(fileId, (targetFileId) =>
+                storage.listLibraryRegistryTokenSubscriptions(targetFileId)
+              )
             },
             null,
             2
@@ -1126,7 +1168,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           type: "text",
           text: JSON.stringify(
             {
-              updates: await storage.listLibraryRegistryTokenUpdates(fileId)
+              updates: await listAuthorizedLibraryRecords(fileId, (targetFileId) =>
+                storage.listLibraryRegistryTokenUpdates(targetFileId)
+              )
             },
             null,
             2
@@ -1151,7 +1195,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           type: "text",
           text: JSON.stringify(
             {
-              subscriptions: await storage.listLibraryRegistrySubscriptions(fileId)
+              subscriptions: await listAuthorizedLibraryRecords(fileId, (targetFileId) =>
+                storage.listLibraryRegistrySubscriptions(targetFileId)
+              )
             },
             null,
             2
@@ -1176,7 +1222,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           type: "text",
           text: JSON.stringify(
             {
-              updates: await storage.listLibraryRegistryUpdates(fileId)
+              updates: await listAuthorizedLibraryRecords(fileId, (targetFileId) =>
+                storage.listLibraryRegistryUpdates(targetFileId)
+              )
             },
             null,
             2
