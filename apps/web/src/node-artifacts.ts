@@ -1317,6 +1317,16 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
   const assetAttribute = node.content.type === "image" ? ` data-image-asset-id="${escapeSvgText(node.content.asset_id)}"` : "";
   const pathData = pathDataForNode(node);
   const strokes = visibleStrokesForNode(node);
+  if (!node.style.fills && !node.style.strokes) {
+    const strokeAttribute = svgStrokeAttributeForNode(node);
+    if (pathData) {
+      return `<path ${svgNodeAttributes(node)}${assetAttribute} d="${escapeSvgText(pathData)}" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${svgFillRuleAttributeForNode(node)}${svgStrokePresentationAttributes(node)}${opacity}${filter} />`;
+    }
+    if (nodeClipUsesEllipseShape(node)) {
+      return `<ellipse ${svgNodeAttributes(node)}${assetAttribute} ${svgEllipseAttributes(width, height)} ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+    }
+    return `<rect ${svgNodeAttributes(node)}${assetAttribute} x="0" y="0" width="${width}" height="${height}" rx="0" ${fillAttribute} ${strokeAttribute} stroke-width="${Math.max(0, Math.round(node.style.stroke_width))}"${opacity}${filter} />`;
+  }
   const shapeForFill = (paint: string, metadata = "", paintOpacity = opacity) => {
     const common = `${metadata} fill="${paint}" stroke="none"${paintOpacity}${filter}`;
     if (pathData) {
@@ -1337,7 +1347,7 @@ function svgSelfForNode(node: RendererNode, options: NodeArtifactOptions) {
       )
     : [shapeForFill(fillAttribute.replace(/^fill="|"$/g, ""))];
 
-  const strokeShapes = strokes.map((stroke) => {
+  const strokeShapes = (node.style.strokes ? strokes : []).map((stroke) => {
     const strokeNode = nodeWithStroke(node, stroke);
     const effectivePosition = effectiveStrokePositionForNode(node, stroke);
     const closedPathData = closedPathDataForStrokeAlignment(node);
