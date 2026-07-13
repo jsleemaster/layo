@@ -738,6 +738,64 @@ describe("MCP AI editing workflow", () => {
     ]);
   });
 
+  test("blocks viewer MCP publication before writing the team library registry", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "viewer-user",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "viewer-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "viewer-user",
+        memberToken: "viewer-token"
+      }
+    });
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "viewer-library-project",
+        name: "Viewer Library Project",
+        documentId: "viewer-library-file",
+        documentName: "Viewer Library File"
+      }
+    });
+    await client.callTool({
+      name: "set_project_sharing",
+      arguments: {
+        projectId: "viewer-library-project",
+        mode: "team",
+        teamId: "team-alpha"
+      }
+    });
+
+    const blocked = await client.callTool({
+      name: "publish_library_registry_item",
+      arguments: {
+        fileId: "viewer-library-file",
+        libraryId: "viewer-kit",
+        name: "Viewer Kit"
+      }
+    });
+    expect(blocked).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/viewer cannot publish/) })]
+    });
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_library_registry",
+        arguments: {}
+      })
+    );
+    expect(listed.libraries).toEqual([]);
+  });
+
   test("scopes registry library MCP list and imports to matching project teams", async () => {
     const client = await connectMcpClient();
 
@@ -1961,10 +2019,24 @@ describe("MCP AI editing workflow", () => {
   });
 });
 
-async function connectMcpClient() {
+async function connectMcpClient(options?: {
+  libraryRegistryAuth?: {
+    members: Array<{
+      userId: string;
+      role: "owner" | "editor" | "viewer";
+      teamIds: string[];
+      token?: string;
+      tokenHash?: string;
+    }>;
+  };
+  libraryRegistryPrincipal?: {
+    userId: string;
+    memberToken: string;
+  };
+}) {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-mcp-"));
   activeClient = new Client({ name: "layo-test", version: "1.0.0" });
-  activeServer = createMcpServer(new FileStorage(tempRoot));
+  activeServer = createMcpServer(new FileStorage(tempRoot), options);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   await Promise.all([
