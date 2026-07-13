@@ -6139,7 +6139,7 @@ test("canvas grid header reorder supports spanned grid items", async ({ page }) 
   }
   await page.mouse.move(firstColumnBox.x + firstColumnBox.width / 2, firstColumnBox.y + firstColumnBox.height / 2);
   await page.mouse.down();
-  await page.mouse.move(thirdColumnBox.x + thirdColumnBox.width / 2, thirdColumnBox.y + thirdColumnBox.height / 2);
+  await page.mouse.move(\n    thirdColumnBox.x + thirdColumnBox.width / 2,\n    thirdColumnBox.y + thirdColumnBox.height / 2,\n    { steps: 5 }\n  );
   await page.mouse.up();
 
   await expect(page.getByTestId("inspector-layout-grid-column-tracks")).toHaveValue("80px 1fr 120px");
