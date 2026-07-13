@@ -41,10 +41,18 @@ interface PenpotPackageAsset extends ExternalMigrationImportedAsset {
   naturalHeight?: number;
 }
 
+interface PenpotPackageFile {
+  id: string;
+  name: string;
+  path: string;
+  pages: PenpotPage[];
+}
+
 interface PenpotPackage {
   fileId: string;
   fileName: string;
   documentCandidates: ExternalMigrationDocumentCandidate[];
+  files: PenpotPackageFile[];
   pages: PenpotPage[];
   relationPages: PenpotPage[];
   mediaById: Map<string, PenpotPackageAsset>;
@@ -181,6 +189,39 @@ export function importPenpotZipEntries(
     pages: relationPages
   };
   applyPenpotComponentRelations(file, penpotPackage.relationPages, state);
+  const relationComponents = file.components ?? [];
+  const importedLibraries = penpotPackage.files
+    .filter((packagedFile) => packagedFile.id !== penpotPackage.fileId)
+    .map((packagedFile) => {
+      const pageIds = new Set(packagedFile.pages.map((page) => page.id));
+      const ownedDefinitionIds = new Set(
+        packagedFile.pages.flatMap((page) =>
+          [...page.shapesById.values()].flatMap((shape) => {
+            const isMain = valueFor(shape.json, 'mainInstance', 'main-instance') === true;
+            const isRoot = valueFor(shape.json, 'componentRoot', 'component-root') === true;
+            const componentFile = stringValue(valueFor(shape.json, 'componentFile', 'component-file'));
+            const componentId = stringValue(valueFor(shape.json, 'componentId', 'component-id'));
+            const groupId = stringValue(valueFor(shape.json, 'variantId', 'variant-id')) ?? componentId;
+            return isMain && isRoot && componentFile === packagedFile.id && groupId
+              ? [`penpot-component-${storageIdSegment(groupId)}`]
+              : [];
+          })
+        )
+      );
+      return {
+        sourceFileId: packagedFile.id,
+        file: {
+          id: `penpot-library-${storageIdSegment(packagedFile.id)}`,
+          name: packagedFile.name,
+          pages: file.pages
+            .filter((page) => pageIds.has(page.id.replace(/^penpot-/, '')))
+            .map((page) => structuredClone(page)),
+          components: relationComponents
+            .filter((component) => ownedDefinitionIds.has(component.id))
+            .map((component) => structuredClone(component))
+        }
+      };
+    });
   file.pages = file.pages.filter((page) =>
     primaryPageIds.has(page.id.replace(/^penpot-/, ''))
   );
@@ -189,6 +230,7 @@ export function importPenpotZipEntries(
     source: 'penpot',
     sourceLabel: 'Penpot',
     file,
+    importedLibraries,
     importedAssets: [...state.usedAssets.values()].map((asset) => ({ metadata: asset.metadata, data: asset.data })),
     mappedNodeCount: state.mappedNodeCount,
     skippedNodeCount: state.skippedNodeCount,
@@ -347,6 +389,7 @@ function readPenpotPackage(
     fileId,
     fileName: stringValue(fileMetadata?.name) ?? stringValue(fileJson.name) ?? fileName,
     documentCandidates,
+    files: packagedFiles,
     pages,
     relationPages,
     mediaById,
