@@ -14174,12 +14174,18 @@ export function App() {
         libraryId
       );
       if (!review.canUpdate) {
-        const affectedInstanceCount = review.deletedComponents.reduce(
-          (total, component) => total + component.affectedInstanceIds.length,
-          0
-        );
-        const message =
-          `업데이트 차단 · 사용 중 컴포넌트 삭제 ${review.deletedComponents.length}개 · 영향 인스턴스 ${affectedInstanceCount}개`;
+        const conflictAffectedInstanceCount = new Set(
+          review.conflictedComponents.flatMap((component) => component.affectedInstanceIds)
+        ).size;
+        const missingOverrideTargetCount = new Set(
+          review.conflictedComponents.flatMap((component) => component.missingOverrideNodeIds)
+        ).size;
+        const deletedAffectedInstanceCount = new Set(
+          review.deletedComponents.flatMap((component) => component.affectedInstanceIds)
+        ).size;
+        const message = review.conflictedComponents.length > 0
+          ? `업데이트 차단 · 호환되지 않는 로컬 오버라이드 ${review.conflictedComponents.length}개 · 영향 인스턴스 ${conflictAffectedInstanceCount}개 · 누락 대상 ${missingOverrideTargetCount}개`
+          : `업데이트 차단 · 사용 중 컴포넌트 삭제 ${review.deletedComponents.length}개 · 영향 인스턴스 ${deletedAffectedInstanceCount}개`;
         setLibraryRegistryStatus(message);
         setProjectStatus(message);
         return;
