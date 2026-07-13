@@ -2,6 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
+import { inspectCanvas, validateDocument } from "./agent-control";
+import { exportDesignToCode } from "./code-export";
 import { createZipArchive } from "./file-archive";
 import { importExternalMigrationArchive, reviewExternalMigrationArchive } from "./external-migration";
 import { FileStorage } from "./storage";
@@ -410,6 +412,40 @@ describe("Penpot component instance migration", () => {
           value: `penpot-component-${circleComponentId}`
         }
       ])
+    );
+
+    const inspection = inspectCanvas(imported.file);
+    expect(inspection.validation).toMatchObject({ ok: true, issueCount: 0 });
+    expect(inspection.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: `penpot-${outerCopySlotId}`,
+          componentDefinitionId: `penpot-component-${circleComponentId}`
+        })
+      ])
+    );
+    expect(validateDocument(imported.file)).toMatchObject({ ok: true, issueCount: 0 });
+
+    const handoff = exportDesignToCode(imported.file);
+    const exportedCopy = handoff.elements.find(
+      (element) => element.id === `penpot-${outerCopyId}`
+    );
+    expect(exportedCopy?.structure.componentRef).toEqual(
+      expect.objectContaining({
+        definitionId: `penpot-component-${outerComponentId}`,
+        overrides: expect.arrayContaining([
+          {
+            nodeId: `penpot-${outerMainSlotId}`,
+            field: "component_swap",
+            value: `penpot-component-${circleComponentId}`
+          }
+        ])
+      })
+    );
+    expect(exportedCopy?.structure.children[0]?.componentRef).toEqual(
+      expect.objectContaining({
+        definitionId: `penpot-component-${circleComponentId}`
+      })
     );
   });
 
