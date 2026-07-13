@@ -774,6 +774,21 @@ function localVisualBoundsForNode(node: RendererNode): LocalVisualBounds {
     right: node.size.width,
     bottom: node.size.height
   };
+  const strokeExpansion = (node.style.strokes ?? [])
+    .filter((stroke) => stroke.visible && stroke.width > 0 && stroke.opacity > 0)
+    .reduce((largest, stroke) => {
+      const aligned = stroke.position === "outside" ? stroke.width : stroke.position === "center" ? stroke.width / 2 : 0;
+      const hasMarker = stroke.start_marker !== "none" || stroke.end_marker !== "none";
+      return Math.max(largest, aligned, hasMarker ? Math.max(4, stroke.width * 2.5) : 0);
+    }, 0);
+  if (strokeExpansion > 0) {
+    bounds = mergeLocalVisualBounds(bounds, {
+      left: -strokeExpansion,
+      top: -strokeExpansion,
+      right: node.size.width + strokeExpansion,
+      bottom: node.size.height + strokeExpansion
+    });
+  }
 
   for (const child of node.children) {
     const childBounds = localVisualBoundsForNode(child);
