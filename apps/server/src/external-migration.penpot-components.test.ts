@@ -1564,7 +1564,7 @@ describe("Penpot component instance migration", () => {
       }
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   test("recovers an interrupted library target write on storage restart", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-restart-"));
@@ -2020,5 +2020,5 @@ describe("Penpot component instance migration", () => {
         detached: false
       }
     });
-  }, 10_000);
+  });
 });
