@@ -646,7 +646,7 @@ function canvasRadialFillGradientForNode(node: RendererNode): CanvasRadialGradie
 }
 
 function canvasRadialStrokeGradientForNode(node: RendererNode): CanvasRadialGradient | null {
-  if (!node.style.stroke || node.style.stroke_width <= 0) {
+  if (node.style.strokes || !node.style.stroke || node.style.stroke_width <= 0) {
     return null;
   }
   return canvasRadialGradientForNode(node, "stroke");
@@ -4375,8 +4375,8 @@ function renderNode({
         data={node.content.path_data}
         fill={node.style.fill}
         fillRule={node.content.fill_rule}
-        stroke={node.style.stroke ?? undefined}
-        strokeWidth={node.style.stroke_width}
+        stroke={node.style.strokes ? undefined : node.style.stroke ?? undefined}
+        strokeWidth={node.style.strokes ? 0 : node.style.stroke_width}
         lineCap={node.style.stroke_cap ?? "butt"}
         lineJoin={node.style.stroke_join ?? "miter"}
         dash={node.style.stroke_dasharray ?? []}
@@ -4433,8 +4433,8 @@ function renderNode({
           width={node.size.width}
           height={node.size.height}
           fill={node.style.fill}
-          stroke={node.style.stroke ?? undefined}
-          strokeWidth={node.style.stroke_width}
+          stroke={node.style.strokes ? undefined : node.style.stroke ?? undefined}
+          strokeWidth={node.style.strokes ? 0 : node.style.stroke_width}
           opacity={node.style.opacity}
           cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
           {...canvasLinearGradientPropsForNode(node)}
@@ -4486,25 +4486,35 @@ function renderNode({
     node.kind === "path" && node.content.type === "path"
       ? openPathMarkerGeometry(node.content.path_data)
       : null;
-  const markerBodies =
-    markerGeometry && node.style.stroke && node.style.stroke_width > 0
-      ? [
-          <CanvasStrokeMarker
-            key="start-marker"
-            marker={node.style.stroke_start_marker ?? "none"}
-            point={markerGeometry.start}
-            stroke={node.style.stroke}
-            strokeWidth={node.style.stroke_width}
-          />,
-          <CanvasStrokeMarker
-            key="end-marker"
-            marker={node.style.stroke_end_marker ?? "none"}
-            point={markerGeometry.end}
-            stroke={node.style.stroke}
-            strokeWidth={node.style.stroke_width}
-          />
-        ]
+  const markerStrokes = node.style.strokes
+    ? node.style.strokes.filter((stroke) => stroke.visible && stroke.width > 0 && stroke.opacity > 0)
+    : node.style.stroke && node.style.stroke_width > 0
+      ? [{
+          id: "legacy",
+          color: node.style.stroke,
+          width: node.style.stroke_width,
+          start_marker: node.style.stroke_start_marker ?? "none",
+          end_marker: node.style.stroke_end_marker ?? "none"
+        }]
       : [];
+  const markerBodies = markerGeometry
+    ? markerStrokes.flatMap((stroke) => [
+        <CanvasStrokeMarker
+          key={`${stroke.id}-start-marker`}
+          marker={stroke.start_marker}
+          point={markerGeometry.start}
+          stroke={stroke.color}
+          strokeWidth={stroke.width}
+        />,
+        <CanvasStrokeMarker
+          key={`${stroke.id}-end-marker`}
+          marker={stroke.end_marker}
+          point={markerGeometry.end}
+          stroke={stroke.color}
+          strokeWidth={stroke.width}
+        />
+      ])
+    : [];
 
   return (
     <Group
