@@ -184,12 +184,13 @@ export type AgentCommand =
     }
   | { type: "detach_instance"; nodeId: string };
 
-type ComponentInstanceStyleOverrideField = "fill" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "fills" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 type GeometryPatch = Partial<{ x: number; y: number; width: number; height: number }>;
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
   "fill",
+  "fills",
   "stroke",
   "stroke_width",
   "strokes",
@@ -1193,7 +1194,23 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     }
     case "set_fill": {
       const node = requireNode(document, command.nodeId);
-      node.style = { ...node.style, fill: command.fill, fill_token: null, fill_style: null };
+      const fills = node.style.fills
+        ? [{
+            id: node.style.fills[0]?.id ?? "fill-1",
+            color: command.fill,
+            paint: { type: "solid" as const, color: command.fill },
+            opacity: 1,
+            visible: true,
+            blend_mode: "normal" as const
+          }]
+        : undefined;
+      node.style = {
+        ...node.style,
+        fill: command.fill,
+        ...(fills ? { fills } : {}),
+        fill_token: null,
+        fill_style: null
+      };
       return node.id;
     }
     case "set_node_style": {
@@ -2388,7 +2405,13 @@ export function normalizeAgentNodeStyle(style: DesignNode["style"]): DesignNode[
 
 function syncComponentInstanceOverridesForAgentCommand(document: DesignFile, command: AgentCommand): void {
   if (command.type === "set_fill") {
-    syncComponentInstanceStyleOverrides(document, command.nodeId, { fill: command.fill }, ["fill"]);
+    const node = findNodeById(document, command.nodeId);
+    syncComponentInstanceStyleOverrides(
+      document,
+      command.nodeId,
+      { fill: command.fill, ...(node?.style.fills ? { fills: node.style.fills } : {}) },
+      node?.style.fills ? ["fill", "fills"] : ["fill"]
+    );
   } else if (command.type === "set_node_style") {
     syncComponentInstanceStyleOverrides(document, command.nodeId, command.style);
   } else if (command.type === "set_effect_shadow_token") {
@@ -2472,7 +2495,12 @@ function syncComponentInstanceStyleOverrides(
     if (sourceValue === undefined) {
       continue;
     }
-    const value = field === "strokes" ? JSON.stringify(style.strokes ?? null) : style[field] as string | number | null;
+    const value =
+      field === "strokes"
+        ? JSON.stringify(style.strokes ?? null)
+        : field === "fills"
+          ? JSON.stringify(style.fills ?? null)
+          : style[field] as string | number | null;
     if (serializeComponentOverrideValue(value) !== serializeComponentOverrideValue(sourceValue)) {
       nextOverrides.push({
         node_id: owner.sourceNodeId,
@@ -2619,6 +2647,9 @@ function findComponentSourceStyleValue(
   }
   if (field === "strokes") {
     return node.style.strokes ? JSON.stringify(node.style.strokes) : null;
+  }
+  if (field === "fills") {
+    return node.style.fills ? JSON.stringify(node.style.fills) : null;
   }
   return node.style[field];
 }
