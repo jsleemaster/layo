@@ -1461,11 +1461,7 @@ export class FileStorage {
         }
         throw error;
       }
-      const mutationPath = pendingJournal.kind === "library-registry-publication"
-        ? this.libraryRegistryPath()
-        : this.filePathFor(pendingJournal.fileId);
-
-      await withStoragePathMutationLock(mutationPath, async () => {
+      const recoverJournal = async (): Promise<void> => {
         let journal: LibraryUpdateRecoveryJournal;
         try {
           journal = parseLibraryUpdateRecoveryJournal(
@@ -1508,7 +1504,13 @@ export class FileStorage {
         await restoreStoragePathSnapshots(original);
         await rm(journalPath, { force: true });
         await syncDirectory(path.dirname(journalPath));
-      });
+      };
+
+      if (pendingJournal.kind === "library-registry-publication") {
+        await withStoragePathMutationLock(this.libraryRegistryPath(), recoverJournal);
+      } else {
+        await recoverJournal();
+      }
     }
   }
 
