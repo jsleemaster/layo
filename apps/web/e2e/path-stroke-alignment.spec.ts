@@ -135,8 +135,8 @@ test("closed path alignment paints distinct canvas regions and normalizes open p
   const openPosition = page.getByTestId("inspector-stroke-0-position");
   await expect(openPosition).toHaveValue("center");
   await expect(openPosition).toHaveAttribute("data-effective-position", "center");
-  await expect(openPosition.locator('option[value="inside"]')).toBeDisabled();
-  await expect(openPosition.locator('option[value="outside"]')).toBeDisabled();
+  await expect(openPosition.locator('option[value="inside"]')).toHaveAttribute("disabled", "");
+  await expect(openPosition.locator('option[value="outside"]')).toHaveAttribute("disabled", "");
 });
 
 function stroke(id: string, color: string, position: "inside" | "center" | "outside") {
