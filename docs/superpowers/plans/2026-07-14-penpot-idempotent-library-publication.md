@@ -41,6 +41,8 @@ regression.
 - [x] Return the receipt across a new storage instance.
 - [x] Reject the same key with a different request fingerprint as HTTP 409.
 - [x] Pass `Idempotency-Key` from HTTP into storage.
+- [x] Expose the same retry key through the MCP publication tool.
+- [x] Reject unsafe path-like keys as no-write HTTP 400.
 - [ ] Complete final full verification and review.
 - [ ] Merge PR and complete post-merge cleanup.
 
@@ -50,6 +52,10 @@ Full Verification `29280022017` passed 281 of 282 server tests. The remaining
 test incorrectly expected Fastify's detailed conflict text in `error`; the
 established response stores it in `message`. The test now preserves that
 contract.
+
+MCP RED `29280506268` proved the existing tool discarded the key and published
+twice. HTTP validation RED `29280727694` proved an unsafe path-like key was
+blocked before writes but surfaced as 500 instead of the required input 400.
 
 ## Remaining Gap
 
