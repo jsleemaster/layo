@@ -13,7 +13,7 @@ import type {
   AgentNodeSummary as BaseAgentNodeSummary,
   CanvasInspection as BaseCanvasInspection
 } from "./agent-control-base.js";
-import type { DesignFile, DesignNode, PathBooleanRelation } from "./storage";
+import type { DesignFile, DesignNode, NodeFill, PathBooleanRelation } from "./storage";
 
 export * from "./agent-control-base.js";
 
@@ -145,6 +145,7 @@ type FlattenPathCommand = Extract<AgentCommand, { type: "flatten_path" }>;
 
 export interface AgentNodeSummary extends BaseAgentNodeSummary {
   clip?: NodeClip;
+  fills?: NodeFill[];
   paintSources?: NodePaintSource[];
   vectorSource?: NodeVectorSource;
   pathData?: string;
@@ -370,6 +371,7 @@ function collectSummary(node: DesignNode, path: string[], nodes: AgentNodeSummar
     constraints: node.constraints ?? undefined,
     exportPresets: node.export_presets ? node.export_presets.map((preset) => ({ ...preset })) : undefined,
     clip: nodeClip(node),
+    fills: node.style.fills ? structuredClone(node.style.fills) : undefined,
     paintSources: paintSources.length > 0 ? paintSources : undefined,
     ...(vectorSource ? { vectorSource: structuredClone(vectorSource) } : {}),
     ...(node.content.type === "path" || node.content.type === "boolean_path"
