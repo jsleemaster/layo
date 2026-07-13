@@ -343,6 +343,13 @@ in GREEN `29290833407`. See
 review/preflight reads, registry events, revocation, shared transactional
 storage, receipt retention, and durable pub/sub remain open.
 
+PR #298 starts exact-target-team authorization for registry review/preflight and
+subscription/update reads. RED `29293745767` proved missing credentials can
+review a team-beta registry library with a 200 response. Layo will reuse the
+same-team viewer policy across HTTP, web, and MCP while keeping unconfigured
+local-first behavior; registry EventSource authorization remains a separate
+follow-up because the current browser transport cannot send member headers.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
