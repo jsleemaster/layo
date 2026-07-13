@@ -1,6 +1,6 @@
 # Penpot Team Library Publication Authorization Plan
 
-Status: Active  
+Status: Completed by PR #295 merge gate  
 Date: 2026-07-14  
 Benchmark: Penpot team roles and shared libraries
 
@@ -38,7 +38,9 @@ References:
 - Browser API RED `29283735052`: the publication helper had no credential contract.
 - MCP RED `29283903958`: the MCP server had no principal options.
 - Validation RED `29284023373`: blank user ids were accepted by configuration.
-- GREEN: pending final full verification.
+- GREEN `29284459320`: maturity/design gates, typecheck, build, 251 web,
+  288 server, Rust workspace, and 193 Playwright CLI tests passed.
+- Restore drill `29284459310` and retention `29284459291` passed.
 
 ## Completion Boundary
 
