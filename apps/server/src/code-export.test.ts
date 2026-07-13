@@ -81,6 +81,57 @@ describe("code export", () => {
     ]);
   });
 
+  test("exports ordered gradient and image stroke paints for agent handoff", () => {
+    const fixture = tossFixture();
+    fixture.pages[0].children[0].style.strokes = [
+      {
+        id: "gradient",
+        color: "#111827",
+        paint: {
+          type: "gradient",
+          gradient: {
+            type: "linear",
+            stops: [
+              { color: "#ef4444", opacity: 1, offset: 0 },
+              { color: "#2563eb", opacity: 1, offset: 1 }
+            ]
+          }
+        },
+        opacity: 1,
+        width: 4,
+        position: "center",
+        style: "solid",
+        visible: true,
+        dasharray: [],
+        cap: "butt",
+        join: "miter",
+        start_marker: "none",
+        end_marker: "none"
+      },
+      {
+        id: "image",
+        color: "#111827",
+        paint: { type: "image", asset_id: "asset-border" },
+        opacity: 0.8,
+        width: 8,
+        position: "outside",
+        style: "solid",
+        visible: true,
+        dasharray: [],
+        cap: "round",
+        join: "round",
+        start_marker: "none",
+        end_marker: "none"
+      }
+    ];
+
+    const result = exportDesignToCode(fixture);
+    expect(result.elements[0]?.structure.style.strokes).toEqual(
+      fixture.pages[0].children[0].style.strokes
+    );
+    expect(result.indexModule).toContain('"asset_id":"asset-border"');
+  });
+
   test("exports color token bindings as CSS variables and implementation metadata", () => {
     const fixture = tossFixture() as any;
     fixture.tokens = [
