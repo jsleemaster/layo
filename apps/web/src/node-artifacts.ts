@@ -2801,6 +2801,9 @@ function contentForPdfEntries(entries: PdfEntry[]) {
           return entry.commands;
         }
         const graphicsState = `/${entry.graphicsStateName} gs`;
+        if (typeof entry.clipOpacity === "number") {
+          return [...entry.commands, graphicsState];
+        }
         const saveIndex = entry.commands.indexOf("q");
         return saveIndex >= 0
           ? [...entry.commands.slice(0, saveIndex + 1), graphicsState, ...entry.commands.slice(saveIndex + 1)]
