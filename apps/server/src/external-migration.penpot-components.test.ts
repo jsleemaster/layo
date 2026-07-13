@@ -1,4 +1,7 @@
 import { mkdtemp, readFile as readRawFile, rm, writeFile as writeRawFile } from "node:fs/promises";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -1337,6 +1340,117 @@ describe("Penpot component instance migration", () => {
     } finally {
       releaseSubscriptionWrite();
       await activeUpdate?.catch(() => undefined);
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes a library update and product write across processes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-process-lock-"));
+    const releasePath = path.join(root, "release-update");
+    const workerPath = fileURLToPath(new URL("./storage-process-lock-worker.ts", import.meta.url));
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const exits: Promise<void>[] = [];
+    const spawnWorker = (args: string[]) => {
+      const child = spawn(process.execPath, ["--import", "tsx", workerPath, ...args], {
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      children.push(child);
+      exits.push(new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => {
+          if (code === 0) {
+            resolve();
+          } else {
+            reject(new Error(`storage process worker exited ${code}: ${stderr}`));
+          }
+        });
+      }));
+      return child;
+    };
+    const waitForMarker = (child: ChildProcessWithoutNullStreams, markerText: string) =>
+      new Promise<void>((resolve, reject) => {
+        let output = "";
+        const onData = (chunk: Buffer) => {
+          output += chunk.toString();
+          if (output.includes(markerText)) {
+            cleanup();
+            resolve();
+          }
+        };
+        const onExit = (code: number | null) => {
+          cleanup();
+          reject(new Error(`worker exited ${code} before marker ${markerText}: ${output}`));
+        };
+        const cleanup = () => {
+          child.stdout.off("data", onData);
+          child.off("exit", onExit);
+        };
+        child.stdout.on("data", onData);
+        child.on("exit", onExit);
+      });
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-process-lock-project",
+        documentId: "penpot-process-lock-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#7c3aed";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const updateWorker = spawnWorker([
+        "update",
+        root,
+        "penpot-process-lock-target",
+        libraryDocumentId,
+        releasePath
+      ]);
+      await waitForMarker(updateWorker, "update-paused");
+
+      const writeWorker = spawnWorker([
+        "write",
+        root,
+        "penpot-process-lock-target",
+        "-",
+        releasePath
+      ]);
+      await waitForMarker(writeWorker, "write-ready");
+      const writeDone = waitForMarker(writeWorker, "write-done");
+      const completedBeforeRelease = await Promise.race([
+        writeDone.then(() => true),
+        delay(1_500).then(() => false)
+      ]);
+
+      expect(completedBeforeRelease).toBe(false);
+
+      await writeRawFile(releasePath, "release\n", "utf8");
+      await Promise.all(exits);
+      expect((await storage.readFile("penpot-process-lock-target")).name).toBe(
+        "Concurrent process write"
+      );
+    } finally {
+      await writeRawFile(releasePath, "release\n", "utf8").catch(() => undefined);
+      await Promise.allSettled(exits);
+      for (const child of children) {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
       await rm(root, { recursive: true, force: true });
     }
   });
