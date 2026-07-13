@@ -132,6 +132,43 @@ describe("code export", () => {
     expect(result.elements[0]?.jsModule).toContain('"asset_id": "asset-border"');
   });
 
+  test("exports ordered gradient and image fill paints for agent handoff", () => {
+    const fixture = tossFixture();
+    fixture.pages[0].children[0].style.fills = [
+      {
+        id: "gradient",
+        color: "#ef4444",
+        paint: {
+          type: "gradient",
+          gradient: {
+            type: "linear",
+            stops: [
+              { color: "#ef4444", opacity: 1, offset: 0 },
+              { color: "#2563eb", opacity: 1, offset: 1 }
+            ]
+          }
+        },
+        opacity: 1,
+        visible: true,
+        blend_mode: "multiply"
+      },
+      {
+        id: "image",
+        color: "#ffffff",
+        paint: { type: "image", asset_id: "asset-fill" },
+        opacity: 0.8,
+        visible: true,
+        blend_mode: "screen"
+      }
+    ];
+
+    const result = exportDesignToCode(fixture);
+    expect(result.elements[0]?.structure.style.fills).toEqual(
+      fixture.pages[0].children[0].style.fills
+    );
+    expect(result.elements[0]?.jsModule).toContain('"asset_id": "asset-fill"');
+  });
+
   test("exports color token bindings as CSS variables and implementation metadata", () => {
     const fixture = tossFixture() as any;
     fixture.tokens = [
