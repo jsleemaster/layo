@@ -197,10 +197,14 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Body: { fileId: string; libraryId?: string; name?: string };
   }>("/libraries", async (request) => {
+    const idempotencyHeader = request.headers["idempotency-key"];
     return {
       library: await storage.publishLibraryToRegistry(request.body.fileId, {
         libraryId: request.body.libraryId,
-        name: request.body.name
+        name: request.body.name,
+        idempotencyKey: Array.isArray(idempotencyHeader)
+          ? idempotencyHeader[0]
+          : idempotencyHeader
       })
     };
   });
