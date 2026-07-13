@@ -75,6 +75,8 @@ References:
       saves, plus optimistic target identity for direct filesystem changes.
 - [x] Add crash-level write-ahead journal, atomic path replacement, startup
       recovery, and external-byte conflict proof.
+- [x] Scope startup recovery to one shared promise per storage instance so
+      project reads cannot roll back an active same-process journal.
 - [ ] Add cross-process mutation locking with safe stale-lock recovery.
 
 Evidence is recorded in
