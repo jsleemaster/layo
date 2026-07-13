@@ -435,9 +435,7 @@ function mapPenpotShape(
     : undefined;
   const opacity = finiteNumber(
     valueFor(shape.json, 'opacity'),
-    mapsAsImage && imagePaintOpacity !== undefined
-      ? imagePaintOpacity
-      : solidFillPaint?.opacity ?? finiteNumber(valueFor(firstRecord(valueFor(shape.json, 'fills')) ?? {}, 'fillOpacity', 'fill-opacity', 'opacity'), 1)
+    mapsAsImage && imagePaintOpacity !== undefined ? imagePaintOpacity : 1
   );
   const nodeId = penpotStorageId(shape.id, `${shape.type}-${state.mappedNodeCount + 1}`);
   state.mappedNodeCount += 1;
