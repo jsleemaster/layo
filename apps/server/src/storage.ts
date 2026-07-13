@@ -322,7 +322,7 @@ export interface ComponentInstance {
   detached: boolean;
 }
 
-type ComponentInstanceStyleOverrideField = "fill" | "fills" | "stroke" | "stroke_width" | "opacity" | "effect_shadow";
+type ComponentInstanceStyleOverrideField = "fill" | "fills" | "stroke" | "stroke_width" | "strokes" | "opacity" | "effect_shadow";
 type ComponentInstanceGeometryOverrideField = "x" | "y" | "width" | "height";
 
 const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[] = [
@@ -330,6 +330,7 @@ const componentInstanceStyleOverrideFields: ComponentInstanceStyleOverrideField[
   "fills",
   "stroke",
   "stroke_width",
+  "strokes",
   "opacity",
   "effect_shadow"
 ];
@@ -340,7 +341,6 @@ const componentInstanceGeometryOverrideFields: ComponentInstanceGeometryOverride
   "height"
 ];
 const nullComponentOverrideValue = "__layo_component_override_null__";
-const jsonComponentOverridePrefix = "__layo_component_override_json__:";
 
 export type CodeComponentMappingImportMode = "named" | "default";
 export type CodeComponentMappingPropType = "string";
@@ -5099,17 +5099,14 @@ function serializeComponentOverrideValue(value: unknown): string {
     return nullComponentOverrideValue;
   }
   if (typeof value === "object") {
-    return `${jsonComponentOverridePrefix}${JSON.stringify(value)}`;
+    return JSON.stringify(value);
   }
   return String(value);
 }
 
 function deserializeComponentOverrideValue(value: string): unknown {
-  if (!value.startsWith(jsonComponentOverridePrefix)) {
-    return value;
-  }
   try {
-    return JSON.parse(value.slice(jsonComponentOverridePrefix.length));
+    return JSON.parse(value);
   } catch {
     return undefined;
   }
@@ -5305,6 +5302,11 @@ function applyComponentInstanceOverrides(instance: DesignNode, sourceRootNodeId:
       const fills = deserializeComponentOverrideValue(override.value);
       if (Array.isArray(fills)) {
         target.style = { ...target.style, fills: fills as NodeFill[] };
+      }
+    } else if (override.field === "strokes") {
+      const strokes = deserializeComponentOverrideValue(override.value);
+      if (Array.isArray(strokes)) {
+        target.style = { ...target.style, strokes: strokes as NodeStroke[] };
       }
     } else if (override.field === "stroke") {
       target.style = {
