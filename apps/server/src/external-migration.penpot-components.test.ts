@@ -335,6 +335,56 @@ describe("Penpot component instance migration", () => {
     );
   });
 
+  test("maps packaged library definitions and a nested swap into native instances", () => {
+    const imported = importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+      fileName: "packaged-library-swap.penpot",
+      fileId: "packaged-library-swap-import"
+    });
+
+    expect(imported.file.pages).toHaveLength(1);
+    expect(imported.file.pages[0].name).toBe("Product");
+    expect(imported.file.components?.map((component) => component.id)).toEqual([
+      `penpot-component-${outerComponentId}`,
+      `penpot-component-${rectangleComponentId}`,
+      `penpot-component-${circleComponentId}`
+    ]);
+
+    const main = imported.file.pages[0].children.find(
+      (node) => node.id === `penpot-${outerMainId}`
+    );
+    const copy = imported.file.pages[0].children.find(
+      (node) => node.id === `penpot-${outerCopyId}`
+    );
+
+    expect(main?.children[0]).toMatchObject({
+      kind: "component_instance",
+      component_instance: {
+        definition_id: `penpot-component-${rectangleComponentId}`,
+        variant_id: "default",
+        overrides: [],
+        detached: false
+      }
+    });
+    expect(copy?.children[0]).toMatchObject({
+      kind: "component_instance",
+      component_instance: {
+        definition_id: `penpot-component-${circleComponentId}`,
+        variant_id: "default",
+        overrides: [],
+        detached: false
+      }
+    });
+    expect(copy?.component_instance?.overrides).toEqual(
+      expect.arrayContaining([
+        {
+          node_id: `penpot-${outerMainSlotId}`,
+          field: "component_swap",
+          value: `penpot-component-${circleComponentId}`
+        }
+      ])
+    );
+  });
+
   test("reviews readable main and copy relations as structurally importable", () => {
     const review = reviewExternalMigrationArchive(componentArchive(), {
       fileName: "components.penpot"
