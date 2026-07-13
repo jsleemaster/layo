@@ -77,7 +77,13 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           height: 72,
           fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
           strokes: [
-            { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": 4 },
+            {
+              "stroke-color": "#ff0000",
+              "stroke-opacity": 0.5,
+              "stroke-width": 4,
+              "stroke-style": "dashed",
+              "stroke-dasharray": [7, 3]
+            },
             { "stroke-color": "#0000ff", "stroke-opacity": 1, "stroke-width": 4 }
           ]
         }),
@@ -213,7 +219,13 @@ test("preserves Penpot ordered solid and gradient stroke paints", () => {
     }
   });
   expect(frame.children[0].style.strokes).toMatchObject([
-    { paint: { type: "solid", color: "#ff0000" }, opacity: 0.5, width: 4 },
+    {
+      paint: { type: "solid", color: "#ff0000" },
+      opacity: 0.5,
+      width: 4,
+      style: "dashed",
+      dasharray: [7, 3]
+    },
     { paint: { type: "solid", color: "#0000ff" }, opacity: 1, width: 4 }
   ]);
 });
