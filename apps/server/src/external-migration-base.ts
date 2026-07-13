@@ -58,11 +58,17 @@ export interface ExternalMigrationImportedAsset {
   data: Buffer;
 }
 
+export interface ExternalMigrationImportedLibrary {
+  sourceFileId: string;
+  file: DesignFile;
+}
+
 export interface ExternalMigrationImportResult {
   source: ExternalMigrationSource;
   sourceLabel: string;
   file: DesignFile;
   importedAssets: ExternalMigrationImportedAsset[];
+  importedLibraries?: ExternalMigrationImportedLibrary[];
   mappedNodeCount: number;
   skippedNodeCount: number;
   warnings: string[];

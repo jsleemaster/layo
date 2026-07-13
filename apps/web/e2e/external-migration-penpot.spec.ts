@@ -2,6 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
 import { rm, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
+import {
+  createPenpotComponentLibrarySwapArchive,
+  penpotLibrarySwapIds
+} from "./fixtures/penpot-component-library-swap";
 
 test.beforeEach(async () => {
   await rm(".layo", { recursive: true, force: true });
@@ -282,4 +286,62 @@ test("imports Penpot component ownership and renders the linked copy", async ({ 
     id: "penpot-86666666-6666-6666-6666-666666666666__penpot-85555555-5555-5555-5555-555555555555",
     content: { type: "text", value: "Continue" }
   });
+});
+
+
+test("imports a packaged Penpot library swap and preserves it after reload", async ({ page }, testInfo) => {
+  await createProjectFromEmptyState(page);
+  const penpotZipPath = testInfo.outputPath("component-library-swap.penpot");
+  await writeFile(penpotZipPath, createPenpotComponentLibrarySwapArchive());
+
+  await page.getByTestId("external-migration-upload").setInputFiles(penpotZipPath);
+  const review = page.getByTestId("external-migration-review");
+  await expect(review).toContainText("가져오기 가능");
+  await expect(review).toContainText("문서 후보 4개");
+  await page.getByRole("button", { name: "외부 디자인 가져오기" }).click();
+
+  await expect(page.getByTestId("external-migration-status")).toContainText("Product file 가져옴");
+  await expect(page.getByTestId("layer-panel")).toContainText("Card");
+  await expect(page.getByTestId("layer-panel")).toContainText("Card copy");
+  await page.getByRole("button", { name: "Card copy" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("400");
+
+  const importedProjectId = await page.getByTestId("project-switcher").inputValue();
+  const projectResponse = await page.request.get(`http://127.0.0.1:4317/projects/${importedProjectId}`);
+  expect(projectResponse.ok()).toBeTruthy();
+  const project = (await projectResponse.json()).project;
+  expect(project.documents.map((document: { name: string }) => document.name)).toEqual([
+    "Product file",
+    "Shape library"
+  ]);
+
+  const fileResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${project.currentDocumentId}`
+  );
+  const file = (await fileResponse.json()).file;
+  const copy = file.pages[0].children.find(
+    (node: { id: string }) => node.id === `penpot-${penpotLibrarySwapIds.outerCopyId}`
+  );
+  expect(copy.children[0]).toMatchObject({
+    kind: "component_instance",
+    component_instance: {
+      definition_id: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`,
+      variant_id: "default",
+      overrides: [],
+      detached: false
+    }
+  });
+  expect(copy.component_instance.overrides).toContainEqual({
+    node_id: `penpot-${penpotLibrarySwapIds.outerMainSlotId}`,
+    field: "component_swap",
+    value: `penpot-component-${penpotLibrarySwapIds.circleComponentId}`
+  });
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("project-switcher").selectOption(importedProjectId);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(importedProjectId);
+  await expect(page.getByTestId("layer-panel")).toContainText("Card copy");
+  await page.getByRole("button", { name: "Card copy" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("400");
 });
