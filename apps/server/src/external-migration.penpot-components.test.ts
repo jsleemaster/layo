@@ -269,6 +269,7 @@ describe("Penpot component instance migration", () => {
         content: expect.objectContaining({ value: "Continue" })
       })
     ]);
+  });
 
   test("groups Penpot variant mains and preserves the selected copy combination", () => {
     const imported = importExternalMigrationArchive(variantArchive(), {
@@ -319,6 +320,5 @@ describe("Penpot component instance migration", () => {
         detached: false
       }
     });
-  });
   });
 });
