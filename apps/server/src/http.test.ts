@@ -886,6 +886,63 @@ describe("HTTP server", () => {
     expect(invalid.json().error).toMatch(/idempotency key/i);
   });
 
+  test("filters hosted registry lists to the authenticated member teams", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    for (const [teamId, fileId] of [
+      ["team-alpha", "alpha-file"],
+      ["team-beta", "beta-file"]
+    ] as const) {
+      const projectId = `${teamId}-project`;
+      await storage.createProject({
+        projectId,
+        name: teamId,
+        documentId: fileId,
+        documentName: fileId
+      });
+      await storage.setProjectSharing(projectId, { mode: "team", teamId });
+      await storage.publishLibraryToRegistry(fileId, {
+        libraryId: `${teamId}-kit`,
+        name: `${teamId} Kit`
+      });
+    }
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          }
+        ]
+      }
+    });
+
+    const missing = await server.inject({
+      method: "GET",
+      url: "/libraries"
+    });
+    expect(missing.statusCode).toBe(401);
+
+    const listed = await server.inject({
+      method: "GET",
+      url: "/libraries",
+      headers: {
+        authorization: "Bearer alpha-token",
+        "x-layo-user-id": "alpha-viewer"
+      }
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().libraries).toEqual([
+      expect.objectContaining({
+        libraryId: "team-alpha-kit",
+        teamId: "team-alpha"
+      })
+    ]);
+  });
+
   test("authorizes team library publication by member token and editor role", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
