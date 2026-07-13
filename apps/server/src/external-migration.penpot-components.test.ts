@@ -779,6 +779,93 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("applies the exact library snapshot that passed compatibility review", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-stale-preview-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "penpot-stale-project",
+        documentId: "penpot-stale-target",
+        documentName: "Product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const target = await storage.readFile("penpot-stale-target");
+      const copy = target.pages[0].children.find(
+        (node) => node.id === `penpot-${outerCopyId}`
+      );
+      const nestedCircle = copy?.children[0];
+      nestedCircle!.component_instance!.overrides = [
+        {
+          node_id: `penpot-${circleMainId}`,
+          field: "fill",
+          value: "#0f766e"
+        }
+      ];
+      await storage.writeFile("penpot-stale-target", target);
+
+      const compatibleLibrary = await storage.readFile(libraryDocumentId);
+      const compatibleCircle = compatibleLibrary.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      compatibleCircle!.source_node.style.fill = "#14b8a6";
+      await storage.writeFile(libraryDocumentId, compatibleLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        readAccessibleLibraryRegistryArchive(
+          fileId: string,
+          libraryId: string
+        ): Promise<{ entry: unknown; archive: Buffer }>;
+      };
+      const readSnapshot = internals.readAccessibleLibraryRegistryArchive.bind(storage);
+      let archiveReadCount = 0;
+      internals.readAccessibleLibraryRegistryArchive = async (fileId, libraryId) => {
+        const snapshot = await readSnapshot(fileId, libraryId);
+        archiveReadCount += 1;
+        if (archiveReadCount === 1) {
+          const incompatibleLibrary = await storage.readFile(libraryDocumentId);
+          const incompatibleCircle = incompatibleLibrary.components?.find(
+            (component) => component.id === `penpot-component-${circleComponentId}`
+          );
+          incompatibleCircle!.source_node.id = "replacement-circle-root";
+          await storage.writeFile(libraryDocumentId, incompatibleLibrary);
+          await storage.publishLibraryToRegistry(libraryDocumentId, {
+            libraryId: libraryDocumentId,
+            name: "Shape library"
+          });
+        }
+        return snapshot;
+      };
+
+      await expect(
+        storage.updateLibraryRegistryItem("penpot-stale-target", libraryDocumentId)
+      ).resolves.toMatchObject({ componentCount: 2 });
+      expect(archiveReadCount).toBe(1);
+
+      const updatedTarget = await storage.readFile("penpot-stale-target");
+      const updatedCircle = updatedTarget.components?.find(
+        (component) => component.id === `penpot-component-${circleComponentId}`
+      );
+      expect(updatedCircle?.source_node.id).toBe(`penpot-${circleMainId}`);
+      expect(updatedCircle?.source_node.style.fill).toBe("#14b8a6");
+      expect(
+        updatedTarget.pages[0].children.find(
+          (node) => node.id === `penpot-${outerCopyId}`
+        )?.children[0]?.component_instance?.overrides
+      ).toContainEqual({
+        node_id: `penpot-${circleMainId}`,
+        field: "fill",
+        value: "#0f766e"
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
     const review = reviewExternalMigrationArchive(archive, {
