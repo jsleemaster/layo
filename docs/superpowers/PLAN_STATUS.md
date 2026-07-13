@@ -28,7 +28,8 @@ Use this order when entering the repo:
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
-| `2026-07-13-penpot-closed-path-stroke-alignment.md` | Active | PR #278 adds the first-class ordered stroke stack across model, deterministic commands, history, reload, collaboration preservation, component overrides, Korean Inspector, canvas, SVG/PDF/PNG box alignment, and code handoff. Closed arbitrary paths still need geometry-aware inside/outside rendering; that exact failed case is next. Deployment remains deferred. |
+| `2026-07-13-penpot-closed-path-stroke-alignment.md` | Completed | PR #279 adds one shared closed-subpath resolver, geometry-aware Path2D canvas clipping, SVG clip/mask alignment, PDF even-odd clipping, PNG bounds, server-side open-path normalization, effective Inspector states, undo/redo, persistence, and reload. RED `29225628767` proved absent SVG/PDF/open-path behavior; failure learning fixed fill-rule routing, remote large-file boundary corruption, narrowing, E2E registration, and disabled-option matcher semantics. Full Verification `29227360608` passed all gates and 188 Playwright cases; restore `29227360595` and retention `29227360638` passed. Product evidence is `docs/product/penpot-closed-path-stroke-alignment-delta.md`. Per-stroke gradient/image paint ownership is routed next; deployment remains deferred. |
+| `2026-07-13-penpot-first-class-stroke-paints.md` | Active | PR #279 closes closed arbitrary-path alignment across canvas, SVG, PDF, PNG, Inspector, agent normalization, undo/redo, and reload. First-class stroke entries still own only a solid color while legacy/import surfaces separately support gradient and image stroke paints; unify those paint sources per ordered stroke next. Deployment remains deferred. |
 
 ## Completed Plans
 
