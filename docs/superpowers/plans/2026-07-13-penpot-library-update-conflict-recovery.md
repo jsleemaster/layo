@@ -1,6 +1,6 @@
 # Penpot Library Update Conflict And Recovery Plan
 
-**Status:** Active after PR #285.
+**Status:** Active after PR #286.
 
 **Goal:** Make imported Penpot library updates safe under source deletion,
 renames, local override conflicts, and partial failure, with deterministic
@@ -60,10 +60,15 @@ References:
       storage/HTTP/UI apply before writes.
 - [x] Preserve the existing in-use deletion UI proof and add a direct
       Playwright CLI pass for override conflicts with zero apply requests.
-- [ ] Add stale-preview and stale-subscription cases.
-- [ ] Add interrupted-write rollback, retry, and version recovery cases.
+- [x] Add a stale-preview race that publishes archive B after archive A is
+      captured for review.
+- [x] Bind compatibility review and mutation to one registry archive, parsed
+      library, and target document snapshot.
+- [ ] Add stale-subscription metadata and interrupted-write rollback cases.
+- [ ] Add retry and version recovery cases.
 
 Evidence is recorded in
 `docs/product/penpot-library-in-use-deletion-guard-delta.md` and
-`docs/product/penpot-library-override-target-conflict-delta.md`. The plan
-remains active; do not treat PR #285 as completion of the broader recovery goal.
+`docs/product/penpot-library-override-target-conflict-delta.md`, and
+`docs/product/penpot-library-stale-preview-snapshot-delta.md`. The plan remains
+active; do not treat PR #286 as completion of the broader recovery goal.
