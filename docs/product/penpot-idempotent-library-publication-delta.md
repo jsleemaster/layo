@@ -37,6 +37,8 @@ fingerprint and committed registry entry.
   test read Fastify's generic `error` field instead of the detailed `message`.
 - MCP RED `29280506268`: the tool discarded the key and published twice.
 - Validation RED `29280727694`: an unsafe key surfaced as HTTP 500 instead of 400.
+- Follow-up `29280923088`: the implementation returned 400; the regression was
+  corrected to use the established validation `error` field.
 - Storage, HTTP, and MCP regressions cover durable replay, one event, conflict,
   and safe key validation.
 
