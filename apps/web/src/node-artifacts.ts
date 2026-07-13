@@ -294,6 +294,14 @@ function svgClipRuleAttributeForNode(node: RendererNode) {
   return clipSourceFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
 }
 
+function svgPathClipRuleAttributeForNode(node: RendererNode) {
+  return pathFillRuleForNode(node) === "evenodd" ? ' clip-rule="evenodd"' : "";
+}
+
+function pdfPathClipOperatorForNode(node: RendererNode) {
+  return pathFillRuleForNode(node) === "evenodd" ? "W*" : "W";
+}
+
 function pdfFillOperatorForNode(node: RendererNode) {
   return pathFillRuleForNode(node) === "evenodd" ? "f*" : "f";
 }
@@ -497,8 +505,7 @@ function strokeBoundsForNode(node: RendererNode): ArtifactBounds | null {
   const height = Math.max(1, Math.round(node.size.height));
   const expansion = strokes.reduce((largest, stroke) => {
     const hasMarker = stroke.start_marker !== "none" || stroke.end_marker !== "none";
-    const markerExpansion = hasMarker ? Math.max(4, stroke.width * 2.5) : 0;
-    return Math.max(largest, strokeExpansion(stroke), markerExpansion);
+    const markerExpansion = hasMarker ? Math.max(4, stroke.width * 2.5) : 0;    return Math.max(largest, strokeExpansion(stroke), markerExpansion);
   }, 0);
   return {
     minX: -expansion,
@@ -957,7 +964,7 @@ function svgAlignedPathStrokeDefinitionLinesForNode(node: RendererNode, depth: n
   if (hasInside) {
     lines.push(
       indent(`<clipPath id="${alignedPathStrokeClipId(node)}">`, depth),
-      indent(`<path d="${escapeSvgText(pathData)}"${svgClipRuleAttributeForNode(node)} />`, depth + 1),
+      indent(`<path d="${escapeSvgText(pathData)}"${svgPathClipRuleAttributeForNode(node)} />`, depth + 1),
       indent("</clipPath>", depth)
     );
   }
@@ -997,8 +1004,7 @@ function svgDefsForNode(node: RendererNode, depth: number): string[] {
 
 function imageAssetForNode(node: RendererNode, options: NodeArtifactOptions) {
   if (node.content.type !== "image") {
-    return undefined;
-  }
+    return undefined;  }
   const asset = options.assets?.[node.content.asset_id];
   return asset?.dataBase64 ? asset : undefined;
 }
@@ -1497,8 +1503,7 @@ function pdfPathCommandsFromSvgPathData(pathData: string, pageHeight: number, x:
   let command = "";
   let current: SvgPathPoint = { x: 0, y: 0 };
   let subpathStart: SvgPathPoint = { x: 0, y: 0 };
-  let lastCubicControl: SvgPathPoint | null = null;
-  let lastQuadraticControl: SvgPathPoint | null = null;
+  let lastCubicControl: SvgPathPoint | null = null;  let lastQuadraticControl: SvgPathPoint | null = null;
   const commands: string[] = [];
   const isCommand = (token: string) => /^[a-zA-Z]$/.test(token);
   const hasNumber = () => index < tokens.length && !isCommand(tokens[index]);
@@ -1747,7 +1752,7 @@ function pdfClipCommandsForNode(node: RendererNode, pageHeight: number, x: numbe
     ];
   }
 
-  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfClipOperatorForNode(node), "n"];
+  return ["q", ...pdfShapePathCommandsForNode(node, pageHeight, x, y), pdfPathClipOperatorForNode(node), "n"];
 }
 
 function pdfClipOpacityForNode(node: RendererNode) {
@@ -1997,7 +2002,6 @@ function pdfTextCommands(node: RendererNode, pageHeight: number, x: number, y: n
     "ET"
   ];
 }
-
 function pdfShadowCommands(entry: PdfShadowEntry) {
   const graphicsState = entry.graphicsStateName ? `/${entry.graphicsStateName} gs` : "";
 
@@ -2498,34 +2502,3 @@ export function pdfForNode(node: RendererNode, options: NodeArtifactOptions = {}
         const id = addPdfObject(objects, `<< /Type /ExtGState /ca ${formatNumber(stroke.opacity)} /CA ${formatNumber(stroke.opacity)} >>`);
         strokeGraphicsStateEntries.push(`/${name} ${id} 0 R`);
       }
-    });
-    candidate.children.forEach(collectStrokeGraphicsStates);
-  };
-  collectStrokeGraphicsStates(node);
-
-  const extGStateEntries = [
-    ...strokeGraphicsStateEntries,
-    ...shadowEntries
-      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
-      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
-    ...clipOpacityEntries
-      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
-      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`),
-    ...gradientEntries
-      .filter((entry) => entry.graphicsStateName && entry.graphicsStateId)
-      .map((entry) => `/${entry.graphicsStateName} ${entry.graphicsStateId} 0 R`)
-  ];
-  const extGStateClause = extGStateEntries.length > 0 ? ` /ExtGState << ${extGStateEntries.join(" ")} >>` : "";
-
-  setPdfObject(objects, catalogId, `<< /Type /Catalog /Pages ${pagesId} 0 R${namesClause} >>`);
-  setPdfObject(objects, pagesId, `<< /Type /Pages /Kids [${pageId} 0 R] /Count 1 >>`);
-  setPdfObject(
-    objects,
-    pageId,
-    `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 ${fontId} 0 R >>${xObjectClause}${shadingClause}${extGStateClause} >> /Contents ${contentId} 0 R >>`
-  );
-  setPdfObject(objects, contentId, [`<< /Length ${contentBytes.length} >>\nstream\n`, contentBytes, "endstream"]);
-  setPdfObject(objects, infoId, `<< /Title (${escapedName}) /Subject (${escapedNodeId}) /Creator (Layo) >>`);
-
-  return buildPdf(objects);
-}
