@@ -6573,7 +6573,13 @@ function Inspector({
       .map((value) => Number(value))
       .filter((value) => Number.isFinite(value) && value >= 0);
     if (dasharray.length > 0 && dasharray.some((value) => value > 0)) {
-      updateStrokeStyle({ stroke_dasharray: dasharray });
+      const currentDasharray =
+        strokeStyleDraftRef.current?.nodeId === selectedNode.id
+          ? strokeStyleDraftRef.current.style.stroke_dasharray ?? []
+          : selectedNode.style.stroke_dasharray ?? [];
+      if (JSON.stringify(currentDasharray) !== JSON.stringify(dasharray)) {
+        updateStrokeStyle({ stroke_dasharray: dasharray });
+      }
       setStrokeDashDraft(dasharray.join(", "));
       return;
     }
