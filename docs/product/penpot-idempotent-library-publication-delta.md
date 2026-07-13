@@ -41,6 +41,9 @@ fingerprint and committed registry entry.
   corrected to use the established validation `error` field.
 - Storage, HTTP, and MCP regressions cover durable replay, one event, conflict,
   and safe key validation.
+- GREEN `29281150206`: maturity/design gates, typecheck, production build,
+  web 251, server 282, Rust workspace, and Playwright CLI 192 passed.
+- Restore `29281150135` and retention `29281150115` passed.
 
 ## Remaining Gap
 
