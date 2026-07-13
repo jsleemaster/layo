@@ -883,7 +883,7 @@ describe("HTTP server", () => {
       headers: { "idempotency-key": "../unsafe" }
     });
     expect(invalid.statusCode).toBe(400);
-    expect(invalid.json().message).toMatch(/idempotency key/i);
+    expect(invalid.json().error).toMatch(/idempotency key/i);
   });
 
   test("publishes lists reviews and imports registry libraries", async () => {
