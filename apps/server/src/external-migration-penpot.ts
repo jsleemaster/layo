@@ -483,8 +483,9 @@ function mapPenpotShape(
   }
   for (const fillPaint of fillStack) {
     if (fillPaint.paint?.type === 'image') {
+      const assetId = fillPaint.paint.asset_id;
       const asset = [...state.assetsById.values()].find(
-        (candidate) => candidate.metadata.assetId === fillPaint.paint?.asset_id
+        (candidate) => candidate.metadata.assetId === assetId
       );
       if (asset) {
         state.usedAssets.set(asset.metadata.assetId, asset);
