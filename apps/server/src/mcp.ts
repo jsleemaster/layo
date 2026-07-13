@@ -6,6 +6,7 @@ import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNod
 import {
   authenticateTeamMember,
   authorizeTeamLibraryRead,
+  filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
   type TeamAuthorizationConfig
@@ -947,13 +948,13 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
         }
         libraries = await storage.listLibraryRegistry(fileId);
+        if (member) {
+          libraries = filterAuthorizedTeamLibraries(member, libraries);
+        }
       } else {
         libraries = await storage.listLibraryRegistry();
         if (member) {
-          libraries = libraries.filter(
-            (library) =>
-              library.teamId !== undefined && member.teamIds.includes(library.teamId)
-          );
+          libraries = filterAuthorizedTeamLibraries(member, libraries);
         }
       }
       return {
