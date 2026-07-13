@@ -264,6 +264,7 @@ describe("collaborative design document", () => {
     const first = createCollaborativeDesignDocument({ document: sampleDocument() });
     const second = createCollaborativeDesignDocument({ document: sampleDocument() });
     Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
 
     first.transact("set-stroke-paints", (current) => {
       const next = structuredClone(current);
