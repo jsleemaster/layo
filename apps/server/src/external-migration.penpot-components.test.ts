@@ -10,7 +10,7 @@ const mainLabelId = "55555555-5555-5555-5555-555555555555";
 const copyId = "66666666-6666-6666-6666-666666666666";
 const copyLabelId = "77777777-7777-7777-7777-777777777777";
 
-function componentArchive(options: { copyShapeRef?: string } = {}) {
+function componentArchive(options: { copyShapeRef?: string; copyLabelShapeRef?: string } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
   return createZipArchive([
     {
@@ -94,7 +94,7 @@ function componentArchive(options: { copyShapeRef?: string } = {}) {
         y: 118,
         width: 126,
         height: 28,
-        "shape-ref": mainLabelId,
+        "shape-ref": options.copyLabelShapeRef ?? mainLabelId,
         touched: ["text-content-group", "fill-group", "stroke-group", "opacity-group", "geometry-group"],
         content: "Continue",
         fontSize: 16,
@@ -357,6 +357,22 @@ describe("Penpot component instance migration", () => {
         fileId: "must-not-import"
       })
     ).toThrow(/component relation/i);
+  });
+
+  test("blocks touched copy layers that do not resolve inside the selected main tree", () => {
+    const review = reviewExternalMigrationArchive(
+      componentArchive({ copyLabelShapeRef: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee" }),
+      { fileName: "dangling-layer.penpot" }
+    );
+
+    expect(review).toMatchObject({
+      source: "penpot",
+      canImport: false,
+      blockedBy: ["penpot_component_relation_invalid"]
+    });
+    expect(review.warnings).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Label.*connected layer/i)])
+    );
   });
 
   test("groups Penpot variant mains and preserves the selected copy combination", () => {
