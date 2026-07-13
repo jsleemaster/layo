@@ -94,6 +94,43 @@ test("Inspector preserves gradient and image stroke paints through artifacts and
   await expect(page.getByTestId("inspector-stroke-1-paint-type")).toHaveValue("image");
   await expect(page.getByTestId("inspector-stroke-1-image-asset")).toContainText("에셋");
 
+  await expect.poll(async () => page.evaluate(() => {
+    let green = 0;
+    let blue = 0;
+    for (const canvas of document.querySelectorAll("canvas")) {
+      const context = canvas.getContext("2d");
+      if (!context) continue;
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const red = pixels[index];
+        const greenChannel = pixels[index + 1];
+        const blueChannel = pixels[index + 2];
+        if (greenChannel > 150 && red < 100 && blueChannel < 160) green += 1;
+        if (blueChannel > 170 && red < 100 && greenChannel < 160) blue += 1;
+      }
+    }
+    return { green, blue };
+  })).toMatchObject({ green: expect.any(Number), blue: expect.any(Number) });
+  const visiblePaint = await page.evaluate(() => {
+    let green = 0;
+    let blue = 0;
+    for (const canvas of document.querySelectorAll("canvas")) {
+      const context = canvas.getContext("2d");
+      if (!context) continue;
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const red = pixels[index];
+        const greenChannel = pixels[index + 1];
+        const blueChannel = pixels[index + 2];
+        if (greenChannel > 150 && red < 100 && blueChannel < 160) green += 1;
+        if (blueChannel > 170 && red < 100 && greenChannel < 160) blue += 1;
+      }
+    }
+    return { green, blue };
+  });
+  expect(visiblePaint.green).toBeGreaterThan(20);
+  expect(visiblePaint.blue).toBeGreaterThan(20);
+
   await page.keyboard.press("Control+z");
   await expect(page.getByTestId("inspector-stroke-1-paint-type")).toHaveValue("solid");
   await page.keyboard.press("Control+Shift+z");
