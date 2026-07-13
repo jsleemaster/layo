@@ -284,6 +284,8 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   expect(visibleBounds.right - visibleBounds.left).toBeGreaterThan(150);
   expect(visibleBounds.bottom - visibleBounds.top).toBeGreaterThan(20);
 
+  await page.getByTestId("inspector-stroke-color").fill("#1d4ed8");
+  await page.getByTestId("inspector-stroke-width").fill("10");
   await page.getByTestId("inspector-stroke-cap").selectOption("square");
   await page.getByTestId("inspector-stroke-join").selectOption("round");
   await page.getByTestId("inspector-stroke-dasharray").fill("4, 2");
@@ -292,6 +294,8 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   await expect.poll(async () => {
     const node = await readOpenPath();
     return {
+      stroke: node?.style.stroke,
+      width: node?.style.stroke_width,
       cap: node?.style.stroke_cap,
       join: node?.style.stroke_join,
       dash: node?.style.stroke_dasharray,
@@ -299,6 +303,8 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
       end: node?.style.stroke_end_marker
     };
   }).toEqual({
+    stroke: "#1d4ed8",
+    width: 10,
     cap: "square",
     join: "round",
     dash: [4, 2],
@@ -315,6 +321,8 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
   await page.reload();
   await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
+  await expect(page.getByTestId("inspector-stroke-color")).toHaveValue("#1d4ed8");
+  await expect(page.getByTestId("inspector-stroke-width")).toHaveValue("10");
   await expect(page.getByTestId("inspector-stroke-cap")).toHaveValue("square");
   await expect(page.getByTestId("inspector-stroke-dasharray")).toHaveValue("4, 2");
 
