@@ -1,3 +1,4 @@
+import { pathHasOnlyClosedSubpaths } from "@layo/renderer";
 import {
   applyConstraintsAfterParentResize,
   normalizeNodeConstraints,
@@ -1153,6 +1154,24 @@ function reflowComponentVariantArea(
   component.source_node = structuredClone(sources[0]);
 }
 
+export function normalizeAgentNodeStyleForNode(node: DesignNode, style: DesignNode["style"]) {
+  const normalized = normalizeAgentNodeStyle(style);
+  if (
+    node.kind !== "path" ||
+    (node.content.type !== "path" && node.content.type !== "boolean_path") ||
+    pathHasOnlyClosedSubpaths(node.content.path_data) ||
+    !normalized.strokes
+  ) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    strokes: normalized.strokes.map((stroke) =>
+      stroke.position === "center" ? stroke : { ...stroke, position: "center" as const }
+    )
+  };
+}
+
 function applyAgentCommand(document: DesignFile, command: AgentCommand): string {
   switch (command.type) {
     case "update_geometry": {
@@ -1177,7 +1196,7 @@ function applyAgentCommand(document: DesignFile, command: AgentCommand): string 
     }
     case "set_node_style": {
       const node = requireNode(document, command.nodeId);
-      node.style = normalizeAgentNodeStyle(command.style);
+      node.style = normalizeAgentNodeStyleForNode(node, command.style);
       return node.id;
     }
     case "create_token": {
