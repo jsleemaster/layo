@@ -182,7 +182,14 @@ function nodeWithStroke(node: RendererNode, stroke: NodeStroke): RendererNode {
       stroke_width: stroke.width,
       stroke_cap: stroke.cap,
       stroke_join: stroke.join,
-      stroke_dasharray: stroke.dasharray,
+      stroke_dasharray:
+        stroke.style === "dotted"
+          ? [0, Math.max(1, stroke.width * 2)]
+          : stroke.style === "dashed"
+            ? (stroke.dasharray.length > 0 ? stroke.dasharray : [stroke.width * 3, stroke.width * 2])
+            : stroke.style === "solid"
+              ? []
+              : stroke.dasharray,
       stroke_start_marker: stroke.start_marker,
       stroke_end_marker: stroke.end_marker
     }
