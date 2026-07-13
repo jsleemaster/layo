@@ -338,6 +338,9 @@ test("imports a packaged Penpot library swap and preserves it after reload", asy
   });
 
   await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("project-switcher").selectOption(importedProjectId);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(importedProjectId);
   await expect(page.getByTestId("layer-panel")).toContainText("Card copy");
   await page.getByRole("button", { name: "Card copy" }).click();
   await expect(page.getByTestId("inspector-x")).toHaveValue("400");
