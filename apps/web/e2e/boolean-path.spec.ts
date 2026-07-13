@@ -300,7 +300,7 @@ test("preserves an open path stroke contract through Flatten, reload, canvas, an
     end: "line_arrow"
   });
 
-  await page.getByTestId("inspector-stroke-end-marker").evaluate((element) => (element as HTMLElement).blur());
+  await page.getByTestId("layer-panel").getByRole("button", { name: "열린 경로" }).click();
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await readOpenPath())?.style.stroke_end_marker).toBe("triangle");
   await page.keyboard.press("Control+Shift+z");
