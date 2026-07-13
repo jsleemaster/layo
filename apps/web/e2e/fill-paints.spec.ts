@@ -124,6 +124,24 @@ test("Inspector preserves ordered fill paints through lifecycle, artifacts, undo
   expect(svg).toContain("layo-fill-gradient-frame-1-gradient");
   expect(svg.indexOf('data-fill-id="upload-target"')).toBeLessThan(svg.indexOf('data-fill-id="gradient"'));
 
+
+  for (const [testId, signature] of [
+    ["dev-panel-download-png", Buffer.from([0x89, 0x50, 0x4e, 0x47])],
+    ["dev-panel-download-jpeg", Buffer.from([0xff, 0xd8, 0xff])],
+    ["dev-panel-download-webp", Buffer.from("RIFF")]
+  ] as const) {
+    const rasterPromise = page.waitForEvent("download");
+    await page.getByTestId(testId).click();
+    const rasterPath = await (await rasterPromise).path();
+    if (!rasterPath) throw new Error(`fill paint raster path missing: ${testId}`);
+    const raster = await readFile(rasterPath);
+    expect(raster.length).toBeGreaterThan(100);
+    expect(raster.subarray(0, signature.length)).toEqual(signature);
+    if (testId === "dev-panel-download-webp") {
+      expect(raster.subarray(8, 12).toString("ascii")).toBe("WEBP");
+    }
+  }
+
   const pdfPromise = page.waitForEvent("download");
   await page.getByTestId("dev-panel-download-pdf").click();
   const pdfPath = await (await pdfPromise).path();
