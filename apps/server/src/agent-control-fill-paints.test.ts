@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import type { DesignNode } from "./storage";
-import { normalizeAgentNodeStyle } from "./agent-control-base";
+import type { DesignFile, DesignNode } from "./storage";
+import { applyAgentCommandsToDocument, normalizeAgentNodeStyle } from "./agent-control-base";
 
 const baseStyle: DesignNode["style"] = {
   fill: "#ffffff",
@@ -84,5 +84,63 @@ describe("first-class fill paint contract", () => {
         ]
       } as unknown as DesignNode["style"])
     ).toThrow("fills[0].paint.gradient requires at least two stops");
+  });
+
+
+  test("serializes the ordered fill stack as a component instance override", () => {
+    const document = {
+      id: "fill-component-file",
+      name: "Fill Component",
+      pages: [{
+        id: "page-1",
+        name: "Page",
+        children: [{
+          id: "frame-1",
+          kind: "frame",
+          name: "Frame",
+          transform: { x: 0, y: 0, rotation: 0 },
+          size: { width: 800, height: 600 },
+          style: baseStyle,
+          content: { type: "empty" },
+          children: []
+        }]
+      }]
+    } as DesignFile;
+
+    const result = applyAgentCommandsToDocument(document, [
+      {
+        type: "create_rectangle",
+        parentId: "frame-1",
+        id: "fill-source",
+        name: "Fill Source",
+        fill: "#ffffff"
+      },
+      {
+        type: "create_component",
+        nodeId: "fill-source",
+        componentId: "fill-component",
+        name: "Fill Component"
+      },
+      {
+        type: "create_component_instance",
+        parentId: "frame-1",
+        definitionId: "fill-component",
+        instanceId: "fill-instance"
+      },
+      {
+        type: "set_node_style",
+        nodeId: "fill-instance",
+        style: { ...baseStyle, fills: orderedFills }
+      }
+    ]);
+
+    const frame = result.document.pages[0].children[0];
+    const instance = frame.children.find((node) => node.id === "fill-instance");
+    expect(instance?.style.fills).toEqual(orderedFills);
+    expect(instance?.component_instance?.overrides).toContainEqual({
+      node_id: "fill-source",
+      field: "fills",
+      value: JSON.stringify(orderedFills)
+    });
   });
 });
