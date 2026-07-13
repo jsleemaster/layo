@@ -1631,6 +1631,19 @@ export class FileStorage {
     return document;
   }
 
+  private async writeFileDurablyWithoutMutationLock(
+    fileId: string,
+    document: DesignFile
+  ): Promise<DesignFile> {
+    await this.adoptPriorDefaultStoreIfNeeded();
+    await mkdir(this.filesDir, { recursive: true });
+    await durablyReplaceFile(
+      this.filePathFor(fileId),
+      Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8")
+    );
+    return document;
+  }
+
   async exportFileArchive(fileId: string): Promise<ExportedFileArchive> {
     const document = await this.readFile(fileId);
     const assetIds = collectImageAssetIds(document);
@@ -2531,10 +2544,10 @@ export class FileStorage {
     const rollbackGuards: StoragePathSnapshot[] = [];
     try {
       for (const asset of library.assets) {
-        await this.writeAsset(asset.metadata, asset.data);
+        await this.writeAssetDurably(asset.metadata, asset.data);
       }
 
-      await this.writeFileWithoutMutationLock(fileId, target);
+      await this.writeFileDurablyWithoutMutationLock(fileId, target);
       rollbackGuards.push({
         filePath: this.filePathFor(fileId),
         data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
@@ -3118,6 +3131,22 @@ export class FileStorage {
     return parsed;
   }
 
+  private async writeAssetDurably(asset: StoredAsset, data: Buffer): Promise<StoredAsset> {
+    const parsed = parseStoredAsset(asset);
+    if (data.length !== parsed.byteLength) {
+      throw new Error(`asset byte length mismatch: ${parsed.assetId}`);
+    }
+    assertImageBytesMatchMimeType(data, parsed.mimeType);
+    await this.adoptPriorDefaultStoreIfNeeded();
+    await mkdir(this.assetsDir, { recursive: true });
+    await durablyReplaceFile(this.assetPathFor(parsed.assetId), data);
+    await durablyReplaceFile(
+      this.assetMetadataPathFor(parsed.assetId),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, "utf8")
+    );
+    return parsed;
+  }
+
   async readAsset(assetId: string): Promise<StoredAssetData> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const raw = await readFile(this.assetMetadataPathFor(assetId), "utf8");
@@ -3598,7 +3627,7 @@ export class FileStorage {
       )
     };
     await onPrepared?.(snapshot);
-    await writeFile(snapshot.filePath, snapshot.data);
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
     onCommitted?.(snapshot);
   }
 
