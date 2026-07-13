@@ -457,7 +457,7 @@ describe("Penpot external image asset migration", () => {
     });
   });
 
-  test("imports Penpot mixed fill-image stacks as Layo image nodes backed by packaged assets", () => {
+  test("imports Penpot mixed fill-image stacks on the owning Layo node", () => {
     const imported = importExternalMigrationArchive(createPenpotFillImageExportArchive(), {
       fileName: "fill-images.penpot",
       fileId: "penpot-fill-image-imported-file"
@@ -487,18 +487,30 @@ describe("Penpot external image asset migration", () => {
     });
     expect(frame.children[0]).toMatchObject({
       id: `penpot-${fillRectId}`,
-      kind: "image",
+      kind: "rectangle",
       name: "Hero fill",
       transform: { x: 24, y: 24, rotation: 0 },
       size: { width: 96, height: 72 },
-      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.75 },
-      content: {
-        type: "image",
-        asset_id: expectedFillAssetId,
-        natural_width: 1,
-        natural_height: 1,
-        fit_mode: "fill"
-      }
+      style: {
+        opacity: 1,
+        fills: [
+          {
+            id: "penpot-fill-1",
+            paint: { type: "gradient" },
+            opacity: 0.4,
+            visible: true,
+            blend_mode: "normal"
+          },
+          {
+            id: "penpot-fill-2",
+            paint: { type: "image", asset_id: expectedFillAssetId },
+            opacity: 0.75,
+            visible: true,
+            blend_mode: "normal"
+          }
+        ]
+      },
+      content: { type: "empty" }
     });
   });
 
@@ -511,7 +523,7 @@ describe("Penpot external image asset migration", () => {
     expect(imported).toMatchObject({
       source: "penpot",
       sourceLabel: "Penpot",
-      mappedNodeCount: 3,
+      mappedNodeCount: 2,
       skippedNodeCount: 0
     });
     expect(imported.importedAssets).toHaveLength(1);
@@ -529,23 +541,18 @@ describe("Penpot external image asset migration", () => {
       kind: "frame",
       name: "Hero frame"
     });
-    expect(frame.children).toHaveLength(2);
-    expect(frame.children[0]).toMatchObject({
-      id: `penpot-${frameId}-fill-image`,
-      kind: "image",
-      name: "Hero frame background",
-      transform: { x: 0, y: 0, rotation: 0 },
-      size: { width: 240, height: 160 },
-      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0 },
-      content: {
-        type: "image",
-        asset_id: expectedFrameBackgroundAssetId,
-        natural_width: 1,
-        natural_height: 1,
-        fit_mode: "fill"
+    expect(frame.style.fills).toEqual([
+      {
+        id: "penpot-fill-1",
+        color: "#ffffff",
+        paint: { type: "image", asset_id: expectedFrameBackgroundAssetId },
+        opacity: 1,
+        visible: true,
+        blend_mode: "normal"
       }
-    });
-    expect(frame.children[1]).toMatchObject({
+    ]);
+    expect(frame.children).toHaveLength(1);
+    expect(frame.children[0]).toMatchObject({
       id: `penpot-${foregroundRectId}`,
       kind: "rectangle",
       name: "Foreground card",
@@ -556,7 +563,7 @@ describe("Penpot external image asset migration", () => {
   });
 });
 
-  test("flattens Penpot solid fill stacks into a single Layo fill", () => {
+  test("preserves Penpot solid fill stacks as ordered owned fills", () => {
     const imported = importExternalMigrationArchive(createPenpotSolidMultiFillExportArchive(), {
       fileName: "multi-fills.penpot",
       fileId: "penpot-multi-fill-imported-file"
@@ -576,7 +583,28 @@ describe("Penpot external image asset migration", () => {
       id: `penpot-${multiFillRectId}`,
       kind: "rectangle",
       name: "Layered fill card",
-      style: { fill: expectedMultiFillColor, opacity: 1 }
+      style: {
+        fill: expectedMultiFillColor,
+        opacity: 1,
+        fills: [
+          {
+            id: "penpot-fill-1",
+            color: "#ff0000",
+            paint: { type: "solid", color: "#ff0000" },
+            opacity: 0.5,
+            visible: true,
+            blend_mode: "normal"
+          },
+          {
+            id: "penpot-fill-2",
+            color: "#0000ff",
+            paint: { type: "solid", color: "#0000ff" },
+            opacity: 1,
+            visible: true,
+            blend_mode: "normal"
+          }
+        ]
+      }
     });
   });
 
@@ -654,7 +682,7 @@ function createPenpotGradientFillExportArchive(): Buffer {
   ]);
 }
 
-test("flattens Penpot gradient fills into a single Layo fill", () => {
+test("preserves Penpot gradient fills as owned gradient paints", () => {
   const imported = importExternalMigrationArchive(createPenpotGradientFillExportArchive(), {
     fileName: "gradient-fills.penpot",
     fileId: "penpot-gradient-fill-imported-file"
@@ -674,7 +702,31 @@ test("flattens Penpot gradient fills into a single Layo fill", () => {
     id: `penpot-${gradientFillRectId}`,
     kind: "rectangle",
     name: "Gradient card",
-    style: { fill: expectedGradientFillColor, opacity: 1 }
+    style: {
+      fill: expectedGradientFillColor,
+      opacity: 1,
+      fills: [
+        {
+          id: "penpot-fill-1",
+          paint: {
+            type: "gradient",
+            gradient: {
+              type: "linear",
+              start: { x: 0, y: 0 },
+              end: { x: 1, y: 0 },
+              width: 1,
+              stops: [
+                { color: "#ff0000", opacity: 1, offset: 0 },
+                { color: "#0000ff", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          opacity: 1,
+          visible: true,
+          blend_mode: "normal"
+        }
+      ]
+    }
   });
 });
 
