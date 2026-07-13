@@ -223,7 +223,7 @@ const outerMainSlotId = "14141414-1414-1414-1414-141414141414";
 const outerCopyId = "15151515-1515-1515-1515-151515151515";
 const outerCopySlotId = "16161616-1616-1616-1616-161616161616";
 
-function packagedLibrarySwapArchive() {
+function packagedLibrarySwapArchive(options: { includeLibrary?: boolean } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
   const shape = (
     id: string,
@@ -236,17 +236,19 @@ function packagedLibrarySwapArchive() {
     extra: Record<string, unknown> = {}
   ) => ({ id, name, type, x, y, width, height, ...extra });
 
-  return createZipArchive([
+  const entries = [
     {
       path: "manifest.json",
       data: json({
         type: "penpot/export-files",
         version: 1,
         generatedBy: "penpot/packaged-library-swap-contract",
-        files: [
-          { id: fileId, name: "Product file", features: ["components/v2"] },
-          { id: libraryFileId, name: "Shape library", features: ["components/v2"] }
-        ]
+        files: options.includeLibrary === false
+          ? [{ id: fileId, name: "Product file", features: ["components/v2"] }]
+          : [
+              { id: fileId, name: "Product file", features: ["components/v2"] },
+              { id: libraryFileId, name: "Shape library", features: ["components/v2"] }
+            ]
       })
     },
     { path: `files/${fileId}.json`, data: json({ id: fileId, name: "Product file" }) },
@@ -316,7 +318,12 @@ function packagedLibrarySwapArchive() {
         fills: [{ fillColor: "#f97316", fillOpacity: 1 }]
       }))
     }
-  ]);
+  ];
+  return createZipArchive(
+    options.includeLibrary === false
+      ? entries.filter((entry) => !entry.path.startsWith(`files/${libraryFileId}`))
+      : entries
+  );
 }
 
 describe("Penpot component instance migration", () => {
@@ -450,6 +457,35 @@ describe("Penpot component instance migration", () => {
           }
         })
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("blocks a missing external library before writing project or document state", async () => {
+    const archive = packagedLibrarySwapArchive({ includeLibrary: false });
+    const review = reviewExternalMigrationArchive(archive, {
+      fileName: "missing-library.penpot"
+    });
+
+    expect(review).toMatchObject({
+      source: "penpot",
+      canImport: false,
+      blockedBy: ["penpot_component_relation_invalid"]
+    });
+
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-missing-library-"));
+    try {
+      const storage = new FileStorage(root);
+      await expect(
+        storage.importExternalMigrationArchive(archive, {
+          projectId: "must-not-write-project",
+          documentId: "must-not-write-document",
+          fileName: "missing-library.penpot"
+        })
+      ).rejects.toThrow(/component relation/i);
+      expect(await storage.listProjects()).toEqual([]);
+      expect(await storage.listFiles()).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
