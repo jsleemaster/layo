@@ -4353,17 +4353,8 @@ function collectProjectImageAssetIds(documents: DesignFile[]): string[] {
 
 function collectImageAssetIds(document: DesignFile): string[] {
   const assetIds = new Set<string>();
-  const stack = document.pages.flatMap((page) => page.children);
-  while (stack.length > 0) {
-    const node = stack.shift();
-    if (!node) {
-      continue;
-    }
-    if (node.content.type === "image") {
-      assertSafeStorageId(node.content.asset_id);
-      assetIds.add(node.content.asset_id);
-    }
-    stack.push(...node.children);
+  for (const root of document.pages.flatMap((page) => page.children)) {
+    collectImageAssetIdsFromNode(root, assetIds);
   }
   return [...assetIds].sort();
 }
