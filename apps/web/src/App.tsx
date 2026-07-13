@@ -4252,7 +4252,8 @@ function CanvasAlignedPathStroke({
     return null;
   }
 
-  const effectivePosition = pathHasOnlyClosedSubpaths(node.content.path_data) ? stroke.position : "center";
+  const pathContent = node.content;
+  const effectivePosition = pathHasOnlyClosedSubpaths(pathContent.path_data) ? stroke.position : "center";
   const lineCap = stroke.style === "dotted" ? "round" : stroke.cap;
   if (effectivePosition === "center") {
     return (
@@ -4277,10 +4278,10 @@ function CanvasAlignedPathStroke({
       listening={false}
       sceneFunc={(context) => {
         const canvas = (context as unknown as { _context: CanvasRenderingContext2D })._context;
-        const path = new Path2D(node.content.path_data);
+        const path = new Path2D(pathContent.path_data);
         canvas.save();
         if (effectivePosition === "inside") {
-          canvas.clip(path, node.content.fill_rule);
+          canvas.clip(path, pathContent.fill_rule);
         } else {
           const inverse = new Path2D();
           inverse.rect(-100000, -100000, 200000, 200000);
