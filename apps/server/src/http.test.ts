@@ -1006,6 +1006,8 @@ describe("HTTP server", () => {
       mode: "team",
       teamId: "team-beta"
     });
+    await storage.importLibraryRegistryItem("beta-target-file", "beta-kit");
+    await storage.importLibraryRegistryTokens("beta-target-file", "beta-kit");
 
     const server = createHttpServer(storage, {
       libraryRegistryAuth: {
@@ -1025,31 +1027,65 @@ describe("HTTP server", () => {
         ]
       }
     });
-    const request = (headers?: Record<string, string>) =>
-      server.inject({
-        method: "POST",
+    const routes = [
+      {
+        method: "POST" as const,
         url: "/files/beta-target-file/import/library/registry/review",
-        headers,
         payload: { libraryId: "beta-kit" }
-      });
+      },
+      {
+        method: "POST" as const,
+        url: "/files/beta-target-file/import/library/registry/tokens/review",
+        payload: { libraryId: "beta-kit" }
+      },
+      {
+        method: "POST" as const,
+        url: "/files/beta-target-file/import/library/registry/update/review",
+        payload: { libraryId: "beta-kit" }
+      },
+      {
+        method: "GET" as const,
+        url: "/files/beta-target-file/libraries/subscriptions"
+      },
+      {
+        method: "GET" as const,
+        url: "/files/beta-target-file/libraries/updates"
+      },
+      {
+        method: "GET" as const,
+        url: "/files/beta-target-file/libraries/token-subscriptions"
+      },
+      {
+        method: "GET" as const,
+        url: "/files/beta-target-file/libraries/token-updates"
+      }
+    ];
 
-    expect((await request()).statusCode).toBe(401);
-    expect(
-      (
-        await request({
-          authorization: "Bearer alpha-token",
-          "x-layo-user-id": "alpha-viewer"
-        })
-      ).statusCode
-    ).toBe(403);
-    expect(
-      (
-        await request({
-          authorization: "Bearer beta-token",
-          "x-layo-user-id": "beta-viewer"
-        })
-      ).statusCode
-    ).toBe(200);
+    for (const route of routes) {
+      expect((await server.inject(route)).statusCode).toBe(401);
+      expect(
+        (
+          await server.inject({
+            ...route,
+            headers: {
+              authorization: "Bearer alpha-token",
+              "x-layo-user-id": "alpha-viewer"
+            }
+          })
+        ).statusCode
+      ).toBe(403);
+      expect(
+        (
+          await server.inject({
+            ...route,
+            headers: {
+              authorization: "Bearer beta-token",
+              "x-layo-user-id": "beta-viewer"
+            }
+          })
+        ).statusCode
+      ).toBe(200);
+    }
   });
 
   test("authorizes team library publication by member token and editor role", async () => {
