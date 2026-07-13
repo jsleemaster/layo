@@ -26,15 +26,16 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No plan is active after the PR #294 merge gate. The next Penpot maturity loop
-must create a new exact failed case for hosted authenticated registry ownership,
-shared transactional storage, receipt retention, or durable pub/sub rather than
-reopening the completed local retry plan.
+No plan is active after the PR #295 merge gate. The next Penpot maturity loop
+must create an exact failed case for authenticated registry import/update/token
+mutations, principal-filtered reads, shared transactional storage, credential
+rotation, receipt retention, or durable pub/sub.
 
 ## Completed Plans
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-14-penpot-library-publish-authorization.md` | Completed by PR #295 merge gate | Adapts Penpot owner/editor/viewer library roles to Layo's team member-token model across HTTP, web, and MCP publication. RED `29283071209` proved viewer writes, `29283735052` proved missing browser credentials, `29283903958` proved missing MCP principal, and `29284023373` proved blank identity acceptance. GREEN `29284459320` passed 251 web, 288 server, Rust workspace, and 193 Playwright CLI tests; restore `29284459310` and retention `29284459291` passed. Product evidence is `docs/product/penpot-library-publish-authorization-delta.md`. Remaining registry mutations and hosted shared storage are routed next. |
 | `2026-07-14-penpot-idempotent-library-publication.md` | Completed by PR #294 merge gate | Adapts Penpot 2.14.1 idempotent RPC retry behavior with a durable receipt committed in the archive/metadata/event recovery transaction. RED `29279535916` proved duplicate storage publication, MCP RED `29280506268` proved the agent tool discarded the key, and validation RED `29280727694` proved unsafe keys surfaced as 500. GREEN `29281150206` passed maturity/design gates, typecheck, build, 251 web, 282 server, Rust workspace, and 192 Playwright tests; restore `29281150135` and retention `29281150115` passed. Product evidence is `docs/product/penpot-idempotent-library-publication-delta.md`. Hosted identity, shared transactions, receipt retention, and durable pub/sub remain next. |
 | `2026-07-13-penpot-library-update-conflict-recovery.md` | Completed | PR #283-#293 establish cross-file ownership, conflict preflight, rollback, write-ahead recovery, resource-keyed process locks, operation-level document RMW transactions, and atomic archive/metadata/event publication. RED `29276435367` proved competing source mismatch and crash RED `29277054987` proved restart mismatch after archive replacement. Final Full Verification `29278626401` passed 251 web, 280 server, Rust workspace, and 192 Playwright tests; restore `29278616916` and retention `29278617280` passed. Product evidence is `docs/product/penpot-library-publication-transaction-delta.md`. Idempotent network retry is routed next; deployment remains non-gating. |
 | `2026-07-13-penpot-component-library-swap-migration.md` | Completed | PR #283 maps every packaged Penpot file into one component relation graph, persists source libraries as project documents and registry subscriptions, preserves nested `component_swap` overrides and cross-file image paints/assets, refreshes target definitions without losing swaps, and blocks missing sources before writes. RED runs `29244805795`, `29245285835`, `29245799016`, and `29246130322` proved review, structure, ownership, and persistence gaps; `29246894374` and `29247968681` drove reload re-entry and stable materialized-child identity fixes. Full Verification `29248081639` passed maturity/design gates, typecheck, build, 250 web tests, 262 server tests, Rust workspace tests, and 192 Playwright CLI cases. Product evidence is `docs/product/penpot-component-library-swap-migration-delta.md`. Conflict and rollback recovery is routed next; deployment remains non-gating. |

@@ -259,4 +259,19 @@ COLLAB_ROOM_TOKEN=
 COLLAB_MEMBER_TOKENS=[]
 ```
 
+Optional hosted library publication authorization:
+
+```bash
+LAYO_LIBRARY_REGISTRY_MEMBERS='[{"userId":"editor-user","role":"editor","teamIds":["team-alpha"],"tokenHash":"<sha256>"}]'
+LAYO_MCP_USER_ID=editor-user
+LAYO_MCP_MEMBER_TOKEN=
+```
+
+When `LAYO_LIBRARY_REGISTRY_MEMBERS` is set, HTTP and MCP library publication
+requires an owner or editor assigned to the source file's exact team. The web
+editor reuses the runtime member token from the active collaboration team.
+Prefer `tokenHash` for hosted configuration; plaintext `token` entries are
+intended only for local development. Leave the registry member configuration
+unset to preserve the open local-first workflow.
+
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.

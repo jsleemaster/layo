@@ -402,6 +402,11 @@ export interface PublishLibraryRegistryInput {
   name?: string;
 }
 
+export interface LibraryRegistryCredentials {
+  userId: string;
+  memberToken: string;
+}
+
 export interface SubscribeToLibraryRegistryEventsOptions {
   fileId?: string;
   after?: number;
@@ -714,11 +719,19 @@ export async function exportLibraryArchive(
 export async function publishLibraryToRegistry(
   fileId: string,
   input: PublishLibraryRegistryInput = {},
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryEntry> {
+  const userId = credentials?.userId.trim();
+  const memberToken = credentials?.memberToken.trim();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (userId && memberToken) {
+    headers.Authorization = `Bearer ${memberToken}`;
+    headers["X-Layo-User-Id"] = userId;
+  }
   const response = await fetcher(apiUrl("/libraries"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ fileId, ...input })
   });
   const payload = await readDocumentJson(response);

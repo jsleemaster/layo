@@ -571,6 +571,38 @@ test("file panel exports a shared library archive and imports reusable component
   ]);
 });
 
+test("file panel sends active team member credentials when publishing a library", async ({ page }) => {
+  await createProjectFromEmptyState(page);
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "실시간 협업" }).click();
+  await page.getByTestId("relay-url").fill("ws://127.0.0.1:65534");
+  await page.getByTestId("member-token").fill("editor-member-token");
+  await page.getByRole("button", { name: "협업 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+
+  const publicationRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/libraries"
+  );
+  await page.getByTestId("library-registry-name").fill("Credentialed Team Kit");
+  await page.getByRole("button", { name: "현재 파일 라이브러리 게시" }).click();
+
+  const request = await publicationRequest;
+  expect(request.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "Credentialed Team Kit 게시됨"
+  );
+});
+
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {

@@ -9422,6 +9422,7 @@ export function App() {
   const [relayUrl, setRelayUrl] = useState("");
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
+  const [activeMemberToken, setActiveMemberToken] = useState("");
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -14018,9 +14019,19 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("라이브러리 게시 중");
-      const published = await publishLibraryToRegistry(currentProject.currentDocumentId, {
-        name: libraryRegistryName.trim() || editor.document.name
-      });
+      const published = await publishLibraryToRegistry(
+        currentProject.currentDocumentId,
+        {
+          name: libraryRegistryName.trim() || editor.document.name
+        },
+        undefined,
+        collabSession && activeMemberToken
+          ? {
+              userId: collabSession.team.currentUserId,
+              memberToken: activeMemberToken
+            }
+          : undefined
+      );
       setLibraryRegistryName(published.name);
       await refreshLibraryRegistry(`${published.name} 게시됨`);
       setProjectStatus(`${published.name} 게시됨`);
@@ -15006,6 +15017,7 @@ export function App() {
       updatedAtMs: Date.now()
     });
     setCollabSession(session);
+    setActiveMemberToken(credentials.memberToken?.trim() ?? "");
     setCollabStatus(session.status);
     publishPresenceSnapshot(session);
     setEncryptionEnabled(team.encryption.mode === "shared-key");
