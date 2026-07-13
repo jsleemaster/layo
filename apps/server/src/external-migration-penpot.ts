@@ -1224,15 +1224,18 @@ function penpotGradientDefinition(record: JsonRecord): NodePaintGradient | null 
     }];
   });
   if (stops.length < 2) return null;
-  const point = (value: unknown) => {
-    const record = asRecord(value);
-    return record
-      ? { x: finiteNumber(valueFor(record, 'x'), 0), y: finiteNumber(valueFor(record, 'y'), 0) }
-      : undefined;
+  const point = (prefix: 'start' | 'end') => {
+    const record = asRecord(valueFor(gradient, prefix, `${prefix}Point`, `${prefix}-point`));
+    if (record) {
+      return { x: finiteNumber(valueFor(record, 'x'), 0), y: finiteNumber(valueFor(record, 'y'), 0) };
+    }
+    const x = finiteNumber(valueFor(gradient, `${prefix}X`, `${prefix}-x`), Number.NaN);
+    const y = finiteNumber(valueFor(gradient, `${prefix}Y`, `${prefix}-y`), Number.NaN);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : undefined;
   };
   const type = stringValue(valueFor(gradient, 'type'));
-  const start = point(valueFor(gradient, 'start', 'startPoint', 'start-point'));
-  const end = point(valueFor(gradient, 'end', 'endPoint', 'end-point'));
+  const start = point('start');
+  const end = point('end');
   const width = finiteNumber(valueFor(gradient, 'width'), Number.NaN);
   return {
     ...(type ? { type } : {}),
