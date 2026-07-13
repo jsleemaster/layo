@@ -4264,15 +4264,6 @@ function useStrokePaintImage(stroke: NodeStroke) {
   return image;
 }
 
-function canvasGradientStopColor(color: string, opacity: number) {
-  if (opacity >= 1) return color;
-  const match = /^#([0-9a-f]{6})$/i.exec(color);
-  if (!match) return color;
-  const hex = match[1];
-  const channels = [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
-  return `rgba(${channels[0]}, ${channels[1]}, ${channels[2]}, ${Math.max(0, Math.min(1, opacity))})`;
-}
-
 function canvasStrokePaint(
   canvas: CanvasRenderingContext2D,
   node: RendererNode,
@@ -4299,7 +4290,7 @@ function canvasStrokePaint(
           end.y * node.size.height
         );
     for (const stop of [...(gradient.stops ?? [])].sort((left, right) => left.offset - right.offset)) {
-      paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop.color, stop.opacity));
+      paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop));
     }
     return paint;
   }
