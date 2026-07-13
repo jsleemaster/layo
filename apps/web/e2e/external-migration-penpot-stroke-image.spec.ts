@@ -141,7 +141,7 @@ function createPenpotStrokeImageExportArchive(): Buffer {
   ]);
 }
 
-test("file panel imports a Penpot stroke-image record as a packaged image asset", async ({ page }, testInfo) => {
+test("file panel imports a Penpot stroke-image record as a rectangle-owned paint", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("stroke-images.penpot");
   await writeFile(penpotZipPath, createPenpotStrokeImageExportArchive());
