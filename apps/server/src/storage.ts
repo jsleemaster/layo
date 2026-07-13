@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -145,10 +145,11 @@ async function recoverAbandonedStorageProcessLock(
   locksDir: string,
   staleMs: number
 ): Promise<boolean> {
+  const ownerPath = path.join(lockDir, "owner.json");
   let owner: StorageProcessLockOwner;
   try {
     owner = parseStorageProcessLockOwner(
-      JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8"))
+      JSON.parse(await readFile(ownerPath, "utf8"))
     );
   } catch (error) {
     if ((error as { code?: string }).code === "ENOENT") {
@@ -165,33 +166,59 @@ async function recoverAbandonedStorageProcessLock(
     return false;
   }
 
-  const abandonedDir = `${lockDir}.abandoned-${owner.token}-${randomUUID()}`;
+  const claimPath = `${lockDir}.recovery-${owner.token}.claim`;
   try {
-    await rename(lockDir, abandonedDir);
+    await link(ownerPath, claimPath);
   } catch (error) {
-    if ((error as { code?: string }).code === "ENOENT") {
+    const code = (error as { code?: string }).code;
+    if (code === "EEXIST") {
+      return false;
+    }
+    if (code === "ENOENT") {
       return true;
     }
     throw error;
   }
 
   try {
-    const movedOwner = parseStorageProcessLockOwner(
-      JSON.parse(await readFile(path.join(abandonedDir, "owner.json"), "utf8"))
+    const claimedOwner = parseStorageProcessLockOwner(
+      JSON.parse(await readFile(claimPath, "utf8"))
     );
-    if (movedOwner.token !== owner.token) {
-      throw new Error("storage process mutation lock changed during stale recovery");
+    if (claimedOwner.token !== owner.token) {
+      return false;
     }
-    await rm(abandonedDir, { recursive: true, force: true });
-    await syncDirectory(locksDir);
-    return true;
-  } catch (error) {
+
+    const abandonedDir = `${lockDir}.abandoned-${owner.token}-${randomUUID()}`;
     try {
-      await rename(abandonedDir, lockDir);
-    } catch {
-      // Preserve the primary stale-recovery failure.
+      await rename(lockDir, abandonedDir);
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return true;
+      }
+      throw error;
     }
-    throw error;
+
+    try {
+      const movedOwner = parseStorageProcessLockOwner(
+        JSON.parse(await readFile(path.join(abandonedDir, "owner.json"), "utf8"))
+      );
+      if (movedOwner.token !== owner.token) {
+        throw new Error("storage process mutation lock changed during stale recovery");
+      }
+      await rm(abandonedDir, { recursive: true, force: true });
+      await syncDirectory(locksDir);
+      return true;
+    } catch (error) {
+      try {
+        await rename(abandonedDir, lockDir);
+      } catch {
+        // Preserve the primary stale-recovery failure.
+      }
+      throw error;
+    }
+  } finally {
+    await rm(claimPath, { force: true });
+    await syncDirectory(locksDir);
   }
 }
 
