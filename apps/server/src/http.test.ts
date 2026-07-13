@@ -979,6 +979,79 @@ describe("HTTP server", () => {
     ]);
   });
 
+  test("authorizes hosted registry review reads by target team", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "beta-source-project",
+      name: "Beta Source",
+      documentId: "beta-source-file",
+      documentName: "Beta Source"
+    });
+    await storage.setProjectSharing("beta-source-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.publishLibraryToRegistry("beta-source-file", {
+      libraryId: "beta-kit",
+      name: "Beta Kit"
+    });
+    await storage.createProject({
+      projectId: "beta-target-project",
+      name: "Beta Target",
+      documentId: "beta-target-file",
+      documentName: "Beta Target"
+    });
+    await storage.setProjectSharing("beta-target-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          },
+          {
+            userId: "beta-viewer",
+            role: "viewer",
+            teamIds: ["team-beta"],
+            token: "beta-token"
+          }
+        ]
+      }
+    });
+    const request = (headers?: Record<string, string>) =>
+      server.inject({
+        method: "POST",
+        url: "/files/beta-target-file/import/library/registry/review",
+        headers,
+        payload: { libraryId: "beta-kit" }
+      });
+
+    expect((await request()).statusCode).toBe(401);
+    expect(
+      (
+        await request({
+          authorization: "Bearer alpha-token",
+          "x-layo-user-id": "alpha-viewer"
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await request({
+          authorization: "Bearer beta-token",
+          "x-layo-user-id": "beta-viewer"
+        })
+      ).statusCode
+    ).toBe(200);
+  });
+
   test("authorizes team library publication by member token and editor role", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
