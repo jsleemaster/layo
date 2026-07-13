@@ -1258,6 +1258,12 @@ function penpotStrokeStack(shape: JsonRecord, assetsById: Map<string, PenpotPack
         : 'center';
     const styleValue = (stringValue(valueFor(record, 'strokeStyle', 'stroke-style')) ?? 'solid').toLowerCase();
     const style = styleValue.includes('dot') ? 'dotted' : styleValue.includes('dash') ? 'dashed' : 'solid';
+    const dasharrayValue = valueFor(record, 'strokeDasharray', 'stroke-dasharray');
+    const dasharray = Array.isArray(dasharrayValue)
+      ? dasharrayValue
+          .map((value) => finiteNumber(value, Number.NaN))
+          .filter((value) => Number.isFinite(value) && value >= 0)
+      : [];
     const paint = imageAsset
       ? { type: 'image' as const, asset_id: imageAsset.metadata.assetId }
       : gradient
@@ -1272,7 +1278,7 @@ function penpotStrokeStack(shape: JsonRecord, assetsById: Map<string, PenpotPack
       position,
       style,
       visible: valueFor(record, 'hidden') !== true,
-      dasharray: recordsFor(valueFor(record, 'strokeDasharray', 'stroke-dasharray')).flatMap(() => []),
+      dasharray,
       cap: 'butt',
       join: 'miter',
       start_marker: 'none',
