@@ -2365,7 +2365,6 @@ export class FileStorage {
 
     target.tokens = targetTokens;
     target.components = [...(target.components ?? []), ...importedComponents];
-    await this.writeFile(fileId, target);
 
       return {
       fileId,
@@ -2616,7 +2615,6 @@ export class FileStorage {
     target.tokens = structuredClone(library.library.tokens);
     target.token_sets = structuredClone(library.library.token_sets);
     target.token_themes = structuredClone(library.library.token_themes);
-    await this.writeFile(fileId, target);
 
       return {
       fileId,
