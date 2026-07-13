@@ -521,11 +521,16 @@ describe("Penpot component instance migration", () => {
           componentCount: 2
         })
       ]);
+      await expect(storage.exportLibraryArchive(libraryDocumentId)).resolves.toMatchObject({
+        componentCount: 2,
+        assetCount: 1
+      });
       expect(await storage.listLibraryRegistrySubscriptions("penpot-product-document")).toEqual([
         expect.objectContaining({
           fileId: "penpot-product-document",
           libraryId: libraryDocumentId,
           sourceFileId: libraryDocumentId,
+          assetCount: 1,
           componentIdMap: {
             [`penpot-component-${rectangleComponentId}`]: `penpot-component-${rectangleComponentId}`,
             [`penpot-component-${circleComponentId}`]: `penpot-component-${circleComponentId}`
