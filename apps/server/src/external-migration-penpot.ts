@@ -53,6 +53,7 @@ interface PenpotPackage {
 interface PenpotReviewResult {
   canImport: boolean;
   documentCandidates: ExternalMigrationDocumentCandidate[];
+  blockedBy: string[];
   warnings: string[];
 }
 
@@ -137,10 +138,12 @@ export function reviewPenpotZipEntries(
     return null;
   }
 
+  const relationErrors = penpotComponentRelationErrors(penpotPackage.pages);
   return {
-    canImport: penpotPackage.pages.length > 0,
+    canImport: penpotPackage.pages.length > 0 && relationErrors.length === 0,
     documentCandidates: penpotPackage.documentCandidates,
-    warnings: penpotPackage.warnings
+    blockedBy: relationErrors.length > 0 ? ['penpot_component_relation_invalid'] : [],
+    warnings: [...penpotPackage.warnings, ...relationErrors]
   };
 }
 
@@ -151,6 +154,10 @@ export function importPenpotZipEntries(
   const penpotPackage = readPenpotPackage(entries, { fileName: options.fileName, sourceHint: 'penpot' });
   if (!penpotPackage || penpotPackage.pages.length === 0) {
     throw inputValidationError('Penpot ZIP export does not contain importable pages.');
+  }
+  const relationErrors = penpotComponentRelationErrors(penpotPackage.pages);
+  if (relationErrors.length > 0) {
+    throw inputValidationError(`Penpot component relation validation failed: ${relationErrors.join(' ')}`);
   }
 
   const state: PenpotMappingState = {
@@ -182,6 +189,58 @@ export function importPenpotZipEntries(
     skippedNodeCount: state.skippedNodeCount,
     warnings: state.warnings
   };
+}
+
+function penpotComponentRelationErrors(pages: PenpotPage[]): string[] {
+  const errors: string[] = [];
+  const mainsByComponentId = new Map<string, PenpotShape[]>();
+
+  for (const page of pages) {
+    for (const shape of page.shapesById.values()) {
+      const isRoot = valueFor(shape.json, 'componentRoot', 'component-root') === true;
+      const isMain = valueFor(shape.json, 'mainInstance', 'main-instance') === true;
+      const componentId = stringValue(valueFor(shape.json, 'componentId', 'component-id'));
+      if (!isRoot || !isMain) {
+        continue;
+      }
+      if (!componentId) {
+        errors.push(`Penpot main component ${shape.name} is missing component-id.`);
+        continue;
+      }
+      const mains = mainsByComponentId.get(componentId) ?? [];
+      mains.push(shape);
+      mainsByComponentId.set(componentId, mains);
+    }
+  }
+
+  for (const [componentId, mains] of mainsByComponentId) {
+    if (mains.length > 1) {
+      errors.push(`Penpot component ${componentId} has ${mains.length} ambiguous main-instance roots.`);
+    }
+  }
+
+  for (const page of pages) {
+    for (const shape of page.shapesById.values()) {
+      const isRoot = valueFor(shape.json, 'componentRoot', 'component-root') === true;
+      const isMain = valueFor(shape.json, 'mainInstance', 'main-instance') === true;
+      if (!isRoot || isMain) {
+        continue;
+      }
+      const componentId = stringValue(valueFor(shape.json, 'componentId', 'component-id'));
+      const shapeRef = stringValue(valueFor(shape.json, 'shapeRef', 'shape-ref'));
+      if (!componentId && !shapeRef) {
+        continue;
+      }
+      const mains = componentId ? mainsByComponentId.get(componentId) ?? [] : [];
+      if (!componentId || !shapeRef || mains.length !== 1 || mains[0].id !== shapeRef) {
+        errors.push(
+          `Penpot component copy ${shape.name} has a missing or ambiguous main-instance relation.`
+        );
+      }
+    }
+  }
+
+  return [...new Set(errors)];
 }
 
 function readPenpotPackage(
