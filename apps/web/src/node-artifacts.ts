@@ -1,5 +1,6 @@
 import { unzlibSync, zlibSync } from "fflate";
 import type { NodePaintGradient, NodePaintSource, NodePaintStop, RendererNode } from "@layo/renderer";
+import { parseEditablePath } from "./path-editor";
 
 export interface NodeArtifactAsset {
   assetId: string;
@@ -398,10 +399,31 @@ function shadowBoundsForNode(node: RendererNode): ArtifactBounds | null {
   }, boundsForBox(width, height));
 }
 
+function strokeBoundsForNode(node: RendererNode): ArtifactBounds | null {
+  if (!node.style.stroke || node.style.stroke_width <= 0 || node.kind === "group") {
+    return null;
+  }
+  const width = Math.max(1, Math.round(node.size.width));
+  const height = Math.max(1, Math.round(node.size.height));
+  const strokeRadius = node.style.stroke_width / 2;
+  const hasMarker =
+    (node.style.stroke_start_marker ?? "none") !== "none" ||
+    (node.style.stroke_end_marker ?? "none") !== "none";
+  const expansion = hasMarker ? Math.max(4, node.style.stroke_width * 2.5) : strokeRadius;
+  return {
+    minX: -expansion,
+    minY: -expansion,
+    maxX: width + expansion,
+    maxY: height + expansion
+  };
+}
+
 function artifactBoundsForNode(node: RendererNode): ArtifactBounds {
   const width = Math.max(1, Math.round(node.size.width));
   const height = Math.max(1, Math.round(node.size.height));
-  let bounds = mergeBounds(boundsForBox(width, height), shadowBoundsForNode(node) ?? boundsForBox(width, height));
+  const boxBounds = boundsForBox(width, height);
+  let bounds = mergeBounds(boxBounds, shadowBoundsForNode(node) ?? boxBounds);
+  bounds = mergeBounds(bounds, strokeBoundsForNode(node) ?? boxBounds);
 
   if (nodeClipsToBounds(node)) {
     return bounds;
@@ -1572,13 +1594,121 @@ function pdfStrokeStyleCommands(node: RendererNode) {
   ];
 }
 
-function pdfStrokeMarkerEvidence(node: RendererNode) {
-  const start = node.style.stroke_start_marker ?? "none";
-  const end = node.style.stroke_end_marker ?? "none";
+type StrokeMarker = NonNullable<RendererNode["style"]["stroke_start_marker"]>;
+
+function openPathMarkerGeometry(pathData: string) {
+  const path = parseEditablePath(pathData);
+  if (!path || path.closed) {
+    return null;
+  }
+  const commands = path.commands.filter((command) => command.type !== "Z");
+  const start = commands[0];
+  const next = commands[1];
+  const end = commands.at(-1);
+  const previous = commands.at(-2);
+  if (!start || start.type !== "M" || !next || !end || end.type === "M") {
+    return null;
+  }
+  const nextPoint = next.type === "C" ? next.control1 : next.type === "Q" ? next.control : next;
+  const previousPoint =
+    end.type === "C"
+      ? end.control2
+      : end.type === "Q"
+        ? end.control
+        : previous && previous.type !== "Z"
+          ? previous
+          : start;
+  return {
+    start: {
+      x: start.x,
+      y: start.y,
+      angle: Math.atan2(start.y - nextPoint.y, start.x - nextPoint.x)
+    },
+    end: {
+      x: end.x,
+      y: end.y,
+      angle: Math.atan2(end.y - previousPoint.y, end.x - previousPoint.x)
+    }
+  };
+}
+
+function pdfStrokeMarkerShapeCommands(marker: StrokeMarker, size: number) {
+  const half = size / 2;
+  if (marker === "circle") {
+    const control = half * pdfEllipseKappa;
+    return [
+      `${formatNumber(half)} 0 m`,
+      `${formatNumber(half)} ${formatNumber(control)} ${formatNumber(control)} ${formatNumber(half)} 0 ${formatNumber(half)} c`,
+      `${formatNumber(-control)} ${formatNumber(half)} ${formatNumber(-half)} ${formatNumber(control)} ${formatNumber(-half)} 0 c`,
+      `${formatNumber(-half)} ${formatNumber(-control)} ${formatNumber(-control)} ${formatNumber(-half)} 0 ${formatNumber(-half)} c`,
+      `${formatNumber(control)} ${formatNumber(-half)} ${formatNumber(half)} ${formatNumber(-control)} ${formatNumber(half)} 0 c`,
+      "h",
+      "f"
+    ];
+  }
+  if (marker === "square") {
+    return [`${formatNumber(-half)} ${formatNumber(-half)} ${formatNumber(size)} ${formatNumber(size)} re`, "f"];
+  }
+  if (marker === "diamond") {
+    return [
+      `${formatNumber(half)} 0 m`,
+      `0 ${formatNumber(half)} l`,
+      `${formatNumber(-half)} 0 l`,
+      `0 ${formatNumber(-half)} l`,
+      "h",
+      "f"
+    ];
+  }
+  if (marker === "line_arrow") {
+    return [
+      `${formatNumber(-size)} ${formatNumber(-half)} m`,
+      "0 0 l",
+      `${formatNumber(-size)} ${formatNumber(half)} l`,
+      "S"
+    ];
+  }
   return [
-    start !== "none" ? `% Layo stroke marker start ${start}` : "",
-    end !== "none" ? `% Layo stroke marker end ${end}` : ""
-  ].filter(Boolean);
+    `${formatNumber(half)} 0 m`,
+    `${formatNumber(-half)} ${formatNumber(-half)} l`,
+    `${formatNumber(-half)} ${formatNumber(half)} l`,
+    "h",
+    "f"
+  ];
+}
+
+function pdfStrokeMarkerCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
+  if (node.content.type !== "path") {
+    return [];
+  }
+  const geometry = openPathMarkerGeometry(node.content.path_data);
+  if (!geometry) {
+    return [];
+  }
+  const size = Math.max(4, node.style.stroke_width * 2.5);
+  const entries = [
+    ["start", node.style.stroke_start_marker ?? "none", geometry.start],
+    ["end", node.style.stroke_end_marker ?? "none", geometry.end]
+  ] as const;
+  return entries.flatMap(([position, marker, point]) => {
+    if (marker === "none") {
+      return [];
+    }
+    const angle = -point.angle;
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+    const translateX = x + point.x;
+    const translateY = pageHeight - y - point.y;
+    return [
+      `% Layo stroke marker geometry ${position} ${marker}`,
+      "q",
+      `${pdfColorOperands(node.style.stroke ?? "#000000")} rg`,
+      `${pdfColorOperands(node.style.stroke ?? "#000000")} RG`,
+      `${formatNumber(Math.max(1, node.style.stroke_width / 2))} w`,
+      `${formatNumber(cosine)} ${formatNumber(sine)} ${formatNumber(-sine)} ${formatNumber(cosine)} ${formatNumber(translateX)} ${formatNumber(translateY)} cm`,
+      ...pdfStrokeMarkerShapeCommands(marker, size),
+      "Q"
+    ];
+  });
 }
 
 function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y: number) {
@@ -1593,7 +1723,7 @@ function pdfStrokeCommands(node: RendererNode, pageHeight: number, x: number, y:
     ...pdfStrokeStyleCommands(node),
     ...pdfShapePathCommandsForNode(node, pageHeight, x, y),
     "S",
-    ...pdfStrokeMarkerEvidence(node),
+    ...pdfStrokeMarkerCommands(node, pageHeight, x, y),
     "Q"
   ];
 }
