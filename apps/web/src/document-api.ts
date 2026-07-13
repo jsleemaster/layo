@@ -767,11 +767,12 @@ export async function listLibraryRegistry(
 export async function reviewLibraryRegistryItem(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryReview> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/review`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
@@ -796,11 +797,12 @@ export async function importLibraryRegistryItem(
 export async function reviewLibraryRegistryTokens(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryTokenReview> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/tokens/review`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
@@ -824,18 +826,24 @@ export async function importLibraryRegistryTokens(
 
 export async function listLibraryRegistryTokenSubscriptions(
   fileId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryTokenSubscription[]> {
-  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/token-subscriptions`));
+  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/token-subscriptions`), {
+    headers: libraryRegistryWriteHeaders(credentials)
+  });
   const payload = await readDocumentJson(response);
   return (payload as { subscriptions: LibraryRegistryTokenSubscription[] }).subscriptions;
 }
 
 export async function listLibraryRegistryTokenUpdates(
   fileId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryTokenUpdateNotification[]> {
-  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/token-updates`));
+  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/token-updates`), {
+    headers: libraryRegistryWriteHeaders(credentials)
+  });
   const payload = await readDocumentJson(response);
   return (payload as { updates: LibraryRegistryTokenUpdateNotification[] }).updates;
 }
@@ -857,18 +865,24 @@ export async function updateLibraryRegistryTokens(
 
 export async function listLibraryRegistrySubscriptions(
   fileId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistrySubscription[]> {
-  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/subscriptions`));
+  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/subscriptions`), {
+    headers: libraryRegistryWriteHeaders(credentials)
+  });
   const payload = await readDocumentJson(response);
   return (payload as { subscriptions: LibraryRegistrySubscription[] }).subscriptions;
 }
 
 export async function listLibraryRegistryUpdates(
   fileId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryUpdateNotification[]> {
-  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/updates`));
+  const response = await fetcher(apiUrl(`/files/${fileId}/libraries/updates`), {
+    headers: libraryRegistryWriteHeaders(credentials)
+  });
   const payload = await readDocumentJson(response);
   return (payload as { updates: LibraryRegistryUpdateNotification[] }).updates;
 }
@@ -876,11 +890,12 @@ export async function listLibraryRegistryUpdates(
 export async function reviewLibraryRegistryItemUpdate(
   fileId: string,
   libraryId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<LibraryRegistryItemUpdatePreview> {
   const response = await fetcher(apiUrl(`/files/${fileId}/import/library/registry/update/review`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify({ libraryId })
   });
   const payload = await readDocumentJson(response);
