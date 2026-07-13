@@ -4187,6 +4187,10 @@ export class FileStorage {
     );
   }
 
+  async getTeamIdForFile(fileId: string): Promise<string | undefined> {
+    return this.findTeamIdForFile(fileId);
+  }
+
   private async findTeamIdForFile(fileId: string): Promise<string | undefined> {
     return Array.from(await this.findTeamIdsForFile(fileId)).sort()[0];
   }
