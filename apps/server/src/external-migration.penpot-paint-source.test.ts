@@ -188,30 +188,40 @@ test("preserves Penpot paint source metadata for agents and code handoff", () =>
     name: "Gradient paint card",
     style: { fill: "#800080", stroke: "#008080", stroke_width: 3, opacity: 0.6 }
   });
-  expect(rect.style.paint_sources).toEqual(expectedPaintSources);
+  expect(rect.style.paint_sources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
 
   const inspection = inspectCanvas(imported.file);
   expect(inspection.nodes.find((node) => node.id === `penpot-${gradientRectId}`)?.paintSources).toEqual(
-    expectedPaintSources
+    expectedPaintSources.filter((source) => source.kind === "fill")
   );
 
   const exported = exportDesignToCode(imported.file);
   const rootElement = exported.elements.find((element) => element.id === `penpot-${frameId}`);
   const rectStructure = rootElement?.structure.children.find((child) => child.id === `penpot-${gradientRectId}`) as any;
-  expect(rectStructure?.style.paintSources).toEqual(expectedPaintSources);
+  expect(rectStructure?.style.paintSources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
   expect(rectStructure?.annotations).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
         id: `penpot-${gradientRectId}-paint-source`,
         label: "Penpot paint",
-        value: "2 paint source(s) preserved",
-        detail: "2 gradient source(s) keep stops and geometry while Layo uses flattened paint for rendering"
+        value: "1 paint source(s) preserved",
+        detail: "1 gradient source(s) keep stops and geometry while Layo uses flattened paint for rendering"
       })
     ])
   );
   expect(rootElement?.jsModule).toContain('"paintSources"');
   expect(rootElement?.jsModule).toContain('"blendMode": "multiply"');
-  expect(rootElement?.jsModule).toContain('"blendMode": "screen"');
+  expect(rect.style.strokes?.[0]?.paint).toMatchObject({
+    type: "gradient",
+    gradient: {
+      type: "linear",
+      stops: [
+        { color: "#00ff00", opacity: 1, offset: 0 },
+        { color: "#0000ff", opacity: 1, offset: 1 }
+      ]
+    }
+  });
+  expect(rectStructure?.style.strokes?.[0]?.paint).toEqual(rect.style.strokes[0].paint);
 });
 
 test("persists Penpot paint source metadata through HTTP import", async () => {
@@ -250,5 +260,5 @@ test("persists Penpot paint source metadata through HTTP import", async () => {
     name: "Gradient paint card",
     style: { fill: "#800080", stroke: "#008080", stroke_width: 3, opacity: 0.6 }
   });
-  expect(rect.style.paint_sources).toEqual(expectedPaintSources);
+  expect(rect.style.paint_sources).toEqual(expectedPaintSources.filter((source) => source.kind === "fill"));
 });

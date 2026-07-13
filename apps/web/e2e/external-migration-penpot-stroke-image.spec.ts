@@ -141,7 +141,7 @@ function createPenpotStrokeImageExportArchive(): Buffer {
   ]);
 }
 
-test("file panel imports a Penpot stroke-image record as a packaged image asset", async ({ page }, testInfo) => {
+test("file panel imports a Penpot stroke-image record as a rectangle-owned paint", async ({ page }, testInfo) => {
   await createProjectFromEmptyState(page);
   const penpotZipPath = testInfo.outputPath("stroke-images.penpot");
   await writeFile(penpotZipPath, createPenpotStrokeImageExportArchive());
@@ -171,16 +171,21 @@ test("file panel imports a Penpot stroke-image record as a packaged image asset"
   const strokeImageNode = frame.children[0];
   expect(strokeImageNode).toMatchObject({
     id: `penpot-${strokeImageRectId}`,
-    kind: "image",
+    kind: "rectangle",
     name: "Border texture card",
-    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 0.6 },
-    content: {
-      type: "image",
-      asset_id: expectedStrokeImageAssetId,
-      natural_width: 1,
-      natural_height: 1,
-      fit_mode: "fill"
-    }
+    style: {
+      fill: "#ffffff",
+      stroke: null,
+      stroke_width: 0,
+      opacity: 1,
+      strokes: [{
+        paint: { type: "image", asset_id: expectedStrokeImageAssetId },
+        opacity: 0.6,
+        width: 12,
+        position: "center"
+      }]
+    },
+    content: { type: "empty" }
   });
 
   const assetResponse = await page.request.get(`http://127.0.0.1:4317/assets/${expectedStrokeImageAssetId}`);

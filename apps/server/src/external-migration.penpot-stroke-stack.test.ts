@@ -17,7 +17,6 @@ const differentWidthStrokeRectId = "13131313-1313-1313-1313-131313131313";
 const mixedGradientStrokeRectId = "14141414-1414-1414-1414-141414141414";
 const expectedStrokeStackColor = "#800080";
 const expectedDifferentWidthStrokeWidth = 8;
-const expectedMixedGradientStrokeColor = "#804040";
 const expectedMixedGradientStrokeWidth = 6;
 
 afterEach(async () => {
@@ -78,7 +77,13 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
           height: 72,
           fills: [{ "fill-color": "#ffffff", "fill-opacity": 1 }],
           strokes: [
-            { "stroke-color": "#ff0000", "stroke-opacity": 0.5, "stroke-width": 4 },
+            {
+              "stroke-color": "#ff0000",
+              "stroke-opacity": 0.5,
+              "stroke-width": 4,
+              "stroke-style": "dashed",
+              "stroke-dasharray": [7, 3]
+            },
             { "stroke-color": "#0000ff", "stroke-opacity": 1, "stroke-width": 4 }
           ]
         }),
@@ -137,7 +142,7 @@ function createPenpotSolidMultiStrokeExportArchive(): Buffer {
   ]);
 }
 
-test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
+test("preserves Penpot ordered solid and gradient stroke paints", () => {
   const archive = createPenpotSolidMultiStrokeExportArchive();
   const review = reviewExternalMigrationArchive(archive, { fileName: "multi-strokes.penpot" });
   expect(review).toMatchObject({
@@ -187,14 +192,45 @@ test("flattens Penpot solid stroke stacks into a single Layo stroke", () => {
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: expectedMixedGradientStrokeColor,
+      stroke: "#804040",
       stroke_width: expectedMixedGradientStrokeWidth,
-      opacity: 1
+      opacity: 1,
+      strokes: [
+        {
+          id: "penpot-stroke-1",
+          paint: { type: "solid", color: "#ff0000" },
+          opacity: 0.5,
+          width: expectedMixedGradientStrokeWidth
+        },
+        {
+          id: "penpot-stroke-2",
+          paint: {
+            type: "gradient",
+            gradient: {
+              stops: [
+                { color: "#00ff00", opacity: 1, offset: 0 },
+                { color: "#0000ff", opacity: 1, offset: 1 }
+              ]
+            }
+          },
+          width: expectedMixedGradientStrokeWidth
+        }
+      ]
     }
   });
+  expect(frame.children[0].style.strokes).toMatchObject([
+    {
+      paint: { type: "solid", color: "#ff0000" },
+      opacity: 0.5,
+      width: 4,
+      style: "dashed",
+      dasharray: [7, 3]
+    },
+    { paint: { type: "solid", color: "#0000ff" }, opacity: 1, width: 4 }
+  ]);
 });
 
-test("reviews imports and persists flattened Penpot solid stroke stacks", async () => {
+test("reviews imports and persists first-class Penpot stroke paints", async () => {
   tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
   const storage = new FileStorage(tempRoot);
   const server = createHttpServer(storage);
@@ -267,9 +303,13 @@ test("reviews imports and persists flattened Penpot solid stroke stacks", async 
     name: "Mixed gradient stroke card",
     style: {
       fill: "#ffffff",
-      stroke: expectedMixedGradientStrokeColor,
+      stroke: "#804040",
       stroke_width: expectedMixedGradientStrokeWidth,
-      opacity: 1
+      opacity: 1,
+      strokes: [
+        { paint: { type: "solid", color: "#ff0000" } },
+        { paint: { type: "gradient" } }
+      ]
     }
   });
 });

@@ -4239,6 +4239,97 @@ function CanvasStrokeMarker({
   );
 }
 
+function useStrokePaintImage(stroke: NodeStroke) {
+  const assetId = stroke.paint?.type === "image" ? stroke.paint.asset_id : null;
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  useEffect(() => {
+    if (!assetId) {
+      setImage(null);
+      return;
+    }
+    let cancelled = false;
+    const nextImage = new window.Image();
+    nextImage.crossOrigin = "anonymous";
+    nextImage.onload = () => {
+      if (!cancelled) setImage(nextImage);
+    };
+    nextImage.onerror = () => {
+      if (!cancelled) setImage(null);
+    };
+    nextImage.src = assetUrlForId(assetId);
+    return () => {
+      cancelled = true;
+    };
+  }, [assetId]);
+  return image;
+}
+
+function canvasStrokePaint(
+  canvas: CanvasRenderingContext2D,
+  node: RendererNode,
+  stroke: NodeStroke,
+  image: HTMLImageElement | null
+) {
+  if (stroke.paint?.type === "gradient") {
+    const gradient = stroke.paint.gradient;
+    const start = gradient.start ?? { x: 0, y: 0.5 };
+    const end = gradient.end ?? { x: 1, y: 0.5 };
+    const sortedStops = [...(gradient.stops ?? [])].sort((left, right) => left.offset - right.offset);
+    const type = (gradient.type ?? "linear").replace(/^:/, "").toLowerCase();
+    if (type.includes("radial")) {
+      const centerPoint = {
+        x: start.x * node.size.width,
+        y: start.y * node.size.height
+      };
+      const endPoint = {
+        x: end.x * node.size.width,
+        y: end.y * node.size.height
+      };
+      const radius = Math.max(1, Math.hypot(endPoint.x - centerPoint.x, endPoint.y - centerPoint.y));
+      const colorStops = canvasGradientColorStops(sortedStops);
+      if (colorStops) {
+        const ellipticalPattern = canvasEllipticalRadialFillPatternForNode(node, {
+          centerPoint,
+          radius,
+          width: canvasRadialGradientWidth(gradient),
+          angleRadians: Math.atan2(end.y - start.y, end.x - start.x) + Math.PI / 2,
+          colorStops
+        });
+        if (ellipticalPattern) {
+          const pattern = canvas.createPattern(ellipticalPattern, "no-repeat");
+          if (pattern) return pattern;
+        }
+      }
+      const paint = canvas.createRadialGradient(
+        centerPoint.x,
+        centerPoint.y,
+        0,
+        centerPoint.x,
+        centerPoint.y,
+        radius
+      );
+      for (const stop of sortedStops) {
+        paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop));
+      }
+      return paint;
+    }
+    const paint = canvas.createLinearGradient(
+      start.x * node.size.width,
+      start.y * node.size.height,
+      end.x * node.size.width,
+      end.y * node.size.height
+    );
+    for (const stop of sortedStops) {
+      paint.addColorStop(Math.max(0, Math.min(1, stop.offset)), canvasGradientStopColor(stop));
+    }
+    return paint;
+  }
+  if (stroke.paint?.type === "image" && image) {
+    return canvas.createPattern(image, "repeat") ?? stroke.color;
+  }
+  return stroke.paint?.type === "solid" ? stroke.paint.color : stroke.color;
+}
+
 function CanvasAlignedPathStroke({
   node,
   stroke,
@@ -4248,6 +4339,7 @@ function CanvasAlignedPathStroke({
   stroke: NodeStroke;
   dash: number[];
 }) {
+  const image = useStrokePaintImage(stroke);
   if (node.content.type !== "path" && node.content.type !== "boolean_path") {
     return null;
   }
@@ -4255,23 +4347,6 @@ function CanvasAlignedPathStroke({
   const pathContent = node.content;
   const effectivePosition = pathHasOnlyClosedSubpaths(pathContent.path_data) ? stroke.position : "center";
   const lineCap = stroke.style === "dotted" ? "round" : stroke.cap;
-  if (effectivePosition === "center") {
-    return (
-      <KonvaPath
-        name={`path-stroke-${stroke.id}-center`}
-        data={node.content.path_data}
-        fill={undefined}
-        stroke={stroke.color}
-        strokeWidth={stroke.width}
-        opacity={node.style.opacity * stroke.opacity}
-        lineCap={lineCap}
-        lineJoin={stroke.join}
-        dash={dash}
-        listening={false}
-      />
-    );
-  }
-
   return (
     <Shape
       name={`path-stroke-${stroke.id}-${effectivePosition}`}
@@ -4282,16 +4357,55 @@ function CanvasAlignedPathStroke({
         canvas.save();
         if (effectivePosition === "inside") {
           canvas.clip(path, pathContent.fill_rule);
-        } else {
+        } else if (effectivePosition === "outside") {
           const inverse = new Path2D();
           inverse.rect(-100000, -100000, 200000, 200000);
           inverse.addPath(path);
           canvas.clip(inverse, "evenodd");
         }
         canvas.globalAlpha = node.style.opacity * stroke.opacity;
-        canvas.strokeStyle = stroke.color;
-        canvas.lineWidth = stroke.width * 2;
+        canvas.strokeStyle = canvasStrokePaint(canvas, node, stroke, image);
+        canvas.lineWidth = effectivePosition === "center" ? stroke.width : stroke.width * 2;
         canvas.lineCap = lineCap;
+        canvas.lineJoin = stroke.join;
+        canvas.setLineDash(dash);
+        canvas.stroke(path);
+        canvas.restore();
+      }}
+    />
+  );
+}
+
+function CanvasBoxStroke({
+  node,
+  stroke,
+  dash
+}: {
+  node: RendererNode;
+  stroke: NodeStroke;
+  dash: number[];
+}) {
+  const image = useStrokePaintImage(stroke);
+  const inset = stroke.position === "inside" ? stroke.width / 2 : stroke.position === "outside" ? -stroke.width / 2 : 0;
+  return (
+    <Shape
+      name={`box-stroke-${stroke.id}`}
+      listening={false}
+      sceneFunc={(context) => {
+        const canvas = (context as unknown as { _context: CanvasRenderingContext2D })._context;
+        const path = new Path2D();
+        const width = Math.max(0, node.size.width - inset * 2);
+        const height = Math.max(0, node.size.height - inset * 2);
+        if (node.kind === "frame" && "roundRect" in path) {
+          path.roundRect(inset, inset, width, height, editorKonvaTokens.radius.frame);
+        } else {
+          path.rect(inset, inset, width, height);
+        }
+        canvas.save();
+        canvas.globalAlpha = node.style.opacity * stroke.opacity;
+        canvas.strokeStyle = canvasStrokePaint(canvas, node, stroke, image);
+        canvas.lineWidth = stroke.width;
+        canvas.lineCap = stroke.style === "dotted" ? "round" : stroke.cap;
         canvas.lineJoin = stroke.join;
         canvas.setLineDash(dash);
         canvas.stroke(path);
@@ -4535,30 +4649,11 @@ function renderNode({
         : stroke.style === "dashed"
           ? (stroke.dasharray.length ? stroke.dasharray : [stroke.width * 3, stroke.width * 2])
           : stroke.dasharray;
-      const common = {
-        key: `stroke-${stroke.id}`,
-        fill: undefined,
-        stroke: stroke.color,
-        strokeWidth: stroke.width,
-        opacity: node.style.opacity * stroke.opacity,
-        lineCap: stroke.style === "dotted" ? "round" as const : stroke.cap,
-        lineJoin: stroke.join,
-        dash,
-        listening: false
-      };
+      const key = `stroke-${stroke.id}`;
       if (node.kind === "path" && (node.content.type === "path" || node.content.type === "boolean_path")) {
-        return <CanvasAlignedPathStroke key={common.key} node={node} stroke={stroke} dash={dash} />;
+        return <CanvasAlignedPathStroke key={key} node={node} stroke={stroke} dash={dash} />;
       }
-      return (
-        <Rect
-          {...common}
-          x={inset}
-          y={inset}
-          width={Math.max(0, node.size.width - inset * 2)}
-          height={Math.max(0, node.size.height - inset * 2)}
-          cornerRadius={node.kind === "frame" ? editorKonvaTokens.radius.frame : editorKonvaTokens.radius.none}
-        />
-      );
+      return <CanvasBoxStroke key={key} node={node} stroke={stroke} dash={dash} />;
     });
   const markerGeometry =
     node.kind === "path" && node.content.type === "path"
@@ -6721,6 +6816,7 @@ function Inspector({
       {
         id: `stroke-${crypto.randomUUID()}`,
         color: source?.color ?? selectedNode.style.stroke ?? selectedNode.style.fill,
+        ...(source?.paint ? { paint: structuredClone(source.paint) } : {}),
         opacity: source?.opacity ?? 1,
         width: source?.width ?? Math.max(1, selectedNode.style.stroke_width || 1),
         position: source?.position ?? "center",
@@ -6739,6 +6835,39 @@ function Inspector({
       candidate === index ? { ...stroke, ...patch } : stroke
     ));
   };
+  const setStrokePaintType = (index: number, stroke: NodeStroke, type: "solid" | "gradient" | "image") => {
+    if (type === "solid") {
+      patchStroke(index, { color: stroke.color, paint: { type: "solid", color: stroke.color } });
+    } else if (type === "gradient") {
+      patchStroke(index, {
+        paint: {
+          type: "gradient",
+          gradient: {
+            type: "linear",
+            start: { x: 0, y: 0.5 },
+            end: { x: 1, y: 0.5 },
+            stops: [
+              { color: stroke.color, opacity: 1, offset: 0 },
+              { color: selectedNode.style.fill, opacity: 1, offset: 1 }
+            ]
+          }
+        }
+      });
+    }
+  };
+  const uploadStrokeImage = async (index: number, file: File | undefined) => {
+    if (!file) return;
+    const asset = await uploadImageAsset(file);
+    patchStroke(index, { paint: { type: "image", asset_id: asset.assetId } });
+  };
+  const patchStrokeGradientColor = (index: number, stroke: NodeStroke, stopIndex: number, color: string) => {
+    if (stroke.paint?.type !== "gradient") return;
+    const stops = [...(stroke.paint.gradient.stops ?? [])];
+    const current = stops[stopIndex];
+    if (!current) return;
+    stops[stopIndex] = { ...current, color };
+    patchStroke(index, { paint: { type: "gradient", gradient: { ...stroke.paint.gradient, stops } } });
+  };
   const moveStroke = (index: number, direction: -1 | 1) => {
     const strokes = [...(selectedNode.style.strokes ?? [])];
     const target = index + direction;
@@ -6750,7 +6879,12 @@ function Inspector({
     const strokes = [...(selectedNode.style.strokes ?? [])];
     const source = strokes[index];
     if (!source) return;
-    strokes.splice(index + 1, 0, { ...source, id: `stroke-${crypto.randomUUID()}`, dasharray: [...source.dasharray] });
+    strokes.splice(index + 1, 0, {
+      ...source,
+      id: `stroke-${crypto.randomUUID()}`,
+      dasharray: [...source.dasharray],
+      ...(source.paint ? { paint: structuredClone(source.paint) } : {})
+    });
     updateStrokeStack(strokes);
   };
   const deleteStroke = (index: number) => {
@@ -7708,9 +7842,76 @@ function Inspector({
             </div>
             <div className="field-grid">
               <label>
-                선 색상
-                <input data-testid={`inspector-stroke-${index}-color`} type="color" value={stroke.color} onChange={(event) => patchStroke(index, { color: event.currentTarget.value })} />
+                페인트
+                <select
+                  data-testid={`inspector-stroke-${index}-paint-type`}
+                  value={stroke.paint?.type ?? "solid"}
+                  onChange={(event) =>
+                    setStrokePaintType(index, stroke, event.currentTarget.value as "solid" | "gradient" | "image")
+                  }
+                >
+                  <option value="solid">단색</option>
+                  <option value="gradient">그라디언트</option>
+                  <option value="image">이미지</option>
+                </select>
               </label>
+              {stroke.paint?.type === "gradient" ? (
+                <>
+                  <label>
+                    시작 색상
+                    <input
+                      data-testid={`inspector-stroke-${index}-gradient-start`}
+                      type="color"
+                      value={stroke.paint.gradient.stops?.[0]?.color ?? stroke.color}
+                      onChange={(event) => patchStrokeGradientColor(index, stroke, 0, event.currentTarget.value)}
+                    />
+                  </label>
+                  <label>
+                    끝 색상
+                    <input
+                      data-testid={`inspector-stroke-${index}-gradient-end`}
+                      type="color"
+                      value={stroke.paint.gradient.stops?.at(-1)?.color ?? stroke.color}
+                      onChange={(event) =>
+                        patchStrokeGradientColor(
+                          index,
+                          stroke,
+                          Math.max(0, (stroke.paint?.type === "gradient" ? stroke.paint.gradient.stops?.length ?? 1 : 1) - 1),
+                          event.currentTarget.value
+                        )
+                      }
+                    />
+                  </label>
+                </>
+              ) : (
+                <label>
+                  선 색상
+                  <input
+                    data-testid={`inspector-stroke-${index}-color`}
+                    type="color"
+                    value={stroke.paint?.type === "solid" ? stroke.paint.color : stroke.color}
+                    onChange={(event) =>
+                      patchStroke(index, {
+                        color: event.currentTarget.value,
+                        paint: { type: "solid", color: event.currentTarget.value }
+                      })
+                    }
+                  />
+                </label>
+              )}
+              <label>
+                이미지
+                <input
+                  data-testid={`inspector-stroke-${index}-image`}
+                  type="file"
+                  accept="image/*"
+                  aria-label="선 이미지 선택"
+                  onChange={(event) => void uploadStrokeImage(index, event.currentTarget.files?.[0])}
+                />
+              </label>
+              {stroke.paint?.type === "image" ? (
+                <div data-testid={`inspector-stroke-${index}-image-asset`}>에셋 {stroke.paint.asset_id}</div>
+              ) : null}
               <label>
                 두께
                 <input data-testid={`inspector-stroke-${index}-width`} type="number" min="0" step="0.5" value={stroke.width} onChange={(event) => {

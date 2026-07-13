@@ -21,6 +21,7 @@ import type {
   NodeLayout,
   NodeLayoutItem,
   NodeStroke,
+  NodeStrokePaint,
   TextOrientation,
   TextWritingMode
 } from "./storage";
@@ -2158,6 +2159,61 @@ function componentSourceNodeForVariant(
   return variant?.source_node ?? definition.source_node;
 }
 
+function normalizeAgentStrokePaint(paint: NodeStrokePaint, index: number): NodeStrokePaint {
+  if (paint.type === "solid") {
+    const color = typeof paint.color === "string" ? paint.color.trim() : "";
+    if (!color) {
+      throw new Error(`strokes[${index}].paint.color is required`);
+    }
+    return { type: "solid", color };
+  }
+  if (paint.type === "image") {
+    const assetId = typeof paint.asset_id === "string" ? paint.asset_id.trim() : "";
+    if (!assetId) {
+      throw new Error(`strokes[${index}].paint.asset_id must be non-empty`);
+    }
+    return { type: "image", asset_id: assetId };
+  }
+  if (paint.type !== "gradient" || !paint.gradient || typeof paint.gradient !== "object") {
+    throw new Error(`strokes[${index}].paint.type is invalid`);
+  }
+
+  const gradient = paint.gradient;
+  if (!Array.isArray(gradient.stops) || gradient.stops.length < 2) {
+    throw new Error(`strokes[${index}].paint.gradient requires at least two stops`);
+  }
+  const stops = gradient.stops.map((stop, stopIndex) => {
+    const color = typeof stop.color === "string" ? stop.color.trim() : "";
+    if (!color || !Number.isFinite(stop.opacity) || stop.opacity < 0 || stop.opacity > 1 ||
+        !Number.isFinite(stop.offset) || stop.offset < 0 || stop.offset > 1) {
+      throw new Error(`strokes[${index}].paint.gradient.stops[${stopIndex}] is invalid`);
+    }
+    return { color, opacity: stop.opacity, offset: stop.offset };
+  });
+  const point = (value: { x: number; y: number } | undefined, field: "start" | "end") => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (!Number.isFinite(value.x) || !Number.isFinite(value.y)) {
+      throw new Error(`strokes[${index}].paint.gradient.${field} is invalid`);
+    }
+    return { x: value.x, y: value.y };
+  };
+  if (gradient.width !== undefined && (!Number.isFinite(gradient.width) || gradient.width < 0)) {
+    throw new Error(`strokes[${index}].paint.gradient.width is invalid`);
+  }
+  return {
+    type: "gradient",
+    gradient: {
+      ...(typeof gradient.type === "string" && gradient.type.trim() ? { type: gradient.type.trim() } : {}),
+      ...(gradient.start !== undefined ? { start: point(gradient.start, "start") } : {}),
+      ...(gradient.end !== undefined ? { end: point(gradient.end, "end") } : {}),
+      ...(gradient.width !== undefined ? { width: gradient.width } : {}),
+      stops
+    }
+  };
+}
+
 function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] | undefined {
   if (strokes === undefined) {
     return undefined;
@@ -2194,9 +2250,11 @@ function normalizeAgentStrokes(strokes: NodeStroke[] | undefined): NodeStroke[] 
         (stroke.dasharray.length > 0 && !stroke.dasharray.some((value) => value > 0))) {
       throw new Error(`strokes[${index}].dasharray is invalid`);
     }
+    const paint = stroke.paint !== undefined ? normalizeAgentStrokePaint(stroke.paint, index) : undefined;
     return {
       id,
-      color: stroke.color.trim(),
+      color: paint?.type === "solid" ? paint.color : stroke.color.trim(),
+      ...(paint !== undefined ? { paint } : {}),
       opacity: stroke.opacity,
       width: stroke.width,
       position: stroke.position,
