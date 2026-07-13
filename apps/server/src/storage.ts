@@ -1528,6 +1528,16 @@ export class FileStorage {
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => this.writeFileWithoutMutationLock(fileId, document)
+    );
+  }
+
+  private async writeFileWithoutMutationLock(
+    fileId: string,
+    document: DesignFile
+  ): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     await mkdir(this.filesDir, { recursive: true });
     await writeFile(this.filePathFor(fileId), `${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -2414,7 +2424,7 @@ export class FileStorage {
         ),
         ...updatedComponents
       ];
-      await this.writeFile(fileId, target);
+      await this.writeFileWithoutMutationLock(fileId, target);
       rollbackGuards.push({
         filePath: this.filePathFor(fileId),
         data: Buffer.from(`${JSON.stringify(target, null, 2)}\n`, "utf8")
