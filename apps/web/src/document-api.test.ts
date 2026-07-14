@@ -709,6 +709,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/files/target-file/import/library/registry/review" && init?.method === "POST") {
+        expect(init.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
         return jsonResponse({
           review: {
@@ -757,6 +762,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/files/target-file/libraries/subscriptions") {
+        expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         return jsonResponse({
           subscriptions: [
             {
@@ -779,6 +789,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/files/target-file/libraries/updates") {
+        expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         return jsonResponse({
           updates: [
             {
@@ -838,7 +853,12 @@ describe("file version API helpers", () => {
       expect.objectContaining({ libraryId: "team-kit", name: "Team Kit" })
     ]);
     await expect(
-      reviewLibraryRegistryItem("target-file", "team-kit", fetcher as typeof fetch)
+      reviewLibraryRegistryItem(
+        "target-file",
+        "team-kit",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
     ).resolves.toMatchObject({
       libraryId: "team-kit",
       components: [expect.objectContaining({ originalComponentId: "component-card" })]
@@ -855,10 +875,22 @@ describe("file version API helpers", () => {
       fileId: "target-file",
       componentCount: 1
     });
-    await expect(listLibraryRegistrySubscriptions("target-file", fetcher as typeof fetch)).resolves.toEqual([
+    await expect(
+      listLibraryRegistrySubscriptions(
+        "target-file",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
+    ).resolves.toEqual([
       expect.objectContaining({ libraryId: "team-kit", importedRegistryUpdatedAt: "2026-06-28T00:00:00.000Z" })
     ]);
-    await expect(listLibraryRegistryUpdates("target-file", fetcher as typeof fetch)).resolves.toEqual([
+    await expect(
+      listLibraryRegistryUpdates(
+        "target-file",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
+    ).resolves.toEqual([
       expect.objectContaining({ libraryId: "team-kit", componentCount: 2 })
     ]);
     await expect(updateLibraryRegistryItem("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
@@ -919,7 +951,11 @@ describe("file version API helpers", () => {
       const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
 
       if (pathname === "/files/target-file/import/library/registry/tokens/review" && init?.method === "POST") {
-        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(init.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         expect(JSON.parse(String(init.body))).toEqual({ libraryId: "team-kit" });
         return jsonResponse({
           review: {
@@ -973,7 +1009,14 @@ describe("file version API helpers", () => {
       return new Response("not found", { status: 404 });
     };
 
-    await expect(reviewLibraryRegistryTokens("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
+    await expect(
+      reviewLibraryRegistryTokens(
+        "target-file",
+        "team-kit",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
+    ).resolves.toMatchObject({
       libraryId: "team-kit",
       tokenSetCount: 3,
       tokenThemeCount: 1,
@@ -997,6 +1040,11 @@ describe("file version API helpers", () => {
       const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
 
       if (pathname === "/files/target-file/libraries/token-subscriptions") {
+        expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         return jsonResponse({
           subscriptions: [
             {
@@ -1016,6 +1064,11 @@ describe("file version API helpers", () => {
       }
 
       if (pathname === "/files/target-file/libraries/token-updates") {
+        expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
         return jsonResponse({
           updates: [
             {
@@ -1057,10 +1110,22 @@ describe("file version API helpers", () => {
       return new Response("not found", { status: 404 });
     };
 
-    await expect(listLibraryRegistryTokenSubscriptions("target-file", fetcher as typeof fetch)).resolves.toEqual([
+    await expect(
+      listLibraryRegistryTokenSubscriptions(
+        "target-file",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
+    ).resolves.toEqual([
       expect.objectContaining({ libraryId: "team-kit", tokenSetCount: 3, tokenThemeCount: 1 })
     ]);
-    await expect(listLibraryRegistryTokenUpdates("target-file", fetcher as typeof fetch)).resolves.toEqual([
+    await expect(
+      listLibraryRegistryTokenUpdates(
+        "target-file",
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
+      )
+    ).resolves.toEqual([
       expect.objectContaining({ libraryId: "team-kit", tokenCount: 4, tokenSetCount: 4 })
     ]);
     await expect(updateLibraryRegistryTokens("target-file", "team-kit", fetcher as typeof fetch)).resolves.toMatchObject({
@@ -1464,6 +1529,11 @@ describe("library update preview API", () => {
         "/files/target-file/import/library/registry/update/review"
       );
       expect(init?.method).toBe("POST");
+      expect(init?.headers).toEqual({
+          Authorization: "Bearer viewer-token",
+          "Content-Type": "application/json",
+          "X-Layo-User-Id": "viewer-user"
+        });
       expect(JSON.parse(String(init?.body))).toEqual({ libraryId: "team-kit" });
       return jsonResponse({
         review: {
@@ -1485,7 +1555,8 @@ describe("library update preview API", () => {
       reviewLibraryRegistryItemUpdate(
         "target-file",
         "team-kit",
-        fetcher as typeof fetch
+        fetcher as typeof fetch,
+        { userId: "viewer-user", memberToken: "viewer-token" }
       )
     ).resolves.toEqual({
       canUpdate: false,

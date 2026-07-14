@@ -63,6 +63,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     );
   };
 
+  const authorizeLibraryRead = async (request: LibraryRequest, fileId: string) => {
+    const member = authenticateLibraryMember(request);
+    if (member) {
+      authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
+    }
+  };
+
   const authorizeLibraryWrite = async (request: LibraryRequest, fileId: string) => {
     const member = authenticateLibraryMember(request);
     if (member) {
@@ -404,6 +411,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/review", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       review: await storage.reviewLibraryRegistryItem(request.params.fileId, request.body.libraryId)
     };
@@ -413,6 +421,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/tokens/review", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       review: await storage.reviewLibraryRegistryTokens(request.params.fileId, request.body.libraryId)
     };
@@ -441,24 +450,28 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/subscriptions", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       subscriptions: await storage.listLibraryRegistrySubscriptions(request.params.fileId)
     };
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/updates", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       updates: await storage.listLibraryRegistryUpdates(request.params.fileId)
     };
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/token-subscriptions", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       subscriptions: await storage.listLibraryRegistryTokenSubscriptions(request.params.fileId)
     };
   });
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId/libraries/token-updates", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       updates: await storage.listLibraryRegistryTokenUpdates(request.params.fileId)
     };
@@ -468,6 +481,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { libraryId: string };
   }>("/files/:fileId/import/library/registry/update/review", async (request) => {
+    await authorizeLibraryRead(request, request.params.fileId);
     return {
       review: await storage.reviewLibraryRegistryItemUpdate(
         request.params.fileId,

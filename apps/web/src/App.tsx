@@ -9741,8 +9741,8 @@ export function App() {
     }
     try {
       const [updates, tokenUpdates] = await Promise.all([
-        listLibraryRegistryUpdates(fileId),
-        listLibraryRegistryTokenUpdates(fileId)
+        listLibraryRegistryUpdates(fileId, undefined, activeLibraryRegistryCredentials),
+        listLibraryRegistryTokenUpdates(fileId, undefined, activeLibraryRegistryCredentials)
       ]);
       setLibraryRegistryUpdates(updates);
       setLibraryRegistryTokenUpdates(tokenUpdates);
@@ -14057,7 +14057,12 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 검토 중");
-      const review = await reviewLibraryRegistryItem(currentProject.currentDocumentId, libraryId);
+      const review = await reviewLibraryRegistryItem(
+        currentProject.currentDocumentId,
+        libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
+      );
       setLibraryRegistryReview({ review });
       setLibraryRegistryTokenReview(null);
       setLibraryRegistryPrefix("team");
@@ -14077,7 +14082,12 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 검토 중");
-      const review = await reviewLibraryRegistryTokens(currentProject.currentDocumentId, libraryId);
+      const review = await reviewLibraryRegistryTokens(
+        currentProject.currentDocumentId,
+        libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
+      );
       setLibraryRegistryTokenReview({ review });
       setLibraryRegistryReview(null);
       setLibraryRegistryStatus(`${review.libraryName} 토큰 검토됨`);
@@ -14201,7 +14211,9 @@ export function App() {
       setLibraryRegistryStatus("게시 라이브러리 업데이트 검토 중");
       const review = await reviewLibraryRegistryItemUpdate(
         currentProject.currentDocumentId,
-        libraryId
+        libraryId,
+        undefined,
+        activeLibraryRegistryCredentials
       );
       if (!review.canUpdate) {
         const conflictAffectedInstanceCount = new Set(
