@@ -218,7 +218,7 @@ export function createTeamAuthorizationFileManager(
     listTokens,
     createToken: (userId, input) =>
       mutate(async () => {
-        const name = input.name.trim();
+        const name = typeof input?.name === "string" ? input.name.trim() : "";
         if (!name) {
           throw managementError("team authorization token name is required", 400);
         }
