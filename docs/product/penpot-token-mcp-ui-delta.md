@@ -1,7 +1,7 @@
 # Penpot Token MCP and UI Delta
 
 Last checked: 2026-07-14
-Status: PR #308 active; implementation evidence exists, merge gate pending
+Status: PR #308 active and ready to merge; final verification/review complete; not merged
 
 ## Retrieval Summary
 
@@ -13,10 +13,12 @@ Status: PR #308 active; implementation evidence exists, merge gate pending
   operator members file remains external and is never replaced.
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
-- Current gate: Full Verification `29335200155` was superseded and cancelled
-  during Playwright by the documentation push; it is not GREEN. The final
-  docs-head Full, including the corrected equal-session E2E, remains pending.
-  Do not treat this delta, PR, or gates 7/8/10 as complete yet.
+- Current gate: final code head
+  `9eae96fe2e11992768636211da3868a9e93142a5` passed Full Verification
+  `29340078192`, restore `29340078406`, and retention `29340078359`.
+  Implementation, verification, failure-learning evidence, and review are
+  complete. PR #308 is ready to merge but is not merged; gates 7/8/10 remain
+  whole-product maturity targets, not completed gates.
 
 ## Penpot Reference And Decision
 
@@ -118,6 +120,31 @@ refills and asserts the same token, confirms the apply control remains disabled,
 waits for the replacement token-list response, and then proves the delayed
 create plaintext/status is still discarded.
 
+## Equal-Identity Fixture Activation Loop
+
+Full `29337201074` failed only in Playwright because the regression test
+assumed `createRelayTeam` activated the created credential in the browser.
+Fix `d7c60f` explicitly applies the credential through the UI and waits for
+the authenticated replacement GET before releasing the delayed old response.
+
+## Session-Reference Review Loop
+
+Fresh review found the E2E generation increment masked the session-reference
+regression it was meant to prove. Deterministic RED commits `8686d0` and
+`032f45` isolated the predicate; RED Full `29339023854` failed exactly at
+expected true-to-be-false. GREEN `bc6823` / `218ddde` extracted the tested
+predicate and delegated App invalidation to it. Fresh review reported no
+findings.
+
+## Relay Reconnect Observer Loop
+
+Full `29339246720` failed only the equal-session E2E because an unavailable
+relay caused eight reconnect socket attempts rather than the asserted two. The
+test had measured reconnect attempts as session count. Commit `9eae96f`
+removed only the socket-count observer/assertions while preserving fixed equal
+identity, replacement-team status, the authenticated replacement GET, and
+absence of the delayed old response. Fresh review reported no findings.
+
 ## Watcher Removal And Reintroduction Loop
 
 Intermittent Full `29333986663` failed in Core when a watched operator member
@@ -195,7 +222,15 @@ process-local, not a shared multi-host generation or delivery guarantee.
 | Commit `df0c0581` | Deterministic RED | Reproduced the exact transient-read recovery failure |
 | Full `29336713035` | RED | Executed and failed the intended retry-recovery case |
 | Commit `3c44aecf` | Focused GREEN | Bounded `reloadTail` retry; auth 15/15 and typecheck passed |
-| Final PR-head Full | Pending | Must cover corrected equal-session E2E and watcher retry; no run id is pinned here |
+| Full `29337201074` | RED Playwright | Fixture created a relay team but did not activate its credential; `d7c60f` added explicit UI apply plus authenticated replacement GET |
+| Commits `8686d0` / `032f45` | Deterministic RED | Isolated session-reference predicate without generation masking |
+| Full `29339023854` | RED Playwright | Failed exactly expected true-to-be-false |
+| GREEN `bc6823` / `218ddde` | Focused GREEN | Extracted tested predicate and App delegation; review found no findings |
+| Full `29339246720` | RED Playwright only | Unavailable relay reconnects produced socket count 8, exposing a test-observer error rather than eight sessions |
+| Commit `9eae96f` | Test repair | Removed only socket-count observation; retained identity/status/authenticated replacement/old-response proofs |
+| Full `29340078192` | Final GREEN, 8m9s | On `9eae96fe2e11992768636211da3868a9e93142a5`; gates, typecheck, build, Core, and Playwright all passed |
+| Restore `29340078406` | Passed | Final-head storage restore drill |
+| Retention `29340078359` | Passed | Final-head backup retention |
 
 The initial browser async guard also failed typecheck because its identity ref was
 declared after first use. After `9e500aa`, the focused lifecycle revealed that
@@ -220,5 +255,5 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Deployment is deliberately non-gating for this slice. Vercel passed on
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
-- PR review, final Full Verification, squash merge, and post-merge cleanup remain
-  Task 4 work.
+- PR #308 is ready to merge after final verification and review with no findings.
+  Squash merge and post-merge cleanup remain Task 4 work.

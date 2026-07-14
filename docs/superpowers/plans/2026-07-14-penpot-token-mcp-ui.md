@@ -149,6 +149,34 @@ Deployment remains a separate non-gating concern.
   refills/asserts the identical token, waits for the replacement list response,
   and then proves the delayed plaintext/status is discarded.
 
+### Equal-identity fixture activation failure loop
+
+- Full `29337201074` failed only in Playwright because the test assumed
+  `createRelayTeam` also activated its credential in the browser.
+- Fix `d7c60f` explicitly applies the replacement credential through the UI
+  and waits for its authenticated replacement GET before releasing the old
+  response. This separates fixture creation from active-session proof.
+
+### Session-reference review failure loop
+
+- Fresh review found the E2E generation increment could mask the intended
+  same-identity session-reference regression.
+- Deterministic RED commits `8686d0` and `032f45` isolated the predicate;
+  RED Full `29339023854` failed exactly at expected true-to-be-false.
+- GREEN `bc6823` / `218ddde` extracted the tested predicate and delegated
+  App invalidation to it. Fresh review reported no findings.
+
+### Relay reconnect observer failure loop
+
+- Full `29339246720` passed every non-E2E gate, then failed the equal-session
+  Playwright case because an unavailable relay produced eight reconnect socket
+  attempts instead of the asserted two.
+- Root cause: the test counted reconnect attempts as collaboration sessions.
+  Commit `9eae96f` removed only that socket-count observer and its assertions.
+  It preserved fixed equal identity, replacement-team status, the authenticated
+  replacement GET, and absence of the delayed old response.
+- Fresh review reported no findings.
+
 ### Watcher removal/reintroduction failure loop
 
 - Intermittent Full `29333986663` failed Core when an older remove callback
@@ -181,19 +209,16 @@ Deployment remains a separate non-gating concern.
 
 ### Current merge gate
 
-- Full Verification `29335200155`: passed gates, typecheck, build, and Core, then was superseded and cancelled during Playwright by the docs push; not GREEN.
-- Full `29333986663` is RED Core. Full `29334373513` is the deterministic
-  358/359 RED at `settledBeforeQuarantine`. Fulls `29334572132` and
-  `29334928481` are Core GREEN only
-  because later commits superseded Playwright.
-- Vercel passed on `bd7acd`, but deployment remains non-gating for this
-  local-first MCP/UI slice.
-- Full `29335855757` is RED at 377/378; `29336713035` is the deterministic
-  retry RED. Focused GREEN `3c44aecf` is not a final Full.
-- Tasks 1-3 are complete. Security re-review is approved. The final PR-head
-  Full, including the corrected equal-session E2E and watcher retry, remains
-  pending without a pinned run id. Task 4 remains in progress until that Full,
-  merge, and post-merge cleanup are actually complete.
+- Final code head: `9eae96fe2e11992768636211da3868a9e93142a5`.
+- Full Verification `29340078192` passed in 8m9s on that head: maturity/design
+  gates, typecheck, web build, Core, and Playwright CLI e2e all passed.
+- Storage Restore Drill `29340078406` and Storage Backup Retention
+  `29340078359` passed on the same head.
+- Implementation, verification, durable evidence, and review are complete.
+  Fresh review reported no findings and PR review threads are empty.
+- PR #308 is active and ready to merge. It is not merged. Squash merge and
+  post-merge cleanup remain open, so this plan remains active and must not move
+  to Completed Plans yet.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -204,8 +229,9 @@ Deployment remains a separate non-gating concern.
 - Modify: `docs/superpowers/PLAN_STATUS.md`
 - Modify: this plan
 
-- [ ] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
+- [x] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
 - [x] Request external code review and feed every actionable finding into a focused RED.
 - [x] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
-- [ ] Open a ready PR, resolve every review thread, and squash merge.
+- [x] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
+- [ ] Squash merge PR #308.
 - [ ] Run required post-merge cleanup checks and delete the remote branch.

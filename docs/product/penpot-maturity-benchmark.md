@@ -94,11 +94,25 @@ the retry remains process-local.
 Focused real-network Playwright passed 3/3 and the direct headed interaction
 passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
 confirmed self-revocation left an empty credential field with recovery guidance.
-Full Verification `29335200155` passed gates, typecheck, build, and Core, then
-was superseded and cancelled during Playwright by the documentation push; it is
-not GREEN. Full `29335855757` is RED, not final evidence. The final PR-head Full,
-including the corrected equal-session E2E and watcher retry regression, remains
-pending without a pinned run id. Vercel passed on `bd7acd`, but deployment remains non-gating.
+
+The final equal-identity browser proof required three distinct failure loops.
+Full `29337201074` exposed fixture activation missing from
+`createRelayTeam`; `d7c60f` added explicit UI credential apply and an
+authenticated replacement GET. Review then found generation masking in the
+session-reference test; deterministic RED `8686d0` / `032f45` and RED Full
+`29339023854` failed exactly expected true-to-be-false, while GREEN
+`bc6823` / `218ddde` extracted the predicate and App delegation. Full
+`29339246720` then exposed a test-oracle error: unavailable-relay reconnect
+attempts produced socket count 8, not eight sessions. `9eae96f` removed only
+that count while retaining fixed identity, replacement status, authenticated
+replacement GET, and old-response absence. Fresh review found no findings.
+
+Final Full Verification `29340078192` passed in 8m9s on
+`9eae96fe2e11992768636211da3868a9e93142a5`, including maturity/design gates,
+typecheck, web build, Core, and Playwright CLI e2e. Restore `29340078406` and
+retention `29340078359` passed on the same head. PR #308 is ready to merge but
+not merged; post-merge cleanup remains open. Vercel passed on `bd7acd`, but
+deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps
