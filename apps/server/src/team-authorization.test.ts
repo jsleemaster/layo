@@ -685,17 +685,36 @@ describe("team library authorization", () => {
           JSON.stringify([removedMember, survivingMember]),
           "utf8"
         );
-        await waitFor(() => authenticationSucceeds(
+        const restartedManager = createTeamAuthorizationFileManager(
+          configPath,
           restarted.config,
-          "removed-user",
-          "removed-base-token"
-        ));
+          {
+            now: () => new Date("2026-07-14T13:00:00.000Z"),
+            generateId: () => "readded-managed",
+            generateSecret: () => "readded-managed-secret"
+          }
+        );
+        await expect(restartedManager.manageTokens(
+          { userId: "removed-user", memberToken: "removed-base-token" },
+          {
+            type: "create",
+            input: { name: "Re-added generation", expiresInDays: null }
+          }
+        )).resolves.toMatchObject({
+          type: "create",
+          created: { metadata: { id: "readded-managed" } }
+        });
 
         expect(authenticationSucceeds(
           restarted.config,
           "removed-user",
           "removed-managed-secret"
         )).toBe(false);
+        expect(authenticationSucceeds(
+          restarted.config,
+          "removed-user",
+          "readded-managed-secret"
+        )).toBe(true);
         expect(authenticationSucceeds(
           restarted.config,
           "surviving-user",
@@ -706,7 +725,7 @@ describe("team library authorization", () => {
           "surviving-user",
           "surviving-revoked-secret"
         )).toBe(false);
-        await waitForSidecarMember(configPath, "removed-user", true);
+        await waitForSidecarMember(configPath, "removed-user", false);
       } finally {
         restarted.close();
       }
