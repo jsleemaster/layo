@@ -211,7 +211,10 @@ export function createTeamAuthorizationFileManager(
   const mutate = <T>(operation: () => Promise<T>): Promise<T> =>
     withFileProcessMutationLock(normalizedPath, operation);
 
-  const persist = async (nextConfig: TeamAuthorizationConfig): Promise<void> => {
+  const persist = async (
+    sourceSnapshot: string,
+    nextConfig: TeamAuthorizationConfig
+  ): Promise<void> => {
     const temporaryPath = `${normalizedPath}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await writeFile(
@@ -219,6 +222,13 @@ export function createTeamAuthorizationFileManager(
         `${JSON.stringify(nextConfig.members, null, 2)}\n`,
         { encoding: "utf8", mode: 0o600 }
       );
+      const currentSnapshot = await readFile(normalizedPath, "utf8");
+      if (currentSnapshot !== sourceSnapshot) {
+        throw managementError(
+          "team authorization file changed during token management",
+          409
+        );
+      }
       await rename(temporaryPath, normalizedPath);
     } finally {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
@@ -233,9 +243,8 @@ export function createTeamAuthorizationFileManager(
     operation: TeamAuthorizationManagementOperation
   ): Promise<TeamAuthorizationManagementResult> =>
     mutate(async () => {
-      const nextConfig = parseRequiredTeamAuthorizationConfig(
-        await readFile(normalizedPath, "utf8")
-      );
+      const sourceSnapshot = await readFile(normalizedPath, "utf8");
+      const nextConfig = parseRequiredTeamAuthorizationConfig(sourceSnapshot);
       const operationNow = now();
       let authenticatedMember: AuthenticatedTeamMember | undefined;
       let userId: string;
@@ -300,7 +309,7 @@ export function createTeamAuthorizationFileManager(
           ...(expiresAt ? { expiresAt } : {})
         };
         member.tokens = [...(member.tokens ?? []), credential];
-        await persist(nextConfig);
+        await persist(sourceSnapshot, nextConfig);
         return {
           type: "create",
           created: {
@@ -331,7 +340,7 @@ export function createTeamAuthorizationFileManager(
       }
       if (!credential.revokedAt) {
         credential.revokedAt = validManagementNow(operationNow);
-        await persist(nextConfig);
+        await persist(sourceSnapshot, nextConfig);
       }
       return {
         type: "revoke",
