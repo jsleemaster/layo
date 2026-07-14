@@ -1,5 +1,6 @@
 import { createHttpServer } from "./http.js";
 import {
+  createTeamAuthorizationFileManager,
   parseTeamAuthorizationConfig,
   watchTeamAuthorizationConfigFile
 } from "./team-authorization.js";
@@ -16,7 +17,7 @@ const libraryRegistryAuthSource = process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE
 const libraryRegistryAuth =
   libraryRegistryAuthSource?.config
   ?? parseTeamAuthorizationConfig(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS);
-const server = createHttpServer(undefined, { libraryRegistryAuth });
+// Token administration is writable only when the operator selected a watched file.\nconst teamAuthorizationManager = libraryRegistryAuthSource\n  ? createTeamAuthorizationFileManager(\n      process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE!,\n      libraryRegistryAuthSource.config\n    )\n  : undefined;\nconst server = createHttpServer(undefined, {\n  libraryRegistryAuth,\n  teamAuthorizationManager\n});
 server.addHook("onClose", async () => {
   libraryRegistryAuthSource?.close();
 });
