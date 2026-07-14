@@ -3661,7 +3661,7 @@ async function readSseEvent(response: Response, eventName: string): Promise<Reco
     const blocks = buffer.split("\n\n");
     buffer = blocks.pop() ?? "";
     for (const block of blocks) {
-      if (!block.includes(`event: ${eventName}`)) {
+      if (!block.split(/\r?\n/).some((line) => line.trim() === `event: ${eventName}`)) {
         continue;
       }
       const data = block
