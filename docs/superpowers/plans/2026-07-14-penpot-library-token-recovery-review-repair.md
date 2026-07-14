@@ -45,7 +45,8 @@ References:
   wiring.
 - [x] Add a browser token revision that permits same-value resubscription only
   after terminal authorization.
-- [ ] Pass full repository verification and direct Playwright CLI interaction.
+- [x] Pass Full Verification `29306760274`, job `87001544790`, including
+  the direct same-token Playwright CLI interaction.
 - [ ] Complete review, merge, and post-merge cleanup.
 
 ## Product Boundary
