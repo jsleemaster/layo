@@ -207,18 +207,34 @@ Deployment remains a separate non-gating concern.
 - Residual: permanently malformed input remains fail-closed. Retry is bounded
   and process-local, not a multi-host generation or delivery guarantee.
 
+### Removed-member orphan quarantine failure loop
+
+- External review found a P1: after the operator removed one member, its
+  sidecar state caused every watcher retry to throw the same binding error and
+  clear all principals, indefinitely locking out surviving members.
+- Deterministic RED `e4c4126` and Full `29342714708` reproduced the survivor
+  timeout with 379 passing server tests and one intended failure.
+- Broad-ignore hypothesis `4d6f0af` skipped every quarantined member and failed
+  existing explicit recovery tests, so it was rejected.
+- GREEN `1b1888f` / `914fc72` skips only a quarantined sidecar member absent
+  from the operator base. Re-added members still require explicit base
+  authentication and reconciliation; removed managed secrets stay invalid,
+  surviving revocations stay revoked, and restart behavior is covered.
+- Full `29343398679`, restore `29343394961`, and retention `29343395030`
+  passed on `914fc7226c5632344d4f5e8e1f4c750006b968a2`.
+
 ### Current merge gate
 
-- Final code head: `9eae96fe2e11992768636211da3868a9e93142a5`.
-- Full Verification `29340078192` passed in 8m9s on that head: maturity/design
-  gates, typecheck, web build, Core, and Playwright CLI e2e all passed.
-- Storage Restore Drill `29340078406` and Storage Backup Retention
-  `29340078359` passed on the same head.
-- Implementation, verification, durable evidence, and review are complete.
-  Fresh review reported no findings and PR review threads are empty.
-- PR #308 is active and ready to merge. It is not merged. Squash merge and
-  post-merge cleanup remain open, so this plan remains active and must not move
-  to Completed Plans yet.
+- Final code head: `914fc7226c5632344d4f5e8e1f4c750006b968a2`.
+- Full Verification `29343398679` passed on that head: maturity/design gates,
+  typecheck, web build, Core, and Playwright CLI e2e all passed.
+- Storage Restore Drill `29343394961` and Storage Backup Retention
+  `29343395030` passed on the same head.
+- The external-review P1 has deterministic RED, repaired GREEN, restart and
+  explicit-recovery regression coverage, and durable evidence. Final fresh
+  review and review-thread resolution remain the merge gate.
+- PR #308 is active and not merged. Squash merge and post-merge cleanup remain
+  open, so this plan remains active and must not move to Completed Plans yet.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -232,6 +248,6 @@ Deployment remains a separate non-gating concern.
 - [x] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
 - [x] Request external code review and feed every actionable finding into a focused RED.
 - [x] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
-- [x] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
+- [ ] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
 - [ ] Squash merge PR #308.
 - [ ] Run required post-merge cleanup checks and delete the remote branch.
