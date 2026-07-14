@@ -33,6 +33,11 @@ against one file. Only process tokens 0, 3, and 4 survived, proving fresh reads
 plus atomic rename still lost committed sibling writes. The regression now
 requires all six deterministic token IDs after every process exits.
 
+External review then found that a recoverer crash could leave the deterministic
+claim path behind and block every later recovery. RED Full Verification
+`29316494422` pre-created that orphan claim and timed out. Recovery claims are
+now unique per attempt, so old claim residue cannot deny subsequent recovery.
+
 ## Remaining Gaps
 
 - A shared transactional identity database is still preferable for multi-host
