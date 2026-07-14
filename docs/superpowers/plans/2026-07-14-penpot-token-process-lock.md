@@ -25,6 +25,8 @@ read-modify-write transaction safe.
 - Keep an in-process queue for same-runtime fairness.
 - Record lock ownership with a random token, PID, hostname, and acquisition time.
 - Recover only stale locks owned by terminated processes on the same host.
+- Use per-attempt recovery claims so a crashed recoverer cannot permanently
+  block later recovery.
 - Never steal a live or remote-host lock.
 - Bound contention with configurable timeout and stale thresholds.
 - Preserve one-time secret and hash-only persistence behavior from PR #306.
