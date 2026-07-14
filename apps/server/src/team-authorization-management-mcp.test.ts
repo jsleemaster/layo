@@ -9,13 +9,9 @@ import { createMcpServer } from "./mcp";
 import {
   createTeamAuthorizationFileManager,
   watchTeamAuthorizationConfigFile,
-  type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
   type TeamAuthorizationConfigSource,
-  type TeamAuthorizationFileManager,
-  type TeamAuthorizationManagementOperation,
-  type TeamAuthorizationManagementPrincipal,
-  type TeamAuthorizationManagementResult
+  type TeamAuthorizationFileManager
 } from "./team-authorization";
 
 const clients: Client[] = [];
@@ -32,52 +28,53 @@ afterEach(async () => {
 
 describe("team access token MCP administration", () => {
   test("advertises and applies authenticated create, list, and revoke with exact safety annotations", async () => {
-    const tokensByUser = new Map<string, TeamAccessTokenMetadata[]>([
-      ["owner-user", []],
-      ["other-user", [{ id: "other-token", name: "Other automation", createdAt: "2026-07-13T12:00:00.000Z" }]]
-    ]);
-    const manager: TeamAuthorizationFileManager = {
-      manageTokens: vi.fn(async (
-        principal: TeamAuthorizationManagementPrincipal,
-        operation: TeamAuthorizationManagementOperation
-      ): Promise<TeamAuthorizationManagementResult> => {
-        const userId = principal.userId.trim();
-        if (operation.type === "list") {
-          return { type: "list", tokens: manager.listTokens(userId) };
-        }
-        if (operation.type === "create") {
-          return {
-            type: "create",
-            created: await manager.createToken(userId, operation.input)
-          };
-        }
-        return {
-          type: "revoke",
-          metadata: await manager.revokeToken(userId, operation.tokenId)
-        };
-      }),
-      listTokens: vi.fn((userId) => [...(tokensByUser.get(userId) ?? [])]),
-      createToken: vi.fn(async (userId, input) => {
-        const metadata = {
-          id: "owner-created",
-          name: input.name,
-          createdAt: "2026-07-14T12:00:00.000Z",
-          ...(input.expiresInDays === null ? {} : { expiresAt: "2026-08-13T12:00:00.000Z" })
-        };
-        tokensByUser.set(userId, [...(tokensByUser.get(userId) ?? []), metadata]);
-        return { token: "layo_pat_mcp_secret", metadata };
-      }),
-      revokeToken: vi.fn(async (userId, tokenId) => {
-        const metadata = (tokensByUser.get(userId) ?? []).find((token) => token.id === tokenId);
-        if (!metadata) throw new Error("team authorization token was not found");
-        const revoked = { ...metadata, revokedAt: "2026-07-14T12:05:00.000Z" };
-        tokensByUser.set(userId, (tokensByUser.get(userId) ?? []).map((token) => token.id === tokenId ? revoked : token));
-        return revoked;
-      })
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-mcp-success-"));
+    roots.push(root);
+    const configPath = path.join(root, "members.json");
+    const otherToken = {
+      id: "other-token",
+      name: "Other automation",
+      tokenHash: tokenHash("other-token-secret"),
+      createdAt: "2026-07-13T12:00:00.000Z"
     };
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        [
+          {
+            userId: "owner-user",
+            role: "owner",
+            teamIds: ["team-alpha"],
+            token: "owner-member-token"
+          },
+          {
+            userId: "other-user",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "other-member-token",
+            tokens: [otherToken]
+          }
+        ],
+        null,
+        2
+      ),
+      "utf8"
+    );
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    sources.push(source);
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => "owner-created",
+      generateSecret: () => "layo_pat_mcp_secret"
+    });
     const client = await connect({
-      libraryRegistryAuth: authorization(),
-      libraryRegistryPrincipal: { userId: " owner-user ", memberToken: "owner-member-token" },
+      libraryRegistryAuth: source.config,
+      libraryRegistryPrincipal: {
+        userId: " owner-user ",
+        memberToken: "owner-member-token"
+      },
       teamAuthorizationManager: manager
     });
 
@@ -107,7 +104,10 @@ describe("team access token MCP administration", () => {
       }
     });
 
-    const listed = parseToolJson(await client.callTool({ name: "list_account_tokens", arguments: {} }));
+    const listed = parseToolJson(await client.callTool({
+      name: "list_account_tokens",
+      arguments: {}
+    }));
     expect(listed).toEqual({ tokens: [created.metadata] });
     expect(JSON.stringify(listed)).not.toContain("layo_pat_mcp_secret");
     expect(JSON.stringify(listed)).not.toContain("tokenHash");
@@ -116,14 +116,29 @@ describe("team access token MCP administration", () => {
       name: "revoke_account_token",
       arguments: { tokenId: "owner-created" }
     }));
-    expect(revoked.metadata).toMatchObject({ id: "owner-created", revokedAt: "2026-07-14T12:05:00.000Z" });
+    expect(revoked).toEqual({
+      metadata: {
+        ...created.metadata,
+        revokedAt: "2026-07-14T12:00:00.000Z"
+      }
+    });
+    expect(JSON.stringify(revoked)).not.toContain("layo_pat_mcp_secret");
+    expect(JSON.stringify(revoked)).not.toContain("tokenHash");
 
-    expect(manager.createToken).toHaveBeenCalledWith("owner-user", { name: "Deploy automation", expiresInDays: 30 });
-    expect(manager.listTokens).toHaveBeenCalledWith("owner-user");
-    expect(manager.revokeToken).toHaveBeenCalledWith("owner-user", "owner-created");
-    expect(tokensByUser.get("other-user")).toEqual([
-      { id: "other-token", name: "Other automation", createdAt: "2026-07-13T12:00:00.000Z" }
+    const persistedText = await readFile(configPath, "utf8");
+    const persisted = JSON.parse(persistedText);
+    const owner = persisted.find((member: { userId: string }) => member.userId === "owner-user");
+    const other = persisted.find((member: { userId: string }) => member.userId === "other-user");
+    expect(owner.tokens).toEqual([
+      expect.objectContaining({
+        id: "owner-created",
+        tokenHash: tokenHash("layo_pat_mcp_secret"),
+        revokedAt: "2026-07-14T12:00:00.000Z"
+      })
     ]);
+    expect(persistedText).not.toContain("layo_pat_mcp_secret");
+    expect(owner.tokens[0]).not.toHaveProperty("token");
+    expect(other.tokens).toEqual([otherToken]);
   });
 
   test.each([
