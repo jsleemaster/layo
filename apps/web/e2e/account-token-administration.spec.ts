@@ -144,72 +144,6 @@ test("manages named account tokens over the isolated real network", async ({ con
   await expect(page.getByTestId("team-status")).not.toContainText("팀 없음");
 });
 
-test("keeps one-time plaintext transient across every browser lifecycle boundary", async ({ page }) => {
-  await createAuthenticatedLocalTeam(page);
-
-  const firstSecret = await createToken(page, "첫 번째 비밀");
-  await page.getByTestId("account-token-dismiss").click();
-  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
-
-  const secondSecret = await createToken(page, "두 번째 비밀");
-  const thirdSecret = await createToken(page, "세 번째 비밀");
-  expect(thirdSecret).not.toBe(secondSecret);
-  await expect(page.getByTestId("account-token-secret")).toHaveValue(thirdSecret);
-  expect(await page.getByTestId("account-token-panel").textContent()).not.toContain(secondSecret);
-
-  await page.getByRole("tab", { name: "로컬 작업" }).click();
-  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
-  await page.getByRole("tab", { name: "팀 설정" }).click();
-
-  const reloadSecret = await createToken(page, "새로고침 비밀");
-  await page.reload();
-  await openTeamPanel(page);
-  await page.getByRole("tab", { name: "팀 설정" }).click();
-  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
-  await expect(page.getByTestId("member-token")).toHaveValue("");
-  await expect(page.getByTestId("account-token-create")).toHaveCount(0);
-  expect(await page.locator("body").textContent()).not.toContain(reloadSecret);
-
-  const restoredCredentialInput = page.getByTestId("member-token");
-  const applyCredentialButton = page.getByRole("button", { name: "멤버 토큰 적용" });
-  await restoredCredentialInput.clear();
-  await restoredCredentialInput.fill(ACTIVE_SECRET);
-  await expect(applyCredentialButton).toBeEnabled();
-  await applyCredentialButton.click();
-  await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
-  const identitySecret = await createToken(page, "계정 변경 비밀");
-
-  await page.getByRole("button", { name: "설정 내보내기" }).click();
-  const manifestField = page.getByTestId("team-manifest");
-  const exportedText = await manifestField.inputValue();
-  expect(exportedText).not.toContain(firstSecret);
-  expect(exportedText).not.toContain(secondSecret);
-  expect(exportedText).not.toContain(thirdSecret);
-  expect(exportedText).not.toContain(reloadSecret);
-  expect(exportedText).not.toContain(identitySecret);
-
-  const changedIdentity = JSON.parse(exportedText) as {
-    currentUserId: string;
-    members: Array<Record<string, unknown>>;
-  };
-  changedIdentity.currentUserId = "review-user";
-  changedIdentity.members.push({
-    userId: "review-user",
-    displayName: "검토 사용자",
-    color: "#0f9f8f",
-    role: "editor"
-  });
-  await manifestField.fill(JSON.stringify(changedIdentity));
-  await page.getByRole("button", { name: "설정 가져오기" }).click();
-  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
-  await expect(page.getByTestId("account-token-member")).toContainText("review-user");
-
-  const storageDump = await readBrowserStorage(page);
-  for (const secret of [firstSecret, secondSecret, thirdSecret, reloadSecret, identitySecret]) {
-    expect(storageDump).not.toContain(secret);
-  }
-});
-
 test("guards pending operations, network errors, and stale identity responses", async ({ page }) => {
   await createAuthenticatedLocalTeam(page);
 
@@ -304,6 +238,72 @@ test("guards pending operations, network errors, and stale identity responses", 
     "멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다"
   );
   await expect(page.getByTestId("account-token-list")).toHaveCount(0);
+});
+
+test("keeps one-time plaintext transient across every browser lifecycle boundary", async ({ page }) => {
+  await createAuthenticatedLocalTeam(page);
+
+  const firstSecret = await createToken(page, "첫 번째 비밀");
+  await page.getByTestId("account-token-dismiss").click();
+  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+
+  const secondSecret = await createToken(page, "두 번째 비밀");
+  const thirdSecret = await createToken(page, "세 번째 비밀");
+  expect(thirdSecret).not.toBe(secondSecret);
+  await expect(page.getByTestId("account-token-secret")).toHaveValue(thirdSecret);
+  expect(await page.getByTestId("account-token-panel").textContent()).not.toContain(secondSecret);
+
+  await page.getByRole("tab", { name: "로컬 작업" }).click();
+  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+
+  const reloadSecret = await createToken(page, "새로고침 비밀");
+  await page.reload();
+  await openTeamPanel(page);
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  await expect(page.getByTestId("member-token")).toHaveValue("");
+  await expect(page.getByTestId("account-token-create")).toHaveCount(0);
+  expect(await page.locator("body").textContent()).not.toContain(reloadSecret);
+
+  const restoredCredentialInput = page.getByTestId("member-token");
+  const applyCredentialButton = page.getByRole("button", { name: "멤버 토큰 적용" });
+  await restoredCredentialInput.clear();
+  await restoredCredentialInput.fill(ACTIVE_SECRET);
+  await expect(applyCredentialButton).toBeEnabled();
+  await applyCredentialButton.click();
+  await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
+  const identitySecret = await createToken(page, "계정 변경 비밀");
+
+  await page.getByRole("button", { name: "설정 내보내기" }).click();
+  const manifestField = page.getByTestId("team-manifest");
+  const exportedText = await manifestField.inputValue();
+  expect(exportedText).not.toContain(firstSecret);
+  expect(exportedText).not.toContain(secondSecret);
+  expect(exportedText).not.toContain(thirdSecret);
+  expect(exportedText).not.toContain(reloadSecret);
+  expect(exportedText).not.toContain(identitySecret);
+
+  const changedIdentity = JSON.parse(exportedText) as {
+    currentUserId: string;
+    members: Array<Record<string, unknown>>;
+  };
+  changedIdentity.currentUserId = "review-user";
+  changedIdentity.members.push({
+    userId: "review-user",
+    displayName: "검토 사용자",
+    color: "#0f9f8f",
+    role: "editor"
+  });
+  await manifestField.fill(JSON.stringify(changedIdentity));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  await expect(page.getByTestId("account-token-member")).toContainText("review-user");
+
+  const storageDump = await readBrowserStorage(page);
+  for (const secret of [firstSecret, secondSecret, thirdSecret, reloadSecret, identitySecret]) {
+    expect(storageDump).not.toContain(secret);
+  }
 });
 
 async function createAuthenticatedLocalTeam(page: Page) {
