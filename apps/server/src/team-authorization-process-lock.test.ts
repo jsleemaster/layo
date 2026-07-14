@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -39,6 +40,7 @@ describe("team authorization cross-process mutations", () => {
             "--import",
             "tsx",
             workerPath,
+            "create",
             configPath,
             tokenId,
             `layo_pat_process_${index}`,
@@ -52,7 +54,8 @@ describe("team authorization cross-process mutations", () => {
 
       await Promise.all(ready);
       const exits = children.map(waitForSuccessfulExit);
-      await writeFile(releasePath, "release\n", "utf8");
+      await writeFile(releasePath, "release
+", "utf8");
       await Promise.all(exits);
 
       const members = JSON.parse(await readFile(configPath, "utf8")) as Array<{
@@ -60,6 +63,84 @@ describe("team authorization cross-process mutations", () => {
       }>;
       expect(members[0]?.tokens?.map((token) => token.id).sort()).toEqual(
         Array.from({ length: 6 }, (_, index) => `process-token-${index}`)
+      );
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test("preserves concurrent create and revoke effects from separate processes", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-process-mixed-"));
+    const configPath = path.join(root, "members.json");
+    const releasePath = path.join(root, "release");
+    const workerPath = fileURLToPath(
+      new URL("./team-authorization-process-worker.ts", import.meta.url)
+    );
+    const children: ChildProcessWithoutNullStreams[] = [];
+
+    try {
+      await writeFile(
+        configPath,
+        JSON.stringify(
+          [{
+            userId: "owner-user",
+            role: "owner",
+            teamIds: ["team-alpha"],
+            token: "legacy-owner-token",
+            tokens: [{
+              id: "existing-token",
+              name: "Existing token",
+              tokenHash: createHash("sha256").update("existing-secret").digest("hex"),
+              createdAt: "2026-07-13T12:00:00.000Z"
+            }]
+          }],
+          null,
+          2
+        ),
+        "utf8"
+      );
+
+      const createWorker = spawn(
+        process.execPath,
+        [
+          "--import", "tsx", workerPath, "create", configPath,
+          "new-token", "layo_pat_new", releasePath
+        ],
+        { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+      );
+      const revokeWorker = spawn(
+        process.execPath,
+        [
+          "--import", "tsx", workerPath, "revoke", configPath,
+          "existing-token", "-", releasePath
+        ],
+        { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+      );
+      children.push(createWorker, revokeWorker);
+      await Promise.all([
+        waitForMarker(createWorker, "ready"),
+        waitForMarker(revokeWorker, "ready")
+      ]);
+      const exits = children.map(waitForSuccessfulExit);
+      await writeFile(releasePath, "release\n", "utf8");
+      await Promise.all(exits);
+
+      const members = JSON.parse(await readFile(configPath, "utf8")) as Array<{
+        tokens?: Array<{ id: string; revokedAt?: string }>;
+      }>;
+      expect(members[0]?.tokens).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "existing-token",
+            revokedAt: "2026-07-14T12:00:00.000Z"
+          }),
+          expect.objectContaining({ id: "new-token" })
+        ])
       );
     } finally {
       for (const child of children) {
