@@ -387,11 +387,13 @@ function matchActiveToken(
   token: string,
   now: Date
 ): { tokenId?: string; tokenName?: string } | undefined {
-  const namedToken = member.tokens?.find(
-    (credential) => matchesToken(credential, token) && isCredentialActive(credential, now)
+  const namedToken = member.tokens?.find((credential) =>
+    matchesToken(credential, token)
   );
   if (namedToken) {
-    return { tokenId: namedToken.id, tokenName: namedToken.name };
+    return isCredentialActive(namedToken, now)
+      ? { tokenId: namedToken.id, tokenName: namedToken.name }
+      : undefined;
   }
   return matchesToken(member, token) ? {} : undefined;
 }
