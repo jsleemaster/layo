@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-07-14-penpot-token-mcp-ui.md` - **Active / ready to merge** on PR #308. Implementation, verification, failure-learning evidence, and review are complete at code head `9eae96fe2e11992768636211da3868a9e93142a5`. Final Full `29340078192`, restore `29340078406`, and retention `29340078359` passed on that head; fresh review reported no findings and no review threads are open. The plan remains active because PR #308 is not merged and post-merge cleanup has not run.
+`2026-07-14-penpot-token-mcp-ui.md` - **Active / final review gate** on PR #308. External review found a removed-member orphan P1; RED `e4c4126` / Full `29342714708` reproduced survivor lockout, broad-ignore hypothesis `4d6f0af` failed existing recovery tests, and narrow repair `1b1888f` / `914fc72` preserves revocations, restart safety, and explicit re-add recovery. Full `29343398679`, restore `29343394961`, and retention `29343395030` passed on repaired head `914fc7226c5632344d4f5e8e1f4c750006b968a2`. Final fresh review, thread resolution, squash merge, and post-merge cleanup remain open.
 
 ## Completed Plans
 
