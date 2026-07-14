@@ -91,6 +91,7 @@ export interface WatchTeamAuthorizationConfigFileOptions {
   pollIntervalMs?: number;
   onError?: (error: Error) => void;
   beforeManagedTokenQuarantine?: () => Promise<void>;
+  beforeManagedTokenRecoveryPublish?: () => Promise<void>;
 }
 
 export type TeamAccessTokenExpiryDays = 30 | 60 | 90 | 180 | null;
@@ -1099,6 +1100,7 @@ export async function watchTeamAuthorizationConfigFile(
               teamAuthorizationConfigGeneration(initialConfig);
             const recoveredConfig =
               await readStableMergedTeamAuthorizationConfig(normalizedPath);
+            await options.beforeManagedTokenRecoveryPublish?.();
             if (
               recoveryGeneration
               === teamAuthorizationConfigGeneration(initialConfig)
