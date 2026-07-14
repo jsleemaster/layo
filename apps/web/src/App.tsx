@@ -9519,6 +9519,7 @@ export function App() {
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const accountTokenOperationGenerationRef = useRef(0);
   const accountTokenIdentityRef = useRef("");
+  const accountTokenSessionRef = useRef<CollabDocumentSession | null>(null);
   const memberTokenInputRef = useRef<HTMLInputElement | null>(null);
   const accountTokenIdentityKey = [
     teamPanelMode,
@@ -9527,6 +9528,7 @@ export function App() {
     activeMemberToken
   ].join(":");
   accountTokenIdentityRef.current = accountTokenIdentityKey;
+  accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
   const nodeStylePersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
@@ -15245,7 +15247,7 @@ export function App() {
   const beginAccountTokenOperation = () => ({
     generation: ++accountTokenOperationGenerationRef.current,
     identity: accountTokenIdentityRef.current,
-    session: collabSessionRef.current
+    session: collabSession
   });
 
   const isCurrentAccountTokenOperation = (operation: {
@@ -15255,7 +15257,7 @@ export function App() {
   }) =>
     operation.generation === accountTokenOperationGenerationRef.current
     && operation.identity === accountTokenIdentityRef.current
-    && operation.session === collabSessionRef.current;
+    && operation.session === accountTokenSessionRef.current;
 
   const refreshAccountTokens = async (successStatus?: string) => {
     if (!collabSession || !activeMemberToken || accountTokenRefreshPending) return;
