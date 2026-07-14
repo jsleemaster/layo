@@ -287,4 +287,13 @@ invalidating sibling tokens. Legacy member-level `token`, `tokenHash`, and
 `tokenHashes` fields remain supported for migration. Leave the registry member
 configuration unset to preserve the open local-first workflow.
 
+When file-backed authorization is active, authenticated members can manage only
+their own credentials through `GET /account/tokens`,
+`POST /account/tokens`, and `DELETE /account/tokens/:tokenId`. Creation
+accepts a name and `expiresInDays` of `null`, `30`, `60`, `90`, or
+`180`; the plaintext token is returned once and only its SHA-256 hash is
+persisted. Listing is metadata-only and revocation keeps `revokedAt` for
+auditability. Environment-only authorization is intentionally read-only and
+these routes return 503.
+
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.
