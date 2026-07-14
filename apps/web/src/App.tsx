@@ -9423,6 +9423,7 @@ export function App() {
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
   const [activeMemberToken, setActiveMemberToken] = useState("");
+  const [memberTokenRevision, setMemberTokenRevision] = useState(0);
   const [memberTokenStatus, setMemberTokenStatus] = useState("멤버 토큰 대기 중");
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
@@ -9882,7 +9883,8 @@ export function App() {
   }, [
     currentProject?.currentDocumentId,
     collabSession?.team.currentUserId,
-    activeMemberToken
+    activeMemberToken,
+    memberTokenRevision
   ]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
@@ -15144,13 +15146,21 @@ export function App() {
 
   const applyMemberToken = () => {
     const nextToken = memberToken.trim();
-    if (!collabSession || !nextToken || nextToken === activeMemberToken) {
+    if (
+      !collabSession
+      || !nextToken
+      || (
+        nextToken === activeMemberToken
+        && !libraryRegistryAuthorizationEndedRef.current
+      )
+    ) {
       return;
     }
     libraryRegistryCredentialReconnectPendingRef.current = true;
     setLibraryRegistryStatus("팀 인증 다시 연결 중");
     setMemberTokenStatus("팀 인증 다시 연결 중");
     setActiveMemberToken(nextToken);
+    setMemberTokenRevision((revision) => revision + 1);
   };
 
   const createLocalTeam = () => {
@@ -16642,7 +16652,10 @@ export function App() {
                   disabled={
                     !collabSession
                     || !memberToken.trim()
-                    || memberToken.trim() === activeMemberToken
+                    || (
+                      memberToken.trim() === activeMemberToken
+                      && !libraryRegistryAuthorizationEndedRef.current
+                    )
                   }
                 >
                   멤버 토큰 적용
