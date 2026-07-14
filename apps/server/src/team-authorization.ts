@@ -198,6 +198,7 @@ export function createTeamAuthorizationFileManager(
   if (!normalizedPath) {
     throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
   }
+  const sidecarPath = managedTokenSidecarPath(normalizedPath);
   const now = options.now ?? (() => new Date());
   const generateId = options.generateId ?? (() => randomUUID());
   const generateSecret =
@@ -209,31 +210,32 @@ export function createTeamAuthorizationFileManager(
   };
 
   const mutate = <T>(operation: () => Promise<T>): Promise<T> =>
-    withFileProcessMutationLock(normalizedPath, operation);
+    withFileProcessMutationLock(sidecarPath, operation);
 
   const persist = async (
-    sourceSnapshot: string,
-    nextConfig: TeamAuthorizationConfig
+    sourceSnapshot: string | undefined,
+    state: ManagedTokenState
   ): Promise<void> => {
-    const temporaryPath = `${normalizedPath}.${process.pid}.${randomUUID()}.tmp`;
+    const temporaryPath = `${sidecarPath}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await writeFile(
         temporaryPath,
-        `${JSON.stringify(nextConfig.members, null, 2)}\n`,
+        `${JSON.stringify(state, null, 2)}\n`,
         { encoding: "utf8", mode: 0o600 }
       );
-      const currentSnapshot = await readFile(normalizedPath, "utf8");
+      const currentSnapshot = await readOptionalFile(sidecarPath);
       if (currentSnapshot !== sourceSnapshot) {
         throw managementError(
-          "team authorization file changed during token management",
+          "team authorization token sidecar changed during token management",
           409
         );
       }
-      await rename(temporaryPath, normalizedPath);
+      await rename(temporaryPath, sidecarPath);
     } finally {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
-    replaceTeamAuthorizationMembers(config, nextConfig.members);
+    const currentConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
+    replaceTeamAuthorizationMembers(config, currentConfig.members);
   };
 
   const executeOperation = (
@@ -243,8 +245,12 @@ export function createTeamAuthorizationFileManager(
     operation: TeamAuthorizationManagementOperation
   ): Promise<TeamAuthorizationManagementResult> =>
     mutate(async () => {
-      const sourceSnapshot = await readFile(normalizedPath, "utf8");
-      const nextConfig = parseRequiredTeamAuthorizationConfig(sourceSnapshot);
+      const baseConfig = parseRequiredTeamAuthorizationConfig(
+        await readFile(normalizedPath, "utf8")
+      );
+      const sidecarSnapshot = await readOptionalFile(sidecarPath);
+      const state = parseManagedTokenState(sidecarSnapshot);
+      const nextConfig = mergeManagedTokenState(baseConfig, state);
       const operationNow = now();
       let authenticatedMember: AuthenticatedTeamMember | undefined;
       let userId: string;
@@ -308,8 +314,8 @@ export function createTeamAuthorizationFileManager(
           createdAt,
           ...(expiresAt ? { expiresAt } : {})
         };
-        member.tokens = [...(member.tokens ?? []), credential];
-        await persist(sourceSnapshot, nextConfig);
+        managedTokenStateMember(state, userId).tokens.push(credential);
+        await persist(sidecarSnapshot, state);
         return {
           type: "create",
           created: {
@@ -339,8 +345,13 @@ export function createTeamAuthorizationFileManager(
         throw managementError("team authorization token was not found", 404);
       }
       if (!credential.revokedAt) {
-        credential.revokedAt = validManagementNow(operationNow);
-        await persist(sourceSnapshot, nextConfig);
+        const revokedAt = validManagementNow(operationNow);
+        managedTokenStateMember(state, userId).revocations.push({
+          tokenId: normalizedTokenId,
+          revokedAt
+        });
+        credential.revokedAt = revokedAt;
+        await persist(sidecarSnapshot, state);
       }
       return {
         type: "revoke",
@@ -425,6 +436,186 @@ function managementError(message: string, statusCode: number): Error {
   });
 }
 
+interface ManagedTokenRevocation {
+  tokenId: string;
+  revokedAt: string;
+}
+
+interface ManagedTokenStateMember {
+  userId: string;
+  tokens: TeamMemberTokenCredential[];
+  revocations: ManagedTokenRevocation[];
+}
+
+interface ManagedTokenState {
+  version: 1;
+  members: ManagedTokenStateMember[];
+}
+
+// Account administration owns this sidecar and never writes the operator-owned members file.
+function managedTokenSidecarPath(filePath: string): string {
+  return `${filePath}.tokens.json`;
+}
+
+function emptyManagedTokenState(): ManagedTokenState {
+  return { version: 1, members: [] };
+}
+
+async function readOptionalFile(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function parseManagedTokenState(input: string | undefined): ManagedTokenState {
+  if (input === undefined) {
+    return emptyManagedTokenState();
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw new Error("invalid team authorization token sidecar JSON");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("invalid team authorization token sidecar");
+  }
+  const candidate = parsed as {
+    version?: unknown;
+    members?: unknown;
+  };
+  if (candidate.version !== 1 || !Array.isArray(candidate.members)) {
+    throw new Error("invalid team authorization token sidecar");
+  }
+  const members = candidate.members.map((value): ManagedTokenStateMember => {
+    if (!value || typeof value !== "object") {
+      throw new Error("invalid team authorization token sidecar member");
+    }
+    const member = value as {
+      userId?: unknown;
+      tokens?: unknown;
+      revocations?: unknown;
+    };
+    if (
+      typeof member.userId !== "string"
+      || !member.userId.trim()
+      || !Array.isArray(member.tokens)
+      || !Array.isArray(member.revocations)
+    ) {
+      throw new Error("invalid team authorization token sidecar member");
+    }
+    const tokens = member.tokens.map((token) => {
+      const credential = parseTeamMemberTokenCredential(token);
+      if (credential.token) {
+        throw new Error("team authorization token sidecar must contain hashes only");
+      }
+      return credential;
+    });
+    if (new Set(tokens.map((token) => token.id)).size !== tokens.length) {
+      throw new Error("duplicate team authorization token sidecar token id");
+    }
+    const revocations = member.revocations.map((value): ManagedTokenRevocation => {
+      if (!value || typeof value !== "object") {
+        throw new Error("invalid team authorization token sidecar revocation");
+      }
+      const revocation = value as { tokenId?: unknown; revokedAt?: unknown };
+      if (typeof revocation.tokenId !== "string" || !revocation.tokenId.trim()) {
+        throw new Error("invalid team authorization token sidecar revocation");
+      }
+      const revokedAt = parseLifecycleTimestamp(
+        revocation.revokedAt,
+        "revokedAt",
+        "team authorization token sidecar revocation"
+      );
+      if (!revokedAt) {
+        throw new Error("invalid team authorization token sidecar revocation");
+      }
+      return { tokenId: revocation.tokenId.trim(), revokedAt };
+    });
+    if (
+      new Set(revocations.map((revocation) => revocation.tokenId)).size
+      !== revocations.length
+    ) {
+      throw new Error("duplicate team authorization token sidecar revocation");
+    }
+    return {
+      userId: member.userId.trim(),
+      tokens,
+      revocations
+    };
+  });
+  if (new Set(members.map((member) => member.userId)).size !== members.length) {
+    throw new Error("duplicate team authorization token sidecar member");
+  }
+  return { version: 1, members };
+}
+
+function managedTokenStateMember(
+  state: ManagedTokenState,
+  userId: string
+): ManagedTokenStateMember {
+  const normalizedUserId = userId.trim();
+  let member = state.members.find(
+    (candidate) => candidate.userId === normalizedUserId
+  );
+  if (!member) {
+    member = { userId: normalizedUserId, tokens: [], revocations: [] };
+    state.members.push(member);
+  }
+  return member;
+}
+
+function mergeManagedTokenState(
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState
+): TeamAuthorizationConfig {
+  return {
+    members: baseConfig.members.map((baseMember) => {
+      const stateMember = state.members.find(
+        (candidate) => candidate.userId === baseMember.userId
+      );
+      const baseTokens = (baseMember.tokens ?? []).map((token) => ({ ...token }));
+      if (!stateMember) {
+        return { ...baseMember, ...(baseTokens.length ? { tokens: baseTokens } : {}) };
+      }
+      const baseIds = new Set(baseTokens.map((token) => token.id));
+      if (stateMember.tokens.some((token) => baseIds.has(token.id))) {
+        throw new Error("team authorization token sidecar conflicts with operator token id");
+      }
+      const tokens = [
+        ...baseTokens,
+        ...stateMember.tokens.map((token) => ({ ...token }))
+      ];
+      const byId = new Map(tokens.map((token) => [token.id, token]));
+      for (const revocation of stateMember.revocations) {
+        const token = byId.get(revocation.tokenId);
+        if (token) {
+          token.revokedAt = revocation.revokedAt;
+        }
+      }
+      return { ...baseMember, ...(tokens.length ? { tokens } : {}) };
+    })
+  };
+}
+
+async function readMergedTeamAuthorizationConfig(
+  filePath: string
+): Promise<TeamAuthorizationConfig> {
+  const [baseSnapshot, sidecarSnapshot] = await Promise.all([
+    readFile(filePath, "utf8"),
+    readOptionalFile(managedTokenSidecarPath(filePath))
+  ]);
+  return mergeManagedTokenState(
+    parseRequiredTeamAuthorizationConfig(baseSnapshot),
+    parseManagedTokenState(sidecarSnapshot)
+  );
+}
+
 export async function watchTeamAuthorizationConfigFile(
   filePath: string,
   options: WatchTeamAuthorizationConfigFileOptions = {}
@@ -433,9 +624,8 @@ export async function watchTeamAuthorizationConfigFile(
   if (!normalizedPath) {
     throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
   }
-  const initialConfig = parseRequiredTeamAuthorizationConfig(
-    await readFile(normalizedPath, "utf8")
-  );
+  const sidecarPath = managedTokenSidecarPath(normalizedPath);
+  const initialConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
   let closed = false;
   let reloadTail = Promise.resolve();
 
@@ -446,9 +636,7 @@ export async function watchTeamAuthorizationConfigFile(
       }
       try {
         const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
-        const nextConfig = parseRequiredTeamAuthorizationConfig(
-          await readFile(normalizedPath, "utf8")
-        );
+        const nextConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
         if (
           generationBeforeRead
           !== teamAuthorizationConfigGeneration(initialConfig)
@@ -462,14 +650,12 @@ export async function watchTeamAuthorizationConfigFile(
     });
   };
   const listener: StatsListener = () => reload();
-  watchFile(
-    normalizedPath,
-    {
-      interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
-      persistent: false
-    },
-    listener
-  );
+  const watchOptions = {
+    interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
+    persistent: false
+  };
+  watchFile(normalizedPath, watchOptions, listener);
+  watchFile(sidecarPath, watchOptions, listener);
 
   return {
     config: initialConfig,
@@ -479,6 +665,7 @@ export async function watchTeamAuthorizationConfigFile(
       }
       closed = true;
       unwatchFile(normalizedPath, listener);
+      unwatchFile(sidecarPath, listener);
     }
   };
 }
