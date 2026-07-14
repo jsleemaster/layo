@@ -1,7 +1,7 @@
 # Penpot Token Process Lock Plan
 
 Date: 2026-07-14
-Status: Active in PR #307
+Status: Completed by PR #307 merge gate
 
 ## Benchmark Decision
 
@@ -36,6 +36,6 @@ read-modify-write transaction safe.
 
 - Six-process creation regression requires all six token IDs.
 - Unit tests cover abandoned same-host recovery and live-lock timeout.
-- Full Verification, restore, retention, external review, and final docs gate
-  merge.
+- Full Verification `29316674532`, Storage Restore Drill `29316674452`, and
+  Storage Backup Retention `29316674522` passed after external-review repair.
 - Deployment remains non-gating.
