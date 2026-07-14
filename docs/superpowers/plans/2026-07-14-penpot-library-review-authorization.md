@@ -1,8 +1,8 @@
 # Penpot Team Library Review Authorization Plan
 
-Status: Active  
+Status: Completed  
 Date: 2026-07-14  
-PR: pending
+PR: #298
 
 ## Exact Failed Case
 
@@ -39,7 +39,15 @@ References:
 ## Evidence
 
 - RED `29293745767`: unauthenticated team-beta registry review returned 200 instead of 401.
-- GREEN: pending.
+- MCP RED `29294139347`: a team-alpha principal received the team-beta
+  review payload.
+- Web contract RED `29294420834`: seven registry read helpers could not accept
+  credentials.
+- GREEN `29294574049`: 251 web, 294 server, Rust, and 193 Playwright CLI
+  cases passed without retry.
+- Restore `29294574061` and retention `29294574028` passed.
+- Direct Playwright verified activated-session headers on update polling and
+  registry review before import.
 
 ## Remaining Boundary
 
