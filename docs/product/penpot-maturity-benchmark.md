@@ -390,6 +390,24 @@ identity storage remain open.
 
 Evidence: `docs/product/penpot-library-credential-lifecycle-delta.md`.
 
+## Latest Verified Delta: Live Stream Reauthorization
+
+PR #301 closes the continued-access gap in configured library event streams.
+Before every shared event-log poll, the server now re-authenticates the request
+headers and re-authorizes file-scoped access against the current team. An
+inactive credential or removed team permission emits a stable secret-free
+terminal event, clears timers, and ends the response before new registry data is
+read.
+
+This is an **adapt** of Penpot's current team-permission boundary to Layo's
+Fetch-based shared-filesystem SSE. RED `29301331244` proved an expired stream
+remained open; GREEN `29301471160` passed 252 web, 297 server, Rust, and 193
+Playwright CLI cases. Browser terminal-auth retry suppression and explicit
+Korean session-expired UI remain the next exact gap.
+
+Evidence:
+`docs/product/penpot-library-stream-reauthentication-delta.md`.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
