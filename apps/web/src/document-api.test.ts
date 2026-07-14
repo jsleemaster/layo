@@ -385,6 +385,72 @@ describe("parseDocumentPayload", () => {
     streamController?.close();
   });
 
+  test("stops reconnecting after a terminal library authorization event", async () => {
+    const calls: string[] = [];
+    const ended: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (calls.length === 1) {
+        return new Response(
+          [
+            "event: library-registry-authorization-ended",
+            'data: {"code":"credential_inactive"}',
+            "",
+            ""
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          }
+        );
+      }
+      return new Response(new ReadableStream<Uint8Array>(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" }
+      });
+    };
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {},
+      onAuthorizationEnded: (code) => ended.push(code)
+    });
+
+    for (let attempt = 0; attempt < 20 && calls.length < 2 && ended.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(ended).toEqual(["credential_inactive"]);
+    expect(calls).toHaveLength(1);
+    unsubscribe();
+  });
+
+  test("treats direct forbidden stream responses as terminal team access", async () => {
+    const calls: string[] = [];
+    const ended: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response("forbidden", { status: 403 });
+    };
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {},
+      onAuthorizationEnded: (code) => ended.push(code)
+    });
+
+    for (let attempt = 0; attempt < 10 && ended.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ended).toEqual(["team_access_revoked"]);
+    expect(calls).toHaveLength(1);
+    unsubscribe();
+  });
+
   test("resumes a closed library registry stream from the last sequence", async () => {
     const urls: string[] = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {

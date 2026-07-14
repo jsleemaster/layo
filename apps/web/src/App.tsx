@@ -9504,6 +9504,8 @@ export function App() {
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
+  const libraryRegistryAccessGenerationRef = useRef(0);
+  const libraryRegistryAuthorizationEndedRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
@@ -9734,6 +9736,10 @@ export function App() {
   }, [selectedPathAnchorIndices]);
 
   const refreshLibraryRegistryUpdates = async (fileId?: string) => {
+    const accessGeneration = libraryRegistryAccessGenerationRef.current;
+    if (libraryRegistryAuthorizationEndedRef.current) {
+      return [];
+    }
     if (!fileId) {
       setLibraryRegistryUpdates([]);
       setLibraryRegistryTokenUpdates([]);
@@ -9744,10 +9750,22 @@ export function App() {
         listLibraryRegistryUpdates(fileId, undefined, activeLibraryRegistryCredentials),
         listLibraryRegistryTokenUpdates(fileId, undefined, activeLibraryRegistryCredentials)
       ]);
+      if (
+        libraryRegistryAuthorizationEndedRef.current
+        || accessGeneration !== libraryRegistryAccessGenerationRef.current
+      ) {
+        return [];
+      }
       setLibraryRegistryUpdates(updates);
       setLibraryRegistryTokenUpdates(tokenUpdates);
       return updates;
     } catch {
+      if (
+        libraryRegistryAuthorizationEndedRef.current
+        || accessGeneration !== libraryRegistryAccessGenerationRef.current
+      ) {
+        return [];
+      }
       setLibraryRegistryUpdates([]);
       setLibraryRegistryTokenUpdates([]);
       return [];
@@ -9755,6 +9773,10 @@ export function App() {
   };
 
   const refreshLibraryRegistry = async (status?: string | null, fileId = currentProject?.currentDocumentId) => {
+    const accessGeneration = libraryRegistryAccessGenerationRef.current;
+    if (libraryRegistryAuthorizationEndedRef.current) {
+      return;
+    }
     try {
       const [libraries] = await Promise.all([
         fileId
@@ -9762,6 +9784,12 @@ export function App() {
           : listLibraryRegistry(undefined, activeLibraryRegistryCredentials),
         refreshLibraryRegistryUpdates(fileId)
       ]);
+      if (
+        libraryRegistryAuthorizationEndedRef.current
+        || accessGeneration !== libraryRegistryAccessGenerationRef.current
+      ) {
+        return;
+      }
       setLibraryRegistry(libraries);
       if (status !== null) {
         setLibraryRegistryStatus(
@@ -9769,6 +9797,12 @@ export function App() {
         );
       }
     } catch (error) {
+      if (
+        libraryRegistryAuthorizationEndedRef.current
+        || accessGeneration !== libraryRegistryAccessGenerationRef.current
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리를 불러오지 못했습니다";
       setLibraryRegistry([]);
       setLibraryRegistryUpdates([]);
@@ -9791,6 +9825,8 @@ export function App() {
 
   useEffect(() => {
     const fileId = currentProject?.currentDocumentId;
+    libraryRegistryAccessGenerationRef.current += 1;
+    libraryRegistryAuthorizationEndedRef.current = false;
     if (!fileId) {
       libraryRegistryEventSequenceRef.current = 0;
       return;
@@ -9814,6 +9850,21 @@ export function App() {
           event.sequence
         );
         void refreshLibraryRegistry(null, fileId);
+      },
+      onAuthorizationEnded: (code) => {
+        libraryRegistryAuthorizationEndedRef.current = true;
+        libraryRegistryAccessGenerationRef.current += 1;
+        libraryRegistryEventSequenceRef.current = 0;
+        setLibraryRegistry([]);
+        setLibraryRegistryUpdates([]);
+        setLibraryRegistryTokenUpdates([]);
+        setLibraryRegistryReview(null);
+        setLibraryRegistryTokenReview(null);
+        setLibraryRegistryStatus(
+          code === "credential_inactive"
+            ? "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
+            : "팀 라이브러리 접근 권한이 해제되었습니다."
+        );
       }
     });
   }, [

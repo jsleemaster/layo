@@ -408,6 +408,23 @@ Korean session-expired UI remain the next exact gap.
 Evidence:
 `docs/product/penpot-library-stream-reauthentication-delta.md`.
 
+## Latest Verified Delta: Terminal Library Authorization UI
+
+PR #302 carries server authorization termination into the visible editor.
+Terminal SSE records and direct 401/403 responses stop reconnecting, clear
+protected registry and review state, invalidate stale in-flight responses, and
+show Korean credential-expired or team-access-removed guidance. Recoverable EOF
+and network errors retain cursor reconnect, while a new credential dependency
+creates a fresh subscription.
+
+This is an **adapt** of Penpot's current team-access model to Layo's local-first
+Fetch SSE client. RED `29302534496` proved the terminal event was ignored and
+retried. Final GREEN `29303273081` passed 254 web, 297 server, Rust, and 194
+Playwright CLI cases, including delayed-response cache non-reappearance.
+First-class token replacement and dynamic server identity reload remain open.
+
+Evidence: `docs/product/penpot-library-auth-ended-ui-delta.md`.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
