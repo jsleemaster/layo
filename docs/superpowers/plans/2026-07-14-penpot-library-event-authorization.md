@@ -1,37 +1,49 @@
 # Penpot Team Library Event Authorization Plan
 
-Status: Active  
+Status: Completed by PR #299 merge gate  
 Date: 2026-07-14  
-PR: pending
+PR: #299
 
 ## Exact Failed Case
 
-With hosted registry auth enabled, `GET /libraries/events` opens a registry
+With hosted registry auth enabled, `GET /libraries/events` opened a registry
 event stream without authenticating the member or checking the requested file's
-team. Browser EventSource cannot send the existing Authorization and
+team. Native EventSource could not send the existing Authorization and
 X-Layo-User-Id headers.
 
 ## Benchmark Decision
 
 - Adopt Penpot's team-owned live library update boundary.
-- Adapt Layo's browser transport from native EventSource to header-capable fetch
-  streaming with cursor resume and abort cleanup.
+- Adapt Layo's browser transport to header-capable fetch streaming with cursor
+  resume and abort cleanup.
 - Do not place bearer tokens or derived secrets in URLs.
 - Preserve unconfigured local-first SSE behavior.
 
-## Execution
+## Delivered
 
-1. RED missing and wrong-team stream access.
-2. Authenticate the stream before hijacking and filter unscoped events by
-   principal teams.
-3. Add header-capable browser stream parsing, abort, and cursor resume.
-4. Verify direct browser request headers and live refresh.
-5. Run full verification, review, merge, documentation, and cleanup.
+1. Missing credentials return 401 before response hijack.
+2. Wrong-team file streams return 403; same-team viewers can subscribe.
+3. Unscoped streams filter every event to the member's authorized teams.
+4. Browser fetch streaming sends credentials, parses incremental SSE, resumes
+   from the latest sequence, and aborts on cleanup.
+5. Polling-suppressed Playwright coverage proves live UI refresh.
+6. Background event refresh preserves explicit user-operation status.
+7. E2E storage cleanup and asynchronous persistence checks are deterministic.
 
 ## Evidence
 
-- RED: pending.
-- GREEN: pending.
+- HTTP RED: `29296041799`, expected 401 but received 200.
+- Web RED: `29296184944`, missing credentials contract.
+- Interaction failure: `29296449241`, request listener registered after the
+  durable stream opened.
+- Status and verification failures: `29297507361`, `29298061859`, and
+  `29298472132`.
+- GREEN: `29298859382`, job `86978192513`; 252 web, 294 server, Rust,
+  and 193 Playwright CLI cases passed without retry.
+
+## Product Evidence
+
+See `docs/product/penpot-library-event-authorization-delta.md`.
 
 ## Remaining Boundary
 
