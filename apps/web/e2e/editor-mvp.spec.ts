@@ -578,10 +578,6 @@ test("file panel sends active team member credentials for library publish and im
   await page.getByRole("tab", { name: "실시간 협업" }).click();
   await page.getByTestId("relay-url").fill("ws://127.0.0.1:65534");
   await page.getByTestId("member-token").fill("editor-member-token");
-  await page.getByRole("button", { name: "협업 팀 만들기" }).click();
-  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
-
-  await openFilePanel(page);
   const eventStreamRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return (
@@ -590,13 +586,17 @@ test("file panel sends active team member credentials for library publish and im
       url.searchParams.get("fileId") === documentId
     );
   });
-  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
-  await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  await page.getByRole("button", { name: "협업 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
   const streamed = await eventStreamRequest;
   expect(streamed.headers()).toMatchObject({
     authorization: "Bearer editor-member-token",
     "x-layo-user-id": "local-user"
   });
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
 
   const listRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
