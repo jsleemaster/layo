@@ -62,6 +62,13 @@ operator-owned file with last-valid fallback. Different-value browser rotation
 and static environment fallbacks remain supported. Named per-token records and
 individual revocation remain the next identity-lifecycle gap.
 
+`docs/product/penpot-named-token-revocation-delta.md` closes that next
+identity-lifecycle gap with named token records, unique per-member token IDs,
+independent lifecycle timestamps, secret-free authentication identity, and
+watched individual revocation that preserves active sibling credentials.
+Hosted token administration, encrypted shared identity storage, cross-instance
+identity synchronization, and retained authorization receipts remain open.
+
 `docs/product/penpot-cross-process-storage-lock-delta.md` adapts Penpot's
 transaction and row-lock ownership principle to Layo's local-first filesystem.
 Resource-keyed owner locks now serialize same-target writes across Node

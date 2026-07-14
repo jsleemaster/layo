@@ -263,7 +263,7 @@ Optional hosted library publication authorization:
 
 ```bash
 LAYO_LIBRARY_REGISTRY_MEMBERS_FILE=/run/secrets/layo-library-members.json
-LAYO_LIBRARY_REGISTRY_MEMBERS='[{"userId":"editor-user","role":"editor","teamIds":["team-alpha"],"tokenHash":"<sha256>"}]'
+LAYO_LIBRARY_REGISTRY_MEMBERS='[{"userId":"editor-user","role":"editor","teamIds":["team-alpha"],"tokens":[{"id":"deploy","name":"Deploy automation","tokenHash":"<sha256>","expiresAt":"2026-08-01T00:00:00.000Z"}]}]'
 LAYO_MCP_USER_ID=editor-user
 LAYO_MCP_MEMBER_TOKEN_FILE=/run/secrets/layo-mcp-member-token
 LAYO_MCP_MEMBER_TOKEN=
@@ -280,7 +280,11 @@ HTTP and MCP library publication requires an owner or editor
 assigned to the source file's exact team. The web
 editor reuses the runtime member token from the active collaboration team.
 Prefer `tokenHash` for hosted configuration; plaintext `token` entries are
-intended only for local development. Leave the registry member configuration
-unset to preserve the open local-first workflow.
+intended only for local development. Named `tokens` records require a stable
+`id` and operator-facing `name`, may use `notBefore`, `expiresAt`, and
+`revokedAt` independently, and allow one credential to be retired without
+invalidating sibling tokens. Legacy member-level `token`, `tokenHash`, and
+`tokenHashes` fields remain supported for migration. Leave the registry member
+configuration unset to preserve the open local-first workflow.
 
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.

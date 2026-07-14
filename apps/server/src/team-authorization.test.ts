@@ -154,6 +154,188 @@ describe("team library authorization", () => {
     )).toMatchObject({ statusCode: 401 });
   });
 
+  test("authenticates a named token record and reports its stable identity", () => {
+    const tokenHash = createHash("sha256").update("deploy-secret").digest("hex");
+    const config = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "automation-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          tokens: [
+            {
+              id: "deploy",
+              name: "Deploy automation",
+              tokenHash,
+              expiresAt: "2026-07-15T00:00:00.000Z"
+            },
+            {
+              id: "preview",
+              name: "Preview automation",
+              token: "preview-secret"
+            }
+          ]
+        }
+      ])
+    );
+
+    expect(
+      authenticateTeamMember(
+        config!,
+        "automation-user",
+        "deploy-secret",
+        new Date("2026-07-14T12:00:00.000Z")
+      )
+    ).toMatchObject({
+      userId: "automation-user",
+      role: "editor",
+      tokenId: "deploy",
+      tokenName: "Deploy automation"
+    });
+  });
+
+  test("revokes one named token without invalidating its sibling", () => {
+    const config = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "automation-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "retired-secret",
+          tokens: [
+            {
+              id: "revoked-deploy",
+              name: "Retired deploy key",
+              token: "retired-secret",
+              revokedAt: "2026-07-14T10:00:00.000Z"
+            },
+            {
+              id: "active-preview",
+              name: "Preview key",
+              token: "preview-secret"
+            }
+          ]
+        }
+      ])
+    );
+    const now = new Date("2026-07-14T12:00:00.000Z");
+
+    expect(captureError(() =>
+      authenticateTeamMember(config!, "automation-user", "retired-secret", now)
+    )).toMatchObject({ statusCode: 401 });
+    expect(
+      authenticateTeamMember(config!, "automation-user", "preview-secret", now)
+    ).toMatchObject({ tokenId: "active-preview", tokenName: "Preview key" });
+  });
+
+  test("denies a shared secret when any matching named token is inactive", () => {
+    const config = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "automation-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          tokens: [
+            {
+              id: "active-first",
+              name: "Active duplicate",
+              token: "shared-secret"
+            },
+            {
+              id: "revoked-second",
+              name: "Revoked duplicate",
+              token: "shared-secret",
+              revokedAt: "2026-07-14T10:00:00.000Z"
+            }
+          ]
+        }
+      ])
+    );
+
+    expect(captureError(() =>
+      authenticateTeamMember(
+        config!,
+        "automation-user",
+        "shared-secret",
+        new Date("2026-07-14T12:00:00.000Z")
+      )
+    )).toMatchObject({ statusCode: 401 });
+  });
+
+  test("rejects duplicate named token ids for one member", () => {
+    expect(() =>
+      parseTeamAuthorizationConfig(
+        JSON.stringify([
+          {
+            userId: "automation-user",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            tokens: [
+              { id: "deploy", name: "Primary", token: "first-secret" },
+              { id: "deploy", name: "Replacement", token: "second-secret" }
+            ]
+          }
+        ])
+      )
+    ).toThrow("duplicate library registry team member token id");
+  });
+
+  test("reloads individual named-token revocation without restarting", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-token-record-"));
+    const configPath = path.join(root, "members.json");
+    const members = (revokedAt?: string) => JSON.stringify([
+      {
+        userId: "automation-user",
+        role: "editor",
+        teamIds: ["team-alpha"],
+        tokens: [
+          {
+            id: "deploy",
+            name: "Deploy automation",
+            token: "deploy-secret",
+            ...(revokedAt ? { revokedAt } : {})
+          },
+          {
+            id: "preview",
+            name: "Preview automation",
+            token: "preview-secret"
+          }
+        ]
+      }
+    ]);
+    await writeFile(configPath, members(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10
+    });
+
+    try {
+      expect(
+        authenticateTeamMember(source.config, "automation-user", "deploy-secret")
+      ).toMatchObject({ tokenId: "deploy" });
+
+      await writeFile(
+        configPath,
+        members(new Date(Date.now() - 1_000).toISOString()),
+        "utf8"
+      );
+      await waitFor(() => {
+        try {
+          authenticateTeamMember(source.config, "automation-user", "deploy-secret");
+          return false;
+        } catch {
+          return true;
+        }
+      });
+
+      expect(
+        authenticateTeamMember(source.config, "automation-user", "preview-secret")
+      ).toMatchObject({ tokenId: "preview" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("rejects invalid credential lifecycle configuration", () => {
     expect(() =>
       parseTeamAuthorizationConfig(
