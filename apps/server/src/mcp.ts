@@ -565,13 +565,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     && options.libraryRegistryAuth
     && options.libraryRegistryPrincipal
   ) {
-    const authenticateAccountTokenMember = () =>
-      authenticateTeamMember(
-        options.libraryRegistryAuth!,
-        options.libraryRegistryPrincipal!.userId,
-        options.libraryRegistryPrincipal!.memberToken
-      );
     const manager = options.teamAuthorizationManager;
+    const principal = options.libraryRegistryPrincipal;
 
     server.registerTool(
       "list_account_tokens",
@@ -586,12 +581,15 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         inputSchema: {}
       },
       async () => {
-        const member = authenticateAccountTokenMember();
+        const result = await manager.manageTokens(principal, { type: "list" });
+        if (result.type !== "list") {
+          throw new Error("unexpected team authorization list result");
+        }
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ tokens: manager.listTokens(member.userId) }, null, 2)
+              text: JSON.stringify({ tokens: result.tokens }, null, 2)
             }
           ]
         };
@@ -616,13 +614,18 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         }
       },
       async ({ name, expiresInDays }) => {
-        const member = authenticateAccountTokenMember();
-        const created = await manager.createToken(member.userId, { name, expiresInDays });
+        const result = await manager.manageTokens(principal, {
+          type: "create",
+          input: { name, expiresInDays }
+        });
+        if (result.type !== "create") {
+          throw new Error("unexpected team authorization create result");
+        }
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(created, null, 2)
+              text: JSON.stringify(result.created, null, 2)
             }
           ]
         };
@@ -640,17 +643,27 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           openWorldHint: false
         },
         inputSchema: {
-          tokenId: z.string().describe("Token id returned by list_account_tokens")
+          tokenId: z.string().describe("Token id returned by list_account_tokens"),
+          confirmSelfRevoke: z
+            .boolean()
+            .default(false)
+            .describe("Explicitly acknowledge revoking the active named MCP principal token")
         }
       },
-      async ({ tokenId }) => {
-        const member = authenticateAccountTokenMember();
-        const metadata = await manager.revokeToken(member.userId, tokenId);
+      async ({ tokenId, confirmSelfRevoke }) => {
+        const result = await manager.manageTokens(principal, {
+          type: "revoke",
+          tokenId,
+          confirmSelfRevoke
+        });
+        if (result.type !== "revoke") {
+          throw new Error("unexpected team authorization revoke result");
+        }
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ metadata }, null, 2)
+              text: JSON.stringify({ metadata: result.metadata }, null, 2)
             }
           ]
         };

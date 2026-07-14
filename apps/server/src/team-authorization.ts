@@ -90,7 +90,26 @@ export interface CreatedTeamAccessToken {
   metadata: TeamAccessTokenMetadata;
 }
 
+export interface TeamAuthorizationManagementPrincipal {
+  userId: string;
+  memberToken: string;
+}
+
+export type TeamAuthorizationManagementOperation =
+  | { type: "list" }
+  | { type: "create"; input: CreateTeamAccessTokenInput }
+  | { type: "revoke"; tokenId: string; confirmSelfRevoke?: boolean };
+
+export type TeamAuthorizationManagementResult =
+  | { type: "list"; tokens: TeamAccessTokenMetadata[] }
+  | { type: "create"; created: CreatedTeamAccessToken }
+  | { type: "revoke"; metadata: TeamAccessTokenMetadata };
+
 export interface TeamAuthorizationFileManager {
+  manageTokens: (
+    principal: TeamAuthorizationManagementPrincipal,
+    operation: TeamAuthorizationManagementOperation
+  ) => Promise<TeamAuthorizationManagementResult>;
   listTokens: (userId: string) => TeamAccessTokenMetadata[];
   createToken: (
     userId: string,
@@ -207,20 +226,48 @@ export function createTeamAuthorizationFileManager(
     replaceTeamAuthorizationMembers(config, nextConfig.members);
   };
 
-  return {
-    listTokens,
-    createToken: (userId, input) =>
-      mutate(async () => {
-        const name = typeof input?.name === "string" ? input.name.trim() : "";
+  const executeOperation = (
+    identity:
+      | { userId: string }
+      | { principal: TeamAuthorizationManagementPrincipal },
+    operation: TeamAuthorizationManagementOperation
+  ): Promise<TeamAuthorizationManagementResult> =>
+    mutate(async () => {
+      const nextConfig = parseRequiredTeamAuthorizationConfig(
+        await readFile(normalizedPath, "utf8")
+      );
+      const operationNow = now();
+      const authenticatedMember =
+        "principal" in identity
+          ? authenticateTeamMember(
+              nextConfig,
+              identity.principal.userId,
+              identity.principal.memberToken,
+              operationNow
+            )
+          : undefined;
+      const userId = authenticatedMember?.userId ?? identity.userId;
+      const member = findManagedMember(nextConfig, userId);
+
+      if (operation.type === "list") {
+        return {
+          type: "list",
+          tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata)
+        };
+      }
+
+      if (operation.type === "create") {
+        const name =
+          typeof operation.input?.name === "string"
+            ? operation.input.name.trim()
+            : "";
         if (!name) {
           throw managementError("team authorization token name is required", 400);
         }
-        const expiresInDays = input?.expiresInDays;
+        const expiresInDays = operation.input?.expiresInDays;
         if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
           throw managementError("invalid team authorization token expiration", 400);
         }
-        const nextConfig = parseRequiredTeamAuthorizationConfig(await readFile(normalizedPath, "utf8"));
-        const member = findManagedMember(nextConfig, userId);
         const id = generateId().trim();
         if (!id) {
           throw new Error("generated team authorization token id must not be blank");
@@ -232,7 +279,7 @@ export function createTeamAuthorizationFileManager(
         if (!secret) {
           throw new Error("generated team authorization token must not be blank");
         }
-        const createdAt = validManagementNow(now());
+        const createdAt = validManagementNow(operationNow);
         const expiresAt =
           expiresInDays === null
             ? undefined
@@ -249,31 +296,71 @@ export function createTeamAuthorizationFileManager(
         member.tokens = [...(member.tokens ?? []), credential];
         await persist(nextConfig);
         return {
-          token: secret,
-          metadata: toTeamAccessTokenMetadata(credential)
+          type: "create",
+          created: {
+            token: secret,
+            metadata: toTeamAccessTokenMetadata(credential)
+          }
         };
-      }),
-    revokeToken: (userId, tokenId) =>
-      mutate(async () => {
-        const normalizedTokenId = tokenId.trim();
-        if (!normalizedTokenId) {
-          throw managementError("team authorization token id is required", 400);
-        }
-        const nextConfig = parseRequiredTeamAuthorizationConfig(await readFile(normalizedPath, "utf8"));
-        const member = findManagedMember(nextConfig, userId);
-        const credential = member.tokens?.find(
-          (candidate) => candidate.id === normalizedTokenId
+      }
+
+      const normalizedTokenId = operation.tokenId.trim();
+      if (!normalizedTokenId) {
+        throw managementError("team authorization token id is required", 400);
+      }
+      if (
+        authenticatedMember?.tokenId === normalizedTokenId
+        && operation.confirmSelfRevoke !== true
+      ) {
+        throw managementError(
+          "confirmSelfRevoke must be true to revoke the active MCP principal token",
+          400
         );
-        if (!credential) {
-          throw managementError("team authorization token was not found", 404);
-        }
-        if (!credential.revokedAt) {
-          credential.revokedAt = validManagementNow(now());
-          await persist(nextConfig);
-          return toTeamAccessTokenMetadata(credential);
-        }
-        return toTeamAccessTokenMetadata(credential);
-      })
+      }
+      const credential = member.tokens?.find(
+        (candidate) => candidate.id === normalizedTokenId
+      );
+      if (!credential) {
+        throw managementError("team authorization token was not found", 404);
+      }
+      if (!credential.revokedAt) {
+        credential.revokedAt = validManagementNow(operationNow);
+        await persist(nextConfig);
+      }
+      return {
+        type: "revoke",
+        metadata: toTeamAccessTokenMetadata(credential)
+      };
+    });
+
+  const manageTokens = (
+    principal: TeamAuthorizationManagementPrincipal,
+    operation: TeamAuthorizationManagementOperation
+  ) => executeOperation({ principal }, operation);
+
+  return {
+    manageTokens,
+    listTokens,
+    createToken: async (userId, input) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "create", input }
+      );
+      if (result.type !== "create") {
+        throw new Error("unexpected team authorization create result");
+      }
+      return result.created;
+    },
+    revokeToken: async (userId, tokenId) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "revoke", tokenId }
+      );
+      if (result.type !== "revoke") {
+        throw new Error("unexpected team authorization revoke result");
+      }
+      return result.metadata;
+    }
   };
 }
 
