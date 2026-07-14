@@ -882,8 +882,23 @@ async function quarantineWatchedManagedTokenState(
 ): Promise<void> {
   const sidecarPath = managedTokenSidecarPath(basePath);
   await withFileProcessMutationLock(sidecarPath, async () => {
-    const sourceSnapshot = await readOptionalFile(sidecarPath);
+    const [baseSnapshot, sourceSnapshot] = await Promise.all([
+      readFile(basePath, "utf8"),
+      readOptionalFile(sidecarPath)
+    ]);
+    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
     const state = parseManagedTokenState(sourceSnapshot);
+    try {
+      mergeManagedTokenState(baseConfig, state);
+      return;
+    } catch (currentError) {
+      if (
+        !(currentError instanceof ManagedTokenBindingError)
+        || currentError.userId !== error.userId
+      ) {
+        throw currentError;
+      }
+    }
     const member = state.members.find(
       (candidate) => candidate.userId === error.userId
     );
