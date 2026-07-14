@@ -49,6 +49,12 @@ import {
   type TeamManifest
 } from "@layo/collaboration";
 import { apiUrl } from "./api-base";
+import {
+  createAccountToken,
+  listAccountTokens,
+  revokeAccountToken,
+  type AccountTokenMetadata
+} from "./account-token-api";
 import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
 import {
   addCommentReply,
@@ -9425,6 +9431,16 @@ export function App() {
   const [activeMemberToken, setActiveMemberToken] = useState("");
   const [memberTokenRevision, setMemberTokenRevision] = useState(0);
   const [memberTokenStatus, setMemberTokenStatus] = useState("멤버 토큰 대기 중");
+  const [accountTokens, setAccountTokens] = useState<AccountTokenMetadata[]>([]);
+  const [activeAccountTokenId, setActiveAccountTokenId] = useState<string | undefined>();
+  const [accountTokenName, setAccountTokenName] = useState("");
+  const [accountTokenExpiry, setAccountTokenExpiry] = useState<"" | "30" | "60" | "90" | "180">("");
+  const [createdAccountTokenSecret, setCreatedAccountTokenSecret] = useState<string | null>(null);
+  const [accountTokenSecretStatus, setAccountTokenSecretStatus] = useState("");
+  const [accountTokenStatus, setAccountTokenStatus] = useState("멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다");
+  const [accountTokenRecovery, setAccountTokenRecovery] = useState(false);
+  const [selfRevokeTokenId, setSelfRevokeTokenId] = useState<string | null>(null);
+  const [confirmSelfRevoke, setConfirmSelfRevoke] = useState(false);
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -9882,6 +9898,51 @@ export function App() {
     });
   }, [
     currentProject?.currentDocumentId,
+    collabSession?.team.currentUserId,
+    activeMemberToken,
+    memberTokenRevision
+  ]);
+
+  useEffect(() => {
+    setCreatedAccountTokenSecret(null);
+    setAccountTokenSecretStatus("");
+    setSelfRevokeTokenId(null);
+    setConfirmSelfRevoke(false);
+
+    if (teamPanelMode !== "manifest") {
+      return undefined;
+    }
+    if (!collabSession || !activeMemberToken) {
+      setAccountTokens([]);
+      setActiveAccountTokenId(undefined);
+      if (!accountTokenRecovery) {
+        setAccountTokenStatus("멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다");
+      }
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAccountTokenRecovery(false);
+    setAccountTokenStatus("계정 토큰 불러오는 중");
+    void listAccountTokens(collabSession.team.currentUserId, activeMemberToken)
+      .then((result) => {
+        if (cancelled) return;
+        setAccountTokens(result.tokens);
+        setActiveAccountTokenId(result.activeTokenId);
+        setAccountTokenStatus(`계정 토큰 ${result.tokens.length}개`);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAccountTokens([]);
+        setActiveAccountTokenId(undefined);
+        setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 불러오지 못했습니다");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    teamPanelMode,
     collabSession?.team.currentUserId,
     activeMemberToken,
     memberTokenRevision
@@ -15144,6 +15205,96 @@ export function App() {
     setManifestStatus(`팀 설정 가져오기 실패: ${message}`);
   };
 
+  const refreshAccountTokens = async (status?: string) => {
+    if (!collabSession || !activeMemberToken) return;
+    const result = await listAccountTokens(collabSession.team.currentUserId, activeMemberToken);
+    setAccountTokens(result.tokens);
+    setActiveAccountTokenId(result.activeTokenId);
+    setAccountTokenStatus(status ?? `계정 토큰 ${result.tokens.length}개`);
+  };
+
+  const handleCreateAccountToken = async () => {
+    if (!collabSession || !activeMemberToken || !accountTokenName.trim()) return;
+    setCreatedAccountTokenSecret(null);
+    setAccountTokenSecretStatus("");
+    setSelfRevokeTokenId(null);
+    try {
+      const created = await createAccountToken(
+        collabSession.team.currentUserId,
+        activeMemberToken,
+        {
+          name: accountTokenName.trim(),
+          expiresInDays: accountTokenExpiry ? Number(accountTokenExpiry) as 30 | 60 | 90 | 180 : null
+        }
+      );
+      setCreatedAccountTokenSecret(created.token);
+      setAccountTokenName("");
+      await refreshAccountTokens(`${created.metadata.name} 토큰 생성됨`);
+    } catch (error) {
+      setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 만들지 못했습니다");
+    }
+  };
+
+  const handleCopyAccountToken = async () => {
+    if (!createdAccountTokenSecret) return;
+    try {
+      await navigator.clipboard.writeText(createdAccountTokenSecret);
+      setAccountTokenSecretStatus("복사됨");
+    } catch {
+      setAccountTokenSecretStatus("복사하지 못했습니다");
+    }
+  };
+
+  const handleRevokeAccountToken = async (tokenId: string) => {
+    if (!collabSession || !activeMemberToken) return;
+    setCreatedAccountTokenSecret(null);
+    setAccountTokenSecretStatus("");
+    if (tokenId === activeAccountTokenId) {
+      setSelfRevokeTokenId(tokenId);
+      setConfirmSelfRevoke(false);
+      return;
+    }
+    try {
+      const revoked = await revokeAccountToken(
+        collabSession.team.currentUserId,
+        activeMemberToken,
+        tokenId,
+        false
+      );
+      setAccountTokens((current) =>
+        current.map((token) => token.id === tokenId ? revoked.metadata : token)
+      );
+      setAccountTokenStatus(`${revoked.metadata.name} 토큰 해지됨`);
+    } catch (error) {
+      setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 해지하지 못했습니다");
+    }
+  };
+
+  const handleConfirmSelfRevoke = async () => {
+    if (!collabSession || !activeMemberToken || !selfRevokeTokenId || !confirmSelfRevoke) return;
+    try {
+      await revokeAccountToken(
+        collabSession.team.currentUserId,
+        activeMemberToken,
+        selfRevokeTokenId,
+        true
+      );
+      setMemberToken("");
+      setActiveMemberToken("");
+      setMemberTokenRevision((revision) => revision + 1);
+      setAccountTokens([]);
+      setActiveAccountTokenId(undefined);
+      setCreatedAccountTokenSecret(null);
+      setSelfRevokeTokenId(null);
+      setConfirmSelfRevoke(false);
+      setAccountTokenRecovery(true);
+      setAccountTokenStatus("현재 토큰이 해지되었습니다");
+      setMemberTokenStatus("현재 토큰이 해지되었습니다. 새 멤버 토큰을 적용해 주세요.");
+    } catch (error) {
+      setAccountTokenStatus(error instanceof Error ? error.message : "현재 토큰을 해지하지 못했습니다");
+    }
+  };
+
   const applyMemberToken = () => {
     const nextToken = memberToken.trim();
     if (
@@ -15156,6 +15307,9 @@ export function App() {
     ) {
       return;
     }
+    setCreatedAccountTokenSecret(null);
+    setAccountTokenSecretStatus("");
+    setAccountTokenRecovery(false);
     libraryRegistryCredentialReconnectPendingRef.current = true;
     setLibraryRegistryStatus("팀 인증 다시 연결 중");
     setMemberTokenStatus("팀 인증 다시 연결 중");
@@ -16687,6 +16841,158 @@ export function App() {
                   </span>
                 ))}
               </div>
+              {teamPanelMode === "manifest" ? (
+                <section className="account-token-panel" data-testid="account-token-panel" aria-label="계정 토큰">
+                  <div className="account-token-heading">
+                    <strong>계정 토큰</strong>
+                    <button
+                      type="button"
+                      data-testid="account-token-refresh"
+                      onClick={() => void refreshAccountTokens()}
+                      disabled={!collabSession || !activeMemberToken}
+                    >
+                      새로고침
+                    </button>
+                  </div>
+                  <div className="account-token-member" data-testid="account-token-member">
+                    {collabSession
+                      ? `${collabSession.team.members.find((member) =>
+                          member.userId === collabSession.team.currentUserId
+                        )?.displayName ?? "현재 멤버"} · ${collabSession.team.currentUserId}`
+                      : "팀 멤버 없음"}
+                  </div>
+                  {accountTokenRecovery ? (
+                    <div className="account-token-recovery" data-testid="account-token-recovery" role="status">
+                      새 멤버 토큰을 입력하고 적용해 계정 토큰 관리를 다시 연결하세요.
+                    </div>
+                  ) : null}
+                  {activeMemberToken ? (
+                    <>
+                      <div className="account-token-create-fields">
+                        <label>
+                          토큰 이름
+                          <input
+                            data-testid="account-token-name"
+                            value={accountTokenName}
+                            onChange={(event) => setAccountTokenName(event.currentTarget.value)}
+                          />
+                        </label>
+                        <label>
+                          만료
+                          <select
+                            data-testid="account-token-expiry"
+                            value={accountTokenExpiry}
+                            onChange={(event) =>
+                              setAccountTokenExpiry(
+                                event.currentTarget.value as "" | "30" | "60" | "90" | "180"
+                              )
+                            }
+                          >
+                            <option value="">만료 없음</option>
+                            <option value="30">30일</option>
+                            <option value="60">60일</option>
+                            <option value="90">90일</option>
+                            <option value="180">180일</option>
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          data-testid="account-token-create"
+                          onClick={() => void handleCreateAccountToken()}
+                          disabled={!accountTokenName.trim()}
+                        >
+                          토큰 만들기
+                        </button>
+                      </div>
+                      {createdAccountTokenSecret ? (
+                        <div className="account-token-secret-block">
+                          <label>
+                            한 번만 표시되는 토큰
+                            <input
+                              data-testid="account-token-secret"
+                              value={createdAccountTokenSecret}
+                              readOnly
+                            />
+                          </label>
+                          <div className="account-token-secret-actions">
+                            <button
+                              type="button"
+                              data-testid="account-token-copy"
+                              onClick={() => void handleCopyAccountToken()}
+                            >
+                              복사
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="account-token-dismiss"
+                              onClick={() => {
+                                setCreatedAccountTokenSecret(null);
+                                setAccountTokenSecretStatus("");
+                              }}
+                            >
+                              닫기
+                            </button>
+                          </div>
+                          <span data-testid="account-token-secret-status" aria-live="polite">
+                            {accountTokenSecretStatus}
+                          </span>
+                        </div>
+                      ) : null}
+                      <ul className="account-token-list" data-testid="account-token-list">
+                        {accountTokens.map((token) => (
+                          <li
+                            key={token.id}
+                            className="account-token-row"
+                            data-testid={`account-token-row-${token.id}`}
+                          >
+                            <span className="account-token-summary">
+                              <strong>{token.name}</strong>
+                              <span>{token.expiresAt ? `만료 ${token.expiresAt}` : "만료 없음"}</span>
+                              {token.id === activeAccountTokenId ? <span>현재 토큰</span> : null}
+                              {token.revokedAt ? <span>해지됨</span> : null}
+                            </span>
+                            <button
+                              type="button"
+                              data-testid={`account-token-revoke-${token.id}`}
+                              aria-label={`${token.name} 토큰 해지`}
+                              title={`${token.name} 토큰 해지`}
+                              disabled={Boolean(token.revokedAt)}
+                              onClick={() => void handleRevokeAccountToken(token.id)}
+                            >
+                              해지
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {selfRevokeTokenId ? (
+                        <div
+                          className="account-token-self-revoke"
+                          data-testid="account-token-self-revoke-confirmation"
+                        >
+                          <label className="team-toggle-field">
+                            현재 토큰 해지 확인
+                            <input
+                              type="checkbox"
+                              checked={confirmSelfRevoke}
+                              onChange={(event) => setConfirmSelfRevoke(event.currentTarget.checked)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void handleConfirmSelfRevoke()}
+                            disabled={!confirmSelfRevoke}
+                          >
+                            현재 토큰 해지
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : null}
+                  <div className="team-status" data-testid="account-token-status" aria-live="polite">
+                    {accountTokenStatus}
+                  </div>
+                </section>
+              ) : null}
               {teamPanelMode === "manifest" ? (
                 <textarea
                   data-testid="team-manifest"
