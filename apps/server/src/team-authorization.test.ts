@@ -694,7 +694,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "recovery-user", false);
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
     }
   });
 
@@ -761,7 +761,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "removed-user", true);
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
     }
   });
 
@@ -902,7 +902,7 @@ describe("team library authorization", () => {
       }
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
     }
   });
 
