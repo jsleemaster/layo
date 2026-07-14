@@ -24,7 +24,9 @@ Use this order when entering the repo:
 3. Read this file before treating any individual plan as active work.
 4. Open the specific plan only for implementation details or historical context.
 
-## Current Active Plan\n\n- `2026-07-14-penpot-token-administration.md` in PR #306: authenticated file-backed create/list/revoke lifecycle with one-time secret delivery, hash-only persistence, and restart durability.
+## Current Active Plan
+
+- `2026-07-14-penpot-token-administration.md` in PR #306: authenticated file-backed create/list/revoke lifecycle with one-time secret delivery, hash-only persistence, and restart durability.
 
 ## Completed Plans
 
