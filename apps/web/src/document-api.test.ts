@@ -385,6 +385,50 @@ describe("parseDocumentPayload", () => {
     streamController?.close();
   });
 
+  test("stops reconnecting after a terminal library authorization event", async () => {
+    const calls: string[] = [];
+    const ended: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (calls.length === 1) {
+        return new Response(
+          [
+            "event: library-registry-authorization-ended",
+            'data: {"code":"credential_inactive"}',
+            "",
+            ""
+          ].join("\n"),
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          }
+        );
+      }
+      return new Response(new ReadableStream<Uint8Array>(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" }
+      });
+    };
+    const options = {
+      fileId: "target-file",
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {},
+      onAuthorizationEnded: (code: string) => ended.push(code)
+    } as Parameters<typeof subscribeToLibraryRegistryEvents>[0] & {
+      onAuthorizationEnded: (code: string) => void;
+    };
+    const unsubscribe = subscribeToLibraryRegistryEvents(options);
+
+    for (let attempt = 0; attempt < 20 && calls.length < 2 && ended.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(ended).toEqual(["credential_inactive"]);
+    expect(calls).toHaveLength(1);
+    unsubscribe();
+  });
+
   test("resumes a closed library registry stream from the last sequence", async () => {
     const urls: string[] = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
