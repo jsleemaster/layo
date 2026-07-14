@@ -33,6 +33,23 @@ export interface TeamAuthorizationConfig {
   members: TeamMemberCredential[];
 }
 
+const teamAuthorizationConfigGenerations = new WeakMap<TeamAuthorizationConfig, number>();
+
+function teamAuthorizationConfigGeneration(config: TeamAuthorizationConfig): number {
+  return teamAuthorizationConfigGenerations.get(config) ?? 0;
+}
+
+function replaceTeamAuthorizationMembers(
+  config: TeamAuthorizationConfig,
+  members: TeamMemberCredential[]
+): void {
+  teamAuthorizationConfigGenerations.set(
+    config,
+    teamAuthorizationConfigGeneration(config) + 1
+  );
+  config.members = members;
+}
+
 export interface AuthenticatedTeamMember {
   userId: string;
   role: TeamAuthorizationRole;
@@ -194,7 +211,7 @@ export function createTeamAuthorizationFileManager(
     } finally {
       await rm(temporaryPath, { force: true }).catch(() => undefined);
     }
-    config.members = nextConfig.members;
+    replaceTeamAuthorizationMembers(config, nextConfig.members);
   };
 
   return {
@@ -338,10 +355,17 @@ export async function watchTeamAuthorizationConfigFile(
         return;
       }
       try {
+        const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
         const nextConfig = parseRequiredTeamAuthorizationConfig(
           await readFile(normalizedPath, "utf8")
         );
-        initialConfig.members = nextConfig.members;
+        if (
+          generationBeforeRead
+          !== teamAuthorizationConfigGeneration(initialConfig)
+        ) {
+          return;
+        }
+        replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
       } catch (error) {
         options.onError?.(error instanceof Error ? error : new Error(String(error)));
       }
