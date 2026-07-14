@@ -201,6 +201,7 @@ describe("team library authorization", () => {
           userId: "automation-user",
           role: "editor",
           teamIds: ["team-alpha"],
+          token: "retired-secret",
           tokens: [
             {
               id: "revoked-deploy",
