@@ -384,6 +384,61 @@ describe("parseDocumentPayload", () => {
     expect((calls[0].init?.signal as AbortSignal).aborted).toBe(true);
     streamController?.close();
   });
+
+  test("resumes a closed library registry stream from the last sequence", async () => {
+    const urls: string[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(url));
+      if (urls.length === 1) {
+        return new Response(
+          [
+            "event: library-registry",
+            `data: ${JSON.stringify({
+              schemaVersion: 1,
+              eventId: "library-registry-4",
+              sequence: 4,
+              type: "published",
+              libraryId: "team-kit",
+              libraryName: "Team Kit",
+              sourceFileId: "source-file",
+              sourceName: "Source",
+              teamId: "team-alpha",
+              componentCount: 1,
+              tokenCount: 0,
+              tokenSetCount: 0,
+              tokenThemeCount: 0,
+              assetCount: 0,
+              registryUpdatedAt: "2026-06-28T00:00:04.000Z",
+              createdAt: "2026-06-28T00:00:04.000Z"
+            })}`,
+            "",
+            ""
+          ].join("\n"),
+          { status: 200 }
+        );
+      }
+      return new Response(new ReadableStream<Uint8Array>(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" }
+      });
+    };
+
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      after: 3,
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {}
+    });
+
+    for (let attempt = 0; attempt < 20 && urls.length < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(urls).toHaveLength(2);
+    expect(new URL(urls[1], "http://127.0.0.1:4317").searchParams.get("after")).toBe("4");
+    unsubscribe();
+  });
 });
 
 describe("file version API helpers", () => {
