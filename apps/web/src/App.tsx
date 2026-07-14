@@ -9973,10 +9973,7 @@ export function App() {
     if (leftPanelMode !== "team") return undefined;
     setMemberToken("");
     const frame = window.requestAnimationFrame(() => {
-      if (
-        memberTokenInputRef.current
-        && document.activeElement !== memberTokenInputRef.current
-      ) {
+      if (memberTokenInputRef.current) {
         memberTokenInputRef.current.value = "";
       }
     });
