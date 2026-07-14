@@ -50,6 +50,17 @@ describe("team access token HTTP administration", () => {
     });
 
     try {
+      const invalid = await server.inject({
+        method: "POST",
+        url: "/account/tokens",
+        headers: credentials("owner-user", "legacy-owner-token"),
+        payload: { expiresInDays: 30 }
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({
+        error: "team authorization token name is required"
+      });
+
       const created = await server.inject({
         method: "POST",
         url: "/account/tokens",
