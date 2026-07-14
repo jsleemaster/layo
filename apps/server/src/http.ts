@@ -276,10 +276,10 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { fileId?: string; after?: string } }>(
     "/libraries/events",
     async (request, reply) => {
-      const member = authenticateLibraryMember(request);
-      if (member && request.query.fileId) {
+      const initialMember = authenticateLibraryMember(request);
+      if (initialMember && request.query.fileId) {
         authorizeTeamLibraryRead(
-          member,
+          initialMember,
           await storage.getTeamIdForFile(request.query.fileId)
         );
       }
@@ -303,12 +303,30 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
+      let heartbeatId: ReturnType<typeof setInterval> | undefined;
+      let pollId: ReturnType<typeof setInterval> | undefined;
+      const close = () => {
+        if (heartbeatId !== undefined) {
+          clearInterval(heartbeatId);
+        }
+        if (pollId !== undefined) {
+          clearInterval(pollId);
+        }
+        libraryRegistryStreamClosers.delete(close);
+      };
       const sendPendingEvents = async () => {
         if (sending || reply.raw.destroyed) {
           return;
         }
         sending = true;
         try {
+          const currentMember = authenticateLibraryMember(request);
+          if (currentMember && request.query.fileId) {
+            authorizeTeamLibraryRead(
+              currentMember,
+              await storage.getTeamIdForFile(request.query.fileId)
+            );
+          }
           const events = await storage.listLibraryRegistryEvents({
             after: lastSequence,
             fileId: request.query.fileId,
@@ -317,13 +335,22 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           for (const event of events) {
             lastSequence = Math.max(lastSequence, event.sequence);
           }
-          const authorizedEvents = member
-            ? filterAuthorizedTeamLibraries(member, events)
+          const authorizedEvents = currentMember
+            ? filterAuthorizedTeamLibraries(currentMember, events)
             : events;
           for (const event of authorizedEvents) {
             sendBlock("library-registry", event);
           }
         } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 401 || statusCode === 403) {
+            sendBlock("library-registry-authorization-ended", {
+              code: statusCode === 401 ? "credential_inactive" : "team_access_revoked"
+            });
+            close();
+            reply.raw.end();
+            return;
+          }
           sendBlock("library-registry-error", {
             message: error instanceof Error ? error.message : "library registry event stream failed"
           });
@@ -332,20 +359,14 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         }
       };
 
-      const heartbeatId = setInterval(() => {
+      heartbeatId = setInterval(() => {
         if (!reply.raw.destroyed) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
-      const pollId = setInterval(() => {
+      pollId = setInterval(() => {
         void sendPendingEvents();
       }, 250);
-
-      const close = () => {
-        clearInterval(heartbeatId);
-        clearInterval(pollId);
-        libraryRegistryStreamClosers.delete(close);
-      };
 
       libraryRegistryStreamClosers.add(close);
       sendBlock("ready", { ok: true, lastSequence });
