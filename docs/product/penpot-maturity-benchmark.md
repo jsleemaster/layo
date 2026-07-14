@@ -343,12 +343,16 @@ in GREEN `29290833407`. See
 review/preflight reads, registry events, revocation, shared transactional
 storage, receipt retention, and durable pub/sub remain open.
 
-PR #298 starts exact-target-team authorization for registry review/preflight and
-subscription/update reads. RED `29293745767` proved missing credentials can
-review a team-beta registry library with a 200 response. Layo will reuse the
-same-team viewer policy across HTTP, web, and MCP while keeping unconfigured
-local-first behavior; registry EventSource authorization remains a separate
-follow-up because the current browser transport cannot send member headers.
+PR #298 completes exact-target-team authorization for registry
+review/preflight and subscription/update reads across HTTP, web, and MCP.
+RED `29293745767` proved missing HTTP credentials, MCP RED `29294139347`
+proved cross-team review payload disclosure, and web contract RED
+`29294420834` proved the browser helpers lacked credential support. GREEN
+`29294574049` passed 251 web, 294 server, Rust, and all 193 Playwright cases
+without retry. See
+`docs/product/penpot-library-review-authorization-delta.md`. Registry
+EventSource authorization remains the next exact gap because the current
+browser transport cannot send member headers.
 
 ## Current Highest-Risk Gaps
 
