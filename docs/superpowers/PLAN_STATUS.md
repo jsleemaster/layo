@@ -26,7 +26,9 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+`2026-07-14-penpot-library-token-recovery-review-repair.md` is implementation
+complete and awaiting external review plus the PR #304 merge gate. GREEN Full
+Verification `29306760274`, job `87001544790`, passed all repository gates.
 
 ## Completed Plans
 
