@@ -42,10 +42,10 @@ immediately before writing, preserving both operator changes and the revocation.
 
 ## Verification
 
-- Full Verification `29312558841` passed maturity/design gates, typecheck,
+- Full Verification `29313614602` passed maturity/design gates, typecheck,
   web build, core tests, Rust workspace tests, and the full Playwright CLI suite.
-- Storage Restore Drill `29312558836` passed.
-- Storage Backup Retention `29312558801` passed.
+- Storage Restore Drill `29313614646` passed.
+- Storage Backup Retention `29313614636` passed.
 - Deployment remained non-gating because Vercel exhausted the free daily
   deployment quota.
 
