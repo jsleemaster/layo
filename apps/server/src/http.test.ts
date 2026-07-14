@@ -2334,13 +2334,49 @@ describe("HTTP server", () => {
     });
     await streamStorage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
 
-    const streamServer = createHttpServer(streamStorage);
+    const streamServer = createHttpServer(streamStorage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          },
+          {
+            userId: "beta-viewer",
+            role: "viewer",
+            teamIds: ["team-beta"],
+            token: "beta-token"
+          }
+        ]
+      }
+    });
     const address = await streamServer.listen({ host: "127.0.0.1", port: 0 });
-    const controller = new AbortController();
+    const controllers: AbortController[] = [];
+    const openStream = async (headers?: Record<string, string>) => {
+      const controller = new AbortController();
+      controllers.push(controller);
+      const response = await fetch(
+        `${address}/libraries/events?fileId=target-file&after=1`,
+        { headers, signal: controller.signal }
+      );
+      return response;
+    };
 
     try {
-      const stream = await fetch(`${address}/libraries/events?fileId=target-file&after=1`, {
-        signal: controller.signal
+      const missing = await openStream();
+      expect(missing.status).toBe(401);
+
+      const wrongTeam = await openStream({
+        authorization: "Bearer beta-token",
+        "x-layo-user-id": "beta-viewer"
+      });
+      expect(wrongTeam.status).toBe(403);
+
+      const stream = await openStream({
+        authorization: "Bearer alpha-token",
+        "x-layo-user-id": "alpha-viewer"
       });
       expect(stream.status).toBe(200);
       expect(stream.headers.get("content-type")).toContain("text/event-stream");
@@ -2379,7 +2415,9 @@ describe("HTTP server", () => {
         registryUpdatedAt: secondPublish.updatedAt
       });
     } finally {
-      controller.abort();
+      for (const controller of controllers) {
+        controller.abort();
+      }
       await streamServer.close();
     }
   });
