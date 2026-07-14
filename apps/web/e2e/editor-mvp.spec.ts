@@ -1895,6 +1895,22 @@ test("component variant property types choose toggle or select controls explicit
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("false");
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      const savedComponent = payload.file.components.find(
+        (candidate: { id: string }) => candidate.id === "component-card"
+      );
+      return savedComponent.variants.find(
+        (variant: { id: string }) => variant.id === "default"
+      ).properties;
+    })
+    .toEqual([
+      { name: "enabled", value: "true", type: "boolean" },
+      { name: "surface", value: "true", type: "select" }
+    ]);
 
   const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
     data: {
@@ -3193,11 +3209,16 @@ test("right-click image menu switches between fill and fit sizing modes", async 
   await menu.getByRole("menuitem", { name: "이미지 맞춤" }).click();
   await expect(page.getByTestId("project-status")).toContainText("이미지 3 이미지 맞춤");
 
-  const fittedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(fittedResponse.ok()).toBeTruthy();
-  const fittedPayload = await fittedResponse.json();
-  const fittedImage = fittedPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
-  expect(fittedImage.content.fit_mode).toBe("fit");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      return payload.file.pages[0].children.find(
+        (node: { id: string }) => node.id === "image-3"
+      ).content.fit_mode;
+    })
+    .toBe("fit");
 
   await page.reload();
   await openFilePanel(page);
@@ -3212,11 +3233,16 @@ test("right-click image menu switches between fill and fit sizing modes", async 
   await expect(menu.getByRole("menuitem", { name: "이미지 채우기" })).toBeEnabled();
   await menu.getByRole("menuitem", { name: "이미지 채우기" }).click();
 
-  const filledResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(filledResponse.ok()).toBeTruthy();
-  const filledPayload = await filledResponse.json();
-  const filledImage = filledPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
-  expect(filledImage.content.fit_mode).toBe("fill");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      return payload.file.pages[0].children.find(
+        (node: { id: string }) => node.id === "image-3"
+      ).content.fit_mode;
+    })
+    .toBe("fill");
 });
 
 test("right-click menu locks and hides objects while layer state remains recoverable", async ({ page }) => {
