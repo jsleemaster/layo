@@ -13,10 +13,9 @@ Status: PR #308 active; implementation evidence exists, merge gate pending
   operator members file remains external and is never replaced.
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
-- Current gate: Full Verification `29332908276` was superseded and cancelled
-  during Playwright after gates/typecheck/build/Core passed; it is not GREEN.
-  Final PR-head Full Verification remains pending. Do not treat this delta, PR,
-  or gates 7/8/10 as complete yet.
+- Current gate: Full Verification `29335200155` is pending at this evidence
+  cut and is not GREEN. Do not treat this delta, PR, or gates 7/8/10 as complete
+  yet.
 
 ## Penpot Reference And Decision
 
@@ -99,10 +98,53 @@ the sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. Dismissal, another create, identity change, leaving team settings,
 reload, and successful self-revocation clear component state.
 
-Each account-token request captures an operation generation and identity key.
-Only the current generation for the same identity may update metadata, errors,
-or one-time secret state. Delayed list/create/revoke responses cannot repopulate
-the previous member's UI or restore cleared credentials after self-revocation.
+Each account-token request captures an operation generation, identity key, and
+collaboration-session instance generation. Only the current operation for the
+same identity and same `collabSession` instance may update metadata, errors, or
+one-time secret state. Delayed list/create/revoke responses cannot cross a
+session replacement even when the replacement has the same team id, member id,
+and token.
+
+### Same-identity collaboration-session P1
+
+RED `69ea991` targeted a delayed create response released after replacement of
+an equal-identity collaboration session. Implementation commits `3047`,
+`d342`, and `fd51` introduced session-instance invalidation and reset/reload
+ordering. Test review found the initial regression was a false positive: the
+replacement path did not prove it retained the same token, so an ordinary
+identity change could explain the discarded response. Corrected test `bd7acd`
+refills and asserts the same token, confirms the apply control remains disabled,
+waits for the replacement token-list response, and then proves the delayed
+create plaintext/status is still discarded.
+
+## Watcher Removal And Reintroduction Loop
+
+Intermittent Full `29333986663` failed in Core when a watched operator member
+was removed and quickly reintroduced. An older watcher callback could enter
+quarantine, then race a fresh token mutation and quarantine the new sidecar
+generation.
+
+Deterministic RED `4f75d7` pauses the watcher immediately before quarantine,
+restores the original member, starts a fresh managed-token create, and proves
+the create must not settle until quarantine resolution. Full `29334373513` was
+superseded during setup before executing the RED gates, so the commit-level
+deterministic case is the RED evidence; that Full is not.
+
+GREEN `35ef` records the watcher reload tail on the shared in-memory config,
+makes managers wait for that tail before entering the sidecar process lock, and
+allows quarantine only when the current sidecar bytes still equal the snapshot
+that produced the binding error. Full `29334572132` passed gates, typecheck,
+build, and Core before being superseded during Playwright. Stress commit `ff7`
+runs the remove/reintroduce case 20 times; Full `29334928481` again reached
+Core GREEN before Playwright was superseded. Security re-review approved the
+repair with no actionable blocker.
+
+This ordering is process-local. It coordinates watchers and managers sharing
+one `TeamAuthorizationConfig` object and filesystem lock. It does not establish
+one monotonic authorization generation across multiple hosts. Shared
+transactional identity storage with a durable version/CAS boundary remains
+required to order watcher, authentication, quarantine, and mutation decisions
+globally.
 
 ## Failure And Verification Ledger
 
@@ -121,7 +163,15 @@ the previous member's UI or restore cleared credentials after self-revocation.
 | Direct headed CLI | 1/1 passed | `복사됨`, sibling `해지됨`, empty credential after self-revoke |
 | Full `29332908276` | Cancelled | Gates/typecheck/build/Core passed; docs push superseded it during Playwright, so it is not GREEN |
 | Restore `29332908281` | Passed | Current-head restore drill |
-| Retention `29332908332` | Passed | Current-head backup retention |
+| Retention `29332908332` | Passed | Implementation-head backup retention |
+| Full `29333986663` | RED Core | Intermittent watcher removal/reintroduction race |
+| Commit `4f75d7` | Deterministic RED | Paused quarantine reproduced the fresh-generation race |
+| Full `29334373513` | Cancelled | Superseded during setup; did not execute RED gates |
+| Full `29334572132` | Core GREEN | Watcher-tail/snapshot fix passed Core; superseded during Playwright |
+| Full `29334928481` | Core GREEN | 20x stress passed Core; superseded during Playwright |
+| Security re-review | Approved | No actionable blocker in the watcher repair |
+| Vercel on `bd7acd` | Passed, non-gating | Preview deployment is separate from the product merge gate |
+| Full `29335200155` | **Pending, not GREEN** | Current implementation head; conclusion not yet verified |
 
 The initial browser async guard also failed typecheck because its identity ref was
 declared after first use. After `9e500aa`, the focused lifecycle revealed that
@@ -135,12 +185,15 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Durable audit events exist only as lifecycle metadata today; searchable,
   retained event consumption and operational review remain open.
 - Shared transactional multi-host identity and revocation storage remains open.
-  Filesystem locking and freshness checks are same-host/storage evidence only.
+  Filesystem locking, watcher-tail waits, and freshness checks are process-local
+  or same-storage evidence only. Multiple hosts need one durable monotonic
+  authorization generation or CAS contract.
 - MCP mutations do not yet provide agent dry-run, review, apply, summary, or
   reversible transaction semantics comparable to saved design edits.
 - Root-token recovery is explicit and preserves teams/revocations, but broader
   account recovery policy and UX remain open.
-- Deployment is deliberately non-gating for this slice. Preview availability or
-  provider rate limits do not prove or disprove the local-first MCP/UI contract.
+- Deployment is deliberately non-gating for this slice. Vercel passed on
+  `bd7acd`, but preview availability does not prove the local-first MCP/UI
+  contract.
 - PR review, final Full Verification, squash merge, and post-merge cleanup remain
   Task 4 work.

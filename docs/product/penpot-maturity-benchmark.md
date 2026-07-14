@@ -61,18 +61,37 @@ through explicit clipboard copy.
 
 MCP authorization and mutation use one freshly parsed, process-locked snapshot.
 The browser invalidates stale list/create/revoke responses by operation
-generation and identity. Focused real-network Playwright passed 3/3 and the
-direct headed interaction passed 1/1: copy changed to `복사됨`, sibling
-revocation to `해지됨`, and confirmed self-revocation left an empty credential
-field with recovery guidance. Full Verification `29332908276` passed gates, typecheck, build, and Core, then
-was superseded and cancelled during Playwright by the documentation commit; it
-is not GREEN. Restore `29332908281` and retention `29332908332` passed on that
-implementation head. A final PR-head Full Verification remains pending.
+generation, identity, and collaboration-session instance. The same-identity P1
+RED `69ea991` showed a delayed create response crossing replacement of a
+`collabSession` with equal team/member/token values. Implementation commits
+`3047`, `d342`, and `fd51` added session-instance invalidation. Review then
+found the first test was a false positive because it did not prove the
+replacement retained the same token; corrected test `bd7acd` explicitly
+preserves that token, waits for the replacement list request, and still proves
+the delayed secret/result is discarded.
+
+The watcher remove/reintroduce race first appeared intermittently in failed Full
+`29333986663`. Deterministic RED `4f75d7` holds quarantine while the same
+member is restored and a fresh generation starts; its Full `29334373513` was
+superseded before the test gates ran. GREEN `35ef` serializes managers behind
+the process-local reload/quarantine tail and binds quarantine to the observed
+sidecar snapshot. Full `29334572132` reached Core GREEN before supersession.
+Stress commit `ff7` repeated the exact race 20 times; Full `29334928481`
+again reached Core GREEN before supersession. Security re-review approved the
+repair with no actionable blocker.
+
+Focused real-network Playwright passed 3/3 and the direct headed interaction
+passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
+confirmed self-revocation left an empty credential field with recovery guidance.
+Full Verification `29335200155` is **pending at this evidence cut and is not
+GREEN**. Vercel passed on `bd7acd`, but deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps
-are durable audit-event consumption, shared transactional multi-host identity,
-agent dry-run/reviewability for token mutations, and broader account recovery.
+are durable audit-event consumption, shared transactional multi-host identity
+with one monotonic authorization generation, agent dry-run/reviewability for
+token mutations, and broader account recovery. Process-local watcher
+coordination does not close the multi-host generation gap.
 Deployment remains a separate non-gating concern for this local-first product
 slice. See `docs/product/penpot-token-mcp-ui-delta.md`.
 ## Maturity Dimensions

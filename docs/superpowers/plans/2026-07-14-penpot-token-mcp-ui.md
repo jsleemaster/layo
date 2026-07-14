@@ -138,20 +138,45 @@ Deployment remains a separate non-gating concern.
   localStorage, IndexedDB, and exported team manifests; dismissal, another
   create, identity change, leaving settings, reload, and self-revoke clear it.
 
+### Same-identity collaboration-session failure loop
+
+- P1 RED `69ea991` delayed create completion across replacement of a
+  `collabSession` whose identity values were intended to remain equal.
+- Implementation commits `3047`, `d342`, and `fd51` added a
+  collaboration-session instance generation to the async guard.
+- Review found the first regression was a false positive because it did not
+  prove the replacement retained the same token. Corrected test `bd7acd`
+  refills/asserts the identical token, waits for the replacement list response,
+  and then proves the delayed plaintext/status is discarded.
+
+### Watcher removal/reintroduction failure loop
+
+- Intermittent Full `29333986663` failed Core when an older remove callback
+  could quarantine a newly reintroduced member generation.
+- Deterministic RED `4f75d7` pauses quarantine while the member is restored
+  and a fresh create begins. Full `29334373513` was superseded during setup,
+  so it did not execute the RED gates.
+- GREEN `35ef` makes managers wait for the process-local watcher reload tail
+  and applies quarantine only to the exact observed sidecar snapshot. Full
+  `29334572132` reached Core GREEN before Playwright was superseded.
+- Stress `ff7` repeats the exact race 20 times. Full `29334928481` reached
+  Core GREEN before Playwright was superseded.
+- Security re-review approved with no actionable blocker.
+- Residual: this coordinates one process and shared in-memory config. Multi-host
+  correctness still needs shared transactional identity plus one durable
+  monotonic generation/version or CAS contract.
+
 ### Current merge gate
 
-- Full Verification `29332908276`: gates, typecheck, build, and Core passed;
-  the documentation push superseded it and cancelled Playwright, so it is not
-  GREEN.
-- Storage Restore Drill `29332908281`: passed.
-- Storage Backup Retention `29332908332`: passed.
-- Earlier Full runs `29332319714`, `29332832876`, and `29332894061` were
-  cancelled by newer branch commits, not recorded as GREEN.
-- Final PR-head Full Verification remains pending and must pass before merge.
-- Vercel preview/deployment status is not the merge gate for this local-first
-  MCP/UI slice. Deployment rate limits and hosted rollout remain separate.
-- Tasks 1-3 are complete. Task 4 remains in progress until Full Verification,
-  review, merge, and post-merge cleanup are actually complete.
+- Full Verification `29335200155`: **pending at this evidence cut; not GREEN**.
+- Full `29333986663` is RED Core. Full `29334373513` was cancelled before
+  RED execution. Fulls `29334572132` and `29334928481` are Core GREEN only
+  because later commits superseded Playwright.
+- Vercel passed on `bd7acd`, but deployment remains non-gating for this
+  local-first MCP/UI slice.
+- Tasks 1-3 are complete. Security re-review is approved. Task 4 remains in
+  progress until final Full Verification, merge, and post-merge cleanup are
+  actually complete.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -163,7 +188,7 @@ Deployment remains a separate non-gating concern.
 - Modify: this plan
 
 - [ ] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
-- [ ] Request external code review and feed every actionable finding into a focused RED.
+- [x] Request external code review and feed every actionable finding into a focused RED.
 - [x] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
 - [ ] Open a ready PR, resolve every review thread, and squash merge.
 - [ ] Run required post-merge cleanup checks and delete the remote branch.

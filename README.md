@@ -320,10 +320,21 @@ Plaintext from token creation is one-time response state: it is absent from the
 sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. The browser clears it on dismissal, another create, identity change,
 leaving team settings, reload, and successful self-revocation; clipboard copy is
-the only intentional external copy. Account-token requests carry an operation
-generation plus identity snapshot so stale async list/create/revoke responses
-cannot repopulate credentials or secret UI after identity changes. Current-token
-revocation requires explicit confirmation, clears the active credential, and
-leaves the local team available for root-token recovery.
+the only intentional external copy. Account-token requests carry an operation generation, identity
+snapshot, and collaboration-session instance generation. Stale async
+list/create/revoke responses are discarded after identity changes, newer
+operations, or replacement of the active `collabSession` even when team id,
+member id, and member token are unchanged. Current-token revocation requires
+explicit confirmation, clears the active credential, and leaves the local team
+available for root-token recovery.
+
+The file watcher and managers that share its in-memory authorization config also
+coordinate process-locally: mutations wait for the current reload/quarantine
+tail, and quarantine writes apply only to the exact sidecar snapshot that
+triggered them. This prevents a remove/reintroduce watcher callback from
+quarantining a fresh generation in the same process. It is not distributed
+coordination. Multiple hosts still need shared transactional identity storage
+with one monotonic generation/version or CAS contract before watcher,
+authentication, quarantine, and mutation decisions can be ordered globally.
 
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.
