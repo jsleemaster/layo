@@ -157,7 +157,7 @@ async function recoverAbandonedFileProcessMutationLock(
     return false;
   }
 
-  const claimPath = `${lockDir}.recovery-${owner.token}.claim`;
+  const claimPath = `${lockDir}.recovery-${owner.token}-${randomUUID()}.claim`;
   try {
     await link(ownerPath, claimPath);
   } catch (error) {
