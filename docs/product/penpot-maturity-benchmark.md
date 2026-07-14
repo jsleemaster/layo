@@ -44,8 +44,11 @@ operator-owned local-first authorization file. Authenticated members can create
 named tokens with Penpot-compatible expiry choices, receive the plaintext once,
 list metadata, and individually revoke credentials while sibling credentials
 remain valid. Hash-only persistence and restart durability are covered by server
-tests. MCP administration, UI management, cross-process writes, audit events,
-and shared hosted identity storage remain below the benchmark.
+tests. PR #307 adds resource-keyed cross-process authorization locking with
+same-host abandoned-lock recovery, live-lock protection, bounded waits, and a
+six-process no-loss regression. MCP administration, UI management, multi-host
+transactional identity storage, audit events, and shared hosted identity storage
+remain below the benchmark.
 
 ## Maturity Dimensions
 
