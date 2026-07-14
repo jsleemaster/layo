@@ -38,5 +38,5 @@ was still required for every credential lifecycle action.
   invalid writes, individual revocation, sibling continuity, and restart.
 - HTTP tests cover authenticated identity isolation and unavailable static
   configuration.
-- Full Verification `29313614602`, Storage Restore Drill `29313614646`, and Storage Backup Retention `29313614636` passed.
+- Full Verification `29313857844`, Storage Restore Drill `29313857687`, and Storage Backup Retention `29313857689` passed.
 - Deployment remains non-gating.
