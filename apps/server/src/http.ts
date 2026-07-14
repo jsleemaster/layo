@@ -301,6 +301,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
       };
 
+      sendBlock("library-registry-ready", { ok: true });
+
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
       let heartbeatId: ReturnType<typeof setInterval> | undefined;
