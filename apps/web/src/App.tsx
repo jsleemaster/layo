@@ -55,6 +55,7 @@ import {
   revokeAccountToken,
   type AccountTokenMetadata
 } from "./account-token-api";
+import { isCurrentAccountTokenOperation as isAccountTokenOperationCurrent } from "./account-token-operation";
 import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
 import {
   addCommentReply,
@@ -15255,9 +15256,11 @@ export function App() {
     identity: string;
     session: CollabDocumentSession | null;
   }) =>
-    operation.generation === accountTokenOperationGenerationRef.current
-    && operation.identity === accountTokenIdentityRef.current
-    && operation.session === accountTokenSessionRef.current;
+    isAccountTokenOperationCurrent(operation, {
+      generation: accountTokenOperationGenerationRef.current,
+      identity: accountTokenIdentityRef.current,
+      session: accountTokenSessionRef.current
+    });
 
   const refreshAccountTokens = async (successStatus?: string) => {
     if (!collabSession || !activeMemberToken || accountTokenRefreshPending) return;
