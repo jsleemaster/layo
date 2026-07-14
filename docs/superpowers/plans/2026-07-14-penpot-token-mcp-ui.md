@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make file-backed personal access tokens fully self-service from Layo MCP and the Korean browser team settings while preserving one-time secret and hash-only storage guarantees.
+**Goal:** Make file-backed personal access tokens self-service from Layo MCP and the Korean browser team settings while preserving fail-closed authentication, one-time secret delivery, and hash-only storage.
 
-**Architecture:** Reuse `TeamAuthorizationFileManager` as the single mutation authority. Inject it into MCP beside the already-authenticated principal, and add a small browser API module that calls the existing HTTP routes with the active member identity. Render account-token controls only in the team settings mode; keep plaintext exclusively in the immediate create response and component memory.
+**Architecture:** Reuse `TeamAuthorizationFileManager` as the single mutation authority. Inject it into MCP beside the authenticated principal and expose tools only when the operator selected file-backed authorization. Add a small browser API module over the existing HTTP routes, including a secret-free active-token identifier for safe self-revocation. Render account controls only in team settings; plaintext may exist only in the immediate create response, transient component memory, and an explicit user clipboard copy.
 
 **Tech Stack:** TypeScript, Fastify, MCP SDK, React, Vitest, Playwright CLI
 
@@ -14,56 +14,65 @@
 
 Penpot manages personal access tokens at account level with a descriptive name,
 Never/30/60/90/180-day expiry choices, one-time copy after creation, a metadata
-list, and deletion. Layo **adapts** that account workflow into its local-first
-team settings and deterministic MCP surface, backed by the operator-owned
+list, and deletion. Layo **adapts** that workflow into its local-first team
+settings and deterministic MCP surface, backed by the operator-owned
 authorization file introduced in PR #306 and serialized across processes in PR
 #307.
 
-This closes maturity gates 2 (team workflow), 7 (extensibility), 8 (operations),
-and 9 (agent safety). Durable audit events and multi-host transactional identity
-storage remain separate follow-up gaps.
+This slice adds evidence toward maturity gates 7 (extensibility) and 8
+(operations). It does not claim those whole-product gates are closed. Audit
+events, multi-host transactional identity storage, richer self-revocation
+recovery, and agent dry-run/reviewability remain follow-up gaps.
 
-### Task 1: Prove the MCP gap
+### Task 1: Prove fail-closed MCP administration
 
 **Files:**
-- Modify: `apps/server/src/mcp.test.ts`
 - Modify: `apps/server/src/mcp.ts`
+- Create: `apps/server/src/team-authorization-management-mcp.test.ts`
+- Modify: `apps/web/e2e/mcp-stdio.spec.ts`
 
-- [ ] Add a failing integration test that connects an authenticated MCP principal with a file manager.
-- [ ] Assert `list_account_tokens`, `create_account_token`, and `revoke_account_token` are advertised with correct annotations.
-- [ ] Assert create returns plaintext once, list omits secret/hash, and revoke targets only the authenticated principal.
-- [ ] Run `pnpm --filter @layo/server test -- mcp.test.ts` and record the expected missing-tool RED.
-- [ ] Inject `teamAuthorizationManager` into `McpServerOptions` and register the three tools.
-- [ ] Wire the stdio entrypoint to construct the manager only for `LAYO_LIBRARY_REGISTRY_MEMBERS_FILE`.
-- [ ] Re-run the focused test and commit GREEN.
+- [ ] Add a failing in-memory MCP integration covering authenticated create/list/revoke for only the principal returned by `authenticateTeamMember`.
+- [ ] Require tools to be absent when the manager is missing, the principal is missing, or authorization is static/non-file-backed.
+- [ ] Require invalid and revoked principals to fail before mutation.
+- [ ] Assert exact annotations: list is read-only/non-destructive/idempotent; create is writable/non-destructive/non-idempotent; revoke is writable/destructive/idempotent.
+- [ ] Add a spawned stdio RED using temporary `LAYO_LIBRARY_REGISTRY_MEMBERS_FILE`, `LAYO_MCP_USER_ID`, and `LAYO_MCP_MEMBER_TOKEN`.
+- [ ] Through stdio create/list/revoke, inspect the file for hash-only persistence and prove another member's tokens remain unchanged.
+- [ ] Run focused server and stdio tests and record the missing-tool RED.
+- [ ] Inject `teamAuthorizationManager` into `McpServerOptions`, derive the member id only from `authenticateTeamMember`, register conditional tools, and wire the stdio file manager.
+- [ ] Re-run focused tests and commit GREEN.
 
-### Task 2: Prove the browser API contract
+### Task 2: Prove the HTTP and browser API contract
 
 **Files:**
+- Modify: `apps/server/src/http.ts`
+- Modify: `apps/server/src/team-authorization-management-http.test.ts`
 - Create: `apps/web/src/account-token-api.ts`
 - Create: `apps/web/src/account-token-api.test.ts`
 
-- [ ] Add failing tests for credentialed list/create/revoke requests and Korean error propagation.
-- [ ] Run the focused web test and record the missing-module RED.
-- [ ] Implement typed token metadata, expiry, and credential helpers over `/account/tokens`.
-- [ ] Ensure responses never synthesize or persist plaintext outside create.
-- [ ] Re-run the focused tests and commit GREEN.
+- [ ] Add failing HTTP assertions that list returns only whitelisted token metadata plus secret-free `activeTokenId`.
+- [ ] Prove legacy credentials return no active token id and named credentials return their own id.
+- [ ] Add failing web API tests for exact credentialed list/create/revoke requests, metadata whitelisting, and Korean errors.
+- [ ] Run focused tests and record RED before implementation.
+- [ ] Implement the HTTP response and typed browser helpers over `/account/tokens`.
+- [ ] Re-run focused tests and commit GREEN.
 
-### Task 3: Prove the visible account workflow
+### Task 3: Prove the real browser account workflow
 
 **Files:**
 - Modify: `apps/web/src/App.tsx`
 - Modify: `apps/web/src/styles.css`
 - Create: `apps/web/e2e/account-token-administration.spec.ts`
-- Modify: `package.json` only if the E2E coverage guard requires explicit registration.
+- Modify: `package.json`
 
-- [ ] Add a failing Playwright test that opens 팀 설정, loads the current member's tokens, creates a named expiring token, exposes one-time copy, and revokes it.
-- [ ] Mock only the network boundary; exercise the real browser UI and request contract.
-- [ ] Run the focused Playwright CLI spec and record the missing-control RED.
-- [ ] Add compact Korean controls under team settings: token name, expiry select, create button, metadata list, revoke icon button with tooltip, and one-time secret copy.
-- [ ] Disable management without an active user id and member token; show loading/error/status via live regions.
-- [ ] Clear the one-time secret when team identity changes or the panel closes.
-- [ ] Re-run the focused Playwright test and direct click/type/copy/revoke interaction pass.
+- [ ] Add a Playwright fixture that starts an isolated file-backed server and web dev server on alternate ports.
+- [ ] Add a failing real-network test that creates a local team, applies a named member token, enters 팀 설정, and loads the current member's metadata.
+- [ ] Type a descriptive name, choose expiry, create a token, copy the one-time secret, reload the metadata list, and revoke a sibling token.
+- [ ] Assert real request headers, hash-only disk persistence, list/reload secret absence, and revoked credential authentication failure.
+- [ ] Mark the active token in Korean UI. Require explicit confirmation before current-token revocation; on success clear active credentials and show the recovery instruction without destroying the team.
+- [ ] Assert plaintext disappears after dismissal, another create, identity change, leaving 팀 설정, and reload.
+- [ ] Assert plaintext is absent from localStorage, IndexedDB, and exported team manifest; clipboard copy is the only intentional external copy.
+- [ ] Register the spec unconditionally in root `test:e2e`.
+- [ ] Run the focused Playwright CLI RED, implement compact accessible controls, then repeat the direct click/type/copy/revoke interaction pass.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -76,6 +85,6 @@ storage remain separate follow-up gaps.
 
 - [ ] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
 - [ ] Request external code review and feed every actionable finding into a focused RED.
-- [ ] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN run IDs, direct browser evidence, and remaining gaps.
-- [ ] Open a ready PR, ensure all review threads are resolved, and squash merge.
-- [ ] Run the required post-merge cleanup checks and delete the remote branch.
+- [ ] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
+- [ ] Open a ready PR, resolve every review thread, and squash merge.
+- [ ] Run required post-merge cleanup checks and delete the remote branch.
