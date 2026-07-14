@@ -9423,6 +9423,7 @@ export function App() {
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
   const [activeMemberToken, setActiveMemberToken] = useState("");
+  const [memberTokenStatus, setMemberTokenStatus] = useState("멤버 토큰 대기 중");
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -9856,6 +9857,7 @@ export function App() {
         if (libraryRegistryCredentialReconnectPendingRef.current) {
           libraryRegistryCredentialReconnectPendingRef.current = false;
           setLibraryRegistryStatus("팀 인증 다시 연결됨");
+          setMemberTokenStatus("팀 인증 다시 연결됨");
         }
         void refreshLibraryRegistry(null, fileId);
       },
@@ -9869,11 +9871,12 @@ export function App() {
         setLibraryRegistryTokenUpdates([]);
         setLibraryRegistryReview(null);
         setLibraryRegistryTokenReview(null);
-        setLibraryRegistryStatus(
+        const authorizationStatus =
           code === "credential_inactive"
             ? "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
-            : "팀 라이브러리 접근 권한이 해제되었습니다."
-        );
+            : "팀 라이브러리 접근 권한이 해제되었습니다.";
+        setLibraryRegistryStatus(authorizationStatus);
+        setMemberTokenStatus(authorizationStatus);
       }
     });
   }, [
@@ -15146,6 +15149,7 @@ export function App() {
     }
     libraryRegistryCredentialReconnectPendingRef.current = true;
     setLibraryRegistryStatus("팀 인증 다시 연결 중");
+    setMemberTokenStatus("팀 인증 다시 연결 중");
     setActiveMemberToken(nextToken);
   };
 
@@ -16657,6 +16661,9 @@ export function App() {
               </div>
               <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
                 {manifestStatus || "팀 설정 대기 중"}
+              </div>
+              <div className="team-status" data-testid="team-member-token-status" aria-live="polite">
+                {memberTokenStatus}
               </div>
               <div className="presence-list" data-testid="presence-list">
                 {presence.map((member, index) => (
