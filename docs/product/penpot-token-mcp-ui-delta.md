@@ -230,7 +230,22 @@ process-local, not a shared multi-host generation or delivery guarantee.
 | Commit `9eae96f` | Test repair | Removed only socket-count observation; retained identity/status/authenticated replacement/old-response proofs |
 | Full `29340078192` | Final GREEN, 8m9s | On `9eae96fe2e11992768636211da3868a9e93142a5`; gates, typecheck, build, Core, and Playwright all passed |
 | Restore `29340078406` | Passed | Final-head storage restore drill |
-| Retention `29340078359` | Passed | Final-head backup retention |
+| Retention `29340078359` | Passed | Pre-review backup retention |
+| External review P1 | Actionable | Removing one sidecar-backed member repeatedly cleared all members and locked out survivors |
+| Commit `e4c4126` / Full `29342714708` | Deterministic RED | Survivor reload timed out after the removed member became an orphan |
+| Commit `4d6f0af` | Failed hypothesis | Ignoring every quarantined member broke explicit re-add recovery tests |
+| Commits `1b1888f` / `914fc72` | Narrow GREEN | Ignore only quarantined orphans; retain binding, revocation, restart, and explicit re-add behavior |
+| Full `29343398679` | Final GREEN | On `914fc7226c5632344d4f5e8e1f4c750006b968a2`; gates, typecheck, build, Core, and Playwright all passed |
+| Restore `29343394961` | Passed | Repaired-head storage restore drill |
+| Retention `29343395030` | Passed | Repaired-head backup retention |
+
+The P1 root cause was that quarantine persisted the removed member but
+`mergeManagedTokenState` still treated that known orphan as a fresh binding
+error on every retry. The repair skips only a quarantined member absent from the
+operator base. A re-added base member still enters binding validation and must
+authenticate with the explicit base credential before reconciliation; the prior
+managed secret remains invalid, surviving revocations remain revoked, and the
+regression restarts the watcher before proving recovery.
 
 The initial browser async guard also failed typecheck because its identity ref was
 declared after first use. After `9e500aa`, the focused lifecycle revealed that
@@ -255,5 +270,5 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Deployment is deliberately non-gating for this slice. Vercel passed on
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
-- PR #308 is ready to merge after final verification and review with no findings.
-  Squash merge and post-merge cleanup remain Task 4 work.
+- PR #308 has repaired and fully verified the external-review P1. Final review,
+  squash merge, and post-merge cleanup remain Task 4 work.
