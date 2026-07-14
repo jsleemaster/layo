@@ -213,7 +213,11 @@ async function connectFileBackedMcp(options: { principalState?: PrincipalState }
   roots.push(root);
   const configPath = path.join(root, "members.json");
   const principalState = options.principalState ?? "active";
-  await writeFile(configPath, membersFile({ principalState }), "utf8");
+  await writeFile(
+    configPath,
+    membersFile({ principalState: principalState === "invalid" ? "active" : principalState }),
+    "utf8"
+  );
   const source = await watchTeamAuthorizationConfigFile(configPath, {
     pollIntervalMs: 60_000
   });
