@@ -123,6 +123,63 @@ describe("team access token administration", () => {
     }
   });
 
+  test("preserves operator changes written before the watcher reloads them", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, ownerConfig(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-15T12:00:00.000Z"),
+      generateId: () => "token-after-operator-edit",
+      generateSecret: () => "layo_pat_after_operator_edit"
+    });
+
+    try {
+      const operatorConfig = JSON.stringify(
+        [
+          {
+            userId: "owner-user",
+            role: "owner",
+            teamIds: ["team-alpha"],
+            token: "legacy-owner-token",
+            revokedAt: "2026-07-15T10:00:00.000Z"
+          },
+          {
+            userId: "new-editor",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "operator-added-token"
+          }
+        ],
+        null,
+        2
+      );
+      await writeFile(configPath, operatorConfig, "utf8");
+
+      await manager.createToken("owner-user", {
+        name: "Created after operator edit",
+        expiresInDays: 30
+      });
+
+      const persisted = await readFile(configPath, "utf8");
+      expect(persisted).toContain('"revokedAt": "2026-07-15T10:00:00.000Z"');
+      expect(persisted).toContain('"userId": "new-editor"');
+      expect(() =>
+        authenticateTeamMember(
+          source.config,
+          "owner-user",
+          "legacy-owner-token",
+          new Date("2026-07-15T12:00:00.000Z")
+        )
+      ).toThrow("team member credentials are invalid");
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("rejects unknown members and duplicate generated ids without changing the file", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
