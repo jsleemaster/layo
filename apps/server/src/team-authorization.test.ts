@@ -484,7 +484,7 @@ describe("team library authorization", () => {
     }
   });
 
-  test("retains the last valid credentials when a watched file becomes malformed", async () => {
+  test("fails cached authentication closed while a watched file is malformed and recovers after repair", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-"));
     const configPath = path.join(root, "members.json");
     await writeFile(configPath, credentialJson("stable-token"), "utf8");
@@ -498,9 +498,9 @@ describe("team library authorization", () => {
       await writeFile(configPath, "{ malformed", "utf8");
       await waitFor(() => reloadErrors.length > 0);
 
-      expect(
+      expect(() =>
         authenticateTeamMember(source.config, "editor-user", "stable-token")
-      ).toMatchObject({ userId: "editor-user", role: "editor" });
+      ).toThrow("team member credentials are invalid");
 
       await writeFile(configPath, credentialJson("recovered-token"), "utf8");
       await waitFor(() => {

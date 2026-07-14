@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -180,6 +180,228 @@ describe("team authorization managed token sidecar", () => {
       await setup.close();
     }
   });
+
+  test("quarantines a token minted when the base changes after the freshness read", async () => {
+    const setup = await fixture(baseMembers(), 60_000);
+    const operatorBase = JSON.stringify([
+      {
+        userId: "owner-user",
+        role: "viewer",
+        teamIds: ["team-alpha"],
+        token: "rotated-operator-secret"
+      }
+    ], null, 2);
+    let hookCalled = false;
+    const options = {
+      now: () => new Date("2026-07-15T12:00:00.000Z"),
+      generateId: () => "final-window-token",
+      generateSecret: () => "final-window-secret",
+      beforeSidecarRename: async () => {
+        hookCalled = true;
+        await writeFile(setup.basePath, operatorBase, "utf8");
+      }
+    } as Parameters<typeof createTeamAuthorizationFileManager>[2] & {
+      beforeSidecarRename: () => Promise<void>;
+    };
+    const manager = createTeamAuthorizationFileManager(
+      setup.basePath,
+      setup.source.config,
+      options
+    );
+
+    try {
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "base-secret" },
+        {
+          type: "create",
+          input: { name: "Final window", expiresInDays: null }
+        }
+      )).rejects.toMatchObject({ statusCode: 409 });
+      expect(hookCalled).toBe(true);
+      expect(await readFile(setup.basePath, "utf8")).toBe(operatorBase);
+      const sidecar = await readFile(sidecarPath(setup.basePath), "utf8");
+      expect(sidecar).toContain('"quarantined": true');
+      expect(sidecar).not.toContain("final-window-secret");
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "final-window-secret" },
+        { type: "list" }
+      )).rejects.toThrow();
+    } finally {
+      await setup.close();
+    }
+  });
+
+  test("does not resurrect managed tokens after a removed user id is reintroduced", async () => {
+    const originalBase = baseMembers();
+    const setup = await fixture(originalBase);
+    const ids = ["dormant-token", "fresh-token"];
+    const secrets = ["dormant-secret", "fresh-secret"];
+    const manager = createTeamAuthorizationFileManager(
+      setup.basePath,
+      setup.source.config,
+      {
+        now: () => new Date("2026-07-15T12:00:00.000Z"),
+        generateId: () => ids.shift()!,
+        generateSecret: () => secrets.shift()!
+      }
+    );
+
+    try {
+      await manager.createToken("owner-user", {
+        name: "Dormant token",
+        expiresInDays: null
+      });
+      await writeFile(setup.basePath, JSON.stringify([
+        {
+          userId: "replacement-user",
+          role: "owner",
+          teamIds: ["team-alpha"],
+          token: "replacement-secret"
+        }
+      ]), "utf8");
+      await waitFor(() => authenticationFails(
+        setup.source.config,
+        "owner-user",
+        "legacy-owner-token"
+      ));
+
+      await writeFile(setup.basePath, originalBase, "utf8");
+      await waitFor(() => authenticationFails(
+        setup.source.config,
+        "owner-user",
+        "legacy-owner-token"
+      ));
+
+      await manager.manageTokens(
+        { userId: "owner-user", memberToken: "legacy-owner-token" },
+        {
+          type: "create",
+          input: { name: "Fresh generation", expiresInDays: null }
+        }
+      );
+      expect(manager.listTokens("owner-user").map((token) => token.id)).toEqual([
+        "base-token",
+        "base-sibling",
+        "fresh-token"
+      ]);
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "dormant-secret" },
+        { type: "list" }
+      )).rejects.toThrow();
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "fresh-secret" },
+        { type: "list" }
+      )).resolves.toMatchObject({ activeTokenId: "fresh-token" });
+    } finally {
+      await setup.close();
+    }
+  });
+
+  test.each([
+    {
+      label: "malformed JSON",
+      content: "{not-json"
+    },
+    {
+      label: "plaintext credential",
+      content: JSON.stringify({
+        version: 1,
+        members: [{
+          userId: "owner-user",
+          tokens: [{ id: "bad", name: "Bad", token: "plaintext" }],
+          revocations: []
+        }]
+      })
+    },
+    {
+      label: "conflicting token id",
+      content: JSON.stringify({
+        version: 1,
+        members: [{
+          userId: "owner-user",
+          tokens: [{
+            id: "base-token",
+            name: "Conflict",
+            tokenHash: hash("conflict-secret")
+          }],
+          revocations: []
+        }]
+      })
+    }
+  ])("fails cached authentication closed for $label sidecar and recovers after repair", async ({
+    content
+  }) => {
+    const setup = await fixture(baseMembers());
+
+    try {
+      await writeFile(sidecarPath(setup.basePath), content, "utf8");
+      await waitFor(() => authenticationFails(
+        setup.source.config,
+        "owner-user",
+        "legacy-owner-token"
+      ));
+
+      await rm(sidecarPath(setup.basePath), { force: true });
+      await waitFor(() => !authenticationFails(
+        setup.source.config,
+        "owner-user",
+        "legacy-owner-token"
+      ));
+    } finally {
+      await setup.close();
+    }
+  });
+
+  test("does not report revoke success before file and directory sync complete", async () => {
+    const setup = await fixture(baseMembers());
+    const setupManager = createTeamAuthorizationFileManager(
+      setup.basePath,
+      setup.source.config,
+      {
+        now: () => new Date("2026-07-15T12:00:00.000Z"),
+        generateId: () => "durable-token",
+        generateSecret: () => "durable-secret"
+      }
+    );
+
+    try {
+      await setupManager.createToken("owner-user", {
+        name: "Durable token",
+        expiresInDays: null
+      });
+      expect((await stat(sidecarPath(setup.basePath))).mode & 0o777).toBe(0o600);
+
+      const syncEvents: string[] = [];
+      const options = {
+        now: () => new Date("2026-07-16T12:00:00.000Z"),
+        syncFile: async (handle: { sync: () => Promise<void> }) => {
+          syncEvents.push("file");
+          await handle.sync();
+        },
+        syncDirectory: async () => {
+          syncEvents.push("directory");
+          throw new Error("directory sync failed");
+        }
+      } as Parameters<typeof createTeamAuthorizationFileManager>[2] & {
+        syncFile: (handle: { sync: () => Promise<void> }) => Promise<void>;
+        syncDirectory: (directoryPath: string) => Promise<void>;
+      };
+      const manager = createTeamAuthorizationFileManager(
+        setup.basePath,
+        setup.source.config,
+        options
+      );
+
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "legacy-owner-token" },
+        { type: "revoke", tokenId: "durable-token" }
+      )).rejects.toThrow("directory sync failed");
+      expect(syncEvents).toEqual(["file", "directory"]);
+    } finally {
+      await setup.close();
+    }
+  });
+
 });
 
 async function fixture(base: string, pollIntervalMs = 10) {
@@ -197,6 +419,31 @@ async function fixture(base: string, pollIntervalMs = 10) {
       await rm(root, { recursive: true, force: true });
     }
   };
+}
+
+
+async function waitFor(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for authorization state");
+}
+
+function authenticationFails(
+  config: Parameters<typeof authenticateTeamMember>[0],
+  userId: string,
+  token: string
+): boolean {
+  try {
+    authenticateTeamMember(config, userId, token);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 function sidecarPath(basePath: string): string {
@@ -231,3 +478,4 @@ function baseMembers(): string {
 function hash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
+
