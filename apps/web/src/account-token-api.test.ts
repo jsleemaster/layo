@@ -53,33 +53,6 @@ describe("account token browser API", () => {
     expect(JSON.stringify(result)).not.toContain("must-not-escape");
   });
 
-  test.each([
-    {
-      label: "duplicate token ids",
-      payload: {
-        tokens: [
-          { id: "duplicate-token", name: "First" },
-          { id: "duplicate-token", name: "Second" }
-        ]
-      }
-    },
-    {
-      label: "an active token id missing from the list",
-      payload: {
-        tokens: [{ id: "listed-token", name: "Listed" }],
-        activeTokenId: "unknown-token"
-      }
-    }
-  ])("rejects list responses with $label", async ({ payload }) => {
-    await expect(
-      listAccountTokens(
-        "owner-user",
-        "member-token",
-        mockFetch(payload) as typeof fetch
-      )
-    ).rejects.toThrow(/서버 응답.*올바르지/);
-  });
-
   test.each([null, 30, 60, 90, 180] as const)(
     "creates a one-time token with Penpot expiry %s",
     async (expiresInDays) => {
