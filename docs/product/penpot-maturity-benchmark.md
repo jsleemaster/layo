@@ -423,6 +423,25 @@ retried. Final GREEN `29303273081` passed 254 web, 297 server, Rust, and 194
 Playwright CLI cases, including delayed-response cache non-reappearance.
 First-class token replacement and dynamic server identity reload remain open.
 
+## Latest Verified Delta: Library Token Recovery
+
+PR #303 closes the immediate credential-recovery gap. An operator-owned
+`LAYO_LIBRARY_REGISTRY_MEMBERS_FILE` now atomically reloads valid member
+configuration into the stable HTTP/MCP authorization object while malformed
+updates retain the last valid state. Authenticated registry streams emit an
+explicit ready event, and the Korean team panel replaces an expired member token
+without recreating the active team while keeping expiry, reconnecting, and
+success states visible.
+
+RED `29304547951` proved dynamic loading was absent. Browser RED
+`29304746565` proved readiness was absent. Failure-learning runs
+`29304831810` and `29304931210` corrected exact SSE event matching and
+hidden team-panel feedback. GREEN `29305440761` passed 255 web tests, 299
+server tests, Rust workspace tests, and 195 Playwright CLI cases.
+
+Evidence: `docs/product/penpot-library-token-recovery-delta.md`. Named
+per-token records and individual revocation remain the next credential gap.
+
 Evidence: `docs/product/penpot-library-auth-ended-ui-delta.md`.
 
 ## Current Highest-Risk Gaps

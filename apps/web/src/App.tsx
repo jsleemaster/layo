@@ -9423,6 +9423,7 @@ export function App() {
   const [relayToken, setRelayToken] = useState("");
   const [memberToken, setMemberToken] = useState("");
   const [activeMemberToken, setActiveMemberToken] = useState("");
+  const [memberTokenStatus, setMemberTokenStatus] = useState("멤버 토큰 대기 중");
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -9506,6 +9507,7 @@ export function App() {
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAuthorizationEndedRef = useRef(false);
+  const libraryRegistryCredentialReconnectPendingRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
@@ -9851,7 +9853,16 @@ export function App() {
         );
         void refreshLibraryRegistry(null, fileId);
       },
+      onReady: () => {
+        if (libraryRegistryCredentialReconnectPendingRef.current) {
+          libraryRegistryCredentialReconnectPendingRef.current = false;
+          setLibraryRegistryStatus("팀 인증 다시 연결됨");
+          setMemberTokenStatus("팀 인증 다시 연결됨");
+        }
+        void refreshLibraryRegistry(null, fileId);
+      },
       onAuthorizationEnded: (code) => {
+        libraryRegistryCredentialReconnectPendingRef.current = false;
         libraryRegistryAuthorizationEndedRef.current = true;
         libraryRegistryAccessGenerationRef.current += 1;
         libraryRegistryEventSequenceRef.current = 0;
@@ -9860,11 +9871,12 @@ export function App() {
         setLibraryRegistryTokenUpdates([]);
         setLibraryRegistryReview(null);
         setLibraryRegistryTokenReview(null);
-        setLibraryRegistryStatus(
+        const authorizationStatus =
           code === "credential_inactive"
             ? "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
-            : "팀 라이브러리 접근 권한이 해제되었습니다."
-        );
+            : "팀 라이브러리 접근 권한이 해제되었습니다.";
+        setLibraryRegistryStatus(authorizationStatus);
+        setMemberTokenStatus(authorizationStatus);
       }
     });
   }, [
@@ -15130,6 +15142,17 @@ export function App() {
     setManifestStatus(`팀 설정 가져오기 실패: ${message}`);
   };
 
+  const applyMemberToken = () => {
+    const nextToken = memberToken.trim();
+    if (!collabSession || !nextToken || nextToken === activeMemberToken) {
+      return;
+    }
+    libraryRegistryCredentialReconnectPendingRef.current = true;
+    setLibraryRegistryStatus("팀 인증 다시 연결 중");
+    setMemberTokenStatus("팀 인증 다시 연결 중");
+    setActiveMemberToken(nextToken);
+  };
+
   const createLocalTeam = () => {
     void activateTeam(
       createTeamManifest({
@@ -16541,14 +16564,6 @@ export function App() {
                         onChange={(event) => setRelayToken(event.currentTarget.value)}
                       />
                     </label>
-                    <label>
-                      멤버 인증 토큰
-                      <input
-                        data-testid="member-token"
-                        value={memberToken}
-                        onChange={(event) => setMemberToken(event.currentTarget.value)}
-                      />
-                    </label>
                     <label className="team-toggle-field">
                       종단간 암호화
                       <input
@@ -16569,6 +16584,16 @@ export function App() {
                     </label>
                   </>
                 ) : null}
+                <label>
+                  멤버 인증 토큰
+                  <input
+                    data-testid="member-token"
+                    type="password"
+                    autoComplete="off"
+                    value={memberToken}
+                    onChange={(event) => setMemberToken(event.currentTarget.value)}
+                  />
+                </label>
                 {teamPanelMode === "manifest" ? (
                   <label>
                     팀 설정 URL
@@ -16611,6 +16636,17 @@ export function App() {
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={applyMemberToken}
+                  disabled={
+                    !collabSession
+                    || !memberToken.trim()
+                    || memberToken.trim() === activeMemberToken
+                  }
+                >
+                  멤버 토큰 적용
+                </button>
               </div>
               <input
                 ref={manifestFileInputRef}
@@ -16625,6 +16661,9 @@ export function App() {
               </div>
               <div className="team-status" data-testid="team-manifest-status" aria-live="polite">
                 {manifestStatus || "팀 설정 대기 중"}
+              </div>
+              <div className="team-status" data-testid="team-member-token-status" aria-live="polite">
+                {memberTokenStatus}
               </div>
               <div className="presence-list" data-testid="presence-list">
                 {presence.map((member, index) => (

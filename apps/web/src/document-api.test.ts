@@ -385,6 +385,37 @@ describe("parseDocumentPayload", () => {
     streamController?.close();
   });
 
+  test("reports an authenticated library registry stream ready event", async () => {
+    const ready: boolean[] = [];
+    const fetcher = async () =>
+      new Response(
+        [
+          "event: library-registry-ready",
+          'data: {"ok":true}',
+          "",
+          ""
+        ].join("\n"),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" }
+        }
+      );
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 10_000,
+      onLibraryRegistryEvent: () => {},
+      onReady: () => ready.push(true)
+    });
+
+    for (let attempt = 0; attempt < 10 && ready.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(ready).toEqual([true]);
+    unsubscribe();
+  });
+
   test("stops reconnecting after a terminal library authorization event", async () => {
     const calls: string[] = [];
     const ended: string[] = [];

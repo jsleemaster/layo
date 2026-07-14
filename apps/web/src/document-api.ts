@@ -418,6 +418,7 @@ export interface SubscribeToLibraryRegistryEventsOptions {
   fetcher?: typeof fetch;
   reconnectDelayMs?: number;
   onLibraryRegistryEvent: (event: LibraryRegistryLiveEvent) => void;
+  onReady?: () => void;
   onAuthorizationEnded?: (code: LibraryRegistryAuthorizationEndedCode) => void;
   onError?: EventListener;
 }
@@ -1274,6 +1275,17 @@ export function subscribeToLibraryRegistryEvents(
       }
     }
     if (data.length === 0) {
+      return;
+    }
+    if (eventName === "library-registry-ready") {
+      try {
+        const event = JSON.parse(data.join("\n")) as { ok?: boolean };
+        if (event.ok === true) {
+          options.onReady?.();
+        }
+      } catch {
+        // Ignore malformed readiness records while keeping the stream alive.
+      }
       return;
     }
     if (eventName === "library-registry-authorization-ended") {

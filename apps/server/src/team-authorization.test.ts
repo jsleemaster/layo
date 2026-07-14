@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   authenticateTeamMember,
   authorizeTeamLibraryRead,
   authorizeTeamLibraryWrite,
   bearerToken,
-  parseTeamAuthorizationConfig
+  parseTeamAuthorizationConfig,
+  watchTeamAuthorizationConfigFile
 } from "./team-authorization";
 
 describe("team library authorization", () => {
@@ -234,6 +238,56 @@ describe("team library authorization", () => {
     expect(bearerToken(["Bearer first-token", "Bearer second-token"])).toBe("first-token");
     expect(bearerToken("Basic member-token")).toBeUndefined();
   });
+
+  test("reloads rotated credentials from a watched team authorization file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, credentialJson("legacy-token"), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, { pollIntervalMs: 10 });
+
+    try {
+      expect(
+        authenticateTeamMember(source.config, "editor-user", "legacy-token")
+      ).toMatchObject({ userId: "editor-user", role: "editor" });
+
+      await writeFile(configPath, credentialJson("rotated-token"), "utf8");
+      await waitForAuthentication(source.config, "rotated-token");
+
+      expect(captureError(() =>
+        authenticateTeamMember(source.config, "editor-user", "legacy-token")
+      )).toMatchObject({ statusCode: 401 });
+      expect(
+        authenticateTeamMember(source.config, "editor-user", "rotated-token")
+      ).toMatchObject({ userId: "editor-user", role: "editor" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("retains the last valid credentials when a watched file becomes malformed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, credentialJson("stable-token"), "utf8");
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => reloadErrors.push(error)
+    });
+
+    try {
+      await writeFile(configPath, "{ malformed", "utf8");
+      await waitFor(() => reloadErrors.length === 1);
+
+      expect(
+        authenticateTeamMember(source.config, "editor-user", "stable-token")
+      ).toMatchObject({ userId: "editor-user", role: "editor" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 function captureError(callback: () => unknown): unknown {
@@ -243,4 +297,41 @@ function captureError(callback: () => unknown): unknown {
     return error;
   }
   throw new Error("expected callback to throw");
+}
+
+
+function credentialJson(token: string): string {
+  return JSON.stringify([
+    {
+      userId: "editor-user",
+      role: "editor",
+      teamIds: ["team-alpha"],
+      token
+    }
+  ]);
+}
+
+async function waitForAuthentication(
+  config: NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>,
+  token: string
+): Promise<void> {
+  await waitFor(() => {
+    try {
+      authenticateTeamMember(config, "editor-user", token);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for watched authorization reload");
 }

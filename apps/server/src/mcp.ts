@@ -9,6 +9,7 @@ import {
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
+  watchTeamAuthorizationConfigFile,
   type TeamAuthorizationConfig
 } from "./team-authorization.js";
 
@@ -2299,10 +2300,16 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  // Keeps MCP library credentials process-local while sharing the HTTP role policy.
-  const libraryRegistryAuth = parseTeamAuthorizationConfig(
-    process.env.LAYO_LIBRARY_REGISTRY_MEMBERS
-  );
+  // The operator-owned file takes precedence so MCP observes the same live credential rotation.
+  const libraryRegistryAuthSource = process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE
+    ? await watchTeamAuthorizationConfigFile(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE, {
+        onError: (error) => console.error("library registry authorization reload failed", error)
+      })
+    : undefined;
+  // The environment fallback preserves static local MCP setups.
+  const libraryRegistryAuth =
+    libraryRegistryAuthSource?.config
+    ?? parseTeamAuthorizationConfig(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS);
   const libraryRegistryPrincipal =
     process.env.LAYO_MCP_USER_ID && process.env.LAYO_MCP_MEMBER_TOKEN
       ? {
@@ -2315,5 +2322,6 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     libraryRegistryPrincipal
   });
   const transport = new StdioServerTransport();
+  process.once("exit", () => libraryRegistryAuthSource?.close());
   await server.connect(transport);
 }
