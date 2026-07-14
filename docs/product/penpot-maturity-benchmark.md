@@ -37,6 +37,16 @@ Use these sources before changing Layo's team-product roadmap:
 Refresh this document when those sources materially change or when a Layo
 implementation slice reveals a new gap.
 
+## Current Token Administration Evidence
+
+PR #306 adapts Penpot's account-level personal access token lifecycle to Layo's
+operator-owned local-first authorization file. Authenticated members can create
+named tokens with Penpot-compatible expiry choices, receive the plaintext once,
+list metadata, and individually revoke credentials while sibling credentials
+remain valid. Hash-only persistence and restart durability are covered by server
+tests. MCP administration, UI management, cross-process writes, audit events,
+and shared hosted identity storage remain below the benchmark.
+
 ## Maturity Dimensions
 
 | Dimension | Penpot benchmark | Layo current posture | Layo target |
