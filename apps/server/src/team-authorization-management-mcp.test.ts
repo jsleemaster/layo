@@ -12,7 +12,10 @@ import {
   type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
   type TeamAuthorizationConfigSource,
-  type TeamAuthorizationFileManager
+  type TeamAuthorizationFileManager,
+  type TeamAuthorizationManagementOperation,
+  type TeamAuthorizationManagementPrincipal,
+  type TeamAuthorizationManagementResult
 } from "./team-authorization";
 
 const clients: Client[] = [];
@@ -34,7 +37,10 @@ describe("team access token MCP administration", () => {
       ["other-user", [{ id: "other-token", name: "Other automation", createdAt: "2026-07-13T12:00:00.000Z" }]]
     ]);
     const manager: TeamAuthorizationFileManager = {
-      manageTokens: vi.fn(async (principal, operation) => {
+      manageTokens: vi.fn(async (
+        principal: TeamAuthorizationManagementPrincipal,
+        operation: TeamAuthorizationManagementOperation
+      ): Promise<TeamAuthorizationManagementResult> => {
         const userId = principal.userId.trim();
         if (operation.type === "list") {
           return { type: "list", tokens: manager.listTokens(userId) };

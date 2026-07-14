@@ -237,16 +237,19 @@ export function createTeamAuthorizationFileManager(
         await readFile(normalizedPath, "utf8")
       );
       const operationNow = now();
-      const authenticatedMember =
-        "principal" in identity
-          ? authenticateTeamMember(
-              nextConfig,
-              identity.principal.userId,
-              identity.principal.memberToken,
-              operationNow
-            )
-          : undefined;
-      const userId = authenticatedMember?.userId ?? identity.userId;
+      let authenticatedMember: AuthenticatedTeamMember | undefined;
+      let userId: string;
+      if ("principal" in identity) {
+        authenticatedMember = authenticateTeamMember(
+          nextConfig,
+          identity.principal.userId,
+          identity.principal.memberToken,
+          operationNow
+        );
+        userId = authenticatedMember.userId;
+      } else {
+        userId = identity.userId;
+      }
       const member = findManagedMember(nextConfig, userId);
 
       if (operation.type === "list") {
