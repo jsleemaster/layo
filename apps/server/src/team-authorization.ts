@@ -222,7 +222,8 @@ export function createTeamAuthorizationFileManager(
         if (!name) {
           throw managementError("team authorization token name is required", 400);
         }
-        if (!isTeamAccessTokenExpiryDays(input.expiresInDays)) {
+        const expiresInDays = input?.expiresInDays;
+        if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
           throw managementError("invalid team authorization token expiration", 400);
         }
         const nextConfig = cloneTeamAuthorizationConfig(config);
@@ -240,10 +241,10 @@ export function createTeamAuthorizationFileManager(
         }
         const createdAt = validManagementNow(now());
         const expiresAt =
-          input.expiresInDays === null
+          expiresInDays === null
             ? undefined
             : new Date(
-                Date.parse(createdAt) + input.expiresInDays * 24 * 60 * 60 * 1_000
+                Date.parse(createdAt) + expiresInDays * 24 * 60 * 60 * 1_000
               ).toISOString();
         const credential: TeamMemberTokenCredential = {
           id,
