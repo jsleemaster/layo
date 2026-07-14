@@ -811,6 +811,9 @@ function mergeManagedTokenState(
     baseConfig.members.map((member) => [member.userId, member])
   );
   for (const stateMember of state.members) {
+    if (stateMember.quarantined) {
+      continue;
+    }
     const baseMember = baseByUserId.get(stateMember.userId);
     if (!baseMember) {
       throw new ManagedTokenBindingError(
@@ -824,7 +827,8 @@ function mergeManagedTokenState(
   return {
     members: baseConfig.members.map((baseMember) => {
       const stateMember = state.members.find(
-        (candidate) => candidate.userId === baseMember.userId
+        (candidate) =>
+          candidate.userId === baseMember.userId && !candidate.quarantined
       );
       const baseTokens = (baseMember.tokens ?? []).map((token) => ({ ...token }));
       if (!stateMember) {
