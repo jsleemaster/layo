@@ -122,12 +122,21 @@ function parseTeamMemberCredential(input: unknown): TeamMemberCredential {
     typeof candidate.tokenHash === "string" && /^[a-f0-9]{64}$/i.test(candidate.tokenHash)
       ? candidate.tokenHash.toLowerCase()
       : undefined;
-  const tokenHashes = Array.isArray(candidate.tokenHashes)
-    && candidate.tokenHashes.every(
-      (value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)
-    )
-      ? Array.from(new Set(candidate.tokenHashes.map((value) => value.toLowerCase())))
-      : undefined;
+  let tokenHashes: string[] | undefined;
+  if (candidate.tokenHashes !== undefined) {
+    if (
+      !Array.isArray(candidate.tokenHashes)
+      || candidate.tokenHashes.length === 0
+      || !candidate.tokenHashes.every(
+        (value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)
+      )
+    ) {
+      throw new Error("invalid library registry team member tokenHashes");
+    }
+    tokenHashes = Array.from(
+      new Set(candidate.tokenHashes.map((value) => value.toLowerCase()))
+    );
+  }
   if (!token && !tokenHash && !tokenHashes?.length) {
     throw new Error("library registry team member token, tokenHash, or tokenHashes is required");
   }
