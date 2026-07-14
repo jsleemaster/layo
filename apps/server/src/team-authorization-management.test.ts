@@ -237,22 +237,16 @@ describe("team access token administration", () => {
             input: { name: "Concurrent create", expiresInDays: 30 }
           }
         )
-      ).resolves.toMatchObject({
-        type: "create",
-        created: { metadata: { id: "token-after-authentication" } }
+      ).rejects.toMatchObject({
+        message: "team authorization file changed during token management",
+        statusCode: 409
       });
-      expect(await readFile(configPath, "utf8")).toBe(operatorConfig);
-      const sidecar = await readFile(`${configPath}.tokens.json`, "utf8");
-      expect(sidecar).not.toContain("layo_pat_must_not_persist");
+      const persistedBase = await readFile(configPath, "utf8");
+      expect(persistedBase).toBe(operatorConfig);
+      expect(persistedBase).not.toContain("layo_pat_must_not_persist");
       await expect(
-        manager.manageTokens(
-          {
-            userId: "owner-user",
-            memberToken: "layo_pat_must_not_persist"
-          },
-          { type: "list" }
-        )
-      ).rejects.toThrow("team member credentials are invalid");
+        readFile(`${configPath}.tokens.json`, "utf8")
+      ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });
