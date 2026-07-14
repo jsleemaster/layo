@@ -34,6 +34,15 @@ future revocation inactive. The test now passes the same injected clock to every
 lifecycle assertion, so it proves the intended instant without depending on wall
 time.
 
+## Verification
+
+- Full Verification `29312558841` passed maturity/design gates, typecheck,
+  web build, core tests, Rust workspace tests, and the full Playwright CLI suite.
+- Storage Restore Drill `29312558836` passed.
+- Storage Backup Retention `29312558801` passed.
+- Deployment remained non-gating because Vercel exhausted the free daily
+  deployment quota.
+
 ## Remaining Gaps
 
 - MCP self-service token administration is not yet exposed.
