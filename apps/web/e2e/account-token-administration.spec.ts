@@ -166,9 +166,16 @@ test("keeps one-time plaintext transient across every browser lifecycle boundary
   await openTeamPanel(page);
   await page.getByRole("tab", { name: "팀 설정" }).click();
   await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  await expect(page.getByTestId("member-token")).toHaveValue("");
+  await expect(page.getByTestId("account-token-create")).toHaveCount(0);
+  expect(await page.locator("body").textContent()).not.toContain(reloadSecret);
 
-  await page.getByTestId("member-token").fill(ACTIVE_SECRET);
-  await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
+  const restoredCredentialInput = page.getByTestId("member-token");
+  const applyCredentialButton = page.getByRole("button", { name: "멤버 토큰 적용" });
+  await restoredCredentialInput.clear();
+  await restoredCredentialInput.fill(ACTIVE_SECRET);
+  await expect(applyCredentialButton).toBeEnabled();
+  await applyCredentialButton.click();
   await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
   const identitySecret = await createToken(page, "계정 변경 비밀");
 
@@ -201,6 +208,102 @@ test("keeps one-time plaintext transient across every browser lifecycle boundary
   for (const secret of [firstSecret, secondSecret, thirdSecret, reloadSecret, identitySecret]) {
     expect(storageDump).not.toContain(secret);
   }
+});
+
+test("guards pending operations, network errors, and stale identity responses", async ({ page }) => {
+  await createAuthenticatedLocalTeam(page);
+
+  let releaseCreate!: () => void;
+  let createSeen!: () => void;
+  const createGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
+  const sawCreate = new Promise<void>((resolve) => { createSeen = resolve; });
+  let delayCreate = true;
+  let abortNextList = false;
+  let releaseRefresh!: () => void;
+  let refreshSeen!: () => void;
+  let refreshGate = Promise.resolve();
+  let sawRefresh = Promise.resolve();
+
+  await page.route(`${API_ORIGIN}/account/tokens**`, async (route) => {
+    const method = route.request().method();
+    if (method === "POST" && delayCreate) {
+      delayCreate = false;
+      createSeen();
+      await createGate;
+      await route.continue();
+      return;
+    }
+    if (method === "GET" && abortNextList) {
+      abortNextList = false;
+      await route.abort("failed");
+      return;
+    }
+    if (method === "GET" && releaseRefresh) {
+      refreshSeen();
+      await refreshGate;
+      releaseRefresh = undefined as unknown as () => void;
+      await route.continue();
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByTestId("account-token-name").fill("지연 생성");
+  await page.getByTestId("account-token-create").click();
+  await sawCreate;
+  await expect(page.getByTestId("account-token-create")).toBeDisabled();
+  abortNextList = true;
+  releaseCreate();
+  await expect(page.getByTestId("account-token-secret")).toBeVisible();
+  await expect(page.getByTestId("account-token-status")).toContainText("토큰은 생성되었지만");
+
+  abortNextList = true;
+  await page.getByTestId("account-token-refresh").click();
+  await expect(page.getByTestId("account-token-status")).toContainText("계정 토큰 목록을 불러오지 못했습니다");
+
+  let releaseRevoke!: () => void;
+  let revokeSeen!: () => void;
+  const revokeGate = new Promise<void>((resolve) => { releaseRevoke = resolve; });
+  const sawRevoke = new Promise<void>((resolve) => { revokeSeen = resolve; });
+  await page.route(`${API_ORIGIN}/account/tokens/sibling-token`, async (route) => {
+    if (route.request().method() === "DELETE") {
+      revokeSeen();
+      await revokeGate;
+    }
+    await route.continue();
+  });
+  await page.getByTestId("account-token-revoke-sibling-token").click();
+  await sawRevoke;
+  await expect(page.getByTestId("account-token-revoke-sibling-token")).toBeDisabled();
+  releaseRevoke();
+  await expect(page.getByTestId("account-token-row-sibling-token")).toContainText("해지됨");
+
+  await page.getByRole("button", { name: "설정 내보내기" }).click();
+  const manifest = page.getByTestId("team-manifest");
+  const changedIdentity = JSON.parse(await manifest.inputValue()) as {
+    currentUserId: string;
+    members: Array<Record<string, unknown>>;
+  };
+  changedIdentity.currentUserId = "review-user";
+  changedIdentity.members.push({
+    userId: "review-user",
+    displayName: "검토 사용자",
+    color: "#0f9f8f",
+    role: "editor"
+  });
+
+  refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+  sawRefresh = new Promise<void>((resolve) => { refreshSeen = resolve; });
+  await page.getByTestId("account-token-refresh").click();
+  await sawRefresh;
+  await manifest.fill(JSON.stringify(changedIdentity));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("account-token-member")).toContainText("review-user");
+  releaseRefresh();
+  await expect(page.getByTestId("account-token-status")).toContainText(
+    "멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다"
+  );
+  await expect(page.getByTestId("account-token-list")).toHaveCount(0);
 });
 
 async function createAuthenticatedLocalTeam(page: Page) {
