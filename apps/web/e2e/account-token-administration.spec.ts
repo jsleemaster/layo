@@ -240,18 +240,22 @@ test("drops a delayed create response after replacing an equal-identity collabor
   await page.getByRole("tab", { name: "실시간 협업" }).click();
   await page.getByTestId("team-name").fill("동일 세션 팀");
   await page.getByTestId("relay-url").fill("ws://127.0.0.1:4329");
-  await page.getByTestId("member-token").fill(ACTIVE_SECRET);
 
   const createRelayTeamButton = page.getByRole("button", { name: "협업 팀 만들기" });
   await createRelayTeamButton.click();
   await expect(page.getByTestId("team-status")).toContainText("동일 세션 팀");
   await expect.poll(() => collaborationSocketCount).toBe(1);
 
+  const memberTokenInput = page.getByTestId("member-token");
+  await memberTokenInput.fill(ACTIVE_SECRET);
+  await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
+
+  await page.getByRole("tab", { name: "실시간 협업" }).click();
   await page.getByTestId("team-name").fill("교체된 동일 세션 팀");
-  const replacementMemberToken = page.getByTestId("member-token");
-  await replacementMemberToken.fill(ACTIVE_SECRET);
-  await expect(replacementMemberToken).toHaveValue(ACTIVE_SECRET);
-  await expect(page.getByRole("button", { name: "멤버 토큰 적용" })).toBeDisabled();
+  await memberTokenInput.fill(ACTIVE_SECRET);
+  await expect(memberTokenInput).toHaveValue(ACTIVE_SECRET);
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.trim() === "협업 팀 만들기"
@@ -293,7 +297,9 @@ test("drops a delayed create response after replacing an equal-identity collabor
   });
   await expect.poll(() => collaborationSocketCount).toBe(2);
   await expect(page.getByTestId("team-status")).toContainText("교체된 동일 세션 팀");
-  await replacementListResponse;
+  const replacementList = await replacementListResponse;
+  expect(replacementList.request().headers().authorization).toBe(`Bearer ${ACTIVE_SECRET}`);
+  expect(replacementList.request().headers()["x-layo-user-id"]).toBe("local-user");
   await expect(page.getByTestId("account-token-member")).toContainText("local-user");
   await expect(page.getByTestId("account-token-create")).toBeVisible();
 
