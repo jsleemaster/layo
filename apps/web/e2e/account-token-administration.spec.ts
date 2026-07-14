@@ -248,6 +248,10 @@ test("drops a delayed create response after replacing an equal-identity collabor
   await expect.poll(() => collaborationSocketCount).toBe(1);
 
   await page.getByTestId("team-name").fill("교체된 동일 세션 팀");
+  const replacementMemberToken = page.getByTestId("member-token");
+  await replacementMemberToken.fill(ACTIVE_SECRET);
+  await expect(replacementMemberToken).toHaveValue(ACTIVE_SECRET);
+  await expect(page.getByRole("button", { name: "멤버 토큰 적용" })).toBeDisabled();
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.trim() === "협업 팀 만들기"
@@ -275,6 +279,10 @@ test("drops a delayed create response after replacing an equal-identity collabor
   await page.getByTestId("account-token-create").click();
   await delayedCreate.seen.promise;
 
+  const replacementListResponse = page.waitForResponse(
+    (response) => response.request().method() === "GET"
+      && response.url() === `${API_ORIGIN}/account/tokens`
+  );
   await page.evaluate(() => {
     const recreate = (window as Window & { recreateEqualIdentitySession?: () => void })
       .recreateEqualIdentitySession;
@@ -285,7 +293,9 @@ test("drops a delayed create response after replacing an equal-identity collabor
   });
   await expect.poll(() => collaborationSocketCount).toBe(2);
   await expect(page.getByTestId("team-status")).toContainText("교체된 동일 세션 팀");
+  await replacementListResponse;
   await expect(page.getByTestId("account-token-member")).toContainText("local-user");
+  await expect(page.getByTestId("account-token-create")).toBeVisible();
 
   delayedCreate.release.resolve();
   await createResponse;
