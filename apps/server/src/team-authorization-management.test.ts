@@ -244,14 +244,15 @@ describe("team access token administration", () => {
       expect(await readFile(configPath, "utf8")).toBe(operatorConfig);
       const sidecar = await readFile(`${configPath}.tokens.json`, "utf8");
       expect(sidecar).not.toContain("layo_pat_must_not_persist");
-      expect(() =>
-        authenticateTeamMember(
-          source.config,
-          "owner-user",
-          "layo_pat_must_not_persist",
-          new Date("2026-07-14T12:00:00.000Z")
+      await expect(
+        manager.manageTokens(
+          {
+            userId: "owner-user",
+            memberToken: "layo_pat_must_not_persist"
+          },
+          { type: "list" }
         )
-      ).toThrow("team member credentials are invalid");
+      ).rejects.toThrow("team member credentials are invalid");
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });

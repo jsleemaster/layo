@@ -496,11 +496,27 @@ describe("team library authorization", () => {
 
     try {
       await writeFile(configPath, "{ malformed", "utf8");
-      await waitFor(() => reloadErrors.length === 1);
+      await waitFor(() => reloadErrors.length > 0);
 
       expect(
         authenticateTeamMember(source.config, "editor-user", "stable-token")
       ).toMatchObject({ userId: "editor-user", role: "editor" });
+
+      await writeFile(configPath, credentialJson("recovered-token"), "utf8");
+      await waitFor(() => {
+        try {
+          return authenticateTeamMember(
+            source.config,
+            "editor-user",
+            "recovered-token"
+          ).userId === "editor-user";
+        } catch {
+          return false;
+        }
+      });
+      expect(() =>
+        authenticateTeamMember(source.config, "editor-user", "stable-token")
+      ).toThrow("team member credentials are invalid");
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });
