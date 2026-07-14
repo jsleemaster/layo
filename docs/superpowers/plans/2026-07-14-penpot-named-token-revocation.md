@@ -42,6 +42,8 @@ while preserving another token for the same member.
   `29308861636`, job `87008099707`.
 - [x] Prevent a revoked named record from falling back to a matching legacy
   secret after security RED `29309012183`, job `87008553748`.
+- [x] Fail closed when multiple named records match one bearer secret after
+  external-review RED `29310081677`, job `87011834431`.
 - [x] Pass Full Verification `29309298280`, job `87009441293`, and prepare
   the review, merge, and post-merge cleanup gate.
 
