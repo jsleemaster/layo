@@ -189,6 +189,8 @@ test("stdio MCP manages only the authenticated member's file-backed account toke
     "utf8"
   );
 
+  const baseSnapshot = await readFile(membersFile, "utf8");
+
   try {
     const result = await runStdioTokenManagement(membersFile);
     expect(result.created.token).toMatch(/^layo_pat_/);
@@ -199,20 +201,30 @@ test("stdio MCP manages only the authenticated member's file-backed account toke
       revokedAt: expect.any(String)
     });
 
-    const persistedText = await readFile(membersFile, "utf8");
+    expect(await readFile(membersFile, "utf8")).toBe(baseSnapshot);
+    const persistedText = await readFile(`${membersFile}.tokens.json`, "utf8");
     const persisted = JSON.parse(persistedText);
-    const owner = persisted.find((member) => member.userId === "owner-user");
-    const other = persisted.find((member) => member.userId === "other-user");
+    const owner = persisted.members.find(
+      (member) => member.userId === "owner-user"
+    );
     expect(owner.tokens).toEqual([
       expect.objectContaining({
         id: result.created.metadata.id,
         name: "Stdio deploy automation",
-        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/),
-        revokedAt: expect.any(String)
+        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/)
       })
     ]);
+    expect(owner.revocations).toEqual([
+      {
+        tokenId: result.created.metadata.id,
+        revokedAt: result.revoked.metadata.revokedAt
+      }
+    ]);
     expect(persistedText).not.toContain(result.created.token);
+    expect(persistedText).not.toMatch(/"token"\\s*:/);
     expect(owner.tokens[0]).not.toHaveProperty("token");
+    const baseMembers = JSON.parse(baseSnapshot);
+    const other = baseMembers.find((member) => member.userId === "other-user");
     expect(other.tokens).toEqual([otherToken]);
   } finally {
     await rm(root, { recursive: true, force: true });
