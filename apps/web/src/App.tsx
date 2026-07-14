@@ -9441,6 +9441,9 @@ export function App() {
   const [accountTokenRecovery, setAccountTokenRecovery] = useState(false);
   const [selfRevokeTokenId, setSelfRevokeTokenId] = useState<string | null>(null);
   const [confirmSelfRevoke, setConfirmSelfRevoke] = useState(false);
+  const [accountTokenCreatePending, setAccountTokenCreatePending] = useState(false);
+  const [accountTokenRefreshPending, setAccountTokenRefreshPending] = useState(false);
+  const [accountTokenRevokingId, setAccountTokenRevokingId] = useState<string | null>(null);
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -9514,6 +9517,13 @@ export function App() {
   const [componentVariantSourceReorderSession, setComponentVariantSourceReorderSession] =
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
+  const accountTokenIdentityKey = [
+    teamPanelMode,
+    collabSession?.team.teamId ?? "no-team",
+    collabSession?.team.currentUserId ?? "no-user",
+    activeMemberToken
+  ].join(":");
+  accountTokenIdentityRef.current = accountTokenIdentityKey;
   const editorRef = useRef<EditorState | null>(null);
   const nodeStylePersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
@@ -9524,6 +9534,9 @@ export function App() {
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAuthorizationEndedRef = useRef(false);
+  const accountTokenOperationGenerationRef = useRef(0);
+  const accountTokenIdentityRef = useRef("");
+  const memberTokenInputRef = useRef<HTMLInputElement | null>(null);
   const libraryRegistryCredentialReconnectPendingRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
@@ -9904,10 +9917,14 @@ export function App() {
   ]);
 
   useEffect(() => {
+    const operation = beginAccountTokenOperation();
     setCreatedAccountTokenSecret(null);
     setAccountTokenSecretStatus("");
     setSelfRevokeTokenId(null);
     setConfirmSelfRevoke(false);
+    setAccountTokenCreatePending(false);
+    setAccountTokenRefreshPending(false);
+    setAccountTokenRevokingId(null);
 
     if (teamPanelMode !== "manifest") {
       return undefined;
@@ -9921,31 +9938,50 @@ export function App() {
       return undefined;
     }
 
-    let cancelled = false;
     setAccountTokenRecovery(false);
+    setAccountTokenRefreshPending(true);
     setAccountTokenStatus("계정 토큰 불러오는 중");
     void listAccountTokens(collabSession.team.currentUserId, activeMemberToken)
       .then((result) => {
-        if (cancelled) return;
+        if (!isCurrentAccountTokenOperation(operation)) return;
         setAccountTokens(result.tokens);
         setActiveAccountTokenId(result.activeTokenId);
         setAccountTokenStatus(`계정 토큰 ${result.tokens.length}개`);
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (!isCurrentAccountTokenOperation(operation)) return;
         setAccountTokens([]);
         setActiveAccountTokenId(undefined);
         setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 불러오지 못했습니다");
+      })
+      .finally(() => {
+        if (isCurrentAccountTokenOperation(operation)) {
+          setAccountTokenRefreshPending(false);
+        }
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return undefined;
   }, [
     teamPanelMode,
+    collabSession?.team.teamId,
     collabSession?.team.currentUserId,
     activeMemberToken,
     memberTokenRevision
+  ]);
+
+  useEffect(() => {
+    if (leftPanelMode !== "team") return undefined;
+    setMemberToken("");
+    const frame = window.requestAnimationFrame(() => {
+      if (memberTokenInputRef.current) {
+        memberTokenInputRef.current.value = "";
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    leftPanelMode,
+    collabSession?.team.teamId,
+    collabSession?.team.currentUserId
   ]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
@@ -15205,16 +15241,48 @@ export function App() {
     setManifestStatus(`팀 설정 가져오기 실패: ${message}`);
   };
 
-  const refreshAccountTokens = async (status?: string) => {
-    if (!collabSession || !activeMemberToken) return;
-    const result = await listAccountTokens(collabSession.team.currentUserId, activeMemberToken);
-    setAccountTokens(result.tokens);
-    setActiveAccountTokenId(result.activeTokenId);
-    setAccountTokenStatus(status ?? `계정 토큰 ${result.tokens.length}개`);
+  const beginAccountTokenOperation = () => ({
+    generation: ++accountTokenOperationGenerationRef.current,
+    identity: accountTokenIdentityRef.current
+  });
+
+  const isCurrentAccountTokenOperation = (operation: { generation: number; identity: string }) =>
+    operation.generation === accountTokenOperationGenerationRef.current
+    && operation.identity === accountTokenIdentityRef.current;
+
+  const refreshAccountTokens = async (successStatus?: string) => {
+    if (!collabSession || !activeMemberToken || accountTokenRefreshPending) return;
+    const operation = beginAccountTokenOperation();
+    setAccountTokenRefreshPending(true);
+    if (!successStatus) {
+      setAccountTokenStatus("계정 토큰 불러오는 중");
+    }
+    try {
+      const result = await listAccountTokens(collabSession.team.currentUserId, activeMemberToken);
+      if (!isCurrentAccountTokenOperation(operation)) return;
+      setAccountTokens(result.tokens);
+      setActiveAccountTokenId(result.activeTokenId);
+      setAccountTokenStatus(successStatus ?? `계정 토큰 ${result.tokens.length}개`);
+    } catch (error) {
+      if (!isCurrentAccountTokenOperation(operation)) return;
+      const message = error instanceof Error ? error.message : "계정 토큰 목록을 불러오지 못했습니다";
+      setAccountTokenStatus(message);
+    } finally {
+      if (isCurrentAccountTokenOperation(operation)) {
+        setAccountTokenRefreshPending(false);
+      }
+    }
   };
 
   const handleCreateAccountToken = async () => {
-    if (!collabSession || !activeMemberToken || !accountTokenName.trim()) return;
+    if (
+      !collabSession
+      || !activeMemberToken
+      || !accountTokenName.trim()
+      || accountTokenCreatePending
+    ) return;
+    const operation = beginAccountTokenOperation();
+    setAccountTokenCreatePending(true);
     setCreatedAccountTokenSecret(null);
     setAccountTokenSecretStatus("");
     setSelfRevokeTokenId(null);
@@ -15227,11 +15295,40 @@ export function App() {
           expiresInDays: accountTokenExpiry ? Number(accountTokenExpiry) as 30 | 60 | 90 | 180 : null
         }
       );
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setCreatedAccountTokenSecret(created.token);
       setAccountTokenName("");
-      await refreshAccountTokens(`${created.metadata.name} 토큰 생성됨`);
+      setAccountTokens((current) => [
+        ...current.filter((token) => token.id !== created.metadata.id),
+        created.metadata
+      ]);
+      setAccountTokenStatus(`${created.metadata.name} 토큰 생성됨`);
+      setAccountTokenCreatePending(false);
+
+      const refreshOperation = beginAccountTokenOperation();
+      setAccountTokenRefreshPending(true);
+      try {
+        const result = await listAccountTokens(collabSession.team.currentUserId, activeMemberToken);
+        if (!isCurrentAccountTokenOperation(refreshOperation)) return;
+        setAccountTokens(result.tokens);
+        setActiveAccountTokenId(result.activeTokenId);
+        setAccountTokenStatus(`${created.metadata.name} 토큰 생성됨`);
+      } catch (error) {
+        if (!isCurrentAccountTokenOperation(refreshOperation)) return;
+        const message = error instanceof Error ? error.message : "계정 토큰 목록을 불러오지 못했습니다";
+        setAccountTokenStatus(`토큰은 생성되었지만 목록을 새로고치지 못했습니다: ${message}`);
+      } finally {
+        if (isCurrentAccountTokenOperation(refreshOperation)) {
+          setAccountTokenRefreshPending(false);
+        }
+      }
     } catch (error) {
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 만들지 못했습니다");
+    } finally {
+      if (isCurrentAccountTokenOperation(operation)) {
+        setAccountTokenCreatePending(false);
+      }
     }
   };
 
@@ -15246,7 +15343,7 @@ export function App() {
   };
 
   const handleRevokeAccountToken = async (tokenId: string) => {
-    if (!collabSession || !activeMemberToken) return;
+    if (!collabSession || !activeMemberToken || accountTokenRevokingId) return;
     setCreatedAccountTokenSecret(null);
     setAccountTokenSecretStatus("");
     if (tokenId === activeAccountTokenId) {
@@ -15254,6 +15351,8 @@ export function App() {
       setConfirmSelfRevoke(false);
       return;
     }
+    const operation = beginAccountTokenOperation();
+    setAccountTokenRevokingId(tokenId);
     try {
       const revoked = await revokeAccountToken(
         collabSession.team.currentUserId,
@@ -15261,17 +15360,31 @@ export function App() {
         tokenId,
         false
       );
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setAccountTokens((current) =>
         current.map((token) => token.id === tokenId ? revoked.metadata : token)
       );
       setAccountTokenStatus(`${revoked.metadata.name} 토큰 해지됨`);
     } catch (error) {
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setAccountTokenStatus(error instanceof Error ? error.message : "계정 토큰을 해지하지 못했습니다");
+    } finally {
+      if (isCurrentAccountTokenOperation(operation)) {
+        setAccountTokenRevokingId(null);
+      }
     }
   };
 
   const handleConfirmSelfRevoke = async () => {
-    if (!collabSession || !activeMemberToken || !selfRevokeTokenId || !confirmSelfRevoke) return;
+    if (
+      !collabSession
+      || !activeMemberToken
+      || !selfRevokeTokenId
+      || !confirmSelfRevoke
+      || accountTokenRevokingId
+    ) return;
+    const operation = beginAccountTokenOperation();
+    setAccountTokenRevokingId(selfRevokeTokenId);
     try {
       await revokeAccountToken(
         collabSession.team.currentUserId,
@@ -15279,6 +15392,7 @@ export function App() {
         selfRevokeTokenId,
         true
       );
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setMemberToken("");
       setActiveMemberToken("");
       setMemberTokenRevision((revision) => revision + 1);
@@ -15291,7 +15405,12 @@ export function App() {
       setAccountTokenStatus("현재 토큰이 해지되었습니다");
       setMemberTokenStatus("현재 토큰이 해지되었습니다. 새 멤버 토큰을 적용해 주세요.");
     } catch (error) {
+      if (!isCurrentAccountTokenOperation(operation)) return;
       setAccountTokenStatus(error instanceof Error ? error.message : "현재 토큰을 해지하지 못했습니다");
+    } finally {
+      if (isCurrentAccountTokenOperation(operation)) {
+        setAccountTokenRevokingId(null);
+      }
     }
   };
 
@@ -16751,9 +16870,11 @@ export function App() {
                 <label>
                   멤버 인증 토큰
                   <input
+                    ref={memberTokenInputRef}
                     data-testid="member-token"
+                    name="layo-member-token-new"
                     type="password"
-                    autoComplete="off"
+                    autoComplete="new-password"
                     value={memberToken}
                     onChange={(event) => setMemberToken(event.currentTarget.value)}
                   />
@@ -16849,7 +16970,13 @@ export function App() {
                       type="button"
                       data-testid="account-token-refresh"
                       onClick={() => void refreshAccountTokens()}
-                      disabled={!collabSession || !activeMemberToken}
+                      disabled={
+                        !collabSession
+                        || !activeMemberToken
+                        || accountTokenRefreshPending
+                        || accountTokenCreatePending
+                        || Boolean(accountTokenRevokingId)
+                      }
                     >
                       새로고침
                     </button>
@@ -16899,7 +17026,12 @@ export function App() {
                           type="button"
                           data-testid="account-token-create"
                           onClick={() => void handleCreateAccountToken()}
-                          disabled={!accountTokenName.trim()}
+                          disabled={
+                            !accountTokenName.trim()
+                            || accountTokenCreatePending
+                            || accountTokenRefreshPending
+                            || Boolean(accountTokenRevokingId)
+                          }
                         >
                           토큰 만들기
                         </button>
@@ -16956,7 +17088,12 @@ export function App() {
                               data-testid={`account-token-revoke-${token.id}`}
                               aria-label={`${token.name} 토큰 해지`}
                               title={`${token.name} 토큰 해지`}
-                              disabled={Boolean(token.revokedAt)}
+                              disabled={
+                                Boolean(token.revokedAt)
+                                || accountTokenCreatePending
+                                || accountTokenRefreshPending
+                                || Boolean(accountTokenRevokingId)
+                              }
                               onClick={() => void handleRevokeAccountToken(token.id)}
                             >
                               해지
@@ -16980,7 +17117,7 @@ export function App() {
                           <button
                             type="button"
                             onClick={() => void handleConfirmSelfRevoke()}
-                            disabled={!confirmSelfRevoke}
+                            disabled={!confirmSelfRevoke || Boolean(accountTokenRevokingId)}
                           >
                             현재 토큰 해지
                           </button>
