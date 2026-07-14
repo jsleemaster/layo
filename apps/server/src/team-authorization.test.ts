@@ -9,7 +9,8 @@ import {
   authorizeTeamLibraryWrite,
   bearerToken,
   parseTeamAuthorizationConfig,
-  watchTeamAuthorizationConfigFile
+  watchTeamAuthorizationConfigFile,
+  watchTeamMemberTokenFile
 } from "./team-authorization";
 
 describe("team library authorization", () => {
@@ -259,6 +260,42 @@ describe("team library authorization", () => {
       expect(
         authenticateTeamMember(source.config, "editor-user", "rotated-token")
       ).toMatchObject({ userId: "editor-user", role: "editor" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reloads an MCP principal token from a watched secret file", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-token-"));
+    const tokenPath = path.join(root, "member-token");
+    await writeFile(tokenPath, "legacy-token\n", "utf8");
+    const source = await watchTeamMemberTokenFile(tokenPath, { pollIntervalMs: 10 });
+
+    try {
+      expect(source.token.value).toBe("legacy-token");
+      await writeFile(tokenPath, "rotated-token\n", "utf8");
+      await waitFor(() => source.token.value === "rotated-token");
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("retains the last valid MCP principal token when the watched secret becomes blank", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-token-"));
+    const tokenPath = path.join(root, "member-token");
+    await writeFile(tokenPath, "stable-token\n", "utf8");
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamMemberTokenFile(tokenPath, {
+      pollIntervalMs: 10,
+      onError: (error) => reloadErrors.push(error)
+    });
+
+    try {
+      await writeFile(tokenPath, "   \n", "utf8");
+      await waitFor(() => reloadErrors.length > 0);
+      expect(source.token.value).toBe("stable-token");
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });
