@@ -72,6 +72,7 @@ async function acquireFileProcessMutationLock(
     hostname: hostname(),
     acquiredAt: new Date().toISOString()
   };
+  // Bounded waits avoid hanging self-hosted auth writes; stale recovery remains same-host only.
   const retryMs = normalizeDuration(options.retryMs, DEFAULT_RETRY_MS, 5);
   const timeoutMs = normalizeDuration(
     options.timeoutMs ?? Number(process.env.LAYO_AUTHORIZATION_LOCK_TIMEOUT_MS),
