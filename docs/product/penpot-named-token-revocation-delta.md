@@ -32,6 +32,8 @@ successful authorization could not identify which credential was used.
 - Revoking one record does not invalidate active sibling tokens.
 - A matching named record takes precedence over legacy fields, so a revoked
   record cannot fall through to the same legacy secret during migration.
+- Authentication fails closed when multiple named records match one bearer
+  secret, preventing record ordering from bypassing revocation or audit identity.
 - Watched authorization-file reload makes individual revocation effective
   without HTTP or MCP restart.
 - Legacy member-level credential fields and member-wide lifecycle timestamps
@@ -57,9 +59,10 @@ tests, and the full Playwright CLI e2e suite. Storage Restore Drill
 
 ## Failure Learning
 
-The first miss was test infrastructure type drift. The second was an ambiguous
-migration precedence rule that could bypass individual revocation. Shared
-production types and the same-secret regression now preserve both decisions.
+The first miss was test infrastructure type drift. The second and third were
+ambiguous same-secret precedence rules across legacy and named credentials.
+Shared production types plus legacy and duplicate-named regressions now preserve
+fail-closed revocation semantics.
 
 A memory note was not added because these are repository-specific contracts
 covered by focused regressions, this delta, and the execution plan.
