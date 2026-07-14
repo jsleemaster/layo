@@ -2305,6 +2305,20 @@ describe("HTTP server", () => {
       documentName: "소스 문서"
     });
     await publisherStorage.setProjectSharing("source-project", { mode: "team", teamId: "team-alpha" });
+    await publisherStorage.createProject({
+      projectId: "beta-source-project",
+      name: "Beta Source",
+      documentId: "beta-source-file",
+      documentName: "Beta Source"
+    });
+    await publisherStorage.setProjectSharing("beta-source-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await publisherStorage.publishLibraryToRegistry("beta-source-file", {
+      libraryId: "beta-kit",
+      name: "Beta Kit"
+    });
     await publisherStorage.applyAgentCommands("source-file", {
       dryRun: false,
       commands: [
@@ -2334,14 +2348,62 @@ describe("HTTP server", () => {
     });
     await streamStorage.setProjectSharing("target-project", { mode: "team", teamId: "team-alpha" });
 
-    const streamServer = createHttpServer(streamStorage);
+    const streamServer = createHttpServer(streamStorage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "alpha-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "alpha-token"
+          },
+          {
+            userId: "beta-viewer",
+            role: "viewer",
+            teamIds: ["team-beta"],
+            token: "beta-token"
+          }
+        ]
+      }
+    });
     const address = await streamServer.listen({ host: "127.0.0.1", port: 0 });
-    const controller = new AbortController();
-
-    try {
-      const stream = await fetch(`${address}/libraries/events?fileId=target-file&after=1`, {
+    const controllers: AbortController[] = [];
+    const openStream = async (
+      headers?: Record<string, string>,
+      endpoint = "/libraries/events?fileId=target-file&after=2"
+    ) => {
+      const controller = new AbortController();
+      controllers.push(controller);
+      const response = await fetch(`${address}${endpoint}`, {
+        headers,
         signal: controller.signal
       });
+      return response;
+    };
+
+    try {
+      const missing = await openStream();
+      expect(missing.status).toBe(401);
+
+      const wrongTeam = await openStream({
+        authorization: "Bearer beta-token",
+        "x-layo-user-id": "beta-viewer"
+      });
+      expect(wrongTeam.status).toBe(403);
+
+      const alphaHeaders = {
+        authorization: "Bearer alpha-token",
+        "x-layo-user-id": "alpha-viewer"
+      };
+      const unscopedStream = await openStream(alphaHeaders, "/libraries/events");
+      expect(unscopedStream.status).toBe(200);
+      await expect(readSseEvent(unscopedStream, "library-registry")).resolves.toMatchObject({
+        sequence: 2,
+        libraryId: "team-kit",
+        teamId: "team-alpha"
+      });
+
+      const stream = await openStream(alphaHeaders);
       expect(stream.status).toBe(200);
       expect(stream.headers.get("content-type")).toContain("text/event-stream");
 
@@ -2369,7 +2431,7 @@ describe("HTTP server", () => {
       const event = await eventPromise;
       expect(event).toMatchObject({
         schemaVersion: 1,
-        sequence: 2,
+        sequence: 3,
         type: "published",
         libraryId: "team-kit",
         libraryName: "Team Kit",
@@ -2379,7 +2441,9 @@ describe("HTTP server", () => {
         registryUpdatedAt: secondPublish.updatedAt
       });
     } finally {
-      controller.abort();
+      for (const controller of controllers) {
+        controller.abort();
+      }
       await streamServer.close();
     }
   });

@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-07-13
+Last checked: 2026-07-14
 
 ## Product Target
 
@@ -353,6 +353,24 @@ without retry. See
 `docs/product/penpot-library-review-authorization-delta.md`. Registry
 EventSource authorization remains the next exact gap because the current
 browser transport cannot send member headers.
+
+## Latest Verified Delta: Team Library Event Authorization
+
+PR #299 closes the hosted registry event-read boundary. Configured HTTP streams
+authenticate before response hijack, enforce exact target-file team access, and
+filter unscoped events to the member's teams. The browser uses credentialed
+fetch SSE without URL secrets, resumes from its last sequence, aborts on
+cleanup, and refreshes the visible library update state without overwriting an
+explicit operation result. Unconfigured local-first streaming remains
+available.
+
+This is an **adapt** of Penpot's team-owned shared-library model to Layo's
+shared-filesystem event log. It is not yet hosted durable pub/sub: credential
+rotation/revocation, multi-instance transactional storage, and durable fanout
+remain open.
+
+Evidence: `docs/product/penpot-library-event-authorization-delta.md`, Full
+Verification `29298859382`.
 
 ## Current Highest-Risk Gaps
 

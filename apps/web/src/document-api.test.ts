@@ -299,75 +299,145 @@ describe("parseDocumentPayload", () => {
     }
   });
 
-  test("subscribes to live library registry events with EventSource", () => {
-    const originalEventSource = globalThis.EventSource;
-    const createdSources: FakeEventSource[] = [];
-    class FakeEventSource extends EventTarget {
-      closed = false;
-
-      constructor(readonly url: string) {
-        super();
-        createdSources.push(this);
-      }
-
-      close() {
-        this.closed = true;
-      }
-    }
-    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-
-    try {
-      const events: unknown[] = [];
-      const unsubscribe = subscribeToLibraryRegistryEvents({
-        fileId: "target-file",
-        after: 3,
-        onLibraryRegistryEvent: (event) => events.push(event)
-      });
-
-      expect(createdSources).toHaveLength(1);
-      const source = createdSources[0];
-      const url = new URL(source.url, "http://127.0.0.1:4317");
-      expect(url.pathname).toBe("/libraries/events");
-      expect(url.searchParams.get("fileId")).toBe("target-file");
-      expect(url.searchParams.get("after")).toBe("3");
-
-      source.dispatchEvent(
-        new MessageEvent("library-registry", {
-          data: JSON.stringify({
-            schemaVersion: 1,
-            eventId: "library-registry-4",
-            sequence: 4,
-            type: "published",
-            libraryId: "team-kit",
-            libraryName: "Team Kit",
-            sourceFileId: "source-file",
-            sourceName: "소스 문서",
-            teamId: "team-alpha",
-            componentCount: 2,
-            tokenCount: 1,
-            tokenSetCount: 0,
-            tokenThemeCount: 0,
-            assetCount: 0,
-            registryUpdatedAt: "2026-06-28T00:00:04.000Z",
-            createdAt: "2026-06-28T00:00:04.000Z"
-          })
-        })
+  test("subscribes to authenticated library registry events with fetch streaming", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(
+              new TextEncoder().encode(
+                [
+                  "event: library-registry",
+                  `data: ${JSON.stringify({
+                    schemaVersion: 1,
+                    eventId: "library-registry-4",
+                    sequence: 4,
+                    type: "published",
+                    libraryId: "team-kit",
+                    libraryName: "Team Kit",
+                    sourceFileId: "source-file",
+                    sourceName: "소스 문서",
+                    teamId: "team-alpha",
+                    componentCount: 2,
+                    tokenCount: 1,
+                    tokenSetCount: 0,
+                    tokenThemeCount: 0,
+                    assetCount: 0,
+                    registryUpdatedAt: "2026-06-28T00:00:04.000Z",
+                    createdAt: "2026-06-28T00:00:04.000Z"
+                  })}`,
+                  "",
+                  ""
+                ].join("\n")
+              )
+            );
+          }
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" }
+        }
       );
-      expect(events).toEqual([
-        expect.objectContaining({
-          schemaVersion: 1,
-          sequence: 4,
-          type: "published",
-          libraryId: "team-kit",
-          registryUpdatedAt: "2026-06-28T00:00:04.000Z"
-        })
-      ]);
+    };
+    const events: unknown[] = [];
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      after: 3,
+      credentials: {
+        userId: "alpha-viewer",
+        memberToken: "alpha-token"
+      },
+      fetcher: fetcher as typeof fetch,
+      onLibraryRegistryEvent: (event) => events.push(event)
+    });
 
-      unsubscribe();
-      expect(source.closed).toBe(true);
-    } finally {
-      globalThis.EventSource = originalEventSource;
+    for (let attempt = 0; attempt < 10 && events.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
+
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0].url, "http://127.0.0.1:4317");
+    expect(url.pathname).toBe("/libraries/events");
+    expect(url.searchParams.get("fileId")).toBe("target-file");
+    expect(url.searchParams.get("after")).toBe("3");
+    expect(url.searchParams.has("token")).toBe(false);
+    expect(calls[0].init?.headers).toEqual({
+      Accept: "text/event-stream",
+      Authorization: "Bearer alpha-token",
+      "X-Layo-User-Id": "alpha-viewer"
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        sequence: 4,
+        type: "published",
+        libraryId: "team-kit",
+        registryUpdatedAt: "2026-06-28T00:00:04.000Z"
+      })
+    ]);
+
+    unsubscribe();
+    expect((calls[0].init?.signal as AbortSignal).aborted).toBe(true);
+    streamController?.close();
+  });
+
+  test("resumes a closed library registry stream from the last sequence", async () => {
+    const urls: string[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      urls.push(String(url));
+      if (urls.length === 1) {
+        return new Response(
+          [
+            "event: library-registry",
+            `data: ${JSON.stringify({
+              schemaVersion: 1,
+              eventId: "library-registry-4",
+              sequence: 4,
+              type: "published",
+              libraryId: "team-kit",
+              libraryName: "Team Kit",
+              sourceFileId: "source-file",
+              sourceName: "Source",
+              teamId: "team-alpha",
+              componentCount: 1,
+              tokenCount: 0,
+              tokenSetCount: 0,
+              tokenThemeCount: 0,
+              assetCount: 0,
+              registryUpdatedAt: "2026-06-28T00:00:04.000Z",
+              createdAt: "2026-06-28T00:00:04.000Z"
+            })}`,
+            "",
+            ""
+          ].join("\n"),
+          { status: 200 }
+        );
+      }
+      return new Response(new ReadableStream<Uint8Array>(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" }
+      });
+    };
+
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      after: 3,
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {}
+    });
+
+    for (let attempt = 0; attempt < 20 && urls.length < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(urls).toHaveLength(2);
+    expect(new URL(urls[1], "http://127.0.0.1:4317").searchParams.get("after")).toBe("4");
+    unsubscribe();
   });
 });
 

@@ -4,8 +4,14 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  const removalOptions = {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 50
+  } as const;
+  await rm(".layo", removalOptions);
+  await rm("apps/server/.layo", removalOptions);
 });
 
 async function openFilePanel(page: Page) {
@@ -578,8 +584,21 @@ test("file panel sends active team member credentials for library publish and im
   await page.getByRole("tab", { name: "실시간 협업" }).click();
   await page.getByTestId("relay-url").fill("ws://127.0.0.1:65534");
   await page.getByTestId("member-token").fill("editor-member-token");
+  const eventStreamRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "GET" &&
+      url.pathname === "/libraries/events" &&
+      url.searchParams.get("fileId") === documentId
+    );
+  });
   await page.getByRole("button", { name: "협업 팀 만들기" }).click();
   await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  const streamed = await eventStreamRequest;
+  expect(streamed.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
 
   await openFilePanel(page);
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
@@ -669,11 +688,10 @@ test("file panel sends active team member credentials for library publish and im
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
-      __layoEventSourceUrls?: string[];
-      __layoLibraryRegistryEventCount?: number;
+      __layoLibraryRegistryStreamUrls?: string[];
       __layoSuppressedLibraryRegistryPolling?: boolean;
     };
-    const NativeEventSource = window.EventSource;
+    const nativeFetch = window.fetch.bind(window);
     const nativeSetInterval = window.setInterval.bind(window);
 
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
@@ -684,21 +702,20 @@ test("file panel publishes imports and updates a shared library registry item", 
       return nativeSetInterval(handler, timeout, ...args);
     }) as typeof window.setInterval;
 
-    class InstrumentedEventSource extends NativeEventSource {
-      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-        super(url, eventSourceInitDict);
-        instrumentedWindow.__layoEventSourceUrls = [
-          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
-          String(url)
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string" || input instanceof URL
+          ? String(input)
+          : input.url;
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/libraries/events") {
+        instrumentedWindow.__layoLibraryRegistryStreamUrls = [
+          ...(instrumentedWindow.__layoLibraryRegistryStreamUrls ?? []),
+          parsedUrl.toString()
         ];
-        this.addEventListener("library-registry", () => {
-          instrumentedWindow.__layoLibraryRegistryEventCount =
-            (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) + 1;
-        });
       }
-    }
-
-    window.EventSource = InstrumentedEventSource;
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
   });
 
   const { documentId } = await createProjectFromEmptyState(page);
@@ -752,12 +769,12 @@ test("file panel publishes imports and updates a shared library registry item", 
   await page.waitForFunction(
     ({ targetDocumentId: expectedDocumentId }) => {
       const instrumentedWindow = window as Window & {
-        __layoEventSourceUrls?: string[];
+        __layoLibraryRegistryStreamUrls?: string[];
         __layoSuppressedLibraryRegistryPolling?: boolean;
       };
       return (
         instrumentedWindow.__layoSuppressedLibraryRegistryPolling === true &&
-        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+        (instrumentedWindow.__layoLibraryRegistryStreamUrls ?? []).some((url) => {
           const parsedUrl = new URL(url, window.location.href);
           return (
             parsedUrl.pathname === "/libraries/events" &&
@@ -768,11 +785,6 @@ test("file panel publishes imports and updates a shared library registry item", 
     },
     { targetDocumentId }
   );
-  const libraryRegistryEventCountBeforeRepublish = await page.evaluate(() => {
-    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
-    return instrumentedWindow.__layoLibraryRegistryEventCount ?? 0;
-  });
-
   const updateCommands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
     data: {
       dryRun: false,
@@ -796,10 +808,6 @@ test("file panel publishes imports and updates a shared library registry item", 
   });
   expect(republished.ok()).toBeTruthy();
 
-  await page.waitForFunction((previousCount) => {
-    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
-    return (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) > previousCount;
-  }, libraryRegistryEventCountBeforeRepublish);
   await expect(page.getByTestId("library-registry-updates")).toContainText("Team Kit 업데이트 가능");
   await page.getByTestId(`library-registry-update-${documentId}`).click();
   await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 업데이트 적용됨");
@@ -1431,6 +1439,24 @@ test("right inspector authors multi-property component variant combinations", as
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("elevated");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("large");
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      const savedComponent = payload.file.components.find(
+        (candidate: { id: string }) => candidate.id === "component-card"
+      );
+      return (
+        savedComponent.variants.find(
+          (variant: { id: string }) => variant.id === "variant-2"
+        )?.properties ?? []
+      );
+    })
+    .toEqual([
+      { name: "surface", value: "elevated", type: "select" },
+      { name: "size", value: "large", type: "select" }
+    ]);
 
   const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
     data: {
@@ -1887,6 +1913,22 @@ test("component variant property types choose toggle or select controls explicit
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("false");
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      const savedComponent = payload.file.components.find(
+        (candidate: { id: string }) => candidate.id === "component-card"
+      );
+      return savedComponent.variants.find(
+        (variant: { id: string }) => variant.id === "default"
+      ).properties;
+    })
+    .toEqual([
+      { name: "enabled", value: "true", type: "boolean" },
+      { name: "surface", value: "true", type: "select" }
+    ]);
 
   const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
     data: {
@@ -3185,11 +3227,16 @@ test("right-click image menu switches between fill and fit sizing modes", async 
   await menu.getByRole("menuitem", { name: "이미지 맞춤" }).click();
   await expect(page.getByTestId("project-status")).toContainText("이미지 3 이미지 맞춤");
 
-  const fittedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(fittedResponse.ok()).toBeTruthy();
-  const fittedPayload = await fittedResponse.json();
-  const fittedImage = fittedPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
-  expect(fittedImage.content.fit_mode).toBe("fit");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      return payload.file.pages[0].children.find(
+        (node: { id: string }) => node.id === "image-3"
+      ).content.fit_mode;
+    })
+    .toBe("fit");
 
   await page.reload();
   await openFilePanel(page);
@@ -3204,11 +3251,16 @@ test("right-click image menu switches between fill and fit sizing modes", async 
   await expect(menu.getByRole("menuitem", { name: "이미지 채우기" })).toBeEnabled();
   await menu.getByRole("menuitem", { name: "이미지 채우기" }).click();
 
-  const filledResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(filledResponse.ok()).toBeTruthy();
-  const filledPayload = await filledResponse.json();
-  const filledImage = filledPayload.file.pages[0].children.find((node: { id: string }) => node.id === "image-3");
-  expect(filledImage.content.fit_mode).toBe("fill");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      return payload.file.pages[0].children.find(
+        (node: { id: string }) => node.id === "image-3"
+      ).content.fit_mode;
+    })
+    .toBe("fill");
 });
 
 test("right-click menu locks and hides objects while layer state remains recoverable", async ({ page }) => {
@@ -4571,12 +4623,16 @@ test("right inspector manages imported DTCG token sets", async ({ page }) => {
   await page.getByTestId("token-set-enabled-dark").uncheck();
   await expect(page.getByTestId("token-set-enabled-dark")).not.toBeChecked();
 
-  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(fileResponse.ok()).toBeTruthy();
-  expect((await fileResponse.json()).file.token_sets).toEqual([
-    { id: "base", name: "base", enabled: true },
-    { id: "dark", name: "dark", enabled: false }
-  ]);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).file.token_sets;
+    })
+    .toEqual([
+      { id: "base", name: "base", enabled: true },
+      { id: "dark", name: "dark", enabled: false }
+    ]);
 
   await page.getByRole("button", { name: "토큰 내보내기" }).click();
   await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"activeTokenSets": \[\s+"base"\s+\]/);
