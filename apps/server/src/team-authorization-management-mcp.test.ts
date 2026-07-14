@@ -249,7 +249,7 @@ function membersFile(options: {
         role: "owner",
         teamIds: ["team-alpha"],
         ...(principalState === "revoked-member"
-          ? { revokedAt: "2026-07-14T10:00:00.000Z" }
+          ? { revokedAt: "2020-01-01T00:00:00.000Z" }
           : {}),
         tokens: [
           {
@@ -260,7 +260,7 @@ function membersFile(options: {
             ),
             createdAt: "2026-07-13T12:00:00.000Z",
             ...(principalState === "revoked-named"
-              ? { revokedAt: "2026-07-14T10:00:00.000Z" }
+              ? { revokedAt: "2020-01-01T00:00:00.000Z" }
               : {})
           },
           {
