@@ -262,13 +262,18 @@ COLLAB_MEMBER_TOKENS=[]
 Optional hosted library publication authorization:
 
 ```bash
+LAYO_LIBRARY_REGISTRY_MEMBERS_FILE=/run/secrets/layo-library-members.json
 LAYO_LIBRARY_REGISTRY_MEMBERS='[{"userId":"editor-user","role":"editor","teamIds":["team-alpha"],"tokenHash":"<sha256>"}]'
 LAYO_MCP_USER_ID=editor-user
 LAYO_MCP_MEMBER_TOKEN=
 ```
 
-When `LAYO_LIBRARY_REGISTRY_MEMBERS` is set, HTTP and MCP library publication
-requires an owner or editor assigned to the source file's exact team. The web
+When `LAYO_LIBRARY_REGISTRY_MEMBERS_FILE` is set, it takes precedence and HTTP
+plus MCP watch the operator-owned JSON array for credential rotation. A malformed
+or unreadable update retains the last valid member configuration. Without the
+file, `LAYO_LIBRARY_REGISTRY_MEMBERS` remains the static fallback. In either
+configured mode, HTTP and MCP library publication requires an owner or editor
+assigned to the source file's exact team. The web
 editor reuses the runtime member token from the active collaboration team.
 Prefer `tokenHash` for hosted configuration; plaintext `token` entries are
 intended only for local development. Leave the registry member configuration
