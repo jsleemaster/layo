@@ -753,6 +753,56 @@ test("file panel clears protected library state when stream authorization ends",
   expect(streamRequests).toBe(1);
 });
 
+test("team panel replaces an expired member token without recreating the team", async ({ page }) => {
+  const streamTokens: string[] = [];
+  await page.route("**/libraries/events**", async (route) => {
+    const authorization = route.request().headers().authorization;
+    if (!authorization) {
+      await route.continue();
+      return;
+    }
+    streamTokens.push(authorization);
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body:
+        authorization === "Bearer expired-member-token"
+          ? [
+              "event: library-registry-authorization-ended",
+              'data: {"code":"credential_inactive"}',
+              "",
+              ""
+            ].join("\n")
+          : [
+              "event: library-registry-ready",
+              'data: {"ok":true}',
+              "",
+              ""
+            ].join("\n")
+    });
+  });
+
+  await createProjectFromEmptyState(page);
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+
+  await page.getByTestId("member-token").fill("expired-member-token");
+  await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "팀 인증이 만료되었습니다"
+  );
+
+  await page.getByTestId("member-token").fill("rotated-member-token");
+  await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
+
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "팀 인증 다시 연결됨"
+  );
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await expect.poll(() => streamTokens).toContain("Bearer rotated-member-token");
+});
+
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
