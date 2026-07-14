@@ -38,6 +38,10 @@ while preserving another token for the same member.
   secret/hash fields, and independent lifecycle timestamps.
 - [x] Return secret-free `tokenId` and `tokenName` authentication metadata.
 - [x] Cover HTTP and MCP registry authorization with named token records.
+- [x] Replace the MCP test helper's stale duplicate auth type after typecheck RED
+  `29308861636`, job `87008099707`.
+- [x] Prevent a revoked named record from falling back to a matching legacy
+  secret after security RED `29309012183`, job `87008553748`.
 - [ ] Pass final full verification, review, merge, and cleanup.
 
 ## Product Boundary
