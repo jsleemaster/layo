@@ -685,6 +685,52 @@ test("file panel sends active team member credentials for library publish and im
   );
 });
 
+test("file panel clears protected library state when stream authorization ends", async ({ page }) => {
+  let releaseAuthorization!: () => void;
+  const authorizationGate = new Promise<void>((resolve) => {
+    releaseAuthorization = resolve;
+  });
+  let streamRequests = 0;
+  await page.route("**/libraries/events**", async (route) => {
+    streamRequests += 1;
+    if (streamRequests === 1) {
+      await authorizationGate;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: [
+          "event: library-registry-authorization-ended",
+          'data: {"code":"credential_inactive"}',
+          "",
+          ""
+        ].join("\n")
+      });
+      return;
+    }
+    await route.fulfill({ status: 401, body: "unauthorized" });
+  });
+
+  const { documentId } = await createProjectFromEmptyState(page);
+  await openFilePanel(page);
+  await page.getByTestId("library-registry-name").fill("Protected Team Kit");
+  await page.getByRole("button", { name: "현재 파일 라이브러리 게시" }).click();
+  await expect(page.getByTestId("library-registry-list")).toContainText("Protected Team Kit");
+  await page.getByTestId(`library-registry-review-${documentId}`).click();
+  await expect(page.getByTestId("library-registry-review")).toContainText("Protected Team Kit");
+
+  releaseAuthorization();
+
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
+  );
+  await expect(page.getByTestId("library-registry-list")).not.toContainText(
+    "Protected Team Kit"
+  );
+  await expect(page.getByTestId("library-registry-review")).toHaveCount(0);
+  await page.waitForTimeout(1_250);
+  expect(streamRequests).toBe(1);
+});
+
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
