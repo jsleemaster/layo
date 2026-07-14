@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -205,6 +206,43 @@ describe("team access token administration", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  test("fails closed when an operator rewrites the authenticated file before persist", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, ownerConfigWithExistingToken(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    const operatorMembers = JSON.parse(ownerConfigWithExistingToken());
+    operatorMembers[0].tokens[0].revokedAt = "2026-07-14T11:59:00.000Z";
+    const operatorConfig = `${JSON.stringify(operatorMembers, null, 2)}\n`;
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => {
+        writeFileSync(configPath, operatorConfig, "utf8");
+        return "token-after-authentication";
+      },
+      generateSecret: () => "layo_pat_must_not_persist"
+    });
+
+    try {
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "existing-secret" },
+          {
+            type: "create",
+            input: { name: "Conflicting create", expiresInDays: 30 }
+          }
+        )
+      ).rejects.toThrow("team authorization file changed during token management");
+      expect(await readFile(configPath, "utf8")).toBe(operatorConfig);
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+
   test("returns the active named token id only from atomic list authentication", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
