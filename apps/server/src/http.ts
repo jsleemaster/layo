@@ -314,11 +314,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
             fileId: request.query.fileId,
             limit: 100
           });
+          for (const event of events) {
+            lastSequence = Math.max(lastSequence, event.sequence);
+          }
           const authorizedEvents = member
             ? filterAuthorizedTeamLibraries(member, events)
             : events;
           for (const event of authorizedEvents) {
-            lastSequence = Math.max(lastSequence, event.sequence);
             sendBlock("library-registry", event);
           }
         } catch (error) {
