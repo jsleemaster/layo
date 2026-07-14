@@ -54,8 +54,7 @@ describe("team authorization cross-process mutations", () => {
 
       await Promise.all(ready);
       const exits = children.map(waitForSuccessfulExit);
-      await writeFile(releasePath, "release
-", "utf8");
+      await writeFile(releasePath, "release\n", "utf8");
       await Promise.all(exits);
 
       const members = JSON.parse(await readFile(configPath, "utf8")) as Array<{
