@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { unwatchFile } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -330,6 +331,74 @@ describe("team library authorization", () => {
       expect(
         authenticateTeamMember(source.config, "automation-user", "preview-secret")
       ).toMatchObject({ tokenId: "preview" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("retries a transient truncated revocation write without another watcher event", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-token-retry-"));
+    const configPath = path.join(root, "members.json");
+    const members = (revokedAt?: string) => JSON.stringify([
+      {
+        userId: "automation-user",
+        role: "editor",
+        teamIds: ["team-alpha"],
+        tokens: [
+          {
+            id: "deploy",
+            name: "Deploy automation",
+            token: "deploy-secret",
+            ...(revokedAt ? { revokedAt } : {})
+          },
+          {
+            id: "preview",
+            name: "Preview automation",
+            token: "preview-secret"
+          }
+        ]
+      }
+    ]);
+    const completedConfig = members(new Date(Date.now() - 1_000).toISOString());
+    await writeFile(configPath, members(), "utf8");
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => {
+        reloadErrors.push(error);
+        unwatchFile(configPath);
+      }
+    });
+
+    try {
+      await writeFile(
+        configPath,
+        completedConfig.slice(0, Math.floor(completedConfig.length / 2)),
+        "utf8"
+      );
+      await waitFor(() => reloadErrors.length >= 2);
+
+      expect(() =>
+        authenticateTeamMember(source.config, "automation-user", "preview-secret")
+      ).toThrow("team member credentials are invalid");
+
+      await writeFile(configPath, completedConfig, "utf8");
+      await waitFor(() => {
+        try {
+          return authenticateTeamMember(
+            source.config,
+            "automation-user",
+            "preview-secret"
+          ).tokenId === "preview";
+        } catch {
+          return false;
+        }
+      });
+
+      expect(() =>
+        authenticateTeamMember(source.config, "automation-user", "deploy-secret")
+      ).toThrow("team member credentials are invalid");
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });
