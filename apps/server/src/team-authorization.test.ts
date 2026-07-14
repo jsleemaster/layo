@@ -228,6 +228,40 @@ describe("team library authorization", () => {
     ).toMatchObject({ tokenId: "active-preview", tokenName: "Preview key" });
   });
 
+  test("denies a shared secret when any matching named token is inactive", () => {
+    const config = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "automation-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          tokens: [
+            {
+              id: "active-first",
+              name: "Active duplicate",
+              token: "shared-secret"
+            },
+            {
+              id: "revoked-second",
+              name: "Revoked duplicate",
+              token: "shared-secret",
+              revokedAt: "2026-07-14T10:00:00.000Z"
+            }
+          ]
+        }
+      ])
+    );
+
+    expect(captureError(() =>
+      authenticateTeamMember(
+        config!,
+        "automation-user",
+        "shared-secret",
+        new Date("2026-07-14T12:00:00.000Z")
+      )
+    )).toMatchObject({ statusCode: 401 });
+  });
+
   test("rejects duplicate named token ids for one member", () => {
     expect(() =>
       parseTeamAuthorizationConfig(
