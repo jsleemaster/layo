@@ -276,6 +276,14 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { fileId?: string; after?: string } }>(
     "/libraries/events",
     async (request, reply) => {
+      const member = authenticateLibraryMember(request);
+      if (member && request.query.fileId) {
+        authorizeTeamLibraryRead(
+          member,
+          await storage.getTeamIdForFile(request.query.fileId)
+        );
+      }
+
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -306,7 +314,10 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
             fileId: request.query.fileId,
             limit: 100
           });
-          for (const event of events) {
+          const authorizedEvents = member
+            ? filterAuthorizedTeamLibraries(member, events)
+            : events;
+          for (const event of authorizedEvents) {
             lastSequence = Math.max(lastSequence, event.sequence);
             sendBlock("library-registry", event);
           }
