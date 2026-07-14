@@ -143,7 +143,7 @@ Deployment remains a separate non-gating concern.
 - P1 RED `69ea991` delayed create completion across replacement of a
   `collabSession` whose identity values were intended to remain equal.
 - Implementation commits `3047`, `d342`, and `fd51` added a
-  collaboration-session instance generation to the async guard.
+  direct `collabSession` object reference to the async guard.
 - Review found the first regression was a false positive because it did not
   prove the replacement retained the same token. Corrected test `bd7acd`
   refills/asserts the identical token, waits for the replacement list response,
@@ -154,8 +154,9 @@ Deployment remains a separate non-gating concern.
 - Intermittent Full `29333986663` failed Core when an older remove callback
   could quarantine a newly reintroduced member generation.
 - Deterministic RED `4f75d7` pauses quarantine while the member is restored
-  and a fresh create begins. Full `29334373513` was superseded during setup,
-  so it did not execute the RED gates.
+  and a fresh create begins. Full `29334373513` executed the RED and failed
+  exactly the intended `settledBeforeQuarantine` assertion with 358/359 server
+  tests passing.
 - GREEN `35ef` makes managers wait for the process-local watcher reload tail
   and applies quarantine only to the exact observed sidecar snapshot. Full
   `29334572132` reached Core GREEN before Playwright was superseded.
@@ -168,15 +169,17 @@ Deployment remains a separate non-gating concern.
 
 ### Current merge gate
 
-- Full Verification `29335200155`: **pending at this evidence cut; not GREEN**.
-- Full `29333986663` is RED Core. Full `29334373513` was cancelled before
-  RED execution. Fulls `29334572132` and `29334928481` are Core GREEN only
+- Full Verification `29335200155`: passed gates, typecheck, build, and Core, then was superseded and cancelled during Playwright by the docs push; not GREEN.
+- Full `29333986663` is RED Core. Full `29334373513` is the deterministic
+  358/359 RED at `settledBeforeQuarantine`. Fulls `29334572132` and
+  `29334928481` are Core GREEN only
   because later commits superseded Playwright.
 - Vercel passed on `bd7acd`, but deployment remains non-gating for this
   local-first MCP/UI slice.
-- Tasks 1-3 are complete. Security re-review is approved. Task 4 remains in
-  progress until final Full Verification, merge, and post-merge cleanup are
-  actually complete.
+- Tasks 1-3 are complete. Security re-review is approved. The final docs-head
+  Full, including the corrected equal-session E2E, remains pending without a
+  pinned run id. Task 4 remains in progress until that Full, merge, and
+  post-merge cleanup are actually complete.
 
 ### Task 4: Verification, review, and durable evidence
 

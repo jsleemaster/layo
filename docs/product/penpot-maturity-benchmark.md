@@ -61,10 +61,10 @@ through explicit clipboard copy.
 
 MCP authorization and mutation use one freshly parsed, process-locked snapshot.
 The browser invalidates stale list/create/revoke responses by operation
-generation, identity, and collaboration-session instance. The same-identity P1
+generation, identity, and direct `collabSession` object reference. The same-identity P1
 RED `69ea991` showed a delayed create response crossing replacement of a
 `collabSession` with equal team/member/token values. Implementation commits
-`3047`, `d342`, and `fd51` added session-instance invalidation. Review then
+`3047`, `d342`, and `fd51` added direct `collabSession` reference invalidation. Review then
 found the first test was a false positive because it did not prove the
 replacement retained the same token; corrected test `bd7acd` explicitly
 preserves that token, waits for the replacement list request, and still proves
@@ -72,8 +72,9 @@ the delayed secret/result is discarded.
 
 The watcher remove/reintroduce race first appeared intermittently in failed Full
 `29333986663`. Deterministic RED `4f75d7` holds quarantine while the same
-member is restored and a fresh generation starts; its Full `29334373513` was
-superseded before the test gates ran. GREEN `35ef` serializes managers behind
+member is restored and a fresh generation starts. Full `29334373513` executed
+that RED and failed exactly the intended `settledBeforeQuarantine` assertion
+with 358/359 server tests passing. GREEN `35ef` serializes managers behind
 the process-local reload/quarantine tail and binds quarantine to the observed
 sidecar snapshot. Full `29334572132` reached Core GREEN before supersession.
 Stress commit `ff7` repeated the exact race 20 times; Full `29334928481`
@@ -83,8 +84,10 @@ repair with no actionable blocker.
 Focused real-network Playwright passed 3/3 and the direct headed interaction
 passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
 confirmed self-revocation left an empty credential field with recovery guidance.
-Full Verification `29335200155` is **pending at this evidence cut and is not
-GREEN**. Vercel passed on `bd7acd`, but deployment remains non-gating.
+Full Verification `29335200155` passed gates, typecheck, build, and Core, then
+was superseded and cancelled during Playwright by the documentation push; it is
+not GREEN. The final docs-head Full, including the corrected equal-session E2E,
+remains pending. Vercel passed on `bd7acd`, but deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps

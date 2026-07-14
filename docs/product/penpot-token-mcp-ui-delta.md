@@ -13,9 +13,10 @@ Status: PR #308 active; implementation evidence exists, merge gate pending
   operator members file remains external and is never replaced.
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
-- Current gate: Full Verification `29335200155` is pending at this evidence
-  cut and is not GREEN. Do not treat this delta, PR, or gates 7/8/10 as complete
-  yet.
+- Current gate: Full Verification `29335200155` was superseded and cancelled
+  during Playwright by the documentation push; it is not GREEN. The final
+  docs-head Full, including the corrected equal-session E2E, remains pending.
+  Do not treat this delta, PR, or gates 7/8/10 as complete yet.
 
 ## Penpot Reference And Decision
 
@@ -99,7 +100,7 @@ manifests. Dismissal, another create, identity change, leaving team settings,
 reload, and successful self-revocation clear component state.
 
 Each account-token request captures an operation generation, identity key, and
-collaboration-session instance generation. Only the current operation for the
+direct `collabSession` object reference. Only the current operation for the
 same identity and same `collabSession` instance may update metadata, errors, or
 one-time secret state. Delayed list/create/revoke responses cannot cross a
 session replacement even when the replacement has the same team id, member id,
@@ -109,7 +110,7 @@ and token.
 
 RED `69ea991` targeted a delayed create response released after replacement of
 an equal-identity collaboration session. Implementation commits `3047`,
-`d342`, and `fd51` introduced session-instance invalidation and reset/reload
+`d342`, and `fd51` introduced direct `collabSession` reference invalidation and reset/reload
 ordering. Test review found the initial regression was a false positive: the
 replacement path did not prove it retained the same token, so an ordinary
 identity change could explain the discarded response. Corrected test `bd7acd`
@@ -126,9 +127,9 @@ generation.
 
 Deterministic RED `4f75d7` pauses the watcher immediately before quarantine,
 restores the original member, starts a fresh managed-token create, and proves
-the create must not settle until quarantine resolution. Full `29334373513` was
-superseded during setup before executing the RED gates, so the commit-level
-deterministic case is the RED evidence; that Full is not.
+the create must not settle until quarantine resolution. Full `29334373513`
+executed that RED and failed exactly the intended
+`settledBeforeQuarantine` assertion with 358/359 server tests passing.
 
 GREEN `35ef` records the watcher reload tail on the shared in-memory config,
 makes managers wait for that tail before entering the sidecar process lock, and
@@ -166,12 +167,13 @@ globally.
 | Retention `29332908332` | Passed | Implementation-head backup retention |
 | Full `29333986663` | RED Core | Intermittent watcher removal/reintroduction race |
 | Commit `4f75d7` | Deterministic RED | Paused quarantine reproduced the fresh-generation race |
-| Full `29334373513` | Cancelled | Superseded during setup; did not execute RED gates |
+| Full `29334373513` | Deterministic RED | Executed the intended `settledBeforeQuarantine` failure; 358/359 server tests passed |
 | Full `29334572132` | Core GREEN | Watcher-tail/snapshot fix passed Core; superseded during Playwright |
 | Full `29334928481` | Core GREEN | 20x stress passed Core; superseded during Playwright |
 | Security re-review | Approved | No actionable blocker in the watcher repair |
 | Vercel on `bd7acd` | Passed, non-gating | Preview deployment is separate from the product merge gate |
-| Full `29335200155` | **Pending, not GREEN** | Current implementation head; conclusion not yet verified |
+| Full `29335200155` | Cancelled, not GREEN | Passed gates/typecheck/build/Core; docs push superseded it during Playwright |
+| Final docs-head Full | Pending | Must execute the corrected equal-session E2E before merge; no run id is pinned here |
 
 The initial browser async guard also failed typecheck because its identity ref was
 declared after first use. After `9e500aa`, the focused lifecycle revealed that

@@ -321,9 +321,9 @@ sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. The browser clears it on dismissal, another create, identity change,
 leaving team settings, reload, and successful self-revocation; clipboard copy is
 the only intentional external copy. Account-token requests carry an operation generation, identity
-snapshot, and collaboration-session instance generation. Stale async
+snapshot, and the direct `collabSession` object reference. Stale async
 list/create/revoke responses are discarded after identity changes, newer
-operations, or replacement of the active `collabSession` even when team id,
+operations, or replacement of the active `collabSession` object even when team id,
 member id, and member token are unchanged. Current-token revocation requires
 explicit confirmation, clears the active credential, and leaves the local team
 available for root-token recovery.
