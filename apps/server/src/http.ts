@@ -146,7 +146,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       throw new Error("unexpected team authorization list result");
     }
     return {
-      tokens: result.tokens.map(accountTokenMetadataResponse)
+      tokens: result.tokens.map(accountTokenMetadataResponse),
+      ...(result.activeTokenId ? { activeTokenId: result.activeTokenId } : {})
     };
   });
 
