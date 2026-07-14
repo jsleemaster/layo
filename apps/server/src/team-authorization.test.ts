@@ -14,6 +14,7 @@ import {
   watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile
 } from "./team-authorization";
+import { fileProcessMutationLockPath } from "./file-process-lock";
 
 describe("team library authorization", () => {
   test("parses normalized plaintext and SHA-256 member credentials", () => {
@@ -771,7 +772,7 @@ describe("team library authorization", () => {
     }
   });
 
-  test("does not republish a survivor token revoked by another manager during recovery", async () => {
+  test("serializes recovery publication before applying a competing manager revocation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-recovery-race-"));
     const configPath = path.join(root, "members.json");
     const removedMember = {
@@ -792,33 +793,37 @@ describe("team library authorization", () => {
     let externalManager:
       | ReturnType<typeof createTeamAuthorizationFileManager>
       | undefined;
-    let survivorTokenActiveWhenQuarantineReported: boolean | undefined;
-    let sourceConfig:
-      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+    let competingRevocation:
+      | ReturnType<ReturnType<typeof createTeamAuthorizationFileManager>["revokeToken"]>
       | undefined;
+    let competingRevocationCompleted = false;
+    let competingRevocationWasBlocked = false;
+    let recoveryLockObserved = false;
     const reloadErrors: Error[] = [];
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 10,
       beforeManagedTokenRecoveryPublish: async () => {
-        if (injectManagerMutation) {
-          await externalManager?.revokeToken("surviving-user", "surviving-managed");
+        if (!injectManagerMutation || !externalManager) {
+          return;
         }
+        const ownerPath = path.join(
+          fileProcessMutationLockPath(configPath + ".tokens.json"),
+          "owner.json"
+        );
+        recoveryLockObserved = JSON.parse(
+          await readFile(ownerPath, "utf8")
+        ).schemaVersion === 1;
+        competingRevocation = externalManager
+          .revokeToken("surviving-user", "surviving-managed")
+          .then((result) => {
+            competingRevocationCompleted = true;
+            return result;
+          });
+        await Promise.resolve();
+        competingRevocationWasBlocked = !competingRevocationCompleted;
       },
-      onError: (error) => {
-        reloadErrors.push(error);
-        if (
-          error.message === "team authorization token sidecar member was removed"
-          && sourceConfig
-        ) {
-          survivorTokenActiveWhenQuarantineReported = authenticationSucceeds(
-            sourceConfig,
-            "surviving-user",
-            "surviving-managed-secret"
-          );
-        }
-      }
+      onError: (error) => reloadErrors.push(error)
     });
-    sourceConfig = source.config;
     const ids = ["removed-managed", "surviving-managed"];
     const secrets = ["removed-managed-secret", "surviving-managed-secret"];
     const manager = createTeamAuthorizationFileManager(configPath, source.config, {
@@ -848,7 +853,16 @@ describe("team library authorization", () => {
         (error) => error.message === "team authorization token sidecar member was removed"
       ));
 
-      expect(survivorTokenActiveWhenQuarantineReported).toBe(false);
+      expect(recoveryLockObserved).toBe(true);
+      expect(competingRevocationWasBlocked).toBe(true);
+      expect(competingRevocation).toBeDefined();
+      await competingRevocation;
+      await waitFor(() => !authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-managed-secret"
+      ));
+      await source.settled();
       expect(authenticationSucceeds(
         source.config,
         "surviving-user",
