@@ -594,6 +594,70 @@ describe("team library authorization", () => {
   });
 
 
+  test("exposes a quiescence boundary for in-flight quarantine work after close", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-close-settled-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    let quarantineStartedResolve: (() => void) | undefined;
+    const quarantineStarted = new Promise<void>((resolve) => {
+      quarantineStartedResolve = resolve;
+    });
+    let releaseQuarantineResolve: (() => void) | undefined;
+    const releaseQuarantine = new Promise<void>((resolve) => {
+      releaseQuarantineResolve = resolve;
+    });
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      beforeManagedTokenQuarantine: async () => {
+        quarantineStartedResolve?.();
+        await releaseQuarantine;
+      }
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      generateId: () => "removed-managed",
+      generateSecret: () => "removed-managed-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await quarantineStarted;
+
+      source.close();
+      let settled = false;
+      const settling = source.settled().then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      releaseQuarantineResolve?.();
+      await settling;
+      expect(settled).toBe(true);
+      await rm(root, { recursive: true, force: true });
+    } finally {
+      releaseQuarantineResolve?.();
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("starts with a quarantined v1 sidecar so a valid base credential can reconcile it", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-v1-recovery-"));
     const configPath = path.join(root, "members.json");
@@ -694,7 +758,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "recovery-user", false);
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -761,7 +825,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "removed-user", true);
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -902,7 +966,7 @@ describe("team library authorization", () => {
       }
     } finally {
       source.close();
-      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 10 });
+      await rm(root, { recursive: true, force: true });
     }
   });
 
