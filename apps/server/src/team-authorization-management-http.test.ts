@@ -1,12 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createHttpServer } from "./http";
 import { FileStorage } from "./storage";
 import {
   createTeamAuthorizationFileManager,
-  watchTeamAuthorizationConfigFile
+  watchTeamAuthorizationConfigFile,
+  type TeamAuthorizationFileManager
 } from "./team-authorization";
 
 const roots: string[] = [];
@@ -16,7 +17,7 @@ afterEach(async () => {
 });
 
 describe("team access token HTTP administration", () => {
-  test("creates, lists, and revokes only the authenticated member's token", async () => {
+  test("creates, lists, and revokes only the authenticated legacy member's token", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-http-"));
     roots.push(root);
     const configPath = path.join(root, "members.json");
@@ -85,8 +86,10 @@ describe("team access token HTTP administration", () => {
       });
       expect(listed.statusCode).toBe(200);
       expect(listed.json()).toEqual({ tokens: [created.json().metadata] });
+      expect(listed.body).not.toContain("activeTokenId");
       expect(listed.body).not.toContain("layo_pat_http_secret");
       expect(listed.body).not.toContain("tokenHash");
+      expect(listed.body).not.toContain("tokenHashes");
 
       const otherList = await server.inject({
         method: "GET",
@@ -98,12 +101,15 @@ describe("team access token HTTP administration", () => {
       const revoked = await server.inject({
         method: "DELETE",
         url: "/account/tokens/token-deploy",
-        headers: credentials("owner-user", "legacy-owner-token")
+        headers: credentials("owner-user", "legacy-owner-token"),
+        payload: { confirmSelfRevoke: false }
       });
       expect(revoked.statusCode).toBe(200);
-      expect(revoked.json().metadata).toMatchObject({
-        id: "token-deploy",
-        revokedAt: "2026-07-14T12:00:00.000Z"
+      expect(revoked.json()).toEqual({
+        metadata: {
+          ...created.json().metadata,
+          revokedAt: "2026-07-14T12:00:00.000Z"
+        }
       });
     } finally {
       source.close();
@@ -111,32 +117,215 @@ describe("team access token HTTP administration", () => {
     }
   });
 
-  test("keeps token administration unavailable without an operator-owned file manager", async () => {
-    const server = createHttpServer(new FileStorage(), {
-      libraryRegistryAuth: {
-        members: [{
-          userId: "owner-user",
-          role: "owner",
-          teamIds: ["team-alpha"],
-          token: "legacy-owner-token"
-        }]
+  test("returns the named principal id and requires confirmation only for active-token revoke", async () => {
+    const fixture = await createNamedCredentialFixture();
+    try {
+      const listed = await fixture.server.inject({
+        method: "GET",
+        url: "/account/tokens",
+        headers: credentials("owner-user", "active-secret")
+      });
+      expect(listed.statusCode).toBe(200);
+      expect(listed.json()).toEqual({
+        tokens: [
+          {
+            id: "active-token",
+            name: "Current browser",
+            createdAt: "2026-07-13T12:00:00.000Z"
+          },
+          {
+            id: "sibling-token",
+            name: "Deploy automation",
+            createdAt: "2026-07-12T12:00:00.000Z"
+          }
+        ],
+        activeTokenId: "active-token"
+      });
+      expect(listed.body).not.toContain("active-secret");
+      expect(listed.body).not.toContain("tokenHash");
+      expect(listed.body).not.toContain("tokenHashes");
+      expect(listed.body).not.toContain("operatorNote");
+
+      const blocked = await fixture.server.inject({
+        method: "DELETE",
+        url: "/account/tokens/active-token",
+        headers: credentials("owner-user", "active-secret"),
+        payload: { confirmSelfRevoke: false }
+      });
+      expect(blocked.statusCode).toBe(400);
+      expect(blocked.json().error).toContain("confirmSelfRevoke");
+
+      const sibling = await fixture.server.inject({
+        method: "DELETE",
+        url: "/account/tokens/sibling-token",
+        headers: credentials("owner-user", "active-secret"),
+        payload: { confirmSelfRevoke: false }
+      });
+      expect(sibling.statusCode).toBe(200);
+      expect(sibling.json()).toEqual({
+        metadata: {
+          id: "sibling-token",
+          name: "Deploy automation",
+          createdAt: "2026-07-12T12:00:00.000Z",
+          revokedAt: "2026-07-14T12:00:00.000Z"
+        }
+      });
+
+      const selfRevoked = await fixture.server.inject({
+        method: "DELETE",
+        url: "/account/tokens/active-token",
+        headers: credentials("owner-user", "active-secret"),
+        payload: { confirmSelfRevoke: true }
+      });
+      expect(selfRevoked.statusCode).toBe(200);
+      expect(selfRevoked.json()).toEqual({
+        metadata: {
+          id: "active-token",
+          name: "Current browser",
+          createdAt: "2026-07-13T12:00:00.000Z",
+          revokedAt: "2026-07-14T12:00:00.000Z"
+        }
+      });
+    } finally {
+      fixture.source.close();
+      await fixture.server.close();
+    }
+  });
+
+  test.each([
+    {
+      label: "list",
+      request: {
+        method: "GET" as const,
+        url: "/account/tokens"
       }
+    },
+    {
+      label: "create",
+      request: {
+        method: "POST" as const,
+        url: "/account/tokens",
+        payload: { name: "Must not persist", expiresInDays: null }
+      }
+    },
+    {
+      label: "revoke",
+      request: {
+        method: "DELETE" as const,
+        url: "/account/tokens/sibling-token",
+        payload: { confirmSelfRevoke: false }
+      }
+    }
+  ])("authenticates current file state atomically for $label", async ({ request }) => {
+    const fixture = await createNamedCredentialFixture();
+    try {
+      const persisted = JSON.parse(await readFile(fixture.configPath, "utf8"));
+      persisted[0].tokens[0].revokedAt = "2026-07-14T11:59:00.000Z";
+      await writeFile(fixture.configPath, JSON.stringify(persisted, null, 2), "utf8");
+      const before = await readFile(fixture.configPath, "utf8");
+
+      const response = await fixture.server.inject({
+        ...request,
+        headers: credentials("owner-user", "active-secret")
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(await readFile(fixture.configPath, "utf8")).toBe(before);
+    } finally {
+      fixture.source.close();
+      await fixture.server.close();
+    }
+  });
+
+  test.each([
+    {
+      method: "GET" as const,
+      url: "/account/tokens"
+    },
+    {
+      method: "POST" as const,
+      url: "/account/tokens",
+      payload: { name: "Blocked", expiresInDays: 30 }
+    },
+    {
+      method: "DELETE" as const,
+      url: "/account/tokens/token-id",
+      payload: { confirmSelfRevoke: true }
+    }
+  ])("keeps $method token administration unavailable without file-backed authorization", async (request) => {
+    const manageTokens = vi.fn();
+    const manager = {
+      manageTokens,
+      listTokens: vi.fn(),
+      createToken: vi.fn(),
+      revokeToken: vi.fn()
+    } as unknown as TeamAuthorizationFileManager;
+    const server = createHttpServer(new FileStorage(), {
+      teamAuthorizationManager: manager
     });
     try {
       const response = await server.inject({
-        method: "GET",
-        url: "/account/tokens",
+        ...request,
         headers: credentials("owner-user", "legacy-owner-token")
       });
       expect(response.statusCode).toBe(503);
       expect(response.json()).toEqual({
         error: "team access token administration requires file-backed authorization"
       });
+      expect(manageTokens).not.toHaveBeenCalled();
     } finally {
       await server.close();
     }
   });
 });
+
+async function createNamedCredentialFixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "layo-token-http-named-"));
+  roots.push(root);
+  const configPath = path.join(root, "members.json");
+  await writeFile(
+    configPath,
+    JSON.stringify(
+      [{
+        userId: "owner-user",
+        role: "owner",
+        teamIds: ["team-alpha"],
+        token: "legacy-owner-token",
+        tokens: [
+          {
+            id: "active-token",
+            name: "Current browser",
+            token: "active-secret",
+            createdAt: "2026-07-13T12:00:00.000Z",
+            operatorNote: "must never leave the server"
+          },
+          {
+            id: "sibling-token",
+            name: "Deploy automation",
+            token: "sibling-secret",
+            createdAt: "2026-07-12T12:00:00.000Z"
+          }
+        ]
+      }],
+      null,
+      2
+    ),
+    "utf8"
+  );
+  const source = await watchTeamAuthorizationConfigFile(configPath, {
+    pollIntervalMs: 60_000
+  });
+  const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+    now: () => new Date("2026-07-14T12:00:00.000Z"),
+    generateId: () => "created-token",
+    generateSecret: () => "created-secret"
+  });
+  const server = createHttpServer(new FileStorage(path.join(root, "storage")), {
+    libraryRegistryAuth: source.config,
+    teamAuthorizationManager: manager
+  });
+  return { configPath, source, server };
+}
 
 function credentials(userId: string, token: string) {
   return {
