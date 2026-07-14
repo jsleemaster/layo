@@ -410,6 +410,8 @@ export interface LibraryRegistryCredentials {
 export interface SubscribeToLibraryRegistryEventsOptions {
   fileId?: string;
   after?: number;
+  credentials?: LibraryRegistryCredentials;
+  fetcher?: typeof fetch;
   onLibraryRegistryEvent: (event: LibraryRegistryLiveEvent) => void;
   onError?: EventListener;
 }
@@ -1197,23 +1199,67 @@ export function subscribeToCommentEvents(options: SubscribeToCommentEventsOption
   };
 }
 
-export function subscribeToLibraryRegistryEvents(options: SubscribeToLibraryRegistryEventsOptions): () => void {
-  if (typeof EventSource === "undefined") {
+export function subscribeToLibraryRegistryEvents(
+  options: SubscribeToLibraryRegistryEventsOptions
+): () => void {
+  const fetcher = options.fetcher ?? globalThis.fetch;
+  if (typeof fetcher !== "function") {
     return () => {};
   }
 
-  const params = new URLSearchParams();
-  if (options.fileId?.trim()) {
-    params.set("fileId", options.fileId);
-  }
-  if (typeof options.after === "number" && Number.isFinite(options.after) && options.after > 0) {
-    params.set("after", String(Math.floor(options.after)));
-  }
-  const query = params.toString() ? `?${params.toString()}` : "";
-  const source = new EventSource(apiUrl(`/libraries/events${query}`));
-  const handleLibraryRegistry = (message: MessageEvent<string>) => {
+  const controller = new AbortController();
+  let closed = false;
+  let reconnectId: ReturnType<typeof setTimeout> | undefined;
+  let lastSequence =
+    typeof options.after === "number" && Number.isFinite(options.after)
+      ? Math.max(0, Math.floor(options.after))
+      : 0;
+
+  const streamUrl = () => {
+    const params = new URLSearchParams();
+    if (options.fileId?.trim()) {
+      params.set("fileId", options.fileId);
+    }
+    if (lastSequence > 0) {
+      params.set("after", String(lastSequence));
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return apiUrl(`/libraries/events${query}`);
+  };
+
+  const reconnect = () => {
+    if (!closed) {
+      reconnectId = setTimeout(() => {
+        void connect();
+      }, 1_000);
+    }
+  };
+
+  const dispatchBlock = (block: string) => {
+    let eventName = "message";
+    const data: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith(":")) {
+        continue;
+      }
+      const separator = line.indexOf(":");
+      const field = separator >= 0 ? line.slice(0, separator) : line;
+      const value =
+        separator >= 0
+          ? line.slice(separator + 1).replace(/^ /, "")
+          : "";
+      if (field === "event") {
+        eventName = value;
+      } else if (field === "data") {
+        data.push(value);
+      }
+    }
+    if (eventName !== "library-registry" || data.length === 0) {
+      return;
+    }
+
     try {
-      const event = JSON.parse(message.data) as Partial<LibraryRegistryLiveEvent>;
+      const event = JSON.parse(data.join("\n")) as Partial<LibraryRegistryLiveEvent>;
       if (
         event.schemaVersion !== 1 ||
         event.type !== "published" ||
@@ -1223,23 +1269,72 @@ export function subscribeToLibraryRegistryEvents(options: SubscribeToLibraryRegi
       ) {
         return;
       }
+      lastSequence = Math.max(lastSequence, event.sequence);
       options.onLibraryRegistryEvent(event as LibraryRegistryLiveEvent);
     } catch {
-      // Ignore malformed stream messages. EventSource will keep the connection alive.
+      // Ignore malformed event payloads while keeping the stream alive.
     }
   };
 
-  source.addEventListener("library-registry", handleLibraryRegistry as EventListener);
-  if (options.onError) {
-    source.addEventListener("error", options.onError);
-  }
+  const connect = async () => {
+    try {
+      const authHeaders = libraryRegistryWriteHeaders(options.credentials);
+      delete authHeaders["Content-Type"];
+      const response = await fetcher(streamUrl(), {
+        headers: {
+          Accept: "text/event-stream",
+          ...authHeaders
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        throw new Error(
+          `라이브러리 이벤트 스트림 연결 실패: ${response.status} ${response.statusText}`.trim()
+        );
+      }
+      if (!response.body) {
+        throw new Error("라이브러리 이벤트 스트림 본문이 없습니다");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (!closed) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.match(/\r?\n\r?\n/);
+          while (boundary?.index !== undefined) {
+            const block = buffer.slice(0, boundary.index);
+            buffer = buffer.slice(boundary.index + boundary[0].length);
+            dispatchBlock(block);
+            boundary = buffer.match(/\r?\n\r?\n/);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      reconnect();
+    } catch (error) {
+      if (closed || (error instanceof DOMException && error.name === "AbortError")) {
+        return;
+      }
+      options.onError?.(new Event("error"));
+      reconnect();
+    }
+  };
+
+  void connect();
 
   return () => {
-    source.removeEventListener("library-registry", handleLibraryRegistry as EventListener);
-    if (options.onError) {
-      source.removeEventListener("error", options.onError);
+    closed = true;
+    if (reconnectId !== undefined) {
+      clearTimeout(reconnectId);
     }
-    source.close();
+    controller.abort();
   };
 }
 
