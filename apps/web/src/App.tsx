@@ -15243,12 +15243,18 @@ export function App() {
 
   const beginAccountTokenOperation = () => ({
     generation: ++accountTokenOperationGenerationRef.current,
-    identity: accountTokenIdentityRef.current
+    identity: accountTokenIdentityRef.current,
+    session: collabSessionRef.current
   });
 
-  const isCurrentAccountTokenOperation = (operation: { generation: number; identity: string }) =>
+  const isCurrentAccountTokenOperation = (operation: {
+    generation: number;
+    identity: string;
+    session: CollabDocumentSession | null;
+  }) =>
     operation.generation === accountTokenOperationGenerationRef.current
-    && operation.identity === accountTokenIdentityRef.current;
+    && operation.identity === accountTokenIdentityRef.current
+    && operation.session === collabSessionRef.current;
 
   const refreshAccountTokens = async (successStatus?: string) => {
     if (!collabSession || !activeMemberToken || accountTokenRefreshPending) return;
