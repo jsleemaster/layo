@@ -231,7 +231,9 @@ describe("team authorization managed token sidecar", () => {
     }
   });
 
-  test("does not resurrect managed tokens after a removed user id is reintroduced", async () => {
+  test.each(Array.from({ length: 20 }, (_, iteration) => iteration))(
+    "does not resurrect managed tokens after a removed user id is reintroduced [%i]",
+    async () => {
     const originalBase = baseMembers();
     let quarantineEnteredResolve!: () => void;
     let quarantineReleaseResolve!: () => void;
@@ -312,7 +314,8 @@ describe("team authorization managed token sidecar", () => {
       quarantineReleaseResolve();
       await setup.close();
     }
-  });
+    }
+  );
 
   test.each([
     {
