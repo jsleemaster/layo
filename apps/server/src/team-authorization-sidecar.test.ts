@@ -154,7 +154,7 @@ describe("team authorization managed token sidecar", () => {
     try {
       await expect(watchTeamAuthorizationConfigFile(basePath)).rejects.toThrow();
     } finally {
-      await rm(root, {\n        recursive: true,\n        force: true,\n        maxRetries: 20,\n        retryDelay: 10\n      });
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -416,7 +416,12 @@ async function fixture(base: string, pollIntervalMs = 10) {
     source,
     close: async () => {
       source.close();
-      await rm(root, { recursive: true, force: true });
+      await rm(root, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 10
+      });
     }
   };
 }
