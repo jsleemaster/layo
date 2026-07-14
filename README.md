@@ -293,12 +293,37 @@ their own credentials through `GET /account/tokens`,
 accepts a name and `expiresInDays` of `null`, `30`, `60`, `90`, or
 `180`; the plaintext token is returned once and only its SHA-256 hash is
 persisted. Listing is metadata-only and revocation keeps `revokedAt` for
-auditability. Environment-only authorization is intentionally read-only and
-these routes return 503. File-backed create and revoke operations serialize the
-full read-modify-write transaction across processes through a resource-keyed
-filesystem lock. Operators may tune bounded contention with
+auditability. The same create/list/revoke scope is available to an authenticated
+member through MCP, and the Korean team settings UI provides the browser
+self-service path. Environment-only authorization is intentionally read-only;
+the HTTP routes return 503 and the MCP management tools are not registered.
+
+The operator members file remains the identity source of truth and is never
+rewritten by account administration. Managed token hashes and revocation
+overlays are owned by the deterministic
+`<members-file>.tokens.json` version 2 sidecar. Each member entry is bound to a
+fingerprint of the current operator record; malformed, plaintext-bearing,
+removed-member, or binding-mismatched state fails closed. Version 1 sidecar
+entries load quarantined. Recovery requires an explicit valid root/legacy
+credential, reconciles the entry against the current operator record, and
+preserves recorded base-token revocations instead of silently restoring a
+revoked credential. Managed create and revoke operations serialize the full
+read-authenticate-write transaction across processes through a resource-keyed
+filesystem lock and reject a stale operator-file snapshot before sidecar
+replacement. Operators may tune bounded contention with
 `LAYO_AUTHORIZATION_LOCK_TIMEOUT_MS` and stale same-host recovery with
 `LAYO_AUTHORIZATION_LOCK_STALE_MS`; active or remote-host locks are never
-stolen.
+stolen. This is same-host/filesystem coordination, not shared transactional
+multi-host identity storage.
+
+Plaintext from token creation is one-time response state: it is absent from the
+sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
+manifests. The browser clears it on dismissal, another create, identity change,
+leaving team settings, reload, and successful self-revocation; clipboard copy is
+the only intentional external copy. Account-token requests carry an operation
+generation plus identity snapshot so stale async list/create/revoke responses
+cannot repopulate credentials or secret UI after identity changes. Current-token
+revocation requires explicit confirmation, clears the active credential, and
+leaves the local team available for root-token recovery.
 
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.

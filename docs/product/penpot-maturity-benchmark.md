@@ -39,17 +39,41 @@ implementation slice reveals a new gap.
 
 ## Current Token Administration Evidence
 
-PR #306 adapts Penpot's account-level personal access token lifecycle to Layo's
-operator-owned local-first authorization file. Authenticated members can create
-named tokens with Penpot-compatible expiry choices, receive the plaintext once,
-list metadata, and individually revoke credentials while sibling credentials
-remain valid. Hash-only persistence and restart durability are covered by server
-tests. PR #307 adds resource-keyed cross-process authorization locking with
-same-host abandoned-lock recovery, live-lock protection, bounded waits, and a
-six-process no-loss regression. MCP administration, UI management, multi-host
-transactional identity storage, audit events, and shared hosted identity storage
-remain below the benchmark.
+PR #306 established account-level create/list/revoke over the operator-owned
+authorization file, and PR #307 serialized same-host process mutations. PR #308
+**adapts** Penpot's account access-token workflow rather than copying its hosted
+account architecture. The reference behavior is Penpot's descriptive token
+name, Never/30/60/90/180-day expiry choices, one-time copy, metadata list, and
+deletion:
 
+- https://help.penpot.app/technical-guide/integration/#access-tokens
+- https://help.penpot.app/mcp/
+
+The adapted Layo scope is authenticated self-only administration through HTTP
+and deterministic MCP plus compact Korean controls in team settings. The
+operator members file remains externally owned. Managed hashes and revocation
+overlays live in `<members-file>.tokens.json` version 2, bound to the current
+operator-member fingerprint; account administration never replaces the base
+file. Version 1 entries are quarantined until explicit root-credential recovery,
+and reconciliation preserves prior base-token revocations. Plaintext is returned
+once, stored only as SHA-256, and intentionally leaves component memory only
+through explicit clipboard copy.
+
+MCP authorization and mutation use one freshly parsed, process-locked snapshot.
+The browser invalidates stale list/create/revoke responses by operation
+generation and identity. Focused real-network Playwright passed 3/3 and the
+direct headed interaction passed 1/1: copy changed to `복사됨`, sibling
+revocation to `해지됨`, and confirmed self-revocation left an empty credential
+field with recovery guidance. Full Verification `29332908276` remains pending
+until its in-progress Playwright CLI step completes; restore `29332908281` and
+retention `29332908332` passed on the same head.
+
+This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
+loop), not closure of those gates or the whole maturity benchmark. Residual gaps
+are durable audit-event consumption, shared transactional multi-host identity,
+agent dry-run/reviewability for token mutations, and broader account recovery.
+Deployment remains a separate non-gating concern for this local-first product
+slice. See `docs/product/penpot-token-mcp-ui-delta.md`.
 ## Maturity Dimensions
 
 | Dimension | Penpot benchmark | Layo current posture | Layo target |
