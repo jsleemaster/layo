@@ -2403,6 +2403,11 @@ describe("HTTP server", () => {
         teamId: "team-alpha"
       });
 
+      const readyStream = await openStream(alphaHeaders);
+      await expect(
+        readSseEvent(readyStream, "library-registry-ready")
+      ).resolves.toEqual({ ok: true });
+
       const stream = await openStream(alphaHeaders);
       expect(stream.status).toBe(200);
       expect(stream.headers.get("content-type")).toContain("text/event-stream");
