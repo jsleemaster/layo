@@ -69,6 +69,7 @@ export interface TeamAuthorizationConfigSource {
 export interface WatchTeamAuthorizationConfigFileOptions {
   pollIntervalMs?: number;
   onError?: (error: Error) => void;
+  beforeManagedTokenQuarantine?: () => Promise<void>;
 }
 
 export type TeamAccessTokenExpiryDays = 30 | 60 | 90 | 180 | null;
@@ -994,6 +995,7 @@ export async function watchTeamAuthorizationConfigFile(
       } catch (error) {
         replaceTeamAuthorizationMembers(initialConfig, []);
         if (error instanceof ManagedTokenBindingError) {
+          await options.beforeManagedTokenQuarantine?.();
           await quarantineWatchedManagedTokenState(normalizedPath, error).catch(
             (quarantineError) => options.onError?.(
               quarantineError instanceof Error
