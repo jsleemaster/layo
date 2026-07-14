@@ -715,10 +715,27 @@ describe("team library authorization", () => {
     };
     await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
     const quarantineErrors: Error[] = [];
+    let survivorActiveWhenQuarantineReported: boolean | undefined;
+    let sourceConfig:
+      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+      | undefined;
     const source = await watchTeamAuthorizationConfigFile(configPath, {
-      pollIntervalMs: 60_000,
-      onError: (error) => quarantineErrors.push(error)
+      pollIntervalMs: 10,
+      onError: (error) => {
+        quarantineErrors.push(error);
+        if (
+          error.message === "team authorization token sidecar member was removed"
+          && sourceConfig
+        ) {
+          survivorActiveWhenQuarantineReported = authenticationSucceeds(
+            sourceConfig,
+            "surviving-user",
+            "surviving-base-token"
+          );
+        }
+      }
     });
+    sourceConfig = source.config;
     const manager = createTeamAuthorizationFileManager(configPath, source.config, {
       generateId: () => "removed-managed",
       generateSecret: () => "removed-managed-secret"
@@ -735,11 +752,7 @@ describe("team library authorization", () => {
         (error) => error.message === "team authorization token sidecar member was removed"
       ));
 
-      expect(authenticationSucceeds(
-        source.config,
-        "surviving-user",
-        "surviving-base-token"
-      )).toBe(true);
+      expect(survivorActiveWhenQuarantineReported).toBe(true);
       expect(authenticationSucceeds(
         source.config,
         "removed-user",
