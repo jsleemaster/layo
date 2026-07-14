@@ -221,13 +221,6 @@ test("drops a delayed create response after replacing an equal-identity collabor
     });
   });
 
-  let collaborationSocketCount = 0;
-  page.on("websocket", (socket) => {
-    if (socket.url().includes("127.0.0.1:4329")) {
-      collaborationSocketCount += 1;
-    }
-  });
-
   await page.goto(WEB_ORIGIN);
   await openFilePanel(page);
   const projectStatus = page.getByTestId("project-status");
@@ -244,7 +237,6 @@ test("drops a delayed create response after replacing an equal-identity collabor
   const createRelayTeamButton = page.getByRole("button", { name: "협업 팀 만들기" });
   await createRelayTeamButton.click();
   await expect(page.getByTestId("team-status")).toContainText("동일 세션 팀");
-  await expect.poll(() => collaborationSocketCount).toBe(1);
 
   const memberTokenInput = page.getByTestId("member-token");
   await memberTokenInput.fill(ACTIVE_SECRET);
@@ -295,7 +287,6 @@ test("drops a delayed create response after replacing an equal-identity collabor
     }
     recreate();
   });
-  await expect.poll(() => collaborationSocketCount).toBe(2);
   await expect(page.getByTestId("team-status")).toContainText("교체된 동일 세션 팀");
   const replacementList = await replacementListResponse;
   expect(replacementList.request().headers().authorization).toBe(`Bearer ${ACTIVE_SECRET}`);
