@@ -97,10 +97,10 @@ describe("team access token administration", () => {
         revokedAt: "2026-07-15T09:30:00.000Z"
       });
       expect(() =>
-        authenticateTeamMember(source.config, "owner-user", "layo_pat_primary")
+        authenticateTeamMember(source.config, "owner-user", "layo_pat_primary", now)
       ).toThrow("team member credentials are invalid");
       expect(
-        authenticateTeamMember(source.config, "owner-user", "layo_pat_preview")
+        authenticateTeamMember(source.config, "owner-user", "layo_pat_preview", now)
       ).toMatchObject({ tokenId: "token-preview" });
 
       source.close();
@@ -109,10 +109,10 @@ describe("team access token administration", () => {
       });
       try {
         expect(() =>
-          authenticateTeamMember(restarted.config, "owner-user", "layo_pat_primary")
+          authenticateTeamMember(restarted.config, "owner-user", "layo_pat_primary", now)
         ).toThrow("team member credentials are invalid");
         expect(
-          authenticateTeamMember(restarted.config, "owner-user", "layo_pat_preview")
+          authenticateTeamMember(restarted.config, "owner-user", "layo_pat_preview", now)
         ).toMatchObject({ tokenId: "token-preview" });
       } finally {
         restarted.close();
