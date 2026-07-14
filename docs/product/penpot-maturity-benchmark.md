@@ -372,6 +372,24 @@ remain open.
 Evidence: `docs/product/penpot-library-event-authorization-delta.md`, Full
 Verification `29298859382`.
 
+## Latest Verified Delta: Library Credential Lifecycle
+
+PR #300 makes configured team access time-bounded and withdrawable without
+changing design documents. The shared authenticator now enforces normalized
+`notBefore`, `expiresAt`, and `revokedAt` cutoffs and accepts a
+deduplicated `tokenHashes` list for controlled SHA-256 rotation overlap.
+Existing `token` and `tokenHash` configuration remains compatible, and
+unconfigured local-first operation is unchanged.
+
+This is an **adapt** of Penpot's revocable team-access expectation to Layo's
+self-hosted environment configuration. RED `29300060591` proved elapsed
+credentials remained valid; GREEN `29300218356` passed 252 web, 296 server,
+Rust, and 193 Playwright CLI cases. Dynamic configuration reload, per-token
+revocation, already-open SSE re-authentication, and shared multi-instance
+identity storage remain open.
+
+Evidence: `docs/product/penpot-library-credential-lifecycle-delta.md`.
+
 ## Current Highest-Risk Gaps
 
 These are the first Penpot-comparable gaps to close:
