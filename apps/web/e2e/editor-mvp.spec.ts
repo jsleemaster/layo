@@ -1447,9 +1447,11 @@ test("right inspector authors multi-property component variant combinations", as
       const savedComponent = payload.file.components.find(
         (candidate: { id: string }) => candidate.id === "component-card"
       );
-      return savedComponent.variants.find(
-        (variant: { id: string }) => variant.id === "variant-2"
-      ).properties;
+      return (
+        savedComponent.variants.find(
+          (variant: { id: string }) => variant.id === "variant-2"
+        )?.properties ?? []
+      );
     })
     .toEqual([
       { name: "surface", value: "elevated", type: "select" },
@@ -4621,12 +4623,16 @@ test("right inspector manages imported DTCG token sets", async ({ page }) => {
   await page.getByTestId("token-set-enabled-dark").uncheck();
   await expect(page.getByTestId("token-set-enabled-dark")).not.toBeChecked();
 
-  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-  expect(fileResponse.ok()).toBeTruthy();
-  expect((await fileResponse.json()).file.token_sets).toEqual([
-    { id: "base", name: "base", enabled: true },
-    { id: "dark", name: "dark", enabled: false }
-  ]);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).file.token_sets;
+    })
+    .toEqual([
+      { id: "base", name: "base", enabled: true },
+      { id: "dark", name: "dark", enabled: false }
+    ]);
 
   await page.getByRole("button", { name: "토큰 내보내기" }).click();
   await expect(page.getByTestId("dtcg-token-json")).toHaveValue(/"activeTokenSets": \[\s+"base"\s+\]/);
