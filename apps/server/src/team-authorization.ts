@@ -226,7 +226,7 @@ export function createTeamAuthorizationFileManager(
         if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
           throw managementError("invalid team authorization token expiration", 400);
         }
-        const nextConfig = cloneTeamAuthorizationConfig(config);
+        const nextConfig = parseRequiredTeamAuthorizationConfig(await readFile(normalizedPath, "utf8"));
         const member = findManagedMember(nextConfig, userId);
         const id = generateId().trim();
         if (!id) {
@@ -266,7 +266,7 @@ export function createTeamAuthorizationFileManager(
         if (!normalizedTokenId) {
           throw managementError("team authorization token id is required", 400);
         }
-        const nextConfig = cloneTeamAuthorizationConfig(config);
+        const nextConfig = parseRequiredTeamAuthorizationConfig(await readFile(normalizedPath, "utf8"));
         const member = findManagedMember(nextConfig, userId);
         const credential = member.tokens?.find(
           (candidate) => candidate.id === normalizedTokenId
@@ -282,12 +282,6 @@ export function createTeamAuthorizationFileManager(
         return toTeamAccessTokenMetadata(credential);
       })
   };
-}
-
-function cloneTeamAuthorizationConfig(
-  config: TeamAuthorizationConfig
-): TeamAuthorizationConfig {
-  return parseRequiredTeamAuthorizationConfig(JSON.stringify(config.members));
 }
 
 function findManagedMember(
