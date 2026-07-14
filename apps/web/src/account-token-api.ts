@@ -40,7 +40,8 @@ export async function listAccountTokens(
       method: "GET",
       headers: authorizationHeaders(userId, memberToken)
     },
-    "계정 토큰 목록을 불러오지 못했습니다"
+    "계정 토큰 목록을 불러오지 못했습니다",
+    fetcher
   );
   const candidate = objectPayload(payload);
   if (!candidate || !Array.isArray(candidate.tokens)) {
@@ -69,7 +70,8 @@ export async function createAccountToken(
       headers: authorizationHeaders(userId, memberToken, true),
       body: JSON.stringify(input)
     },
-    "계정 토큰을 만들지 못했습니다"
+    "계정 토큰을 만들지 못했습니다",
+    fetcher
   );
   const candidate = objectPayload(payload);
   const token = candidate && nonBlankString(candidate.token);
@@ -96,7 +98,8 @@ export async function revokeAccountToken(
       headers: authorizationHeaders(userId, memberToken, true),
       body: JSON.stringify({ confirmSelfRevoke })
     },
-    "계정 토큰을 해지하지 못했습니다"
+    "계정 토큰을 해지하지 못했습니다",
+    fetcher
   );
   const candidate = objectPayload(payload);
   if (!candidate) {
@@ -119,17 +122,6 @@ function authorizationHeaders(
   };
 }
 
-async function requestJson(
-  url: string,
-  init: RequestInit,
-  failureMessage: string,
-  fetcher: typeof fetch
-): Promise<unknown>;
-async function requestJson(
-  url: string,
-  init: RequestInit,
-  failureMessage: string
-): Promise<unknown>;
 async function requestJson(
   url: string,
   init: RequestInit,
