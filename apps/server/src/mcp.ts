@@ -10,6 +10,7 @@ import {
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
   watchTeamAuthorizationConfigFile,
+  watchTeamMemberTokenFile,
   type TeamAuthorizationConfig
 } from "./team-authorization.js";
 
@@ -2310,11 +2311,23 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const libraryRegistryAuth =
     libraryRegistryAuthSource?.config
     ?? parseTeamAuthorizationConfig(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS);
+  // The operator-owned token file takes precedence so MCP principal rotation is restart-free.
+  const libraryRegistryPrincipalTokenSource = process.env.LAYO_MCP_MEMBER_TOKEN_FILE
+    ? await watchTeamMemberTokenFile(process.env.LAYO_MCP_MEMBER_TOKEN_FILE, {
+        onError: (error) => console.error("MCP member token reload failed", error)
+      })
+    : undefined;
+  // The static value remains available for local setups without a mounted secret.
+  const staticLibraryRegistryPrincipalToken = process.env.LAYO_MCP_MEMBER_TOKEN;
   const libraryRegistryPrincipal =
-    process.env.LAYO_MCP_USER_ID && process.env.LAYO_MCP_MEMBER_TOKEN
+    process.env.LAYO_MCP_USER_ID
+    && (libraryRegistryPrincipalTokenSource || staticLibraryRegistryPrincipalToken)
       ? {
           userId: process.env.LAYO_MCP_USER_ID,
-          memberToken: process.env.LAYO_MCP_MEMBER_TOKEN
+          get memberToken() {
+            return libraryRegistryPrincipalTokenSource?.token.value
+              ?? staticLibraryRegistryPrincipalToken!;
+          }
         }
       : undefined;
   const server = createMcpServer(undefined, {
@@ -2322,6 +2335,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     libraryRegistryPrincipal
   });
   const transport = new StdioServerTransport();
-  process.once("exit", () => libraryRegistryAuthSource?.close());
+  process.once("exit", () => {
+    libraryRegistryAuthSource?.close();
+    libraryRegistryPrincipalTokenSource?.close();
+  });
   await server.connect(transport);
 }

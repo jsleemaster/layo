@@ -755,6 +755,7 @@ test("file panel clears protected library state when stream authorization ends",
 
 test("team panel replaces an expired member token without recreating the team", async ({ page }) => {
   const streamTokens: string[] = [];
+  let expiredTokenRequests = 0;
   await page.route("**/libraries/events**", async (route) => {
     const authorization = route.request().headers().authorization;
     if (!authorization) {
@@ -762,11 +763,14 @@ test("team panel replaces an expired member token without recreating the team", 
       return;
     }
     streamTokens.push(authorization);
+    if (authorization === "Bearer expired-member-token") {
+      expiredTokenRequests += 1;
+    }
     await route.fulfill({
       status: 200,
       contentType: "text/event-stream",
       body:
-        authorization === "Bearer expired-member-token"
+        authorization === "Bearer expired-member-token" && expiredTokenRequests === 1
           ? [
               "event: library-registry-authorization-ended",
               'data: {"code":"credential_inactive"}',
@@ -792,6 +796,14 @@ test("team panel replaces an expired member token without recreating the team", 
   await expect(page.getByTestId("team-member-token-status")).toContainText(
     "팀 인증이 만료되었습니다"
   );
+
+  const applyToken = page.getByRole("button", { name: "멤버 토큰 적용" });
+  await expect(applyToken).toBeEnabled();
+  await applyToken.click();
+  await expect(page.getByTestId("team-member-token-status")).toContainText(
+    "팀 인증 다시 연결됨"
+  );
+  await expect.poll(() => expiredTokenRequests).toBe(2);
 
   await page.getByTestId("member-token").fill("rotated-member-token");
   await page.getByRole("button", { name: "멤버 토큰 적용" }).click();

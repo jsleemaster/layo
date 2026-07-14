@@ -37,6 +37,68 @@ export interface WatchTeamAuthorizationConfigFileOptions {
   onError?: (error: Error) => void;
 }
 
+export interface TeamMemberTokenSource {
+  token: { value: string };
+  close: () => void;
+}
+
+export async function watchTeamMemberTokenFile(
+  filePath: string,
+  options: WatchTeamAuthorizationConfigFileOptions = {}
+): Promise<TeamMemberTokenSource> {
+  const normalizedPath = filePath.trim();
+  if (!normalizedPath) {
+    throw new Error("LAYO_MCP_MEMBER_TOKEN_FILE must not be blank");
+  }
+  const token = { value: parseRequiredTeamMemberToken(await readFile(normalizedPath, "utf8")) };
+  let closed = false;
+  let reloadTail = Promise.resolve();
+
+  const reload = () => {
+    reloadTail = reloadTail.then(async () => {
+      if (closed) {
+        return;
+      }
+      try {
+        const nextToken = parseRequiredTeamMemberToken(
+          await readFile(normalizedPath, "utf8")
+        );
+        token.value = nextToken;
+      } catch (error) {
+        options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+  const listener: StatsListener = () => reload();
+  watchFile(
+    normalizedPath,
+    {
+      interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
+      persistent: false
+    },
+    listener
+  );
+
+  return {
+    token,
+    close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      unwatchFile(normalizedPath, listener);
+    }
+  };
+}
+
+function parseRequiredTeamMemberToken(input: string): string {
+  const token = input.trim();
+  if (!token) {
+    throw new Error("MCP member token file must not be blank");
+  }
+  return token;
+}
+
 export async function watchTeamAuthorizationConfigFile(
   filePath: string,
   options: WatchTeamAuthorizationConfigFileOptions = {}

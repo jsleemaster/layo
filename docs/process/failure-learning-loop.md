@@ -25,6 +25,10 @@ free to recur.
 7. Update project docs or rules when the miss changes future agent workflow.
 8. Put the failure mode, regression test, live verification, and docs or memory
    update in the PR body.
+9. When external review is requested, re-fetch reviews and unresolved threads
+   immediately before merge. Do not merge while the requested review is still
+   pending; after a bounded wait, record why review was unavailable instead of
+   assuming silence means approval.
 
 ## UI Detail Checklist
 
