@@ -8,6 +8,10 @@ export interface TeamMemberCredential {
   teamIds: string[];
   token?: string;
   tokenHash?: string;
+  tokenHashes?: string[];
+  notBefore?: string;
+  expiresAt?: string;
+  revokedAt?: string;
 }
 
 export interface TeamAuthorizationConfig {
@@ -38,14 +42,15 @@ export function parseTeamAuthorizationConfig(
 export function authenticateTeamMember(
   config: TeamAuthorizationConfig,
   userId: string | undefined,
-  token: string | undefined
+  token: string | undefined,
+  now = new Date()
 ): AuthenticatedTeamMember {
   const normalizedUserId = userId?.trim();
   if (!normalizedUserId || !token) {
     throw unauthorizedError("team member credentials are required");
   }
   const member = config.members.find((candidate) => candidate.userId === normalizedUserId);
-  if (!member || !matchesToken(member, token)) {
+  if (!member || !matchesToken(member, token) || !isCredentialActive(member, now)) {
     throw unauthorizedError("team member credentials are invalid");
   }
   return {
@@ -117,15 +122,37 @@ function parseTeamMemberCredential(input: unknown): TeamMemberCredential {
     typeof candidate.tokenHash === "string" && /^[a-f0-9]{64}$/i.test(candidate.tokenHash)
       ? candidate.tokenHash.toLowerCase()
       : undefined;
-  if (!token && !tokenHash) {
-    throw new Error("library registry team member token or tokenHash is required");
+  const tokenHashes = Array.isArray(candidate.tokenHashes)
+    && candidate.tokenHashes.every(
+      (value) => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value)
+    )
+      ? Array.from(new Set(candidate.tokenHashes.map((value) => value.toLowerCase())))
+      : undefined;
+  if (!token && !tokenHash && !tokenHashes?.length) {
+    throw new Error("library registry team member token, tokenHash, or tokenHashes is required");
   }
+
+  const notBefore = parseLifecycleTimestamp(candidate.notBefore, "notBefore");
+  const expiresAt = parseLifecycleTimestamp(candidate.expiresAt, "expiresAt");
+  const revokedAt = parseLifecycleTimestamp(candidate.revokedAt, "revokedAt");
+  if (
+    notBefore
+    && expiresAt
+    && Date.parse(expiresAt) <= Date.parse(notBefore)
+  ) {
+    throw new Error("library registry team member expiresAt must be after notBefore");
+  }
+
   return {
     userId: candidate.userId.trim(),
     role: candidate.role,
     teamIds: Array.from(new Set(candidate.teamIds.map((teamId) => teamId.trim()))).sort(),
     token,
-    tokenHash
+    tokenHash,
+    ...(tokenHashes?.length ? { tokenHashes } : {}),
+    ...(notBefore ? { notBefore } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+    ...(revokedAt ? { revokedAt } : {})
   };
 }
 
@@ -133,7 +160,37 @@ function matchesToken(member: TeamMemberCredential, token: string): boolean {
   if (member.token && safeEqual(member.token, token)) {
     return true;
   }
-  return Boolean(member.tokenHash && safeEqual(member.tokenHash, hashToken(token)));
+  const actualHash = hashToken(token);
+  return [member.tokenHash, ...(member.tokenHashes ?? [])].some(
+    (expectedHash) => expectedHash !== undefined && safeEqual(expectedHash, actualHash)
+  );
+}
+
+function isCredentialActive(member: TeamMemberCredential, now: Date): boolean {
+  const nowMs = now.getTime();
+  if (!Number.isFinite(nowMs)) {
+    throw new Error("authentication time must be a valid date");
+  }
+  if (member.notBefore && nowMs < Date.parse(member.notBefore)) {
+    return false;
+  }
+  if (member.expiresAt && nowMs >= Date.parse(member.expiresAt)) {
+    return false;
+  }
+  return !member.revokedAt || nowMs < Date.parse(member.revokedAt);
+}
+
+function parseLifecycleTimestamp(
+  value: unknown,
+  field: "notBefore" | "expiresAt" | "revokedAt"
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !value.trim() || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`invalid library registry team member ${field}`);
+  }
+  return new Date(value).toISOString();
 }
 
 function safeEqual(expected: string, actual: string): boolean {
