@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,6 +20,10 @@ describe("file process mutation lock", () => {
         pid: 99_999_999,
         acquiredAt: "2026-07-14T00:00:00.000Z"
       });
+      await link(
+        path.join(lockPath, "owner.json"),
+        `${lockPath}.recovery-abandoned-owner.claim`
+      );
 
       await expect(
         withFileProcessMutationLock(
