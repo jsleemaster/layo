@@ -5,13 +5,15 @@ import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
 import {
   authenticateTeamMember,
+  createTeamAuthorizationFileManager,
   authorizeTeamLibraryRead,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
   watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile,
-  type TeamAuthorizationConfig
+  type TeamAuthorizationConfig,
+  type TeamAuthorizationFileManager
 } from "./team-authorization.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
@@ -499,6 +501,7 @@ export interface McpServerOptions {
     userId: string;
     memberToken: string;
   };
+  teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
@@ -556,6 +559,104 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     name: "layo",
     version: "0.1.0"
   });
+
+  if (
+    options.teamAuthorizationManager
+    && options.libraryRegistryAuth
+    && options.libraryRegistryPrincipal
+  ) {
+    const authenticateAccountTokenMember = () =>
+      authenticateTeamMember(
+        options.libraryRegistryAuth!,
+        options.libraryRegistryPrincipal!.userId,
+        options.libraryRegistryPrincipal!.memberToken
+      );
+    const manager = options.teamAuthorizationManager;
+
+    server.registerTool(
+      "list_account_tokens",
+      {
+        description: "List account access token metadata for the authenticated team member.",
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        },
+        inputSchema: {}
+      },
+      async () => {
+        const member = authenticateAccountTokenMember();
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ tokens: manager.listTokens(member.userId) }, null, 2)
+            }
+          ]
+        };
+      }
+    );
+
+    server.registerTool(
+      "create_account_token",
+      {
+        description: "Create an account access token for the authenticated team member.",
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false
+        },
+        inputSchema: {
+          name: z.string().describe("Descriptive token name"),
+          expiresInDays: z
+            .union([z.literal(30), z.literal(60), z.literal(90), z.literal(180), z.null()])
+            .describe("Token lifetime in days, or null for no expiry")
+        }
+      },
+      async ({ name, expiresInDays }) => {
+        const member = authenticateAccountTokenMember();
+        const created = await manager.createToken(member.userId, { name, expiresInDays });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(created, null, 2)
+            }
+          ]
+        };
+      }
+    );
+
+    server.registerTool(
+      "revoke_account_token",
+      {
+        description: "Revoke one account access token for the authenticated team member.",
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false
+        },
+        inputSchema: {
+          tokenId: z.string().describe("Token id returned by list_account_tokens")
+        }
+      },
+      async ({ tokenId }) => {
+        const member = authenticateAccountTokenMember();
+        const metadata = await manager.revokeToken(member.userId, tokenId);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ metadata }, null, 2)
+            }
+          ]
+        };
+      }
+    );
+  }
 
   server.registerTool(
     "list_files",
@@ -2330,9 +2431,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
           }
         }
       : undefined;
+  const teamAuthorizationManager =
+    process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE && libraryRegistryAuthSource
+      ? createTeamAuthorizationFileManager(
+          process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE,
+          libraryRegistryAuthSource.config
+        )
+      : undefined;
   const server = createMcpServer(undefined, {
     libraryRegistryAuth,
-    libraryRegistryPrincipal
+    libraryRegistryPrincipal,
+    teamAuthorizationManager
   });
   const transport = new StdioServerTransport();
   process.once("exit", () => {
