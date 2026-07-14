@@ -154,7 +154,7 @@ describe("team authorization managed token sidecar", () => {
     try {
       await expect(watchTeamAuthorizationConfigFile(basePath)).rejects.toThrow();
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await rm(root, {\n        recursive: true,\n        force: true,\n        maxRetries: 20,\n        retryDelay: 10\n      });
     }
   });
 
