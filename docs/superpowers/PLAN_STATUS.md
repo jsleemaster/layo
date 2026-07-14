@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+- `2026-07-14-penpot-token-process-lock.md` in PR #307: serialize authorization read-modify-write across processes with ownership-safe stale recovery and six-process no-loss proof.
 
 ## Completed Plans
 
