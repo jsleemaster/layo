@@ -60,6 +60,7 @@ describe("team access token MCP administration", () => {
       ),
       "utf8"
     );
+    const baseSnapshot = await readFile(configPath, "utf8");
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 60_000
     });
@@ -125,19 +126,35 @@ describe("team access token MCP administration", () => {
     expect(JSON.stringify(revoked)).not.toContain("layo_pat_mcp_secret");
     expect(JSON.stringify(revoked)).not.toContain("tokenHash");
 
-    const persistedText = await readFile(configPath, "utf8");
-    const persisted = JSON.parse(persistedText);
-    const owner = persisted.find((member: { userId: string }) => member.userId === "owner-user");
-    const other = persisted.find((member: { userId: string }) => member.userId === "other-user");
-    expect(owner.tokens).toEqual([
+    expect(await readFile(configPath, "utf8")).toBe(baseSnapshot);
+    const persistedText = await readFile(`${configPath}.tokens.json`, "utf8");
+    const persisted = JSON.parse(persistedText) as {
+      members: Array<{
+        userId: string;
+        tokens: Array<Record<string, unknown>>;
+        revocations: Array<Record<string, unknown>>;
+      }>;
+    };
+    const owner = persisted.members.find((member) => member.userId === "owner-user");
+    expect(owner?.tokens).toEqual([
       expect.objectContaining({
         id: "owner-created",
-        tokenHash: tokenHash("layo_pat_mcp_secret"),
-        revokedAt: "2026-07-14T12:00:00.000Z"
+        tokenHash: tokenHash("layo_pat_mcp_secret")
       })
     ]);
+    expect(owner?.revocations).toEqual([
+      {
+        tokenId: "owner-created",
+        revokedAt: "2026-07-14T12:00:00.000Z"
+      }
+    ]);
     expect(persistedText).not.toContain("layo_pat_mcp_secret");
-    expect(owner.tokens[0]).not.toHaveProperty("token");
+    expect(persistedText).not.toMatch(/"token"\\s*:/);
+    expect(owner?.tokens[0]).not.toHaveProperty("token");
+    const baseMembers = JSON.parse(baseSnapshot);
+    const other = baseMembers.find(
+      (member: { userId: string }) => member.userId === "other-user"
+    );
     expect(other.tokens).toEqual([otherToken]);
   });
 

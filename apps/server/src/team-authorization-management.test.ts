@@ -14,7 +14,8 @@ describe("team access token administration", () => {
   test("creates a named token while returning its secret only once", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
-    await writeFile(configPath, ownerConfig(), "utf8");
+    const base = ownerConfig();
+    await writeFile(configPath, base, "utf8");
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 10
     });
@@ -43,8 +44,10 @@ describe("team access token administration", () => {
       expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("token");
       expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("tokenHash");
 
-      const persisted = await readFile(configPath, "utf8");
+      expect(await readFile(configPath, "utf8")).toBe(base);
+      const persisted = await readFile(`${configPath}.tokens.json`, "utf8");
       expect(persisted).not.toContain("layo_pat_one_time_secret");
+      expect(persisted).not.toMatch(/"token"\\s*:/);
       expect(persisted).toContain(
         createHash("sha256").update("layo_pat_one_time_secret").digest("hex")
       );
@@ -206,7 +209,7 @@ describe("team access token administration", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
-  test("fails closed when an operator rewrites the authenticated file before persist", async () => {
+  test("preserves a concurrent operator rewrite and leaves the issued token unusable", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
     await writeFile(configPath, ownerConfigWithExistingToken(), "utf8");
@@ -231,11 +234,24 @@ describe("team access token administration", () => {
           { userId: "owner-user", memberToken: "existing-secret" },
           {
             type: "create",
-            input: { name: "Conflicting create", expiresInDays: 30 }
+            input: { name: "Concurrent create", expiresInDays: 30 }
           }
         )
-      ).rejects.toThrow("team authorization file changed during token management");
+      ).resolves.toMatchObject({
+        type: "create",
+        created: { metadata: { id: "token-after-authentication" } }
+      });
       expect(await readFile(configPath, "utf8")).toBe(operatorConfig);
+      const sidecar = await readFile(`${configPath}.tokens.json`, "utf8");
+      expect(sidecar).not.toContain("layo_pat_must_not_persist");
+      expect(() =>
+        authenticateTeamMember(
+          source.config,
+          "owner-user",
+          "layo_pat_must_not_persist",
+          new Date("2026-07-14T12:00:00.000Z")
+        )
+      ).toThrow("team member credentials are invalid");
     } finally {
       source.close();
       await rm(root, { recursive: true, force: true });
