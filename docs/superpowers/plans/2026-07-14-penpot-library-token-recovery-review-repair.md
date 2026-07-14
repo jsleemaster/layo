@@ -1,7 +1,7 @@
 # Penpot Library Token Recovery Review Repair Plan
 
 Date: 2026-07-14
-Status: In progress
+Status: Review pending
 PR: #304
 
 ## Goal
