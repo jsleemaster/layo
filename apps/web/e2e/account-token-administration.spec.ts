@@ -243,6 +243,7 @@ test("keeps one-time plaintext transient across every browser lifecycle boundary
   const applyCredentialButton = page.getByRole("button", { name: "멤버 토큰 적용" });
   await restoredCredentialInput.clear();
   await restoredCredentialInput.fill(ACTIVE_SECRET);
+  await expect(restoredCredentialInput).toHaveValue(ACTIVE_SECRET);
   await expect(applyCredentialButton).toBeEnabled();
   await applyCredentialButton.click();
   await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
