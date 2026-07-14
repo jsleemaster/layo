@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { unwatchFile, watchFile, type StatsListener } from "node:fs";
+import { readFile } from "node:fs/promises";
 
 export type TeamAuthorizationRole = "owner" | "editor" | "viewer";
 
@@ -22,6 +24,76 @@ export interface AuthenticatedTeamMember {
   userId: string;
   role: TeamAuthorizationRole;
   teamIds: string[];
+}
+
+
+export interface TeamAuthorizationConfigSource {
+  config: TeamAuthorizationConfig;
+  close: () => void;
+}
+
+export interface WatchTeamAuthorizationConfigFileOptions {
+  pollIntervalMs?: number;
+  onError?: (error: Error) => void;
+}
+
+export async function watchTeamAuthorizationConfigFile(
+  filePath: string,
+  options: WatchTeamAuthorizationConfigFileOptions = {}
+): Promise<TeamAuthorizationConfigSource> {
+  const normalizedPath = filePath.trim();
+  if (!normalizedPath) {
+    throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
+  }
+  const initialConfig = parseRequiredTeamAuthorizationConfig(
+    await readFile(normalizedPath, "utf8")
+  );
+  let closed = false;
+  let reloadTail = Promise.resolve();
+
+  const reload = () => {
+    reloadTail = reloadTail.then(async () => {
+      if (closed) {
+        return;
+      }
+      try {
+        const nextConfig = parseRequiredTeamAuthorizationConfig(
+          await readFile(normalizedPath, "utf8")
+        );
+        initialConfig.members = nextConfig.members;
+      } catch (error) {
+        options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+  const listener: StatsListener = () => reload();
+  watchFile(
+    normalizedPath,
+    {
+      interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
+      persistent: false
+    },
+    listener
+  );
+
+  return {
+    config: initialConfig,
+    close: () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      unwatchFile(normalizedPath, listener);
+    }
+  };
+}
+
+function parseRequiredTeamAuthorizationConfig(input: string): TeamAuthorizationConfig {
+  const config = parseTeamAuthorizationConfig(input);
+  if (!config) {
+    throw new Error("library registry team member file must contain a JSON array");
+  }
+  return config;
 }
 
 export function parseTeamAuthorizationConfig(
