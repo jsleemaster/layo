@@ -618,12 +618,14 @@ describe("team library authorization", () => {
       releaseQuarantineResolve = resolve;
     });
     await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+    const closeErrors: Error[] = [];
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 10,
       beforeManagedTokenQuarantine: async () => {
         quarantineStartedResolve?.();
         await releaseQuarantine;
-      }
+      },
+      onError: (error) => closeErrors.push(error)
     });
     const manager = createTeamAuthorizationFileManager(configPath, source.config, {
       generateId: () => "removed-managed",
@@ -649,6 +651,12 @@ describe("team library authorization", () => {
       releaseQuarantineResolve?.();
       await settling;
       expect(settled).toBe(true);
+      expect(closeErrors).toEqual([]);
+      expect(authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-base-token"
+      )).toBe(false);
       await rm(root, { recursive: true, force: true });
     } finally {
       releaseQuarantineResolve?.();
@@ -756,6 +764,96 @@ describe("team library authorization", () => {
         operatorRevokedSecret
       )).toBe(false);
       await waitForSidecarMember(configPath, "recovery-user", false);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("does not republish a survivor token revoked by another manager during recovery", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-recovery-race-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+
+    let injectManagerMutation = false;
+    let externalManager:
+      | ReturnType<typeof createTeamAuthorizationFileManager>
+      | undefined;
+    let survivorTokenActiveWhenQuarantineReported: boolean | undefined;
+    let sourceConfig:
+      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+      | undefined;
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      beforeManagedTokenRecoveryPublish: async () => {
+        if (injectManagerMutation) {
+          await externalManager?.revokeToken("surviving-user", "surviving-managed");
+        }
+      },
+      onError: (error) => {
+        reloadErrors.push(error);
+        if (
+          error.message === "team authorization token sidecar member was removed"
+          && sourceConfig
+        ) {
+          survivorTokenActiveWhenQuarantineReported = authenticationSucceeds(
+            sourceConfig,
+            "surviving-user",
+            "surviving-managed-secret"
+          );
+        }
+      }
+    });
+    sourceConfig = source.config;
+    const ids = ["removed-managed", "surviving-managed"];
+    const secrets = ["removed-managed-secret", "surviving-managed-secret"];
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => ids.shift() ?? "unexpected-id",
+      generateSecret: () => secrets.shift() ?? "unexpected-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+      await manager.createToken("surviving-user", {
+        name: "Surviving managed token",
+        expiresInDays: null
+      });
+      externalManager = createTeamAuthorizationFileManager(
+        configPath,
+        { members: [] },
+        { now: () => new Date("2026-07-14T13:00:00.000Z") }
+      );
+      injectManagerMutation = true;
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => reloadErrors.some(
+        (error) => error.message === "team authorization token sidecar member was removed"
+      ));
+
+      expect(survivorTokenActiveWhenQuarantineReported).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-managed-secret"
+      )).toBe(false);
     } finally {
       source.close();
       await source.settled();
