@@ -30,6 +30,8 @@ successful authorization could not identify which credential was used.
 - Authentication accepts only an active matching token and returns secret-free
   `tokenId` and `tokenName` metadata.
 - Revoking one record does not invalidate active sibling tokens.
+- A matching named record takes precedence over legacy fields, so a revoked
+  record cannot fall through to the same legacy secret during migration.
 - Watched authorization-file reload makes individual revocation effective
   without HTTP or MCP restart.
 - Legacy member-level credential fields and member-wide lifecycle timestamps
@@ -41,7 +43,23 @@ RED Full Verification `29308411441`, job `87006764257`, passed maturity
 gates, typecheck, and build, then failed core tests before named token records
 were implemented.
 
+A first review-repair run `29308861636`, job `87008099707`, exposed that
+the MCP test helper duplicated and narrowed the production authorization type;
+it now consumes `TeamAuthorizationConfig` directly. Security RED
+`29309012183`, job `87008553748`, then proved a revoked named token could
+fall through to an identical legacy secret. Named-record precedence now blocks
+that migration bypass.
+
 Final GREEN evidence is pending.
+
+## Failure Learning
+
+The first miss was test infrastructure type drift. The second was an ambiguous
+migration precedence rule that could bypass individual revocation. Shared
+production types and the same-secret regression now preserve both decisions.
+
+A memory note was not added because these are repository-specific contracts
+covered by focused regressions, this delta, and the execution plan.
 
 ## Remaining Boundary
 
