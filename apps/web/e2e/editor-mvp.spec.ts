@@ -738,7 +738,7 @@ test("file panel clears protected library state when stream authorization ends",
 
   releaseAuthorization();
 
-  await expect(page.getByTestId("team-member-token-status")).toContainText(
+  await expect(page.getByTestId("library-registry-status")).toContainText(
     "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
   );
   releaseRegistryRefresh();
@@ -746,7 +746,7 @@ test("file panel clears protected library state when stream authorization ends",
     "Protected Team Kit"
   );
   await expect(page.getByTestId("library-registry-review")).toHaveCount(0);
-  await expect(page.getByTestId("team-member-token-status")).toContainText(
+  await expect(page.getByTestId("library-registry-status")).toContainText(
     "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
   );
   await page.waitForTimeout(1_250);
