@@ -26,7 +26,9 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+`2026-07-14-penpot-named-token-revocation.md` is implementing PR #305. RED Full
+Verification `29308411441`, job `87006764257`, proves named token records and
+individual revocation were absent; implementation and final verification are in progress.
 
 ## Completed Plans
 
