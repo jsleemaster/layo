@@ -233,11 +233,15 @@ test("keeps one-time plaintext transient across every browser lifecycle boundary
   const reloadSecret = await createToken(page, "새로고침 비밀");
   await page.reload();
   await openTeamPanel(page);
-  await page.getByRole("tab", { name: "팀 설정" }).click();
   await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  expect(await page.locator("body").textContent()).not.toContain(reloadSecret);
+
+  await page.getByTestId("team-name").fill("토큰 관리 팀");
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("토큰 관리 팀");
+  await page.getByRole("tab", { name: "팀 설정" }).click();
   await expect(page.getByTestId("member-token")).toHaveValue("");
   await expect(page.getByTestId("account-token-create")).toHaveCount(0);
-  expect(await page.locator("body").textContent()).not.toContain(reloadSecret);
 
   const restoredCredentialInput = page.getByTestId("member-token");
   const applyCredentialButton = page.getByRole("button", { name: "멤버 토큰 적용" });
