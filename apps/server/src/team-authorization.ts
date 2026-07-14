@@ -298,7 +298,7 @@ export function createTeamAuthorizationFileManager(
           throw error;
         }
         authenticatedMember = authenticateTeamMember(
-          baseConfig,
+          mergeManagedRevocationsForRecovery(baseConfig, state),
           identity.principal.userId,
           identity.principal.memberToken,
           operationNow
@@ -719,10 +719,14 @@ function reconcileManagedTokenStateMember(
   state: ManagedTokenState,
   baseMember: TeamMemberCredential
 ): ManagedTokenStateMember {
-  const member = createManagedTokenStateMember(baseMember);
   const index = state.members.findIndex(
     (candidate) => candidate.userId === baseMember.userId
   );
+  const previous = index === -1 ? undefined : state.members[index];
+  const member = {
+    ...createManagedTokenStateMember(baseMember),
+    revocations: previous?.revocations.map((revocation) => ({ ...revocation })) ?? []
+  };
   if (index === -1) {
     state.members.push(member);
   } else {
@@ -747,6 +751,33 @@ function assertManagedTokenBinding(
       "team authorization token sidecar member binding changed"
     );
   }
+}
+
+function mergeManagedRevocationsForRecovery(
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState
+): TeamAuthorizationConfig {
+  return {
+    members: baseConfig.members.map((baseMember) => {
+      const tokens = (baseMember.tokens ?? []).map((token) => ({ ...token }));
+      const stateMember = state.members.find(
+        (candidate) => candidate.userId === baseMember.userId
+      );
+      if (stateMember) {
+        const byId = new Map(tokens.map((token) => [token.id, token]));
+        for (const revocation of stateMember.revocations) {
+          const token = byId.get(revocation.tokenId);
+          if (token) {
+            token.revokedAt = revocation.revokedAt;
+          }
+        }
+      }
+      return {
+        ...baseMember,
+        ...(tokens.length ? { tokens } : {})
+      };
+    })
+  };
 }
 
 function mergeManagedTokenState(
