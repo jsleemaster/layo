@@ -167,6 +167,18 @@ Deployment remains a separate non-gating concern.
   correctness still needs shared transactional identity plus one durable
   monotonic generation/version or CAS contract.
 
+### Watcher transient-read retry failure loop
+
+- Final docs-head Full `29335855757` failed 377/378 server tests because a
+  sibling preview token stayed invalid after a transient truncated base read.
+- Deterministic RED `df0c0581` reproduced the exact recovery miss; RED Full
+  `29336713035` failed that intended case.
+- GREEN `3c44aecf` adds bounded retry serialized by `reloadTail`, preserves
+  immediate fail-close on the first bad read, and cancels retry state on success
+  or watcher close. Focused authorization passed 15/15; typecheck passed.
+- Residual: permanently malformed input remains fail-closed. Retry is bounded
+  and process-local, not a multi-host generation or delivery guarantee.
+
 ### Current merge gate
 
 - Full Verification `29335200155`: passed gates, typecheck, build, and Core, then was superseded and cancelled during Playwright by the docs push; not GREEN.
@@ -176,10 +188,12 @@ Deployment remains a separate non-gating concern.
   because later commits superseded Playwright.
 - Vercel passed on `bd7acd`, but deployment remains non-gating for this
   local-first MCP/UI slice.
-- Tasks 1-3 are complete. Security re-review is approved. The final docs-head
-  Full, including the corrected equal-session E2E, remains pending without a
-  pinned run id. Task 4 remains in progress until that Full, merge, and
-  post-merge cleanup are actually complete.
+- Full `29335855757` is RED at 377/378; `29336713035` is the deterministic
+  retry RED. Focused GREEN `3c44aecf` is not a final Full.
+- Tasks 1-3 are complete. Security re-review is approved. The final PR-head
+  Full, including the corrected equal-session E2E and watcher retry, remains
+  pending without a pinned run id. Task 4 remains in progress until that Full,
+  merge, and post-merge cleanup are actually complete.
 
 ### Task 4: Verification, review, and durable evidence
 

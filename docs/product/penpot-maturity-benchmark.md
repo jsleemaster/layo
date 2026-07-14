@@ -81,13 +81,24 @@ Stress commit `ff7` repeated the exact race 20 times; Full `29334928481`
 again reached Core GREEN before supersession. Security re-review approved the
 repair with no actionable blocker.
 
+Final docs-head Full `29335855757` then failed 377/378 server tests because a
+sibling preview token stayed invalid after one transient truncated base-file
+read. Deterministic RED `df0c0581` reproduced that exact reload-recovery gap;
+RED Full `29336713035` failed the intended case. GREEN `3c44aecf` adds a
+bounded retry serialized by `reloadTail`: the first bad read fails closed
+immediately, success cancels retry state, and watcher close cancels pending
+retry work. Focused authorization tests passed 15/15 and typecheck passed.
+Permanently malformed input remains fail-closed after the bounded budget, and
+the retry remains process-local.
+
 Focused real-network Playwright passed 3/3 and the direct headed interaction
 passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
 confirmed self-revocation left an empty credential field with recovery guidance.
 Full Verification `29335200155` passed gates, typecheck, build, and Core, then
 was superseded and cancelled during Playwright by the documentation push; it is
-not GREEN. The final docs-head Full, including the corrected equal-session E2E,
-remains pending. Vercel passed on `bd7acd`, but deployment remains non-gating.
+not GREEN. Full `29335855757` is RED, not final evidence. The final PR-head Full,
+including the corrected equal-session E2E and watcher retry regression, remains
+pending without a pinned run id. Vercel passed on `bd7acd`, but deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps

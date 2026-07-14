@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-07-14-penpot-token-mcp-ui.md` - **Active / in progress** on PR #308. Tasks 1-3 are implemented with MCP/HTTP/Korean UI, same-identity session invalidation, and process-local watcher serialization. Security re-review approved; Full Verification `29335200155` was superseded and cancelled during Playwright and is not GREEN. Final docs-head Full, merge, and post-merge cleanup remain pending.
+`2026-07-14-penpot-token-mcp-ui.md` - **Active / in progress** on PR #308. Tasks 1-3 are implemented with MCP/HTTP/Korean UI, same-identity session invalidation, and process-local watcher serialization. Security re-review approved. Full `29335855757` exposed transient watcher-read recovery; deterministic RED `df0c0581` / `29336713035` and focused GREEN `3c44aecf` now cover bounded process-local retry. Final PR-head Full, merge, and post-merge cleanup remain pending.
 
 ## Completed Plans
 

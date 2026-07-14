@@ -147,6 +147,24 @@ transactional identity storage with a durable version/CAS boundary remains
 required to order watcher, authentication, quarantine, and mutation decisions
 globally.
 
+## Watcher Transient-read Retry Loop
+
+Final docs-head Full `29335855757` failed with 377/378 server tests passing:
+after a transient truncated operator-base read failed closed, the sibling
+preview token stayed invalid instead of recovering on a later valid read.
+Deterministic RED `df0c0581` made that recovery failure repeatable, and RED
+Full `29336713035` failed the exact intended case.
+
+GREEN `3c44aecf` schedules a bounded retry through the existing process-local
+`reloadTail`. The initial malformed/truncated read still clears authorization
+immediately. A later successful reload cancels retry state; closing the watcher
+also cancels pending retry work. Focused authorization tests passed 15/15 and
+typecheck passed.
+
+The retry budget does not weaken fail-close behavior: permanently malformed
+input remains unauthorized after retries are exhausted. It is bounded and
+process-local, not a shared multi-host generation or delivery guarantee.
+
 ## Failure And Verification Ledger
 
 | Evidence | Result | What it proved or exposed |
@@ -173,7 +191,11 @@ globally.
 | Security re-review | Approved | No actionable blocker in the watcher repair |
 | Vercel on `bd7acd` | Passed, non-gating | Preview deployment is separate from the product merge gate |
 | Full `29335200155` | Cancelled, not GREEN | Passed gates/typecheck/build/Core; docs push superseded it during Playwright |
-| Final docs-head Full | Pending | Must execute the corrected equal-session E2E before merge; no run id is pinned here |
+| Full `29335855757` | RED server 377/378 | Sibling preview token stayed invalid after a transient truncated base read |
+| Commit `df0c0581` | Deterministic RED | Reproduced the exact transient-read recovery failure |
+| Full `29336713035` | RED | Executed and failed the intended retry-recovery case |
+| Commit `3c44aecf` | Focused GREEN | Bounded `reloadTail` retry; auth 15/15 and typecheck passed |
+| Final PR-head Full | Pending | Must cover corrected equal-session E2E and watcher retry; no run id is pinned here |
 
 The initial browser async guard also failed typecheck because its identity ref was
 declared after first use. After `9e500aa`, the focused lifecycle revealed that
@@ -188,8 +210,9 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
   retained event consumption and operational review remain open.
 - Shared transactional multi-host identity and revocation storage remains open.
   Filesystem locking, watcher-tail waits, and freshness checks are process-local
-  or same-storage evidence only. Multiple hosts need one durable monotonic
-  authorization generation or CAS contract.
+  or same-storage evidence only. The bounded transient-read retry is also
+  process-local. Multiple hosts need one durable monotonic authorization
+  generation or CAS contract. Permanently malformed input remains fail-closed.
 - MCP mutations do not yet provide agent dry-run, review, apply, summary, or
   reversible transaction semantics comparable to saved design edits.
 - Root-token recovery is explicit and preserves teams/revocations, but broader

@@ -337,4 +337,11 @@ coordination. Multiple hosts still need shared transactional identity storage
 with one monotonic generation/version or CAS contract before watcher,
 authentication, quarantine, and mutation decisions can be ordered globally.
 
+A transient unreadable or truncated operator-file reload fails closed
+immediately, then schedules a bounded process-local retry serialized through the
+same `reloadTail`. A successful reload cancels pending retry work, and watcher
+close cancels it as well. Permanently malformed configuration remains
+fail-closed after the retry budget is exhausted; the retry is not an eventual
+multi-host consistency mechanism.
+
 The MVP relay gate token is not account authentication. For member authorization, the relay can also validate `COLLAB_MEMBER_TOKENS` entries with `owner`, `editor`, or `viewer` roles. Viewers are limited to awareness-only connections; document sync/write access is reserved for owners and editors. E2EE encrypts document snapshots through the relay, but presence, cursor, selection, room ids, and auth metadata remain visible to the relay in this v1.
