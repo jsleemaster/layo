@@ -738,6 +738,40 @@ describe("MCP AI editing workflow", () => {
     ]);
   });
 
+  test("authenticates MCP registry tools with a named token record", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "automation-user",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            tokens: [
+              {
+                id: "mcp",
+                name: "MCP automation",
+                token: "mcp-secret"
+              }
+            ]
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "automation-user",
+        memberToken: "mcp-secret"
+      }
+    });
+
+    expect(
+      parseToolJson(
+        await client.callTool({
+          name: "list_library_registry",
+          arguments: {}
+        })
+      ).libraries
+    ).toEqual([]);
+  });
+
   test("filters MCP registry lists to the configured principal teams", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {
