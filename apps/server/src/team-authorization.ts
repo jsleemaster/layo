@@ -948,7 +948,8 @@ async function quarantinePersistedManagedTokenState(
 async function quarantineWatchedManagedTokenState(
   basePath: string,
   error: ManagedTokenBindingError,
-  observedSourceSnapshot: string | undefined
+  observedSourceSnapshot: string | undefined,
+  recoverWhileLocked: () => Promise<void>
 ): Promise<void> {
   const sidecarPath = managedTokenSidecarPath(basePath);
   await withFileProcessMutationLock(sidecarPath, async () => {
@@ -963,20 +964,26 @@ async function quarantineWatchedManagedTokenState(
     const member = state.members.find(
       (candidate) => candidate.userId === error.userId
     );
-    if (!member || member.quarantined) {
-      return;
+    if (!member) {
+      throw managementError(
+        "team authorization token sidecar member changed during quarantine",
+        409
+      );
     }
-    member.quarantined = true;
-    await persistManagedTokenState(
-      basePath,
-      sidecarPath,
-      sourceSnapshot,
-      state,
-      {
-        syncFile: (handle) => handle.sync(),
-        syncDirectory
-      }
-    );
+    if (!member.quarantined) {
+      member.quarantined = true;
+      await persistManagedTokenState(
+        basePath,
+        sidecarPath,
+        sourceSnapshot,
+        state,
+        {
+          syncFile: (handle) => handle.sync(),
+          syncDirectory
+        }
+      );
+    }
+    await recoverWhileLocked();
   });
 }
 
@@ -1091,34 +1098,51 @@ export async function watchTeamAuthorizationConfigFile(
         if (error instanceof ManagedTokenBindingError) {
           try {
             await options.beforeManagedTokenQuarantine?.();
+            if (closed) {
+              return;
+            }
+            await options.beforeManagedTokenRecoveryPublish?.();
+            if (closed) {
+              return;
+            }
             await quarantineWatchedManagedTokenState(
               normalizedPath,
               error,
-              observedSidecarSnapshot
+              observedSidecarSnapshot,
+              async () => {
+                const recoveryGeneration =
+                  teamAuthorizationConfigGeneration(initialConfig);
+                const recoveredConfig =
+                  await readStableMergedTeamAuthorizationConfig(normalizedPath);
+                if (closed) {
+                  return;
+                }
+                if (
+                  recoveryGeneration
+                  === teamAuthorizationConfigGeneration(initialConfig)
+                ) {
+                  replaceTeamAuthorizationMembers(
+                    initialConfig,
+                    recoveredConfig.members
+                  );
+                  cancelRetry();
+                  recovered = true;
+                }
+              }
             );
-            const recoveryGeneration =
-              teamAuthorizationConfigGeneration(initialConfig);
-            const recoveredConfig =
-              await readStableMergedTeamAuthorizationConfig(normalizedPath);
-            await options.beforeManagedTokenRecoveryPublish?.();
-            if (
-              recoveryGeneration
-              === teamAuthorizationConfigGeneration(initialConfig)
-            ) {
-              replaceTeamAuthorizationMembers(
-                initialConfig,
-                recoveredConfig.members
-              );
-              cancelRetry();
-              recovered = true;
-            }
           } catch (quarantineError) {
+            if (closed) {
+              return;
+            }
             options.onError?.(
               quarantineError instanceof Error
                 ? quarantineError
                 : new Error(String(quarantineError))
             );
           }
+        }
+        if (closed) {
+          return;
         }
         options.onError?.(error instanceof Error ? error : new Error(String(error)));
         if (!recovered) {
