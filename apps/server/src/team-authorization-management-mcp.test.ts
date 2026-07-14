@@ -1,19 +1,30 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createMcpServer } from "./mcp";
-import type {
-  TeamAccessTokenMetadata,
-  TeamAuthorizationConfig,
-  TeamAuthorizationFileManager
+import {
+  createTeamAuthorizationFileManager,
+  watchTeamAuthorizationConfigFile,
+  type TeamAccessTokenMetadata,
+  type TeamAuthorizationConfig,
+  type TeamAuthorizationConfigSource,
+  type TeamAuthorizationFileManager
 } from "./team-authorization";
 
 const clients: Client[] = [];
 const servers: Array<ReturnType<typeof createMcpServer>> = [];
+const sources: TeamAuthorizationConfigSource[] = [];
+const roots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close().catch(() => undefined)));
   await Promise.all(servers.splice(0).map((server) => server.close().catch(() => undefined)));
+  sources.splice(0).forEach((source) => source.close());
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
 describe("team access token MCP administration", () => {
@@ -120,35 +131,167 @@ describe("team access token MCP administration", () => {
     expect(names).not.toContain("revoke_account_token");
   });
 
-  test.each([
-    { name: "invalid", auth: authorization(), token: "wrong-token" },
-    {
-      name: "revoked",
-      auth: authorization({ revokedAt: "2026-07-14T00:00:00.000Z" }),
-      token: "owner-member-token"
-    }
-  ])("rejects an $name principal before any token mutation", async ({ auth, token }) => {
-    const manager = noOpManager();
-    const client = await connect({
-      libraryRegistryAuth: auth,
-      libraryRegistryPrincipal: { userId: "owner-user", memberToken: token },
-      teamAuthorizationManager: manager
+  test.each(
+    ["invalid", "revoked-member", "revoked-named"].flatMap((principalState) =>
+      ["list", "create", "revoke"].map((operation) => ({ principalState, operation }))
+    )
+  )("rejects a $principalState principal before $operation", async ({ principalState, operation }) => {
+    const setup = await connectFileBackedMcp({
+      principalState: principalState as PrincipalState
     });
 
-    const result = await client.callTool({
-      name: "create_account_token",
-      arguments: { name: "Must not persist", expiresInDays: null }
-    });
-
+    const before = await readFile(setup.configPath, "utf8");
+    const result = await callManagementTool(setup.client, operation as ManagementOperation);
     expect(result).toMatchObject({
       isError: true,
       content: [expect.objectContaining({ text: expect.stringMatching(/credentials are invalid/) })]
     });
-    expect(manager.createToken).not.toHaveBeenCalled();
-    expect(manager.listTokens).not.toHaveBeenCalled();
-    expect(manager.revokeToken).not.toHaveBeenCalled();
+    expect(await readFile(setup.configPath, "utf8")).toBe(before);
+  });
+
+  test.each(
+    ["revoked", "replaced"].flatMap((fileState) =>
+      ["list", "create", "revoke"].map((operation) => ({ fileState, operation }))
+    )
+  )("uses current file credentials before $operation when the cached principal is $fileState", async ({
+    fileState,
+    operation
+  }) => {
+    const setup = await connectFileBackedMcp();
+    const changed = membersFile({
+      principalState: fileState === "revoked" ? "revoked-named" : "replaced-named"
+    });
+    await writeFile(setup.configPath, changed, "utf8");
+
+    const result = await callManagementTool(setup.client, operation as ManagementOperation);
+    expect(result).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/credentials are invalid/) })]
+    });
+    expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(JSON.parse(changed));
+  });
+
+  test("requires explicit acknowledgement before revoking the active named principal token", async () => {
+    const setup = await connectFileBackedMcp();
+
+    const result = await setup.client.callTool({
+      name: "revoke_account_token",
+      arguments: { tokenId: "principal-token" }
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/confirmSelfRevoke/) })]
+    });
+    expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(
+      JSON.parse(membersFile())
+    );
+  });
+
+  test("revokes the active named principal only with acknowledgement and returns no secret", async () => {
+    const setup = await connectFileBackedMcp();
+
+    const result = parseToolJson(await setup.client.callTool({
+      name: "revoke_account_token",
+      arguments: { tokenId: "principal-token", confirmSelfRevoke: true }
+    }));
+
+    expect(result.metadata).toMatchObject({
+      id: "principal-token",
+      revokedAt: "2026-07-14T12:00:00.000Z"
+    });
+    expect(JSON.stringify(result)).not.toContain("principal-secret");
+    expect(JSON.stringify(result)).not.toContain("tokenHash");
   });
 });
+
+type PrincipalState = "active" | "invalid" | "revoked-member" | "revoked-named";
+type ManagementOperation = "list" | "create" | "revoke";
+
+async function connectFileBackedMcp(options: { principalState?: PrincipalState } = {}) {
+  const root = await mkdtemp(path.join(tmpdir(), "layo-token-mcp-review-"));
+  roots.push(root);
+  const configPath = path.join(root, "members.json");
+  const principalState = options.principalState ?? "active";
+  await writeFile(configPath, membersFile({ principalState }), "utf8");
+  const source = await watchTeamAuthorizationConfigFile(configPath, {
+    pollIntervalMs: 60_000
+  });
+  sources.push(source);
+  const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+    now: () => new Date("2026-07-14T12:00:00.000Z"),
+    generateId: () => "created-token",
+    generateSecret: () => "layo_pat_created_secret"
+  });
+  const client = await connect({
+    libraryRegistryAuth: source.config,
+    libraryRegistryPrincipal: {
+      userId: "owner-user",
+      memberToken: principalState === "invalid" ? "wrong-secret" : "principal-secret"
+    },
+    teamAuthorizationManager: manager
+  });
+  return { client, configPath };
+}
+
+function membersFile(options: {
+  principalState?: "active" | "revoked-member" | "revoked-named" | "replaced-named";
+} = {}): string {
+  const principalState = options.principalState ?? "active";
+  return JSON.stringify(
+    [
+      {
+        userId: "owner-user",
+        role: "owner",
+        teamIds: ["team-alpha"],
+        ...(principalState === "revoked-member"
+          ? { revokedAt: "2026-07-14T10:00:00.000Z" }
+          : {}),
+        tokens: [
+          {
+            id: "principal-token",
+            name: "MCP principal",
+            tokenHash: tokenHash(
+              principalState === "replaced-named" ? "replacement-secret" : "principal-secret"
+            ),
+            createdAt: "2026-07-13T12:00:00.000Z",
+            ...(principalState === "revoked-named"
+              ? { revokedAt: "2026-07-14T10:00:00.000Z" }
+              : {})
+          },
+          {
+            id: "target-token",
+            name: "Target automation",
+            tokenHash: tokenHash("target-secret"),
+            createdAt: "2026-07-13T13:00:00.000Z"
+          }
+        ]
+      }
+    ],
+    null,
+    2
+  );
+}
+
+function tokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function callManagementTool(client: Client, operation: ManagementOperation) {
+  if (operation === "list") {
+    return client.callTool({ name: "list_account_tokens", arguments: {} });
+  }
+  if (operation === "create") {
+    return client.callTool({
+      name: "create_account_token",
+      arguments: { name: "Must not persist", expiresInDays: null }
+    });
+  }
+  return client.callTool({
+    name: "revoke_account_token",
+    arguments: { tokenId: "target-token" }
+  });
+}
 
 function authorization(memberOverrides: Record<string, unknown> = {}): TeamAuthorizationConfig {
   return {
