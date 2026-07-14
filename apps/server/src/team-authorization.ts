@@ -213,6 +213,7 @@ export function createTeamAuthorizationFileManager(
     withFileProcessMutationLock(sidecarPath, operation);
 
   const persist = async (
+    baseSnapshot: string,
     sourceSnapshot: string | undefined,
     state: ManagedTokenState
   ): Promise<void> => {
@@ -227,6 +228,12 @@ export function createTeamAuthorizationFileManager(
       if (currentSnapshot !== sourceSnapshot) {
         throw managementError(
           "team authorization token sidecar changed during token management",
+          409
+        );
+      }
+      if (await readFile(normalizedPath, "utf8") !== baseSnapshot) {
+        throw managementError(
+          "team authorization file changed during token management",
           409
         );
       }
@@ -245,9 +252,8 @@ export function createTeamAuthorizationFileManager(
     operation: TeamAuthorizationManagementOperation
   ): Promise<TeamAuthorizationManagementResult> =>
     mutate(async () => {
-      const baseConfig = parseRequiredTeamAuthorizationConfig(
-        await readFile(normalizedPath, "utf8")
-      );
+      const baseSnapshot = await readFile(normalizedPath, "utf8");
+      const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
       const sidecarSnapshot = await readOptionalFile(sidecarPath);
       const state = parseManagedTokenState(sidecarSnapshot);
       const nextConfig = mergeManagedTokenState(baseConfig, state);
@@ -315,7 +321,7 @@ export function createTeamAuthorizationFileManager(
           ...(expiresAt ? { expiresAt } : {})
         };
         managedTokenStateMember(state, userId).tokens.push(credential);
-        await persist(sidecarSnapshot, state);
+        await persist(baseSnapshot, sidecarSnapshot, state);
         return {
           type: "create",
           created: {
@@ -351,7 +357,7 @@ export function createTeamAuthorizationFileManager(
           revokedAt
         });
         credential.revokedAt = revokedAt;
-        await persist(sidecarSnapshot, state);
+        await persist(baseSnapshot, sidecarSnapshot, state);
       }
       return {
         type: "revoke",
