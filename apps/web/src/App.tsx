@@ -9963,6 +9963,7 @@ export function App() {
     return undefined;
   }, [
     teamPanelMode,
+    collabSession,
     collabSession?.team.teamId,
     collabSession?.team.currentUserId,
     activeMemberToken,
