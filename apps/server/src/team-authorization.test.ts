@@ -83,6 +83,115 @@ describe("team library authorization", () => {
     ).toThrow("invalid library registry team member credential");
   });
 
+  test("enforces activation, expiry, revocation, and hash rotation windows", () => {
+    const rotatedTokenHash = createHash("sha256").update("rotated-token").digest("hex");
+    const config = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "rotating-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "legacy-token",
+          tokenHashes: [rotatedTokenHash, rotatedTokenHash.toUpperCase()],
+          notBefore: "2026-07-14T00:00:00.000Z",
+          expiresAt: "2026-07-15T00:00:00.000Z",
+          revokedAt: "2026-07-14T18:00:00.000Z"
+        }
+      ])
+    );
+
+    expect(
+      authenticateTeamMember(
+        config!,
+        "rotating-user",
+        "legacy-token",
+        new Date("2026-07-14T12:00:00.000Z")
+      )
+    ).toMatchObject({ userId: "rotating-user", role: "editor" });
+    expect(
+      authenticateTeamMember(
+        config!,
+        "rotating-user",
+        "rotated-token",
+        new Date("2026-07-14T12:00:00.000Z")
+      )
+    ).toMatchObject({ userId: "rotating-user", role: "editor" });
+    expect(captureError(() =>
+      authenticateTeamMember(
+        config!,
+        "rotating-user",
+        "legacy-token",
+        new Date("2026-07-13T23:59:59.999Z")
+      )
+    )).toMatchObject({ statusCode: 401 });
+    expect(captureError(() =>
+      authenticateTeamMember(
+        config!,
+        "rotating-user",
+        "legacy-token",
+        new Date("2026-07-14T18:00:00.000Z")
+      )
+    )).toMatchObject({ statusCode: 401 });
+
+    const expired = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "expired-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "expired-token",
+          expiresAt: "2020-01-01T00:00:00.000Z"
+        }
+      ])
+    );
+    expect(captureError(() =>
+      authenticateTeamMember(expired!, "expired-user", "expired-token")
+    )).toMatchObject({ statusCode: 401 });
+  });
+
+  test("rejects invalid credential lifecycle configuration", () => {
+    expect(() =>
+      parseTeamAuthorizationConfig(
+        JSON.stringify([
+          {
+            userId: "editor-user",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "editor-token",
+            expiresAt: "not-a-date"
+          }
+        ])
+      )
+    ).toThrow("invalid library registry team member expiresAt");
+    expect(() =>
+      parseTeamAuthorizationConfig(
+        JSON.stringify([
+          {
+            userId: "editor-user",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "fallback-token",
+            tokenHashes: ["not-a-sha256"]
+          }
+        ])
+      )
+    ).toThrow("invalid library registry team member tokenHashes");
+    expect(() =>
+      parseTeamAuthorizationConfig(
+        JSON.stringify([
+          {
+            userId: "editor-user",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "editor-token",
+            notBefore: "2026-07-15T00:00:00.000Z",
+            expiresAt: "2026-07-14T00:00:00.000Z"
+          }
+        ])
+      )
+    ).toThrow("expiresAt must be after notBefore");
+  });
+
   test("returns stable authentication and authorization failures", () => {
     const config = {
       members: [
