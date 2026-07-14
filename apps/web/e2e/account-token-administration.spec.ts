@@ -1,11 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer, type Server } from "node:http";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const API_ORIGIN = "http://127.0.0.1:4318";
+const SERVER_ORIGIN = "http://127.0.0.1:4318";
+const API_ORIGIN = "http://127.0.0.1:4319";
 const WEB_ORIGIN = "http://127.0.0.1:5174";
 const ACTIVE_SECRET = "active-browser-secret";
 const SIBLING_SECRET = "sibling-automation-secret";
@@ -19,6 +21,8 @@ let fixtureRoot = "";
 let authorizationFile = "";
 let authorizationSidecarFile = "";
 let baseAuthorizationText = "";
+let proxyServer: Server | undefined;
+let proxyFault: ProxyFault | undefined;
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
@@ -40,7 +44,14 @@ test.beforeAll(async () => {
       }
     )
   );
-  await waitForUrl(`${API_ORIGIN}/health`, createdProcesses.at(-1));
+  await waitForUrl(`${SERVER_ORIGIN}/health`, createdProcesses.at(-1));
+
+  proxyServer = createFaultProxy();
+  await new Promise<void>((resolve, reject) => {
+    proxyServer!.once("error", reject);
+    proxyServer!.listen(4319, "127.0.0.1", () => resolve());
+  });
+  await waitForUrl(`${API_ORIGIN}/health`);
 
   createdProcesses.push(
     startService(
@@ -52,6 +63,12 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  proxyFault?.release.resolve();
+  proxyFault = undefined;
+  if (proxyServer) {
+    await new Promise<void>((resolve) => proxyServer!.close(() => resolve()));
+    proxyServer = undefined;
+  }
   await Promise.all(createdProcesses.reverse().map(stopService));
   if (fixtureRoot) {
     await rm(fixtureRoot, { recursive: true, force: true });
@@ -121,7 +138,7 @@ test("manages named account tokens over the isolated real network", async ({ con
 
   await page.getByTestId("account-token-revoke-sibling-token").click();
   await expect(page.getByTestId("account-token-row-sibling-token")).toContainText("해지됨");
-  const revokedAuthentication = await page.request.get(`${API_ORIGIN}/account/tokens`, {
+  const revokedAuthentication = await page.request.get(`${SERVER_ORIGIN}/account/tokens`, {
     headers: {
       Authorization: `Bearer ${SIBLING_SECRET}`,
       "X-Layo-User-Id": "local-user"
@@ -147,69 +164,26 @@ test("manages named account tokens over the isolated real network", async ({ con
 test("guards pending operations, network errors, and stale identity responses", async ({ page }) => {
   await createAuthenticatedLocalTeam(page);
 
-  let releaseCreate!: () => void;
-  let createSeen!: () => void;
-  const createGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
-  const sawCreate = new Promise<void>((resolve) => { createSeen = resolve; });
-  let delayCreate = true;
-  let abortNextList = false;
-  let releaseRefresh!: () => void;
-  let refreshSeen!: () => void;
-  let refreshGate = Promise.resolve();
-  let sawRefresh = Promise.resolve();
-
-  await page.route(`${API_ORIGIN}/account/tokens**`, async (route) => {
-    const method = route.request().method();
-    if (method === "POST" && delayCreate) {
-      delayCreate = false;
-      createSeen();
-      await createGate;
-      await route.continue();
-      return;
-    }
-    if (method === "GET" && abortNextList) {
-      abortNextList = false;
-      await route.abort("failed");
-      return;
-    }
-    if (method === "GET" && releaseRefresh) {
-      refreshSeen();
-      await refreshGate;
-      releaseRefresh = undefined as unknown as () => void;
-      await route.continue();
-      return;
-    }
-    await route.continue();
-  });
-
+  const delayedCreate = armProxyFault("POST", "/account/tokens", "delay");
   await page.getByTestId("account-token-name").fill("지연 생성");
   await page.getByTestId("account-token-create").click();
-  await sawCreate;
+  await delayedCreate.seen.promise;
   await expect(page.getByTestId("account-token-create")).toBeDisabled();
-  abortNextList = true;
-  releaseCreate();
+
+  armProxyFault("GET", "/account/tokens", "status");
+  delayedCreate.release.resolve();
   await expect(page.getByTestId("account-token-secret")).toBeVisible();
   await expect(page.getByTestId("account-token-status")).toContainText("토큰은 생성되었지만");
 
-  abortNextList = true;
+  armProxyFault("GET", "/account/tokens", "status");
   await page.getByTestId("account-token-refresh").click();
   await expect(page.getByTestId("account-token-status")).toContainText("계정 토큰 목록을 불러오지 못했습니다");
 
-  let releaseRevoke!: () => void;
-  let revokeSeen!: () => void;
-  const revokeGate = new Promise<void>((resolve) => { releaseRevoke = resolve; });
-  const sawRevoke = new Promise<void>((resolve) => { revokeSeen = resolve; });
-  await page.route(`${API_ORIGIN}/account/tokens/sibling-token`, async (route) => {
-    if (route.request().method() === "DELETE") {
-      revokeSeen();
-      await revokeGate;
-    }
-    await route.continue();
-  });
+  const delayedRevoke = armProxyFault("DELETE", "/account/tokens/sibling-token", "delay");
   await page.getByTestId("account-token-revoke-sibling-token").click();
-  await sawRevoke;
+  await delayedRevoke.seen.promise;
   await expect(page.getByTestId("account-token-revoke-sibling-token")).toBeDisabled();
-  releaseRevoke();
+  delayedRevoke.release.resolve();
   await expect(page.getByTestId("account-token-row-sibling-token")).toContainText("해지됨");
 
   await page.getByRole("button", { name: "설정 내보내기" }).click();
@@ -226,14 +200,13 @@ test("guards pending operations, network errors, and stale identity responses", 
     role: "editor"
   });
 
-  refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
-  sawRefresh = new Promise<void>((resolve) => { refreshSeen = resolve; });
+  const delayedRefresh = armProxyFault("GET", "/account/tokens", "delay");
   await page.getByTestId("account-token-refresh").click();
-  await sawRefresh;
+  await delayedRefresh.seen.promise;
   await manifest.fill(JSON.stringify(changedIdentity));
   await page.getByRole("button", { name: "설정 가져오기" }).click();
   await expect(page.getByTestId("account-token-member")).toContainText("review-user");
-  releaseRefresh();
+  delayedRefresh.release.resolve();
   await expect(page.getByTestId("account-token-status")).toContainText(
     "멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다"
   );
@@ -368,6 +341,96 @@ async function readBrowserStorage(page: Page) {
     }
     return JSON.stringify(values);
   });
+}
+
+interface Deferred {
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+interface ProxyFault {
+  method: string;
+  path: string;
+  mode: "delay" | "status";
+  seen: Deferred;
+  release: Deferred;
+}
+
+function createFaultProxy() {
+  return createServer(async (request, response) => {
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      const body = Buffer.concat(chunks);
+      const requestPath = request.url ?? "/";
+      const activeFault =
+        proxyFault
+        && proxyFault.method === request.method
+        && proxyFault.path === requestPath
+          ? proxyFault
+          : undefined;
+      if (activeFault) {
+        proxyFault = undefined;
+        activeFault.seen.resolve();
+        if (activeFault.mode === "status") {
+          response.writeHead(503, {
+            "Access-Control-Allow-Origin": request.headers.origin ?? "*",
+            "Content-Type": "application/json"
+          });
+          response.end(JSON.stringify({ error: "테스트 프록시 일시 실패" }));
+          return;
+        }
+        await activeFault.release.promise;
+      }
+
+      const headers = new Headers();
+      for (const [name, value] of Object.entries(request.headers)) {
+        if (value !== undefined && name !== "host" && name !== "content-length") {
+          headers.set(name, Array.isArray(value) ? value.join(", ") : value);
+        }
+      }
+      const upstream = await fetch(`${SERVER_ORIGIN}${requestPath}`, {
+        method: request.method,
+        headers,
+        body: body.length > 0 ? body : undefined
+      });
+      response.statusCode = upstream.status;
+      upstream.headers.forEach((value, name) => {
+        if (!["content-encoding", "content-length", "transfer-encoding"].includes(name)) {
+          response.setHeader(name, value);
+        }
+      });
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (error) {
+      response.writeHead(502, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        error: error instanceof Error ? error.message : "테스트 프록시 전달 실패"
+      }));
+    }
+  });
+}
+
+function armProxyFault(method: string, path: string, mode: ProxyFault["mode"]) {
+  if (proxyFault) {
+    throw new Error("only one account proxy fault may be armed at a time");
+  }
+  const fault = {
+    method,
+    path,
+    mode,
+    seen: deferred(),
+    release: deferred()
+  };
+  proxyFault = fault;
+  return fault;
+}
+
+function deferred(): Deferred {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => { resolve = complete; });
+  return { promise, resolve };
 }
 
 function startService(args: string[], extraEnv: Record<string, string>): TrackedService {
