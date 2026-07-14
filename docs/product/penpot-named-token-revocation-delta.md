@@ -50,7 +50,10 @@ it now consumes `TeamAuthorizationConfig` directly. Security RED
 fall through to an identical legacy secret. Named-record precedence now blocks
 that migration bypass.
 
-Final GREEN evidence is pending.
+GREEN Full Verification `29309298280`, job `87009441293`, passed Penpot
+maturity/design gates, repository typecheck, web build, TypeScript and Rust core
+tests, and the full Playwright CLI e2e suite. Storage Restore Drill
+`29309298314` and Storage Backup Retention `29309298272` also passed.
 
 ## Failure Learning
 
