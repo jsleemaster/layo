@@ -1439,6 +1439,22 @@ test("right inspector authors multi-property component variant combinations", as
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("elevated");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("large");
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      const payload = await response.json();
+      const savedComponent = payload.file.components.find(
+        (candidate: { id: string }) => candidate.id === "component-card"
+      );
+      return savedComponent.variants.find(
+        (variant: { id: string }) => variant.id === "variant-2"
+      ).properties;
+    })
+    .toEqual([
+      { name: "surface", value: "elevated", type: "select" },
+      { name: "size", value: "large", type: "select" }
+    ]);
 
   const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
     data: {
