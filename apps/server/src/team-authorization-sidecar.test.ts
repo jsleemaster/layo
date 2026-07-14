@@ -233,7 +233,20 @@ describe("team authorization managed token sidecar", () => {
 
   test("does not resurrect managed tokens after a removed user id is reintroduced", async () => {
     const originalBase = baseMembers();
-    const setup = await fixture(originalBase);
+    let quarantineEnteredResolve!: () => void;
+    let quarantineReleaseResolve!: () => void;
+    const quarantineEntered = new Promise<void>((resolve) => {
+      quarantineEnteredResolve = resolve;
+    });
+    const quarantineRelease = new Promise<void>((resolve) => {
+      quarantineReleaseResolve = resolve;
+    });
+    const setup = await fixture(originalBase, 10, {
+      beforeManagedTokenQuarantine: async () => {
+        quarantineEnteredResolve();
+        await quarantineRelease;
+      }
+    });
     const ids = ["dormant-token", "fresh-token"];
     const secrets = ["dormant-secret", "fresh-secret"];
     const manager = createTeamAuthorizationFileManager(
@@ -259,26 +272,29 @@ describe("team authorization managed token sidecar", () => {
           token: "replacement-secret"
         }
       ]), "utf8");
-      await waitFor(() => authenticationFails(
+      await quarantineEntered;
+      expect(authenticationFails(
         setup.source.config,
         "owner-user",
         "legacy-owner-token"
-      ));
+      )).toBe(true);
 
       await writeFile(setup.basePath, originalBase, "utf8");
-      await waitFor(() => authenticationFails(
-        setup.source.config,
-        "owner-user",
-        "legacy-owner-token"
-      ));
-
-      await manager.manageTokens(
+      let createSettled = false;
+      const create = manager.manageTokens(
         { userId: "owner-user", memberToken: "legacy-owner-token" },
         {
           type: "create",
           input: { name: "Fresh generation", expiresInDays: null }
         }
-      );
+      ).finally(() => {
+        createSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const settledBeforeQuarantine = createSettled;
+      quarantineReleaseResolve();
+      await create;
+      expect(settledBeforeQuarantine).toBe(false);
       expect(manager.listTokens("owner-user").map((token) => token.id)).toEqual([
         "base-token",
         "base-sibling",
@@ -293,6 +309,7 @@ describe("team authorization managed token sidecar", () => {
         { type: "list" }
       )).resolves.toMatchObject({ activeTokenId: "fresh-token" });
     } finally {
+      quarantineReleaseResolve();
       await setup.close();
     }
   });
@@ -512,11 +529,16 @@ describe("team authorization managed token sidecar", () => {
 
 });
 
-async function fixture(base: string, pollIntervalMs = 10) {
+async function fixture(
+  base: string,
+  pollIntervalMs = 10,
+  watchOptions: Parameters<typeof watchTeamAuthorizationConfigFile>[1] = {}
+) {
   const root = await mkdtemp(path.join(tmpdir(), "layo-token-sidecar-"));
   const basePath = path.join(root, "members.json");
   await writeFile(basePath, base, "utf8");
   const source = await watchTeamAuthorizationConfigFile(basePath, {
+    ...watchOptions,
     pollIntervalMs
   });
   return {
