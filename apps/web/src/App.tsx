@@ -9795,10 +9795,17 @@ export function App() {
     }
 
     libraryRegistryEventSequenceRef.current = 0;
+    const credentials =
+      collabSession && activeMemberToken
+        ? {
+            userId: collabSession.team.currentUserId,
+            memberToken: activeMemberToken
+          }
+        : undefined;
     return subscribeToLibraryRegistryEvents({
       fileId,
       after: libraryRegistryEventSequenceRef.current,
-      credentials: activeLibraryRegistryCredentials,
+      credentials,
       onLibraryRegistryEvent: (event) => {
         libraryRegistryEventSequenceRef.current = Math.max(
           libraryRegistryEventSequenceRef.current,
@@ -9809,8 +9816,8 @@ export function App() {
     });
   }, [
     currentProject?.currentDocumentId,
-    activeLibraryRegistryCredentials?.userId,
-    activeLibraryRegistryCredentials?.memberToken
+    collabSession?.team.currentUserId,
+    activeMemberToken
   ]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
