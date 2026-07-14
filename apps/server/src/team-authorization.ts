@@ -985,10 +985,31 @@ export async function watchTeamAuthorizationConfigFile(
   }
   const sidecarPath = managedTokenSidecarPath(normalizedPath);
   const initialConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
+  const pollIntervalMs = Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000));
   let closed = false;
   let reloadTail = Promise.resolve();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const reload = () => {
+  function cancelRetry(): void {
+    if (retryTimer === undefined) {
+      return;
+    }
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
+
+  function scheduleRetry(): void {
+    if (closed || retryTimer !== undefined) {
+      return;
+    }
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      reload();
+    }, pollIntervalMs);
+    retryTimer.unref();
+  }
+
+  function reload(): void {
     reloadTail = reloadTail.then(async () => {
       if (closed) {
         return;
@@ -1005,6 +1026,7 @@ export async function watchTeamAuthorizationConfigFile(
           parseRequiredTeamAuthorizationConfig(baseSnapshot),
           parseManagedTokenState(sidecarSnapshot)
         );
+        cancelRetry();
         if (
           generationBeforeRead
           !== teamAuthorizationConfigGeneration(initialConfig)
@@ -1029,13 +1051,14 @@ export async function watchTeamAuthorizationConfigFile(
           );
         }
         options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        scheduleRetry();
       }
     });
-  };
+  }
   teamAuthorizationConfigReloads.set(initialConfig, () => reloadTail);
   const listener: StatsListener = () => reload();
   const watchOptions = {
-    interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
+    interval: pollIntervalMs,
     persistent: false
   };
   watchFile(normalizedPath, watchOptions, listener);
@@ -1048,6 +1071,7 @@ export async function watchTeamAuthorizationConfigFile(
         return;
       }
       closed = true;
+      cancelRetry();
       teamAuthorizationConfigReloads.delete(initialConfig);
       unwatchFile(normalizedPath, listener);
       unwatchFile(sidecarPath, listener);
