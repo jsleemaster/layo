@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+`2026-07-14-penpot-library-stream-reauthentication.md`
 
 ## Completed Plans
 
