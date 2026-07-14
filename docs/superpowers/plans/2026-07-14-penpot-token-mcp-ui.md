@@ -140,12 +140,14 @@ Deployment remains a separate non-gating concern.
 
 ### Current merge gate
 
-- Full Verification `29332908276`: **pending**; gates, typecheck, build, and
-  Core passed, while Playwright CLI remains in progress.
+- Full Verification `29332908276`: gates, typecheck, build, and Core passed;
+  the documentation push superseded it and cancelled Playwright, so it is not
+  GREEN.
 - Storage Restore Drill `29332908281`: passed.
 - Storage Backup Retention `29332908332`: passed.
 - Earlier Full runs `29332319714`, `29332832876`, and `29332894061` were
   cancelled by newer branch commits, not recorded as GREEN.
+- Final PR-head Full Verification remains pending and must pass before merge.
 - Vercel preview/deployment status is not the merge gate for this local-first
   MCP/UI slice. Deployment rate limits and hosted rollout remain separate.
 - Tasks 1-3 are complete. Task 4 remains in progress until Full Verification,

@@ -64,9 +64,10 @@ The browser invalidates stale list/create/revoke responses by operation
 generation and identity. Focused real-network Playwright passed 3/3 and the
 direct headed interaction passed 1/1: copy changed to `복사됨`, sibling
 revocation to `해지됨`, and confirmed self-revocation left an empty credential
-field with recovery guidance. Full Verification `29332908276` remains pending
-until its in-progress Playwright CLI step completes; restore `29332908281` and
-retention `29332908332` passed on the same head.
+field with recovery guidance. Full Verification `29332908276` passed gates, typecheck, build, and Core, then
+was superseded and cancelled during Playwright by the documentation commit; it
+is not GREEN. Restore `29332908281` and retention `29332908332` passed on that
+implementation head. A final PR-head Full Verification remains pending.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps

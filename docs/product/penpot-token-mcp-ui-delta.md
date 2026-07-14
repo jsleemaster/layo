@@ -13,8 +13,10 @@ Status: PR #308 active; implementation evidence exists, merge gate pending
   operator members file remains external and is never replaced.
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
-- Current gate: Full Verification `29332908276` is pending while Playwright
-  runs. Do not treat this delta, PR, or gates 7/8/10 as complete yet.
+- Current gate: Full Verification `29332908276` was superseded and cancelled
+  during Playwright after gates/typecheck/build/Core passed; it is not GREEN.
+  Final PR-head Full Verification remains pending. Do not treat this delta, PR,
+  or gates 7/8/10 as complete yet.
 
 ## Penpot Reference And Decision
 
@@ -117,7 +119,7 @@ the previous member's UI or restore cleared credentials after self-revocation.
 | Full `29329460338` | Cancelled | Superseded during Web build; not GREEN |
 | Focused account-token e2e | 3/3 passed | Real-network create/copy/refresh/revoke/recovery and secret absence |
 | Direct headed CLI | 1/1 passed | `복사됨`, sibling `해지됨`, empty credential after self-revoke |
-| Full `29332908276` | **Pending** | Gates/typecheck/build/Core passed; Playwright still in progress |
+| Full `29332908276` | Cancelled | Gates/typecheck/build/Core passed; docs push superseded it during Playwright, so it is not GREEN |
 | Restore `29332908281` | Passed | Current-head restore drill |
 | Retention `29332908332` | Passed | Current-head backup retention |
 
