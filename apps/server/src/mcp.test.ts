@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createMcpServer } from "./mcp";
 import { FileStorage } from "./storage";
+import type { TeamAuthorizationConfig } from "./team-authorization";
 
 let tempRoot: string | undefined;
 let activeClient: Client | undefined;
@@ -2274,15 +2275,7 @@ describe("MCP AI editing workflow", () => {
 });
 
 async function connectMcpClient(options?: {
-  libraryRegistryAuth?: {
-    members: Array<{
-      userId: string;
-      role: "owner" | "editor" | "viewer";
-      teamIds: string[];
-      token?: string;
-      tokenHash?: string;
-    }>;
-  };
+  libraryRegistryAuth?: TeamAuthorizationConfig;
   libraryRegistryPrincipal?: {
     userId: string;
     memberToken: string;
