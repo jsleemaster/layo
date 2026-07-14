@@ -178,9 +178,13 @@ function noOpManager(): TeamAuthorizationFileManager {
   };
 }
 
-async function connect(options: Parameters<typeof createMcpServer>[1]) {
+type TestMcpOptions = Parameters<typeof createMcpServer>[1] & {
+  teamAuthorizationManager?: TeamAuthorizationFileManager;
+};
+
+async function connect(options: TestMcpOptions) {
   const client = new Client({ name: "layo-token-management-test", version: "1.0.0" });
-  const server = createMcpServer(undefined, options);
+  const server = createMcpServer(undefined, options as Parameters<typeof createMcpServer>[1]);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   clients.push(client);
   servers.push(server);
