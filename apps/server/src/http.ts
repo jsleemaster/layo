@@ -85,6 +85,12 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       return reply.code(400).send({ error: (error as Error).message });
     }
 
+    const code = (error as { code?: string }).code;
+    if (code === "EINVAL" || code === "EEXIST" || code === "EUNAVAILABLE") {
+      const statusCode = (error as { statusCode?: number }).statusCode ?? 400;
+      return reply.code(statusCode).send({ error: (error as Error).message });
+    }
+
     if ((error as { code?: string }).code === "ENOENT") {
       return reply.code(404).send({ error: "not found" });
     }
