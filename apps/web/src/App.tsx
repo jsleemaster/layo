@@ -9517,6 +9517,9 @@ export function App() {
   const [componentVariantSourceReorderSession, setComponentVariantSourceReorderSession] =
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
+  const accountTokenOperationGenerationRef = useRef(0);
+  const accountTokenIdentityRef = useRef("");
+  const memberTokenInputRef = useRef<HTMLInputElement | null>(null);
   const accountTokenIdentityKey = [
     teamPanelMode,
     collabSession?.team.teamId ?? "no-team",
@@ -9534,9 +9537,6 @@ export function App() {
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAuthorizationEndedRef = useRef(false);
-  const accountTokenOperationGenerationRef = useRef(0);
-  const accountTokenIdentityRef = useRef("");
-  const memberTokenInputRef = useRef<HTMLInputElement | null>(null);
   const libraryRegistryCredentialReconnectPendingRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
