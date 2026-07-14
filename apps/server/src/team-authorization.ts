@@ -36,6 +36,10 @@ export interface TeamAuthorizationConfig {
 }
 
 const teamAuthorizationConfigGenerations = new WeakMap<TeamAuthorizationConfig, number>();
+const teamAuthorizationConfigReloads = new WeakMap<
+  TeamAuthorizationConfig,
+  () => Promise<void>
+>();
 
 function teamAuthorizationConfigGeneration(config: TeamAuthorizationConfig): number {
   return teamAuthorizationConfigGenerations.get(config) ?? 0;
@@ -50,6 +54,22 @@ function replaceTeamAuthorizationMembers(
     teamAuthorizationConfigGeneration(config) + 1
   );
   config.members = members;
+}
+
+async function waitForTeamAuthorizationConfigReload(
+  config: TeamAuthorizationConfig
+): Promise<void> {
+  const currentReload = teamAuthorizationConfigReloads.get(config);
+  if (!currentReload) {
+    return;
+  }
+  while (true) {
+    const pending = currentReload();
+    await pending;
+    if (pending === currentReload()) {
+      return;
+    }
+  }
 }
 
 export interface AuthenticatedTeamMember {
@@ -219,8 +239,10 @@ export function createTeamAuthorizationFileManager(
     return (member.tokens ?? []).map(toTeamAccessTokenMetadata);
   };
 
-  const mutate = <T>(operation: () => Promise<T>): Promise<T> =>
-    withFileProcessMutationLock(sidecarPath, operation);
+  const mutate = async <T>(operation: () => Promise<T>): Promise<T> => {
+    await waitForTeamAuthorizationConfigReload(config);
+    return withFileProcessMutationLock(sidecarPath, operation);
+  };
 
   const persist = async (
     baseSnapshot: string,
@@ -910,27 +932,16 @@ async function quarantinePersistedManagedTokenState(
 
 async function quarantineWatchedManagedTokenState(
   basePath: string,
-  error: ManagedTokenBindingError
+  error: ManagedTokenBindingError,
+  observedSourceSnapshot: string | undefined
 ): Promise<void> {
   const sidecarPath = managedTokenSidecarPath(basePath);
   await withFileProcessMutationLock(sidecarPath, async () => {
-    const [baseSnapshot, sourceSnapshot] = await Promise.all([
-      readFile(basePath, "utf8"),
-      readOptionalFile(sidecarPath)
-    ]);
-    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
-    const state = parseManagedTokenState(sourceSnapshot);
-    try {
-      mergeManagedTokenState(baseConfig, state);
+    const sourceSnapshot = await readOptionalFile(sidecarPath);
+    if (sourceSnapshot !== observedSourceSnapshot) {
       return;
-    } catch (currentError) {
-      if (
-        !(currentError instanceof ManagedTokenBindingError)
-        || currentError.userId !== error.userId
-      ) {
-        throw currentError;
-      }
     }
+    const state = parseManagedTokenState(sourceSnapshot);
     const member = state.members.find(
       (candidate) => candidate.userId === error.userId
     );
@@ -982,9 +993,18 @@ export async function watchTeamAuthorizationConfigFile(
       if (closed) {
         return;
       }
+      let observedSidecarSnapshot: string | undefined;
       try {
         const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
-        const nextConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
+        const [baseSnapshot, sidecarSnapshot] = await Promise.all([
+          readFile(normalizedPath, "utf8"),
+          readOptionalFile(sidecarPath)
+        ]);
+        observedSidecarSnapshot = sidecarSnapshot;
+        const nextConfig = mergeManagedTokenState(
+          parseRequiredTeamAuthorizationConfig(baseSnapshot),
+          parseManagedTokenState(sidecarSnapshot)
+        );
         if (
           generationBeforeRead
           !== teamAuthorizationConfigGeneration(initialConfig)
@@ -996,7 +1016,11 @@ export async function watchTeamAuthorizationConfigFile(
         replaceTeamAuthorizationMembers(initialConfig, []);
         if (error instanceof ManagedTokenBindingError) {
           await options.beforeManagedTokenQuarantine?.();
-          await quarantineWatchedManagedTokenState(normalizedPath, error).catch(
+          await quarantineWatchedManagedTokenState(
+            normalizedPath,
+            error,
+            observedSidecarSnapshot
+          ).catch(
             (quarantineError) => options.onError?.(
               quarantineError instanceof Error
                 ? quarantineError
@@ -1008,6 +1032,7 @@ export async function watchTeamAuthorizationConfigFile(
       }
     });
   };
+  teamAuthorizationConfigReloads.set(initialConfig, () => reloadTail);
   const listener: StatsListener = () => reload();
   const watchOptions = {
     interval: Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000)),
@@ -1023,6 +1048,7 @@ export async function watchTeamAuthorizationConfigFile(
         return;
       }
       closed = true;
+      teamAuthorizationConfigReloads.delete(initialConfig);
       unwatchFile(normalizedPath, listener);
       unwatchFile(sidecarPath, listener);
     }
