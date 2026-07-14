@@ -213,6 +213,83 @@ test("guards pending operations, network errors, and stale identity responses", 
   await expect(page.getByTestId("account-token-list")).toHaveCount(0);
 });
 
+test("drops a delayed create response after replacing an equal-identity collaboration session", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Crypto.prototype, "randomUUID", {
+      configurable: true,
+      value: () => "11111111-1111-4111-8111-111111111111"
+    });
+  });
+
+  let collaborationSocketCount = 0;
+  page.on("websocket", (socket) => {
+    if (socket.url().includes("127.0.0.1:4329")) {
+      collaborationSocketCount += 1;
+    }
+  });
+
+  await page.goto(WEB_ORIGIN);
+  await openFilePanel(page);
+  const projectStatus = page.getByTestId("project-status");
+  if ((await projectStatus.textContent())?.includes("저장된 프로젝트 없음")) {
+    await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
+    await expect(projectStatus).toContainText("새 프로젝트 저장됨");
+  }
+
+  await openTeamPanel(page);
+  await page.getByRole("tab", { name: "실시간 협업" }).click();
+  await page.getByTestId("team-name").fill("동일 세션 팀");
+  await page.getByTestId("relay-url").fill("ws://127.0.0.1:4329");
+  await page.getByTestId("member-token").fill(ACTIVE_SECRET);
+
+  const createRelayTeamButton = page.getByRole("button", { name: "협업 팀 만들기" });
+  await page.evaluate(() => {
+    const button = Array.from(document.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === "협업 팀 만들기"
+    );
+    const reactPropsKey = button && Object.keys(button).find((key) => key.startsWith("__reactProps$"));
+    const reactProps = reactPropsKey
+      ? (button as unknown as Record<string, { onClick?: () => void }>)[reactPropsKey]
+      : undefined;
+    if (!reactProps?.onClick) {
+      throw new Error("협업 팀 만들기 핸들러를 찾지 못했습니다");
+    }
+    (window as Window & { recreateEqualIdentitySession?: () => void }).recreateEqualIdentitySession =
+      reactProps.onClick;
+  });
+  await createRelayTeamButton.click();
+  await expect(page.getByTestId("team-status")).toContainText("동일 세션 팀");
+  await expect.poll(() => collaborationSocketCount).toBe(1);
+
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
+
+  const delayedCreate = armProxyFault("POST", "/account/tokens", "delay");
+  const createResponse = page.waitForResponse(
+    (response) => response.request().method() === "POST"
+      && response.url() === `${API_ORIGIN}/account/tokens`
+  );
+  await page.getByTestId("account-token-name").fill("교체 전 지연 생성");
+  await page.getByTestId("account-token-create").click();
+  await delayedCreate.seen.promise;
+
+  await page.evaluate(() => {
+    const recreate = (window as Window & { recreateEqualIdentitySession?: () => void })
+      .recreateEqualIdentitySession;
+    if (!recreate) {
+      throw new Error("동일 identity 세션 재생성 핸들러가 없습니다");
+    }
+    recreate();
+  });
+  await expect.poll(() => collaborationSocketCount).toBe(2);
+  await expect(page.getByTestId("account-token-member")).toContainText("local-user");
+
+  delayedCreate.release.resolve();
+  await createResponse;
+  await expect(page.getByTestId("account-token-secret")).toHaveCount(0);
+  await expect(page.getByTestId("account-token-status")).not.toContainText("교체 전 지연 생성");
+});
+
 test("keeps one-time plaintext transient across every browser lifecycle boundary", async ({ page }) => {
   await createAuthenticatedLocalTeam(page);
 
