@@ -9814,6 +9814,19 @@ export function App() {
           event.sequence
         );
         void refreshLibraryRegistry(null, fileId);
+      },
+      onAuthorizationEnded: (code) => {
+        libraryRegistryEventSequenceRef.current = 0;
+        setLibraryRegistry([]);
+        setLibraryRegistryUpdates([]);
+        setLibraryRegistryTokenUpdates([]);
+        setLibraryRegistryReview(null);
+        setLibraryRegistryTokenReview(null);
+        setLibraryRegistryStatus(
+          code === "credential_inactive"
+            ? "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
+            : "팀 라이브러리 접근 권한이 해제되었습니다."
+        );
       }
     });
   }, [
