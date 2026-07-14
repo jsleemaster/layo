@@ -183,7 +183,7 @@ describe("team access token administration", () => {
   test("rejects unknown members and duplicate generated ids without changing the file", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
-    const initial = ownerConfig();
+    const initial = ownerConfigWithExistingToken();
     await writeFile(configPath, initial, "utf8");
     const source = await watchTeamAuthorizationConfigFile(configPath);
     const manager = createTeamAuthorizationFileManager(configPath, source.config, {
@@ -196,14 +196,6 @@ describe("team access token administration", () => {
         manager.createToken("missing-user", { name: "Unknown", expiresInDays: 30 })
       ).rejects.toThrow("team authorization member was not found");
 
-      source.config.members[0]!.tokens = [
-        {
-          id: "existing-token",
-          name: "Existing",
-          tokenHash: createHash("sha256").update("existing-secret").digest("hex"),
-          createdAt: "2026-07-14T00:00:00.000Z"
-        }
-      ];
       await expect(
         manager.createToken("owner-user", { name: "Duplicate", expiresInDays: 30 })
       ).rejects.toThrow("team authorization token id already exists");
@@ -214,6 +206,29 @@ describe("team access token administration", () => {
     }
   });
 });
+
+function ownerConfigWithExistingToken(): string {
+  return JSON.stringify(
+    [
+      {
+        userId: "owner-user",
+        role: "owner",
+        teamIds: ["team-alpha"],
+        token: "legacy-owner-token",
+        tokens: [
+          {
+            id: "existing-token",
+            name: "Existing",
+            tokenHash: createHash("sha256").update("existing-secret").digest("hex"),
+            createdAt: "2026-07-14T00:00:00.000Z"
+          }
+        ]
+      }
+    ],
+    null,
+    2
+  );
+}
 
 function ownerConfig(): string {
   return JSON.stringify(
