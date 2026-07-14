@@ -9506,6 +9506,7 @@ export function App() {
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAuthorizationEndedRef = useRef(false);
+  const libraryRegistryCredentialReconnectPendingRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
   const styleClipboardRef = useRef<EditorNodeStyle | null>(null);
   const resizeSessionRef = useRef<ResizeSession | null>(null);
@@ -9851,7 +9852,15 @@ export function App() {
         );
         void refreshLibraryRegistry(null, fileId);
       },
+      onReady: () => {
+        if (libraryRegistryCredentialReconnectPendingRef.current) {
+          libraryRegistryCredentialReconnectPendingRef.current = false;
+          setLibraryRegistryStatus("팀 인증 다시 연결됨");
+        }
+        void refreshLibraryRegistry(null, fileId);
+      },
       onAuthorizationEnded: (code) => {
+        libraryRegistryCredentialReconnectPendingRef.current = false;
         libraryRegistryAuthorizationEndedRef.current = true;
         libraryRegistryAccessGenerationRef.current += 1;
         libraryRegistryEventSequenceRef.current = 0;
@@ -15130,6 +15139,16 @@ export function App() {
     setManifestStatus(`팀 설정 가져오기 실패: ${message}`);
   };
 
+  const applyMemberToken = () => {
+    const nextToken = memberToken.trim();
+    if (!collabSession || !nextToken || nextToken === activeMemberToken) {
+      return;
+    }
+    libraryRegistryCredentialReconnectPendingRef.current = true;
+    setLibraryRegistryStatus("팀 인증 다시 연결 중");
+    setActiveMemberToken(nextToken);
+  };
+
   const createLocalTeam = () => {
     void activateTeam(
       createTeamManifest({
@@ -16541,14 +16560,6 @@ export function App() {
                         onChange={(event) => setRelayToken(event.currentTarget.value)}
                       />
                     </label>
-                    <label>
-                      멤버 인증 토큰
-                      <input
-                        data-testid="member-token"
-                        value={memberToken}
-                        onChange={(event) => setMemberToken(event.currentTarget.value)}
-                      />
-                    </label>
                     <label className="team-toggle-field">
                       종단간 암호화
                       <input
@@ -16569,6 +16580,16 @@ export function App() {
                     </label>
                   </>
                 ) : null}
+                <label>
+                  멤버 인증 토큰
+                  <input
+                    data-testid="member-token"
+                    type="password"
+                    autoComplete="off"
+                    value={memberToken}
+                    onChange={(event) => setMemberToken(event.currentTarget.value)}
+                  />
+                </label>
                 {teamPanelMode === "manifest" ? (
                   <label>
                     팀 설정 URL
@@ -16611,6 +16632,17 @@ export function App() {
                     </button>
                   </>
                 ) : null}
+                <button
+                  type="button"
+                  onClick={applyMemberToken}
+                  disabled={
+                    !collabSession
+                    || !memberToken.trim()
+                    || memberToken.trim() === activeMemberToken
+                  }
+                >
+                  멤버 토큰 적용
+                </button>
               </div>
               <input
                 ref={manifestFileInputRef}
