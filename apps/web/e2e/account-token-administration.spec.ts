@@ -9,9 +9,16 @@ const API_ORIGIN = "http://127.0.0.1:4318";
 const WEB_ORIGIN = "http://127.0.0.1:5174";
 const ACTIVE_SECRET = "active-browser-secret";
 const SIBLING_SECRET = "sibling-automation-secret";
-const createdProcesses: ChildProcess[] = [];
+interface TrackedService {
+  child: ChildProcess;
+  output: string[];
+}
+
+const createdProcesses: TrackedService[] = [];
 let fixtureRoot = "";
 let authorizationFile = "";
+let authorizationSidecarFile = "";
+let baseAuthorizationText = "";
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(120_000);
@@ -19,6 +26,7 @@ test.setTimeout(120_000);
 test.beforeAll(async () => {
   fixtureRoot = await mkdtemp(join(tmpdir(), "layo-account-token-e2e-"));
   authorizationFile = join(fixtureRoot, "members.json");
+  authorizationSidecarFile = `${authorizationFile}.tokens.json`;
   await resetAuthorizationFile();
 
   createdProcesses.push(
@@ -32,7 +40,7 @@ test.beforeAll(async () => {
       }
     )
   );
-  await waitForUrl(`${API_ORIGIN}/health`);
+  await waitForUrl(`${API_ORIGIN}/health`, createdProcesses.at(-1));
 
   createdProcesses.push(
     startService(
@@ -40,7 +48,7 @@ test.beforeAll(async () => {
       { VITE_API_BASE_URL: API_ORIGIN }
     )
   );
-  await waitForUrl(WEB_ORIGIN);
+  await waitForUrl(WEB_ORIGIN, createdProcesses.at(-1));
 });
 
 test.afterAll(async () => {
@@ -51,6 +59,7 @@ test.afterAll(async () => {
 });
 
 test.beforeEach(async () => {
+  await rm(authorizationSidecarFile, { force: true });
   await resetAuthorizationFile();
 });
 
@@ -101,11 +110,14 @@ test("manages named account tokens over the isolated real network", async ({ con
   expect(listBodies.join("\n")).not.toContain(ACTIVE_SECRET);
   expect(listBodies.join("\n")).not.toContain(SIBLING_SECRET);
 
-  const persistedText = await readFile(authorizationFile, "utf8");
-  expect(persistedText).toContain("tokenHash");
-  expect(persistedText).not.toContain(ACTIVE_SECRET);
-  expect(persistedText).not.toContain(SIBLING_SECRET);
-  expect(persistedText).not.toContain(createdSecret);
+  const persistedBase = await readFile(authorizationFile, "utf8");
+  expect(persistedBase).toBe(baseAuthorizationText);
+  const persistedSidecar = await readFile(authorizationSidecarFile, "utf8");
+  expect(persistedSidecar).toContain("tokenHash");
+  expect(persistedSidecar).not.toMatch(/"token"\s*:/);
+  expect(persistedSidecar).not.toContain(ACTIVE_SECRET);
+  expect(persistedSidecar).not.toContain(SIBLING_SECRET);
+  expect(persistedSidecar).not.toContain(createdSecret);
 
   await page.getByTestId("account-token-revoke-sibling-token").click();
   await expect(page.getByTestId("account-token-row-sibling-token")).toContainText("해지됨");
@@ -255,16 +267,26 @@ async function readBrowserStorage(page: Page) {
   });
 }
 
-function startService(args: string[], extraEnv: Record<string, string>) {
-  return spawn("pnpm", args, {
+function startService(args: string[], extraEnv: Record<string, string>): TrackedService {
+  const child = spawn("pnpm", args, {
     cwd: process.cwd(),
     detached: process.platform !== "win32",
     env: { ...process.env, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"]
   });
+  const tracked = { child, output: [] as string[] };
+  for (const stream of [child.stdout, child.stderr]) {
+    stream?.on("data", (chunk) => {
+      for (const line of String(chunk).split(/\r?\n/).filter(Boolean)) {
+        tracked.output.push(line);
+        if (tracked.output.length > 80) tracked.output.shift();
+      }
+    });
+  }
+  return tracked;
 }
 
-async function stopService(child: ChildProcess) {
+async function stopService({ child }: TrackedService) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform !== "win32" && child.pid) {
     try {
@@ -281,7 +303,7 @@ async function stopService(child: ChildProcess) {
   ]);
 }
 
-async function waitForUrl(url: string) {
+async function waitForUrl(url: string, service?: TrackedService) {
   const deadline = Date.now() + 45_000;
   while (Date.now() < deadline) {
     try {
@@ -292,7 +314,8 @@ async function waitForUrl(url: string) {
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`service did not become ready: ${url}`);
+  const diagnostics = service?.output.length ? `\n${service.output.join("\n")}` : "";
+  throw new Error(`service did not become ready: ${url}${diagnostics}`);
 }
 
 async function resetAuthorizationFile() {
@@ -315,7 +338,8 @@ async function resetAuthorizationFile() {
       }
     ]
   };
-  await writeFile(authorizationFile, `${JSON.stringify([member], null, 2)}\n`, {
+  baseAuthorizationText = `${JSON.stringify([member], null, 2)}\n`;
+  await writeFile(authorizationFile, baseAuthorizationText, {
     encoding: "utf8",
     mode: 0o600
   });
