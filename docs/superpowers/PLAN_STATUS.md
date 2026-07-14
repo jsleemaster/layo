@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None.
+`2026-07-14-penpot-token-mcp-ui.md` - closing the exact MCP and Korean browser self-service gap left by PR #307.
 
 ## Completed Plans
 
