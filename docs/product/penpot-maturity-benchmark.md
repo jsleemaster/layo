@@ -54,6 +54,14 @@ implementation slice reveals a new gap.
 
 ## Current Library Recovery Evidence
 
+`docs/product/penpot-library-token-recovery-review-repair-delta.md` closes the
+post-merge review gaps in no-restart credential recovery. A terminal browser
+authorization state now permits an explicit same-token retry when an operator
+restores that credential, and MCP can read its principal token from a watched
+operator-owned file with last-valid fallback. Different-value browser rotation
+and static environment fallbacks remain supported. Named per-token records and
+individual revocation remain the next identity-lifecycle gap.
+
 `docs/product/penpot-cross-process-storage-lock-delta.md` adapts Penpot's
 transaction and row-lock ownership principle to Layo's local-first filesystem.
 Resource-keyed owner locks now serialize same-target writes across Node
