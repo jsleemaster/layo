@@ -243,6 +243,11 @@ test("drops a delayed create response after replacing an equal-identity collabor
   await page.getByTestId("member-token").fill(ACTIVE_SECRET);
 
   const createRelayTeamButton = page.getByRole("button", { name: "협업 팀 만들기" });
+  await createRelayTeamButton.click();
+  await expect(page.getByTestId("team-status")).toContainText("동일 세션 팀");
+  await expect.poll(() => collaborationSocketCount).toBe(1);
+
+  await page.getByTestId("team-name").fill("교체된 동일 세션 팀");
   await page.evaluate(() => {
     const button = Array.from(document.querySelectorAll("button")).find(
       (candidate) => candidate.textContent?.trim() === "협업 팀 만들기"
@@ -257,9 +262,6 @@ test("drops a delayed create response after replacing an equal-identity collabor
     (window as Window & { recreateEqualIdentitySession?: () => void }).recreateEqualIdentitySession =
       reactProps.onClick;
   });
-  await createRelayTeamButton.click();
-  await expect(page.getByTestId("team-status")).toContainText("동일 세션 팀");
-  await expect.poll(() => collaborationSocketCount).toBe(1);
 
   await page.getByRole("tab", { name: "팀 설정" }).click();
   await expect(page.getByTestId("account-token-list")).toContainText("Current browser");
@@ -282,6 +284,7 @@ test("drops a delayed create response after replacing an equal-identity collabor
     recreate();
   });
   await expect.poll(() => collaborationSocketCount).toBe(2);
+  await expect(page.getByTestId("team-status")).toContainText("교체된 동일 세션 팀");
   await expect(page.getByTestId("account-token-member")).toContainText("local-user");
 
   delayedCreate.release.resolve();
