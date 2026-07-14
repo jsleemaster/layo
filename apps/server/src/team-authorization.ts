@@ -1,6 +1,6 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { unwatchFile, watchFile, type StatsListener } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 
 export type TeamAuthorizationRole = "owner" | "editor" | "viewer";
 
@@ -10,6 +10,7 @@ export interface TeamMemberTokenCredential {
   token?: string;
   tokenHash?: string;
   tokenHashes?: string[];
+  createdAt?: string;
   notBefore?: string;
   expiresAt?: string;
   revokedAt?: string;
@@ -49,6 +50,44 @@ export interface TeamAuthorizationConfigSource {
 export interface WatchTeamAuthorizationConfigFileOptions {
   pollIntervalMs?: number;
   onError?: (error: Error) => void;
+}
+
+export type TeamAccessTokenExpiryDays = 30 | 60 | 90 | 180 | null;
+
+export interface TeamAccessTokenMetadata {
+  id: string;
+  name: string;
+  createdAt?: string;
+  expiresAt?: string;
+  revokedAt?: string;
+}
+
+export interface CreateTeamAccessTokenInput {
+  name: string;
+  expiresInDays: TeamAccessTokenExpiryDays;
+}
+
+export interface CreatedTeamAccessToken {
+  token: string;
+  metadata: TeamAccessTokenMetadata;
+}
+
+export interface TeamAuthorizationFileManager {
+  listTokens: (userId: string) => TeamAccessTokenMetadata[];
+  createToken: (
+    userId: string,
+    input: CreateTeamAccessTokenInput
+  ) => Promise<CreatedTeamAccessToken>;
+  revokeToken: (
+    userId: string,
+    tokenId: string
+  ) => Promise<TeamAccessTokenMetadata>;
+}
+
+export interface TeamAuthorizationFileManagerOptions {
+  now?: () => Date;
+  generateId?: () => string;
+  generateSecret?: () => string;
 }
 
 export interface TeamMemberTokenSource {
@@ -111,6 +150,172 @@ function parseRequiredTeamMemberToken(input: string): string {
     throw new Error("MCP member token file must not be blank");
   }
   return token;
+}
+
+export function createTeamAuthorizationFileManager(
+  filePath: string,
+  config: TeamAuthorizationConfig,
+  options: TeamAuthorizationFileManagerOptions = {}
+): TeamAuthorizationFileManager {
+  const normalizedPath = filePath.trim();
+  if (!normalizedPath) {
+    throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
+  }
+  const now = options.now ?? (() => new Date());
+  const generateId = options.generateId ?? (() => randomUUID());
+  const generateSecret =
+    options.generateSecret
+    ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
+  let mutationTail = Promise.resolve();
+
+  const listTokens = (userId: string): TeamAccessTokenMetadata[] => {
+    const member = findManagedMember(config, userId);
+    return (member.tokens ?? []).map(toTeamAccessTokenMetadata);
+  };
+
+  const mutate = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = mutationTail.then(operation);
+    mutationTail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  };
+
+  const persist = async (nextConfig: TeamAuthorizationConfig): Promise<void> => {
+    const temporaryPath = `${normalizedPath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(
+        temporaryPath,
+        `${JSON.stringify(nextConfig.members, null, 2)}\n`,
+        { encoding: "utf8", mode: 0o600 }
+      );
+      await rename(temporaryPath, normalizedPath);
+    } finally {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+    }
+    config.members = nextConfig.members;
+  };
+
+  return {
+    listTokens,
+    createToken: (userId, input) =>
+      mutate(async () => {
+        const name = input.name.trim();
+        if (!name) {
+          throw managementError("team authorization token name is required", 400);
+        }
+        if (!isTeamAccessTokenExpiryDays(input.expiresInDays)) {
+          throw managementError("invalid team authorization token expiration", 400);
+        }
+        const nextConfig = cloneTeamAuthorizationConfig(config);
+        const member = findManagedMember(nextConfig, userId);
+        const id = generateId().trim();
+        if (!id) {
+          throw new Error("generated team authorization token id must not be blank");
+        }
+        if (member.tokens?.some((credential) => credential.id === id)) {
+          throw managementError("team authorization token id already exists", 409);
+        }
+        const secret = generateSecret();
+        if (!secret) {
+          throw new Error("generated team authorization token must not be blank");
+        }
+        const createdAt = validManagementNow(now());
+        const expiresAt =
+          input.expiresInDays === null
+            ? undefined
+            : new Date(
+                Date.parse(createdAt) + input.expiresInDays * 24 * 60 * 60 * 1_000
+              ).toISOString();
+        const credential: TeamMemberTokenCredential = {
+          id,
+          name,
+          tokenHash: hashToken(secret),
+          createdAt,
+          ...(expiresAt ? { expiresAt } : {})
+        };
+        member.tokens = [...(member.tokens ?? []), credential];
+        await persist(nextConfig);
+        return {
+          token: secret,
+          metadata: toTeamAccessTokenMetadata(credential)
+        };
+      }),
+    revokeToken: (userId, tokenId) =>
+      mutate(async () => {
+        const normalizedTokenId = tokenId.trim();
+        if (!normalizedTokenId) {
+          throw managementError("team authorization token id is required", 400);
+        }
+        const nextConfig = cloneTeamAuthorizationConfig(config);
+        const member = findManagedMember(nextConfig, userId);
+        const credential = member.tokens?.find(
+          (candidate) => candidate.id === normalizedTokenId
+        );
+        if (!credential) {
+          throw managementError("team authorization token was not found", 404);
+        }
+        if (!credential.revokedAt) {
+          credential.revokedAt = validManagementNow(now());
+          await persist(nextConfig);
+          return toTeamAccessTokenMetadata(credential);
+        }
+        return toTeamAccessTokenMetadata(credential);
+      })
+  };
+}
+
+function cloneTeamAuthorizationConfig(
+  config: TeamAuthorizationConfig
+): TeamAuthorizationConfig {
+  return parseRequiredTeamAuthorizationConfig(JSON.stringify(config.members));
+}
+
+function findManagedMember(
+  config: TeamAuthorizationConfig,
+  userId: string
+): TeamMemberCredential {
+  const normalizedUserId = userId.trim();
+  const member = config.members.find(
+    (candidate) => candidate.userId === normalizedUserId
+  );
+  if (!member) {
+    throw managementError("team authorization member was not found", 404);
+  }
+  return member;
+}
+
+function toTeamAccessTokenMetadata(
+  credential: TeamMemberTokenCredential
+): TeamAccessTokenMetadata {
+  return {
+    id: credential.id,
+    name: credential.name,
+    ...(credential.createdAt ? { createdAt: credential.createdAt } : {}),
+    ...(credential.expiresAt ? { expiresAt: credential.expiresAt } : {}),
+    ...(credential.revokedAt ? { revokedAt: credential.revokedAt } : {})
+  };
+}
+
+function validManagementNow(value: Date): string {
+  if (!Number.isFinite(value.getTime())) {
+    throw new Error("team authorization management time must be valid");
+  }
+  return value.toISOString();
+}
+
+function isTeamAccessTokenExpiryDays(
+  value: unknown
+): value is TeamAccessTokenExpiryDays {
+  return value === null || value === 30 || value === 60 || value === 90 || value === 180;
+}
+
+function managementError(message: string, statusCode: number): Error {
+  return Object.assign(new Error(message), {
+    code: statusCode === 409 ? "EEXIST" : statusCode === 404 ? "ENOENT" : "EINVAL",
+    statusCode
+  });
 }
 
 export async function watchTeamAuthorizationConfigFile(
@@ -332,6 +537,7 @@ function parseTeamMemberTokenCredential(input: unknown): TeamMemberTokenCredenti
   if (!token && !tokenHash && !tokenHashes?.length) {
     throw new Error(`${context} token, tokenHash, or tokenHashes is required`);
   }
+  const createdAt = parseLifecycleTimestamp(candidate.createdAt, "createdAt", context);
   const notBefore = parseLifecycleTimestamp(candidate.notBefore, "notBefore", context);
   const expiresAt = parseLifecycleTimestamp(candidate.expiresAt, "expiresAt", context);
   const revokedAt = parseLifecycleTimestamp(candidate.revokedAt, "revokedAt", context);
@@ -344,6 +550,7 @@ function parseTeamMemberTokenCredential(input: unknown): TeamMemberTokenCredenti
     token,
     tokenHash,
     ...(tokenHashes?.length ? { tokenHashes } : {}),
+    ...(createdAt ? { createdAt } : {}),
     ...(notBefore ? { notBefore } : {}),
     ...(expiresAt ? { expiresAt } : {}),
     ...(revokedAt ? { revokedAt } : {})
@@ -435,7 +642,7 @@ function isCredentialActive(
 
 function parseLifecycleTimestamp(
   value: unknown,
-  field: "notBefore" | "expiresAt" | "revokedAt",
+  field: "createdAt" | "notBefore" | "expiresAt" | "revokedAt",
   context = "library registry team member"
 ): string | undefined {
   if (value === undefined) {
