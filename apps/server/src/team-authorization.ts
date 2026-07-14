@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { unwatchFile, watchFile, type StatsListener } from "node:fs";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { withFileProcessMutationLock } from "./file-process-lock.js";
 
 export type TeamAuthorizationRole = "owner" | "editor" | "viewer";
 
@@ -183,21 +184,13 @@ export function createTeamAuthorizationFileManager(
   const generateSecret =
     options.generateSecret
     ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
-  let mutationTail = Promise.resolve();
-
   const listTokens = (userId: string): TeamAccessTokenMetadata[] => {
     const member = findManagedMember(config, userId);
     return (member.tokens ?? []).map(toTeamAccessTokenMetadata);
   };
 
-  const mutate = <T>(operation: () => Promise<T>): Promise<T> => {
-    const result = mutationTail.then(operation);
-    mutationTail = result.then(
-      () => undefined,
-      () => undefined
-    );
-    return result;
-  };
+  const mutate = <T>(operation: () => Promise<T>): Promise<T> =>
+    withFileProcessMutationLock(normalizedPath, operation);
 
   const persist = async (nextConfig: TeamAuthorizationConfig): Promise<void> => {
     const temporaryPath = `${normalizedPath}.${process.pid}.${randomUUID()}.tmp`;
