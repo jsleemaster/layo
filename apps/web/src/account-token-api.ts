@@ -47,12 +47,22 @@ export async function listAccountTokens(
   if (!candidate || !Array.isArray(candidate.tokens)) {
     throw malformedResponse("계정 토큰 목록");
   }
+  const tokens = candidate.tokens.map((token) =>
+    parseMetadata(token, "계정 토큰 목록")
+  );
+  if (new Set(tokens.map((token) => token.id)).size !== tokens.length) {
+    throw malformedResponse("계정 토큰 목록");
+  }
   const activeTokenId = optionalNonBlankString(candidate.activeTokenId);
-  if (candidate.activeTokenId !== undefined && !activeTokenId) {
+  if (
+    (candidate.activeTokenId !== undefined && !activeTokenId)
+    || (activeTokenId !== undefined
+      && tokens.filter((token) => token.id === activeTokenId).length !== 1)
+  ) {
     throw malformedResponse("계정 토큰 목록");
   }
   return {
-    tokens: candidate.tokens.map((token) => parseMetadata(token, "계정 토큰 목록")),
+    tokens,
     ...(activeTokenId ? { activeTokenId } : {})
   };
 }
