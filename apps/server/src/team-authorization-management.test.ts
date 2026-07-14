@@ -205,6 +205,50 @@ describe("team access token administration", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  test("returns the active named token id only from atomic list authentication", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, ownerConfigWithExistingToken(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config);
+
+    try {
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "existing-secret" },
+          { type: "list" }
+        )
+      ).resolves.toEqual({
+        type: "list",
+        tokens: [{
+          id: "existing-token",
+          name: "Existing",
+          createdAt: "2026-07-14T00:00:00.000Z"
+        }],
+        activeTokenId: "existing-token"
+      });
+
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "legacy-owner-token" },
+          { type: "list" }
+        )
+      ).resolves.toEqual({
+        type: "list",
+        tokens: [{
+          id: "existing-token",
+          name: "Existing",
+          createdAt: "2026-07-14T00:00:00.000Z"
+        }]
+      });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 function ownerConfigWithExistingToken(): string {
