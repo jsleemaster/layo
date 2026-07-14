@@ -9798,6 +9798,7 @@ export function App() {
     return subscribeToLibraryRegistryEvents({
       fileId,
       after: libraryRegistryEventSequenceRef.current,
+      credentials: activeLibraryRegistryCredentials,
       onLibraryRegistryEvent: (event) => {
         libraryRegistryEventSequenceRef.current = Math.max(
           libraryRegistryEventSequenceRef.current,
@@ -9806,7 +9807,11 @@ export function App() {
         void refreshLibraryRegistry(undefined, fileId);
       }
     });
-  }, [currentProject?.currentDocumentId]);
+  }, [
+    currentProject?.currentDocumentId,
+    activeLibraryRegistryCredentials?.userId,
+    activeLibraryRegistryCredentials?.memberToken
+  ]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
     const response = await fetch(apiUrl(`/files/${project.currentDocumentId}`));
