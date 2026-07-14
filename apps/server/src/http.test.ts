@@ -979,6 +979,54 @@ describe("HTTP server", () => {
     ]);
   });
 
+  test("authenticates hosted registry requests with named tokens and rejects one revoked token", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const server = createHttpServer(new FileStorage(tempRoot), {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "automation-user",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            tokens: [
+              {
+                id: "active",
+                name: "Active automation",
+                token: "active-secret"
+              },
+              {
+                id: "retired",
+                name: "Retired automation",
+                token: "retired-secret",
+                revokedAt: "2020-01-01T00:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      }
+    });
+
+    const active = await server.inject({
+      method: "GET",
+      url: "/libraries",
+      headers: {
+        authorization: "Bearer active-secret",
+        "x-layo-user-id": "automation-user"
+      }
+    });
+    expect(active.statusCode).toBe(200);
+
+    const retired = await server.inject({
+      method: "GET",
+      url: "/libraries",
+      headers: {
+        authorization: "Bearer retired-secret",
+        "x-layo-user-id": "automation-user"
+      }
+    });
+    expect(retired.statusCode).toBe(401);
+  });
+
   test("authorizes hosted registry review reads by target team", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
