@@ -582,8 +582,21 @@ test("file panel sends active team member credentials for library publish and im
   await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
 
   await openFilePanel(page);
+  const eventStreamRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "GET" &&
+      url.pathname === "/libraries/events" &&
+      url.searchParams.get("fileId") === documentId
+    );
+  });
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  const streamed = await eventStreamRequest;
+  expect(streamed.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
 
   const listRequest = page.waitForRequest((request) => {
     const url = new URL(request.url());
@@ -669,11 +682,10 @@ test("file panel sends active team member credentials for library publish and im
 test("file panel publishes imports and updates a shared library registry item", async ({ page }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
-      __layoEventSourceUrls?: string[];
-      __layoLibraryRegistryEventCount?: number;
+      __layoLibraryRegistryStreamUrls?: string[];
       __layoSuppressedLibraryRegistryPolling?: boolean;
     };
-    const NativeEventSource = window.EventSource;
+    const nativeFetch = window.fetch.bind(window);
     const nativeSetInterval = window.setInterval.bind(window);
 
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
@@ -684,21 +696,20 @@ test("file panel publishes imports and updates a shared library registry item", 
       return nativeSetInterval(handler, timeout, ...args);
     }) as typeof window.setInterval;
 
-    class InstrumentedEventSource extends NativeEventSource {
-      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-        super(url, eventSourceInitDict);
-        instrumentedWindow.__layoEventSourceUrls = [
-          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
-          String(url)
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url =
+        typeof input === "string" || input instanceof URL
+          ? String(input)
+          : input.url;
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/libraries/events") {
+        instrumentedWindow.__layoLibraryRegistryStreamUrls = [
+          ...(instrumentedWindow.__layoLibraryRegistryStreamUrls ?? []),
+          parsedUrl.toString()
         ];
-        this.addEventListener("library-registry", () => {
-          instrumentedWindow.__layoLibraryRegistryEventCount =
-            (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) + 1;
-        });
       }
-    }
-
-    window.EventSource = InstrumentedEventSource;
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
   });
 
   const { documentId } = await createProjectFromEmptyState(page);
@@ -752,12 +763,12 @@ test("file panel publishes imports and updates a shared library registry item", 
   await page.waitForFunction(
     ({ targetDocumentId: expectedDocumentId }) => {
       const instrumentedWindow = window as Window & {
-        __layoEventSourceUrls?: string[];
+        __layoLibraryRegistryStreamUrls?: string[];
         __layoSuppressedLibraryRegistryPolling?: boolean;
       };
       return (
         instrumentedWindow.__layoSuppressedLibraryRegistryPolling === true &&
-        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+        (instrumentedWindow.__layoLibraryRegistryStreamUrls ?? []).some((url) => {
           const parsedUrl = new URL(url, window.location.href);
           return (
             parsedUrl.pathname === "/libraries/events" &&
@@ -768,11 +779,6 @@ test("file panel publishes imports and updates a shared library registry item", 
     },
     { targetDocumentId }
   );
-  const libraryRegistryEventCountBeforeRepublish = await page.evaluate(() => {
-    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
-    return instrumentedWindow.__layoLibraryRegistryEventCount ?? 0;
-  });
-
   const updateCommands = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/agent/commands`, {
     data: {
       dryRun: false,
@@ -796,10 +802,6 @@ test("file panel publishes imports and updates a shared library registry item", 
   });
   expect(republished.ok()).toBeTruthy();
 
-  await page.waitForFunction((previousCount) => {
-    const instrumentedWindow = window as Window & { __layoLibraryRegistryEventCount?: number };
-    return (instrumentedWindow.__layoLibraryRegistryEventCount ?? 0) > previousCount;
-  }, libraryRegistryEventCountBeforeRepublish);
   await expect(page.getByTestId("library-registry-updates")).toContainText("Team Kit 업데이트 가능");
   await page.getByTestId(`library-registry-update-${documentId}`).click();
   await expect(page.getByTestId("library-registry-status")).toContainText("Team Kit 업데이트 적용됨");
