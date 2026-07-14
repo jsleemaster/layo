@@ -412,6 +412,7 @@ export interface SubscribeToLibraryRegistryEventsOptions {
   after?: number;
   credentials?: LibraryRegistryCredentials;
   fetcher?: typeof fetch;
+  reconnectDelayMs?: number;
   onLibraryRegistryEvent: (event: LibraryRegistryLiveEvent) => void;
   onError?: EventListener;
 }
@@ -1231,7 +1232,7 @@ export function subscribeToLibraryRegistryEvents(
     if (!closed) {
       reconnectId = setTimeout(() => {
         void connect();
-      }, 1_000);
+      }, Math.max(0, options.reconnectDelayMs ?? 1_000));
     }
   };
 
