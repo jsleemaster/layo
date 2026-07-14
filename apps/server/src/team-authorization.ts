@@ -101,7 +101,7 @@ export type TeamAuthorizationManagementOperation =
   | { type: "revoke"; tokenId: string; confirmSelfRevoke?: boolean };
 
 export type TeamAuthorizationManagementResult =
-  | { type: "list"; tokens: TeamAccessTokenMetadata[] }
+  | { type: "list"; tokens: TeamAccessTokenMetadata[]; activeTokenId?: string }
   | { type: "create"; created: CreatedTeamAccessToken }
   | { type: "revoke"; metadata: TeamAccessTokenMetadata };
 
@@ -255,7 +255,10 @@ export function createTeamAuthorizationFileManager(
       if (operation.type === "list") {
         return {
           type: "list",
-          tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata)
+          tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata),
+          ...(authenticatedMember?.tokenId
+            ? { activeTokenId: authenticatedMember.tokenId }
+            : {})
         };
       }
 
