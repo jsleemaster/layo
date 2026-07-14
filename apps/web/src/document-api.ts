@@ -407,6 +407,10 @@ export interface LibraryRegistryCredentials {
   memberToken: string;
 }
 
+export type LibraryRegistryAuthorizationEndedCode =
+  | "credential_inactive"
+  | "team_access_revoked";
+
 export interface SubscribeToLibraryRegistryEventsOptions {
   fileId?: string;
   after?: number;
@@ -414,6 +418,7 @@ export interface SubscribeToLibraryRegistryEventsOptions {
   fetcher?: typeof fetch;
   reconnectDelayMs?: number;
   onLibraryRegistryEvent: (event: LibraryRegistryLiveEvent) => void;
+  onAuthorizationEnded?: (code: LibraryRegistryAuthorizationEndedCode) => void;
   onError?: EventListener;
 }
 
@@ -1210,6 +1215,7 @@ export function subscribeToLibraryRegistryEvents(
 
   const controller = new AbortController();
   let closed = false;
+  let authorizationEnded = false;
   let reconnectId: ReturnType<typeof setTimeout> | undefined;
   let lastSequence =
     typeof options.after === "number" && Number.isFinite(options.after)
@@ -1228,8 +1234,20 @@ export function subscribeToLibraryRegistryEvents(
     return apiUrl(`/libraries/events${query}`);
   };
 
+  const endAuthorization = (code: LibraryRegistryAuthorizationEndedCode) => {
+    if (closed || authorizationEnded) {
+      return;
+    }
+    authorizationEnded = true;
+    if (reconnectId !== undefined) {
+      clearTimeout(reconnectId);
+    }
+    options.onAuthorizationEnded?.(code);
+    controller.abort();
+  };
+
   const reconnect = () => {
-    if (!closed) {
+    if (!closed && !authorizationEnded) {
       reconnectId = setTimeout(() => {
         void connect();
       }, Math.max(0, options.reconnectDelayMs ?? 1_000));
@@ -1255,7 +1273,26 @@ export function subscribeToLibraryRegistryEvents(
         data.push(value);
       }
     }
-    if (eventName !== "library-registry" || data.length === 0) {
+    if (data.length === 0) {
+      return;
+    }
+    if (eventName === "library-registry-authorization-ended") {
+      try {
+        const event = JSON.parse(data.join("\n")) as {
+          code?: LibraryRegistryAuthorizationEndedCode;
+        };
+        if (
+          event.code === "credential_inactive"
+          || event.code === "team_access_revoked"
+        ) {
+          endAuthorization(event.code);
+        }
+      } catch {
+        // Ignore malformed terminal records and let normal reconnect handling apply.
+      }
+      return;
+    }
+    if (eventName !== "library-registry") {
       return;
     }
 
@@ -1288,6 +1325,12 @@ export function subscribeToLibraryRegistryEvents(
         },
         signal: controller.signal
       });
+      if (response.status === 401 || response.status === 403) {
+        endAuthorization(
+          response.status === 401 ? "credential_inactive" : "team_access_revoked"
+        );
+        return;
+      }
       if (!response.ok) {
         throw new Error(
           `라이브러리 이벤트 스트림 연결 실패: ${response.status} ${response.statusText}`.trim()
@@ -1320,7 +1363,11 @@ export function subscribeToLibraryRegistryEvents(
       }
       reconnect();
     } catch (error) {
-      if (closed || (error instanceof DOMException && error.name === "AbortError")) {
+      if (
+        closed
+        || authorizationEnded
+        || (error instanceof DOMException && error.name === "AbortError")
+      ) {
         return;
       }
       options.onError?.(new Event("error"));
