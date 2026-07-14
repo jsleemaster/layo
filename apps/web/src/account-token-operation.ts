@@ -9,5 +9,6 @@ export function isCurrentAccountTokenOperation<TSession>(
   current: AccountTokenOperationContext<TSession>
 ): boolean {
   return operation.generation === current.generation
-    && operation.identity === current.identity;
+    && operation.identity === current.identity
+    && operation.session === current.session;
 }
