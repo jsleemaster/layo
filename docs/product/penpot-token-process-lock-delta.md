@@ -38,6 +38,16 @@ claim path behind and block every later recovery. RED Full Verification
 `29316494422` pre-created that orphan claim and timed out. Recovery claims are
 now unique per attempt, so old claim residue cannot deny subsequent recovery.
 
+## Verification
+
+- RED Full Verification `29315315463` retained only three of six process tokens.
+- Orphan-claim RED Full Verification `29316494422` timed out on stale recovery.
+- Repaired Full Verification `29316674532` passed maturity/design gates,
+  typecheck, web build, core tests, Rust, and the full Playwright CLI suite.
+- Storage Restore Drill `29316674452` passed.
+- Storage Backup Retention `29316674522` passed.
+- Deployment remains non-gating.
+
 ## Remaining Gaps
 
 - A shared transactional identity database is still preferable for multi-host
