@@ -83,6 +83,38 @@ describe("team library authorization", () => {
     ).toThrow("invalid library registry team member credential");
   });
 
+  test("rejects expired and revoked member credentials", () => {
+    const expired = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "expired-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "expired-token",
+          expiresAt: "2020-01-01T00:00:00.000Z"
+        }
+      ])
+    );
+    const revoked = parseTeamAuthorizationConfig(
+      JSON.stringify([
+        {
+          userId: "revoked-user",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "revoked-token",
+          revokedAt: "2020-01-01T00:00:00.000Z"
+        }
+      ])
+    );
+
+    expect(captureError(() =>
+      authenticateTeamMember(expired!, "expired-user", "expired-token")
+    )).toMatchObject({ statusCode: 401 });
+    expect(captureError(() =>
+      authenticateTeamMember(revoked!, "revoked-user", "revoked-token")
+    )).toMatchObject({ statusCode: 401 });
+  });
+
   test("returns stable authentication and authorization failures", () => {
     const config = {
       members: [
