@@ -48,15 +48,16 @@ describe("team authorization managed token sidecar", () => {
           type: "create",
           input: { name: "Post auth", expiresInDays: null }
         }
-      )).resolves.toMatchObject({
-        type: "create",
-        created: { metadata: { id: "post-auth-token" } }
+      )).rejects.toMatchObject({
+        message: "team authorization file changed during token management",
+        statusCode: 409
       });
-      expect(await readFile(setup.basePath, "utf8")).toBe(operatorBase);
-      const sidecar = await readFile(sidecarPath(setup.basePath), "utf8");
-      expect(sidecar).toContain(hash("post-auth-secret"));
-      expect(sidecar).not.toContain("post-auth-secret");
-      expect(sidecar).not.toMatch(/"token"\s*:/);
+      const persistedBase = await readFile(setup.basePath, "utf8");
+      expect(persistedBase).toBe(operatorBase);
+      expect(persistedBase).not.toContain("post-auth-secret");
+      await expect(
+        readFile(sidecarPath(setup.basePath), "utf8")
+      ).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await setup.close();
     }
