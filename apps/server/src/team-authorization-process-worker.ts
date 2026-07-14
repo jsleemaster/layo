@@ -28,8 +28,7 @@ const manager = createTeamAuthorizationFileManager(configPath, source.config, {
 });
 
 try {
-  process.stdout.write("ready
-");
+  process.stdout.write("ready\\n");
   while (!existsSync(releasePath)) {
     await delay(10);
   }
@@ -41,8 +40,7 @@ try {
   } else {
     await manager.revokeToken("owner-user", tokenId);
   }
-  process.stdout.write("done
-");
+  process.stdout.write("done\\n");
 } finally {
   source.close();
 }
