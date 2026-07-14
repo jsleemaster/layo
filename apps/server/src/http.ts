@@ -11,7 +11,9 @@ import {
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
-  type TeamAuthorizationConfig
+  type TeamAccessTokenExpiryDays,
+  type TeamAuthorizationConfig,
+  type TeamAuthorizationFileManager
 } from "./team-authorization.js";
 import {
   FILE_ARCHIVE_MIME_TYPE,
@@ -30,6 +32,7 @@ export interface HttpServerOptions {
   webBasePath?: string;
   webDistDir?: string | null;
   libraryRegistryAuth?: TeamAuthorizationConfig;
+  teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
 const DEFAULT_WEB_BASE_PATH = "/app/";
@@ -99,6 +102,51 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get("/health", async () => ({ ok: true }));
+
+  const requireTeamAuthorizationManager = () => {
+    if (!options.teamAuthorizationManager || !options.libraryRegistryAuth) {
+      throw Object.assign(
+        new Error("team access token administration requires file-backed authorization"),
+        { code: "EUNAVAILABLE", statusCode: 503 }
+      );
+    }
+    return options.teamAuthorizationManager;
+  };
+
+  server.get("/account/tokens", async (request) => {
+    const manager = requireTeamAuthorizationManager();
+    const member = authenticateLibraryMember(request);
+    if (!member) {
+      throw new Error("team authorization configuration is unavailable");
+    }
+    return { tokens: manager.listTokens(member.userId) };
+  });
+
+  server.post<{
+    Body: { name: string; expiresInDays: TeamAccessTokenExpiryDays };
+  }>("/account/tokens", async (request, reply) => {
+    const manager = requireTeamAuthorizationManager();
+    const member = authenticateLibraryMember(request);
+    if (!member) {
+      throw new Error("team authorization configuration is unavailable");
+    }
+    const created = await manager.createToken(member.userId, request.body);
+    return reply.code(201).send(created);
+  });
+
+  server.delete<{ Params: { tokenId: string } }>(
+    "/account/tokens/:tokenId",
+    async (request) => {
+      const manager = requireTeamAuthorizationManager();
+      const member = authenticateLibraryMember(request);
+      if (!member) {
+        throw new Error("team authorization configuration is unavailable");
+      }
+      return {
+        metadata: await manager.revokeToken(member.userId, request.params.tokenId)
+      };
+    }
+  );
 
   server.options("*", async (_request, reply) => {
     return reply.code(204).send();
