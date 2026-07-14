@@ -1,7 +1,7 @@
 # Penpot Token Administration Plan
 
 Date: 2026-07-14
-Status: Active in PR #306
+Status: Completed by PR #306 merge gate
 
 ## Benchmark Decision
 
@@ -36,5 +36,5 @@ was still required for every credential lifecycle action.
   invalid writes, individual revocation, sibling continuity, and restart.
 - HTTP tests cover authenticated identity isolation and unavailable static
   configuration.
-- Full Verification, storage restore, and retention workflows are merge gates.
+- Full Verification `29312558841`, Storage Restore Drill `29312558836`, and Storage Backup Retention `29312558801` passed.
 - Deployment remains non-gating.
