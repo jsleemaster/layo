@@ -409,22 +409,44 @@ describe("parseDocumentPayload", () => {
         headers: { "Content-Type": "text/event-stream" }
       });
     };
-    const options = {
+    const unsubscribe = subscribeToLibraryRegistryEvents({
       fileId: "target-file",
       fetcher: fetcher as typeof fetch,
       reconnectDelayMs: 0,
       onLibraryRegistryEvent: () => {},
-      onAuthorizationEnded: (code: string) => ended.push(code)
-    } as Parameters<typeof subscribeToLibraryRegistryEvents>[0] & {
-      onAuthorizationEnded: (code: string) => void;
-    };
-    const unsubscribe = subscribeToLibraryRegistryEvents(options);
+      onAuthorizationEnded: (code) => ended.push(code)
+    });
 
     for (let attempt = 0; attempt < 20 && calls.length < 2 && ended.length === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     expect(ended).toEqual(["credential_inactive"]);
+    expect(calls).toHaveLength(1);
+    unsubscribe();
+  });
+
+  test("treats direct forbidden stream responses as terminal team access", async () => {
+    const calls: string[] = [];
+    const ended: string[] = [];
+    const fetcher = async (url: string | URL | Request) => {
+      calls.push(String(url));
+      return new Response("forbidden", { status: 403 });
+    };
+    const unsubscribe = subscribeToLibraryRegistryEvents({
+      fileId: "target-file",
+      fetcher: fetcher as typeof fetch,
+      reconnectDelayMs: 0,
+      onLibraryRegistryEvent: () => {},
+      onAuthorizationEnded: (code) => ended.push(code)
+    });
+
+    for (let attempt = 0; attempt < 10 && ended.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ended).toEqual(["team_access_revoked"]);
     expect(calls).toHaveLength(1);
     unsubscribe();
   });
