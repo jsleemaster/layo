@@ -261,8 +261,8 @@ test("file panel preserves even-odd winding on a first-class Penpot path", async
   await anchors.nth(1).click();
   await page.getByRole("button", { name: "곡선으로 변환" }).click();
   await expect(page.locator('[data-testid^="path-control-"]')).toHaveCount(2);
+  await expect.poll(readPersistedPathData).not.toBe(evenOddPathData);
   const curvedPathData = await readPersistedPathData();
-  expect(curvedPathData).not.toBe(evenOddPathData);
 
   const firstControl = page.locator('[data-testid^="path-control-"]').first();
   const controlBounds = await firstControl.boundingBox();
