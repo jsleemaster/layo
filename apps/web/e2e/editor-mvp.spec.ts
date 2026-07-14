@@ -718,15 +718,37 @@ test("file panel clears protected library state when stream authorization ends",
   await page.getByTestId(`library-registry-review-${documentId}`).click();
   await expect(page.getByTestId("library-registry-review")).toContainText("Protected Team Kit");
 
+  let releaseRegistryRefresh!: () => void;
+  const registryRefreshGate = new Promise<void>((resolve) => {
+    releaseRegistryRefresh = resolve;
+  });
+  let registryRefreshRequests = 0;
+  await page.route("**/libraries?**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/libraries") {
+      await route.continue();
+      return;
+    }
+    registryRefreshRequests += 1;
+    const response = await route.fetch();
+    await registryRefreshGate;
+    await route.fulfill({ response });
+  });
+  await page.getByRole("button", { name: "게시 목록 갱신" }).click();
+  await expect.poll(() => registryRefreshRequests).toBe(1);
+
   releaseAuthorization();
 
   await expect(page.getByTestId("library-registry-status")).toContainText(
     "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
   );
+  releaseRegistryRefresh();
   await expect(page.getByTestId("library-registry-list")).not.toContainText(
     "Protected Team Kit"
   );
   await expect(page.getByTestId("library-registry-review")).toHaveCount(0);
+  await expect(page.getByTestId("library-registry-status")).toContainText(
+    "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
+  );
   await page.waitForTimeout(1_250);
   expect(streamRequests).toBe(1);
 });
