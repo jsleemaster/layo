@@ -34,6 +34,12 @@ future revocation inactive. The test now passes the same injected clock to every
 lifecycle assertion, so it proves the intended instant without depending on wall
 time.
 
+External review then identified that a member mutation could clone stale watched
+memory and overwrite an operator edit made before the next poll. The focused
+regression delays the watcher, writes an operator revocation plus a new member,
+then creates a token. Management mutations now reparse the current file
+immediately before writing, preserving both operator changes and the revocation.
+
 ## Verification
 
 - Full Verification `29312558841` passed maturity/design gates, typecheck,
