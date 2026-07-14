@@ -27,6 +27,8 @@ was still required for every credential lifecycle action.
   current principal.
 - Keep environment-only authorization read-only.
 - Prove individual revocation, sibling survival, and restart durability.
+- Re-read the operator file immediately before each mutation so a watcher poll
+  delay cannot resurrect stale credentials.
 - Record MCP token administration and cross-process file locking as follow-up
   gaps instead of silently expanding this slice.
 
