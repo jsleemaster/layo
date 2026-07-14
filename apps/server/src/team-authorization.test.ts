@@ -170,11 +170,12 @@ describe("team library authorization", () => {
             userId: "editor-user",
             role: "editor",
             teamIds: ["team-alpha"],
+            token: "fallback-token",
             tokenHashes: ["not-a-sha256"]
           }
         ])
       )
-    ).toThrow("token, tokenHash, or tokenHashes is required");
+    ).toThrow("invalid library registry team member tokenHashes");
     expect(() =>
       parseTeamAuthorizationConfig(
         JSON.stringify([
