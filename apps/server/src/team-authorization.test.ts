@@ -758,6 +758,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "recovery-user", false);
     } finally {
       source.close();
+      await source.settled();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -825,6 +826,7 @@ describe("team library authorization", () => {
       await waitForSidecarMember(configPath, "removed-user", true);
     } finally {
       source.close();
+      await source.settled();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -898,6 +900,7 @@ describe("team library authorization", () => {
       )).toBe(false);
 
       source.close();
+      await source.settled();
       const restarted = await watchTeamAuthorizationConfigFile(configPath, {
         pollIntervalMs: 10
       });
@@ -963,9 +966,11 @@ describe("team library authorization", () => {
         await waitForSidecarMember(configPath, "removed-user", false);
       } finally {
         restarted.close();
+        await restarted.settled();
       }
     } finally {
       source.close();
+      await source.settled();
       await rm(root, { recursive: true, force: true });
     }
   });
