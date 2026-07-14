@@ -4,8 +4,14 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  const removalOptions = {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 50
+  } as const;
+  await rm(".layo", removalOptions);
+  await rm("apps/server/.layo", removalOptions);
 });
 
 async function openFilePanel(page: Page) {
