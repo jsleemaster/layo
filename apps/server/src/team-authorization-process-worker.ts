@@ -5,9 +5,17 @@ import {
   watchTeamAuthorizationConfigFile
 } from "./team-authorization.js";
 
-const [configPath, tokenId, tokenSecret, releasePath] = process.argv.slice(2);
-if (!configPath || !tokenId || !tokenSecret || !releasePath) {
-  throw new Error("token process worker requires configPath, tokenId, tokenSecret, and releasePath");
+const [mode, configPath, tokenId, tokenSecret, releasePath] = process.argv.slice(2);
+if (
+  (mode !== "create" && mode !== "revoke")
+  || !configPath
+  || !tokenId
+  || !tokenSecret
+  || !releasePath
+) {
+  throw new Error(
+    "token process worker requires mode, configPath, tokenId, tokenSecret, and releasePath"
+  );
 }
 
 const source = await watchTeamAuthorizationConfigFile(configPath, {
@@ -20,15 +28,21 @@ const manager = createTeamAuthorizationFileManager(configPath, source.config, {
 });
 
 try {
-  process.stdout.write("ready\n");
+  process.stdout.write("ready
+");
   while (!existsSync(releasePath)) {
     await delay(10);
   }
-  await manager.createToken("owner-user", {
-    name: `Concurrent ${tokenId}`,
-    expiresInDays: 30
-  });
-  process.stdout.write("done\n");
+  if (mode === "create") {
+    await manager.createToken("owner-user", {
+      name: `Concurrent ${tokenId}`,
+      expiresInDays: 30
+    });
+  } else {
+    await manager.revokeToken("owner-user", tokenId);
+  }
+  process.stdout.write("done
+");
 } finally {
   source.close();
 }
