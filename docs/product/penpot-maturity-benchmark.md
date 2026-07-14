@@ -107,12 +107,20 @@ attempts produced socket count 8, not eight sessions. `9eae96f` removed only
 that count while retaining fixed identity, replacement status, authenticated
 replacement GET, and old-response absence. Fresh review found no findings.
 
-Final Full Verification `29340078192` passed in 8m9s on
-`9eae96fe2e11992768636211da3868a9e93142a5`, including maturity/design gates,
-typecheck, web build, Core, and Playwright CLI e2e. Restore `29340078406` and
-retention `29340078359` passed on the same head. PR #308 is ready to merge but
-not merged; post-merge cleanup remains open. Vercel passed on `bd7acd`, but
-deployment remains non-gating.
+External review then found a P1 removal failure: a managed-token sidecar member
+left behind after operator removal repeatedly failed binding, so every watcher
+retry cleared all principals and indefinitely locked out surviving members. RED
+`e4c4126` and Full `29342714708` reproduced the survivor timeout. The first
+broad quarantine-ignore hypothesis `4d6f0af` broke explicit recovery tests; the
+final narrow repair `1b1888f` / `914fc72` ignores only quarantined orphan
+members while retaining binding checks for re-added users.
+
+Full Verification `29343398679` passed on
+`914fc7226c5632344d4f5e8e1f4c750006b968a2`, including maturity/design gates,
+typecheck, web build, Core, and Playwright CLI e2e. Restore `29343394961` and
+retention `29343395030` passed on the same head. PR #308 is ready for its final
+review and merge gate but is not merged; post-merge cleanup remains open.
+Deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps
