@@ -84,6 +84,7 @@ export interface AuthenticatedTeamMember {
 export interface TeamAuthorizationConfigSource {
   config: TeamAuthorizationConfig;
   close: () => void;
+  settled: () => Promise<void>;
 }
 
 export interface WatchTeamAuthorizationConfigFileOptions {
@@ -1135,6 +1136,15 @@ export async function watchTeamAuthorizationConfigFile(
 
   return {
     config: initialConfig,
+    settled: async () => {
+      while (true) {
+        const pending = reloadTail;
+        await pending;
+        if (pending === reloadTail) {
+          return;
+        }
+      }
+    },
     close: () => {
       if (closed) {
         return;
