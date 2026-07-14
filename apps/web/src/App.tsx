@@ -9754,7 +9754,7 @@ export function App() {
     }
   };
 
-  const refreshLibraryRegistry = async (status?: string, fileId = currentProject?.currentDocumentId) => {
+  const refreshLibraryRegistry = async (status?: string | null, fileId = currentProject?.currentDocumentId) => {
     try {
       const [libraries] = await Promise.all([
         fileId
@@ -9763,9 +9763,11 @@ export function App() {
         refreshLibraryRegistryUpdates(fileId)
       ]);
       setLibraryRegistry(libraries);
-      setLibraryRegistryStatus(
-        status ?? (libraries.length > 0 ? `게시 라이브러리 ${libraries.length}개` : "게시 라이브러리 없음")
-      );
+      if (status !== null) {
+        setLibraryRegistryStatus(
+          status ?? (libraries.length > 0 ? `게시 라이브러리 ${libraries.length}개` : "게시 라이브러리 없음")
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "게시 라이브러리를 불러오지 못했습니다";
       setLibraryRegistry([]);
@@ -9811,7 +9813,7 @@ export function App() {
           libraryRegistryEventSequenceRef.current,
           event.sequence
         );
-        void refreshLibraryRegistry(undefined, fileId);
+        void refreshLibraryRegistry(null, fileId);
       }
     });
   }, [
