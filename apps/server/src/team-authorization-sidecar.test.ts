@@ -352,6 +352,114 @@ describe("team authorization managed token sidecar", () => {
     }
   });
 
+  test("does not let a v1-revoked base token reconcile its quarantined generation", async () => {
+    const setup = await fixture(baseMembers(), 60_000);
+    await writeFile(sidecarPath(setup.basePath), JSON.stringify({
+      version: 1,
+      members: [{
+        userId: "owner-user",
+        tokens: [],
+        revocations: [{
+          tokenId: "base-token",
+          revokedAt: "2026-07-15T00:00:00.000Z"
+        }]
+      }]
+    }, null, 2), "utf8");
+    const manager = createTeamAuthorizationFileManager(
+      setup.basePath,
+      setup.source.config,
+      {
+        now: () => new Date("2026-07-16T12:00:00.000Z"),
+        generateId: () => "v1-fresh-token",
+        generateSecret: () => "v1-fresh-secret"
+      }
+    );
+
+    try {
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "base-secret" },
+        {
+          type: "create",
+          input: { name: "Forbidden recovery", expiresInDays: null }
+        }
+      )).rejects.toThrow("team member credentials are invalid");
+
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "legacy-owner-token" },
+        {
+          type: "create",
+          input: { name: "Allowed recovery", expiresInDays: null }
+        }
+      )).resolves.toMatchObject({ type: "create" });
+      const sidecar = await readFile(sidecarPath(setup.basePath), "utf8");
+      expect(sidecar).toContain('"tokenId": "base-token"');
+      expect(sidecar).not.toContain("base-secret");
+      expect(sidecar).not.toContain("v1-fresh-secret");
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "base-secret" },
+        { type: "list" }
+      )).rejects.toThrow("team member credentials are invalid");
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "v1-fresh-secret" },
+        { type: "list" }
+      )).resolves.toMatchObject({ activeTokenId: "v1-fresh-token" });
+    } finally {
+      await setup.close();
+    }
+  });
+
+  test("preserves base-token revocations while reconciling a fingerprint change", async () => {
+    const setup = await fixture(baseMembers(), 60_000);
+    const manager = createTeamAuthorizationFileManager(
+      setup.basePath,
+      setup.source.config,
+      {
+        now: () => new Date("2026-07-16T12:00:00.000Z"),
+        generateId: () => "fingerprint-fresh-token",
+        generateSecret: () => "fingerprint-fresh-secret"
+      }
+    );
+
+    try {
+      await manager.revokeToken("owner-user", "base-token");
+      await writeFile(
+        setup.basePath,
+        baseMembers().replace('"role": "owner"', '"role": "editor"'),
+        "utf8"
+      );
+
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "base-secret" },
+        {
+          type: "create",
+          input: { name: "Forbidden recovery", expiresInDays: null }
+        }
+      )).rejects.toThrow("team member credentials are invalid");
+
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "legacy-owner-token" },
+        {
+          type: "create",
+          input: { name: "Allowed recovery", expiresInDays: null }
+        }
+      )).resolves.toMatchObject({ type: "create" });
+      const sidecar = await readFile(sidecarPath(setup.basePath), "utf8");
+      expect(sidecar).toContain('"tokenId": "base-token"');
+      expect(sidecar).not.toContain("base-secret");
+      expect(sidecar).not.toContain("fingerprint-fresh-secret");
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "base-secret" },
+        { type: "list" }
+      )).rejects.toThrow("team member credentials are invalid");
+      await expect(manager.manageTokens(
+        { userId: "owner-user", memberToken: "fingerprint-fresh-secret" },
+        { type: "list" }
+      )).resolves.toMatchObject({ activeTokenId: "fingerprint-fresh-token" });
+    } finally {
+      await setup.close();
+    }
+  });
+
   test("does not report revoke success before file and directory sync complete", async () => {
     const setup = await fixture(baseMembers());
     const setupManager = createTeamAuthorizationFileManager(
