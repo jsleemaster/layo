@@ -262,6 +262,36 @@ describePostgres("PostgreSQL team authorization state store", () => {
     }
   });
 
+  test("does not advance generation for an explicitly unchanged mutation", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const scope = `unchanged-${randomUUID()}`;
+
+    try {
+      await store.initializeAbsent(scope, {
+        generation: "0",
+        baseFingerprint: fingerprint,
+        serializedState: emptyState
+      });
+      await expect(store.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: snapshot.baseFingerprint,
+        serializedState: snapshot.serializedState,
+        result: "unchanged",
+        changed: false
+      }))).resolves.toMatchObject({
+        generation: "0",
+        result: "unchanged"
+      });
+      await expect(store.read(scope)).resolves.toMatchObject({
+        generation: "0"
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
   test("isolates scopes", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
