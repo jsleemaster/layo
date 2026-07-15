@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState,
@@ -138,6 +138,55 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
     await expect(runTeamAuthorizationSharedCli([
       "bootstrap", "--scope", `required-base-${randomUUID()}`, "--empty"
     ], { env: cliEnv() })).rejects.toThrow("--base is required");
+  });
+
+  test("uses locale-independent ordering for canonical fingerprints", () => {
+    const localeSpy = vi.spyOn(String.prototype, "localeCompare").mockImplementation(() => {
+      throw new Error("locale-dependent comparison was used");
+    });
+    const base = JSON.stringify([
+      {
+        userId: "사용자-b",
+        role: "owner",
+        teamIds: ["팀-b", "팀-a"],
+        token: "secret-b",
+        tokens: [
+          { id: "토큰-b", name: "B", token: "token-b" },
+          { id: "토큰-a", name: "A", token: "token-a" }
+        ]
+      },
+      {
+        userId: "사용자-a",
+        role: "viewer",
+        teamIds: ["팀-a"],
+        token: "secret-a"
+      }
+    ]);
+
+    try {
+      expect(() => canonicalTeamAuthorizationBaseFingerprint(base)).not.toThrow();
+    } finally {
+      localeSpy.mockRestore();
+    }
+  });
+
+  test("preserves the command error when store close also fails", async () => {
+    const commandError = new Error("authorization export failed");
+    const closeError = new Error("authorization close failed");
+    const store = {
+      read: async () => { throw commandError; },
+      initializeAbsent: async () => { throw new Error("unreachable"); },
+      mutate: async () => { throw new Error("unreachable"); },
+      close: async () => { throw closeError; }
+    } as TeamAuthorizationStateStore;
+
+    await expect(runTeamAuthorizationSharedCli(
+      ["export", "--scope", "close-precedence"],
+      {
+        env: { LAYO_AUTHORIZATION_DATABASE_URL: "postgres://unused" },
+        createStore: async () => store
+      }
+    )).rejects.toBe(commandError);
   });
 
   test("bootstraps empty state at generation zero with a canonical whole-base fingerprint", async () => {
@@ -325,10 +374,13 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       expect(stdout).not.toContain("operator-plaintext");
 
       const outputPath = path.join(root, "authorization-backup.json");
+      await writeFile(outputPath, "stale", { encoding: "utf8", mode: 0o644 });
+      await chmod(outputPath, 0o644);
       await runTeamAuthorizationSharedCli([
         "export", "--scope", exportScope, "--output", outputPath
       ], { env: cliEnv() });
       expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(exported);
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
 
       const restoreScope = `restore-${randomUUID()}`;
       const artifactPath = path.join(root, "restore.json");
