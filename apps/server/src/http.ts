@@ -55,6 +55,11 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
   let eventStreamsClosing = false;
+  const closeServer = server.close.bind(server);
+  server.close = ((...args: [] | [(error?: Error) => void]) => {
+    eventStreamsClosing = true;
+    return args.length === 0 ? closeServer() : closeServer(args[0]);
+  }) as FastifyInstance["close"];
   const libraryRegistryAuthorizationProvider =
     options.libraryRegistryAuthorizationProvider
     ?? (options.libraryRegistryAuth
