@@ -653,6 +653,18 @@ export async function createPostgresTeamAuthorizationStateStore(
         const mutation = await operation(snapshot);
         const baseFingerprint = validateFingerprint(mutation.baseFingerprint);
         const state = parseSerializedState(mutation.serializedState);
+        if (mutation.changed === false) {
+          if (
+            baseFingerprint !== snapshot.baseFingerprint
+            || state.serializedState !== snapshot.serializedState
+          ) {
+            throw new Error(
+              "unchanged authorization mutation must not change shared state"
+            );
+          }
+          await client.query("COMMIT");
+          return { ...snapshot, result: mutation.result };
+        }
         const updated = await client.query<AuthorizationStateRow>(
           `UPDATE layo_team_authorization_state
            SET generation = generation + 1,
