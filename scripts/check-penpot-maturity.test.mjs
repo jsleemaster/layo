@@ -61,6 +61,18 @@ test("README documents authorization watcher retries as unbounded and process-lo
   assert.doesNotMatch(readme, /retry budget is exhausted/);
 });
 
+test("a failed local post-merge audit cannot archive the token plan", async () => {
+  const status = await readText("docs/superpowers/PLAN_STATUS.md");
+  const plan = await readText("docs/superpowers/plans/2026-07-14-penpot-token-mcp-ui.md");
+  const activePlan = sectionBetween(status, "## Current Active Plan", "## Completed Plans");
+  const completedPlans = status.slice(status.indexOf("## Completed Plans"));
+
+  assert.match(plan, /exited 134 even through `\/usr\/bin\/git`/);
+  assert.match(plan, /- \[ \] Resolve the retained local cleanup exception/);
+  assert.match(activePlan, /2026-07-14-penpot-token-mcp-ui\.md/);
+  assert.doesNotMatch(completedPlans, /2026-07-14-penpot-token-mcp-ui\.md/);
+});
+
 test("active top-level docs no longer frame Layo as a small personal editor", async () => {
   const docs = {
     "README.md": await readText("README.md"),
