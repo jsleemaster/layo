@@ -14,6 +14,7 @@ import {
   type TeamAuthorizationProvider
 } from "./team-authorization.js";
 import { createTeamAuthorizationRuntime } from "./team-authorization-runtime.js";
+import { installProcessShutdown } from "./process-shutdown.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
   return nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
@@ -2453,12 +2454,11 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       teamAuthorizationManager: authorizationRuntime.teamAuthorizationManager
     });
     const transport = new StdioServerTransport();
+    let disposeShutdown = () => undefined;
     let resourceClosePromise: Promise<void> | undefined;
     const closeResources = (): Promise<void> => {
       resourceClosePromise ??= (async () => {
-        process.removeListener("SIGINT", onSignal);
-        process.removeListener("SIGTERM", onSignal);
-        process.removeListener("exit", closeSynchronousResources);
+        disposeShutdown();
         libraryRegistryPrincipalTokenSource?.close();
         // Purpose: drain shared authorization work before closing its PostgreSQL pool.
         await authorizationRuntime.close();
@@ -2476,19 +2476,18 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       })();
       return shutdownPromise;
     };
-    const onSignal = () => {
-      void shutdown().catch((error) => {
+    disposeShutdown = installProcessShutdown({
+      processEvents: process,
+      stdinEvents: process.stdin,
+      shutdown,
+      closeSynchronousResources: () => {
+        libraryRegistryPrincipalTokenSource?.close();
+      },
+      onError: (error) => {
         console.error("Layo MCP shutdown failed", error);
         process.exitCode = 1;
-      });
-    };
-    const closeSynchronousResources = () => {
-      libraryRegistryPrincipalTokenSource?.close();
-    };
-    process.once("SIGINT", onSignal);
-    process.once("SIGTERM", onSignal);
-    // Final safety only: PostgreSQL cleanup stays on awaitable shutdown paths.
-    process.once("exit", closeSynchronousResources);
+      }
+    });
 
     try {
       await server.connect(transport);
