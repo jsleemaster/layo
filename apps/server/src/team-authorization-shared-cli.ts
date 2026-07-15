@@ -417,7 +417,10 @@ export async function runTeamAuthorizationBaseReconciliation(
         return {
           baseFingerprint: candidateFingerprint,
           serializedState,
-          result: undefined
+          result: undefined,
+          changed:
+            candidateFingerprint !== locked.baseFingerprint
+            || serializedState !== locked.serializedState
         };
       }
     );
