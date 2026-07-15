@@ -104,10 +104,12 @@ export async function createTeamAuthorizationRuntime(
   environment: TeamAuthorizationRuntimeEnvironment,
   dependencies: TeamAuthorizationRuntimeDependencies = defaultDependencies
 ): Promise<TeamAuthorizationRuntime> {
-  const databaseConfigured =
-    environment.LAYO_AUTHORIZATION_DATABASE_URL !== undefined;
-  const scopeConfigured =
-    environment.LAYO_AUTHORIZATION_SHARED_SCOPE !== undefined;
+  const databaseUrl =
+    environment.LAYO_AUTHORIZATION_DATABASE_URL?.trim() || undefined;
+  const sharedScope =
+    environment.LAYO_AUTHORIZATION_SHARED_SCOPE?.trim() || undefined;
+  const databaseConfigured = databaseUrl !== undefined;
+  const scopeConfigured = sharedScope !== undefined;
   if (databaseConfigured !== scopeConfigured) {
     const missing = databaseConfigured
       ? "LAYO_AUTHORIZATION_SHARED_SCOPE"
@@ -118,7 +120,8 @@ export async function createTeamAuthorizationRuntime(
   }
 
   const shared = databaseConfigured && scopeConfigured;
-  const membersFile = environment.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE;
+  const membersFile =
+    environment.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE?.trim() || undefined;
   if (shared && !membersFile) {
     throw new Error(
       "LAYO_LIBRARY_REGISTRY_MEMBERS_FILE is required for shared authorization"
@@ -197,9 +200,8 @@ export async function createTeamAuthorizationRuntime(
     }
 
     stateStore = await dependencies.createStateStore({
-      connectionString: environment.LAYO_AUTHORIZATION_DATABASE_URL!
+      connectionString: databaseUrl!
     });
-    const sharedScope = environment.LAYO_AUTHORIZATION_SHARED_SCOPE!;
     // Purpose: reject missing, unreadable, or unbootstrapped shared authority before serving.
     await stateStore.read(sharedScope);
     const baseProvider = dependencies.createSharedProvider(
