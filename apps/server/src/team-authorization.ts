@@ -1101,10 +1101,6 @@ export async function watchTeamAuthorizationConfigFile(
             if (closed) {
               return;
             }
-            await options.beforeManagedTokenRecoveryPublish?.();
-            if (closed) {
-              return;
-            }
             await quarantineWatchedManagedTokenState(
               normalizedPath,
               error,
@@ -1114,6 +1110,7 @@ export async function watchTeamAuthorizationConfigFile(
                   teamAuthorizationConfigGeneration(initialConfig);
                 const recoveredConfig =
                   await readStableMergedTeamAuthorizationConfig(normalizedPath);
+                await options.beforeManagedTokenRecoveryPublish?.();
                 if (closed) {
                   return;
                 }
