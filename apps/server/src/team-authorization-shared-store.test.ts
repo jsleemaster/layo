@@ -308,6 +308,27 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
             metadata: {}
           })
         ]);
+        const firstPage = await secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: "0", limit: 1 }
+        );
+        expect(firstPage).toEqual({
+          events: [events![0]],
+          nextAfterId: events![0]!.id
+        });
+        await expect(secondManager.listAuditEvents?.(
+          { userId: "unmanaged-user", memberToken: "unmanaged-base-secret" },
+          { afterId: "0", limit: 1 }
+        )).rejects.toMatchObject({
+          statusCode: 403,
+          message: "owner role is required to read authorization audit history"
+        });
+        const secondPage = await secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: firstPage!.nextAfterId!, limit: 1 }
+        );
+        expect(secondPage).toEqual({ events: [events![1]] });
+
         expect(JSON.stringify(events)).not.toContain("layo_pat_host");
         expect(JSON.stringify(events)).not.toContain("tokenHash");
       } finally {
