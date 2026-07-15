@@ -1,7 +1,7 @@
 # Penpot Token MCP and UI Delta
 
 Last checked: 2026-07-14
-Status: PR #308 active and ready to merge; final verification/review complete; not merged
+Status: PR #308 active; final external-review P3 documentation repair under verification; not merged
 
 ## Retrieval Summary
 
@@ -14,11 +14,11 @@ Status: PR #308 active and ready to merge; final verification/review complete; n
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
 - Current gate: final code head
-  `9eae96fe2e11992768636211da3868a9e93142a5` passed Full Verification
-  `29340078192`, restore `29340078406`, and retention `29340078359`.
-  Implementation, verification, failure-learning evidence, and review are
-  complete. PR #308 is ready to merge but is not merged; gates 7/8/10 remain
-  whole-product maturity targets, not completed gates.
+  `aabff5fa59d280e5b736cc972a2f02b234667d40` passed Full Verification
+  `29379115279`, restore `29379115246`, and retention `29379115265`.
+  Final review then found one README retry-semantics mismatch. Commits
+  `ef6929e` and `1731949` correct the operator contract and add a maturity
+  gate; PR #308 remains unmerged while that documentation head verifies.
 
 ## Penpot Reference And Decision
 
@@ -182,15 +182,17 @@ preview token stayed invalid instead of recovering on a later valid read.
 Deterministic RED `df0c0581` made that recovery failure repeatable, and RED
 Full `29336713035` failed the exact intended case.
 
-GREEN `3c44aecf` schedules a bounded retry through the existing process-local
+GREEN `3c44aecf` schedules retry through the existing process-local
 `reloadTail`. The initial malformed/truncated read still clears authorization
-immediately. A later successful reload cancels retry state; closing the watcher
-also cancels pending retry work. Focused authorization tests passed 15/15 and
-typecheck passed.
+immediately. Each failed reload re-arms another attempt after the poll interval;
+a later successful reload cancels retry state and closing the watcher cancels
+pending work. Focused authorization tests passed 15/15 and typecheck passed.
 
-The retry budget does not weaken fail-close behavior: permanently malformed
-input remains unauthorized after retries are exhausted. It is bounded and
-process-local, not a shared multi-host generation or delivery guarantee.
+Final external review found the README incorrectly described this loop as a
+bounded retry budget. The implementation retries for the lifetime of the
+watcher while remaining fail-closed. Commits `ef6929e` and `1731949` correct
+the operator contract and add a maturity gate that rejects the old claim. This
+process-local retry is not a shared multi-host generation or delivery guarantee.
 
 ## Failure And Verification Ledger
 
@@ -221,7 +223,7 @@ process-local, not a shared multi-host generation or delivery guarantee.
 | Full `29335855757` | RED server 377/378 | Sibling preview token stayed invalid after a transient truncated base read |
 | Commit `df0c0581` | Deterministic RED | Reproduced the exact transient-read recovery failure |
 | Full `29336713035` | RED | Executed and failed the intended retry-recovery case |
-| Commit `3c44aecf` | Focused GREEN | Bounded `reloadTail` retry; auth 15/15 and typecheck passed |
+| Commit `3c44aecf` | Focused GREEN | Fail-closed `reloadTail` retry; auth 15/15 and typecheck passed |
 | Full `29337201074` | RED Playwright | Fixture created a relay team but did not activate its credential; `d7c60f` added explicit UI apply plus authenticated replacement GET |
 | Commits `8686d0` / `032f45` | Deterministic RED | Isolated session-reference predicate without generation masking |
 | Full `29339023854` | RED Playwright | Failed exactly expected true-to-be-false |
@@ -251,6 +253,8 @@ process-local, not a shared multi-host generation or delivery guarantee.
 | Full `29379115279` | Final GREEN | On `aabff5fa59d280e5b736cc972a2f02b234667d40`; gates, typecheck, build, 385 Core server cases, Rust, and Playwright passed |
 | Restore `29379115246` | Passed | Final repaired-head storage restore drill |
 | Retention `29379115265` | Passed | Final repaired-head backup retention |
+| Final external-review P3 | Actionable | README claimed a retry budget although watcher failures re-arm for the watcher lifetime |
+| Commits `ef6929e` / `1731949` | Documentation repair | Correct unbounded process-local retry semantics and guard against reintroducing the exhausted-budget claim |
 
 The follow-up recovery root causes were separate: startup used strict merge
 before a manager could reconcile a quarantined generation; watcher recovery
@@ -284,7 +288,7 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
   retained event consumption and operational review remain open.
 - Shared transactional multi-host identity and revocation storage remains open.
   Filesystem locking, watcher-tail waits, and freshness checks are process-local
-  or same-storage evidence only. The bounded transient-read retry is also
+  or same-storage evidence only. The unbounded watcher retry is also
   process-local. Multiple hosts need one durable monotonic authorization
   generation or CAS contract. Permanently malformed input remains fail-closed.
 - MCP mutations do not yet provide agent dry-run, review, apply, summary, or
@@ -294,6 +298,6 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Deployment is deliberately non-gating for this slice. Vercel passed on
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
-- PR #308 has repaired and fully verified all external-review findings through
-  the final code head. Final docs-head verification/review, squash merge, and
-  post-merge cleanup remain Task 4 work.
+- PR #308 has repaired every code finding and the final README semantics P3.
+  Final documentation-head verification, squash merge, and post-merge cleanup
+  remain Task 4 work.
