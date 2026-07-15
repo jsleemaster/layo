@@ -223,16 +223,45 @@ Deployment remains a separate non-gating concern.
 - Full `29343398679`, restore `29343394961`, and retention `29343395030`
   passed on `914fc7226c5632344d4f5e8e1f4c750006b968a2`.
 
+### Startup, immediate recovery, and locked publication failure loop
+
+- External re-review found startup P1 and immediate-survivor P2 gaps.
+  Deterministic RED `3a0b640` / Full `29376307034` failed those two cases
+  with 380/382 server tests passing.
+- First GREEN `01105a9` exposed an in-flight watcher lock after close in Full
+  `29376572991`. The arbitrary cleanup-retry hypothesis was rejected.
+- Lifecycle and competing-publication RED `0e3d2a4` / Full `29377023368`
+  failed exactly two new cases with 382/384 passing.
+- `463ca6e` / `19bdc0b` add callback suppression, `settled()`, stable
+  reread and publication under the sidecar process lock, and a competing manager
+  ordering proof.
+
+### Bulk removal and reintroduction failure loop
+
+- Latest external review found only one removed sidecar member was quarantined
+  per poll. RED `fad4ae2` / Full `29378304736` kept the survivor unavailable
+  while 384/385 server tests passed.
+- Broad all-binding quarantine `2f6f155` failed all 20 reintroduction stress
+  cases in Full `29378477598`; dormant managed tokens reappeared.
+- Present-base skip `c8445a1` also failed all 20 cases in Full
+  `29378879310` because a queued reload accepted the unquarantined dormant
+  generation.
+- Final `aabff5f` quarantines every orphan from the exact observed removal
+  snapshot in one lock, rechecks the current base before persistence, and
+  blocks publication for reintroduced generations until explicit recovery.
+- Full `29379115279`, restore `29379115246`, and retention
+  `29379115265` passed. Independent security review found no actionable
+  finding; all PR review threads are resolved.
+
 ### Current merge gate
 
-- Final code head: `914fc7226c5632344d4f5e8e1f4c750006b968a2`.
-- Full Verification `29343398679` passed on that head: maturity/design gates,
-  typecheck, web build, Core, and Playwright CLI e2e all passed.
-- Storage Restore Drill `29343394961` and Storage Backup Retention
-  `29343395030` passed on the same head.
-- The external-review P1 has deterministic RED, repaired GREEN, restart and
-  explicit-recovery regression coverage, and durable evidence. Final fresh
-  review and review-thread resolution remain the merge gate.
+- Final code head: `aabff5fa59d280e5b736cc972a2f02b234667d40`.
+- Full Verification `29379115279` passed on that head: maturity/design gates,
+  typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
+- Storage Restore Drill `29379115246` and Storage Backup Retention
+  `29379115265` passed on the same head.
+- Independent security review found no actionable finding and all external
+  review threads are resolved. Final docs-head verification/review remains.
 - PR #308 is active and not merged. Squash merge and post-merge cleanup remain
   open, so this plan remains active and must not move to Completed Plans yet.
 
