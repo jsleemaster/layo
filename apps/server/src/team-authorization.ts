@@ -1111,6 +1111,9 @@ export async function watchTeamAuthorizationConfigFile(
           parseRequiredTeamAuthorizationConfig(baseSnapshot),
           parseManagedTokenState(sidecarSnapshot)
         );
+        if (teamAuthorizationConfigsRequiringRecovery.has(initialConfig)) {
+          return;
+        }
         cancelRetry();
         if (
           generationBeforeRead
@@ -1119,7 +1122,6 @@ export async function watchTeamAuthorizationConfigFile(
           return;
         }
         replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
-        teamAuthorizationConfigsRequiringRecovery.delete(initialConfig);
       } catch (error) {
         replaceTeamAuthorizationMembers(initialConfig, []);
         if (error instanceof ManagedTokenBindingError) {
