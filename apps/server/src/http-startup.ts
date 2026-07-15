@@ -67,7 +67,28 @@ export async function startHttpServer(
       server: activeServer,
       authorizationRuntime,
       shutdown: () => {
-        shutdownPromise ??= activeServer.close();
+        shutdownPromise ??= (async () => {
+          let serverCloseError: unknown;
+          try {
+            await activeServer.close();
+          } catch (error) {
+            serverCloseError = error;
+          }
+          try {
+            await authorizationRuntime.close();
+          } catch (runtimeCloseError) {
+            if (serverCloseError) {
+              throw new AggregateError(
+                [serverCloseError, runtimeCloseError],
+                "HTTP server and authorization runtime cleanup failed"
+              );
+            }
+            throw runtimeCloseError;
+          }
+          if (serverCloseError) {
+            throw serverCloseError;
+          }
+        })();
         return shutdownPromise;
       }
     };
