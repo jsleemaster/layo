@@ -11,7 +11,10 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "authorization:migrate": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-postgres.ts"
+    "authorization:migrate": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-postgres.ts",
+    "authorization:bootstrap": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts bootstrap",
+    "authorization:export": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts export",
+    "authorization:restore": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts restore"
   },
   "dependencies": {
     "@layo/collaboration": "workspace:*",
