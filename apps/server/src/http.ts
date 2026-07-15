@@ -54,6 +54,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const server = Fastify({ logger: true });
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
+  let eventStreamsClosing = false;
   const libraryRegistryAuthorizationProvider =
     options.libraryRegistryAuthorizationProvider
     ?? (options.libraryRegistryAuth
@@ -238,6 +239,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.addHook("preClose", async () => {
+    eventStreamsClosing = true;
     // Purpose: end long-lived responses before Node waits for active sockets.
     for (const close of [...commentEventStreamClosers]) {
       close();
@@ -382,6 +384,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           initialMember,
           await storage.getTeamIdForFile(request.query.fileId)
         );
+      }
+      if (eventStreamsClosing) {
+        return reply.code(503).send({ error: "server is closing" });
       }
 
       reply.hijack();
@@ -728,6 +733,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
+      if (eventStreamsClosing) {
+        return reply.code(503).send({ error: "server is closing" });
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
