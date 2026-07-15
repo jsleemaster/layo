@@ -527,6 +527,7 @@ export async function createPostgresTeamAuthorizationStateStore(
         baseFingerprint: string;
         serializedState: string;
         result: T;
+        changed?: boolean;
       }>
     ) {
       assertOpen();
