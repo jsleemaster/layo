@@ -36,8 +36,6 @@ export interface TeamAuthorizationConfig {
 }
 
 const teamAuthorizationConfigGenerations = new WeakMap<TeamAuthorizationConfig, number>();
-const teamAuthorizationConfigsRequiringRecovery =
-  new WeakSet<TeamAuthorizationConfig>();
 const teamAuthorizationConfigReloads = new WeakMap<
   TeamAuthorizationConfig,
   () => Promise<void>
@@ -282,7 +280,6 @@ export function createTeamAuthorizationFileManager(
     try {
       const currentConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
       replaceTeamAuthorizationMembers(config, currentConfig.members);
-      teamAuthorizationConfigsRequiringRecovery.delete(config);
     } catch (error) {
       if (error instanceof ManagedTokenBindingError) {
         await quarantinePersistedManagedTokenState(
@@ -317,12 +314,6 @@ export function createTeamAuthorizationFileManager(
 
       try {
         nextConfig = mergeManagedTokenState(baseConfig, state);
-        if (teamAuthorizationConfigsRequiringRecovery.has(config)) {
-          throw new ManagedTokenBindingError(
-            "principal" in identity ? identity.principal.userId : identity.userId,
-            "team authorization config requires explicit recovery"
-          );
-        }
       } catch (error) {
         if (
           !(error instanceof ManagedTokenBindingError)
@@ -956,7 +947,7 @@ async function quarantinePersistedManagedTokenState(
 
 async function quarantineWatchedManagedTokenState(
   basePath: string,
-  error: ManagedTokenBindingError,
+  observedBaseSnapshot: string,
   observedSourceSnapshot: string | undefined,
   recoverWhileLocked: () => Promise<void>
 ): Promise<void> {
@@ -969,33 +960,23 @@ async function quarantineWatchedManagedTokenState(
         409
       );
     }
-    const baseSnapshot = await readFile(basePath, "utf8");
-    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
-    const baseUserIds = new Set(
-      baseConfig.members.map((member) => member.userId)
+    const observedBaseConfig =
+      parseRequiredTeamAuthorizationConfig(observedBaseSnapshot);
+    const originalBaseUserIds = new Set(
+      observedBaseConfig.members.map((member) => member.userId)
     );
     const state = parseManagedTokenState(sourceSnapshot);
-    const originalMember = state.members.find(
-      (member) => member.userId === error.userId
-    );
-    if (!originalMember) {
-      throw managementError(
-        "team authorization token sidecar member changed during quarantine",
-        409
-      );
-    }
-    if (baseUserIds.has(error.userId)) {
-      throw error;
-    }
-
     let changed = false;
     for (const member of state.members) {
-      if (!baseUserIds.has(member.userId) && !member.quarantined) {
+      if (!originalBaseUserIds.has(member.userId) && !member.quarantined) {
         member.quarantined = true;
         changed = true;
       }
     }
 
+    const currentBaseSnapshot = await readFile(basePath, "utf8");
+    const currentBaseConfig =
+      parseRequiredTeamAuthorizationConfig(currentBaseSnapshot);
     if (changed) {
       await persistManagedTokenState(
         basePath,
@@ -1006,10 +987,10 @@ async function quarantineWatchedManagedTokenState(
           syncFile: (handle) => handle.sync(),
           syncDirectory
         },
-        baseSnapshot
+        currentBaseSnapshot
       );
     }
-    mergeManagedTokenState(baseConfig, state);
+    mergeManagedTokenState(currentBaseConfig, state);
     await recoverWhileLocked();
   });
 }
@@ -1099,6 +1080,7 @@ export async function watchTeamAuthorizationConfigFile(
       if (closed) {
         return;
       }
+      let observedBaseSnapshot: string | undefined;
       let observedSidecarSnapshot: string | undefined;
       const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
       try {
@@ -1106,14 +1088,12 @@ export async function watchTeamAuthorizationConfigFile(
           readFile(normalizedPath, "utf8"),
           readOptionalFile(sidecarPath)
         ]);
+        observedBaseSnapshot = baseSnapshot;
         observedSidecarSnapshot = sidecarSnapshot;
         const nextConfig = mergeManagedTokenState(
           parseRequiredTeamAuthorizationConfig(baseSnapshot),
           parseManagedTokenState(sidecarSnapshot)
         );
-        if (teamAuthorizationConfigsRequiringRecovery.has(initialConfig)) {
-          return;
-        }
         cancelRetry();
         if (
           generationBeforeRead
@@ -1124,9 +1104,6 @@ export async function watchTeamAuthorizationConfigFile(
         replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
       } catch (error) {
         replaceTeamAuthorizationMembers(initialConfig, []);
-        if (error instanceof ManagedTokenBindingError) {
-          teamAuthorizationConfigsRequiringRecovery.add(initialConfig);
-        }
         let recovered = false;
         if (error instanceof ManagedTokenBindingError) {
           try {
@@ -1134,9 +1111,15 @@ export async function watchTeamAuthorizationConfigFile(
             if (closed) {
               return;
             }
+            if (observedBaseSnapshot === undefined) {
+              throw managementError(
+                "team authorization base snapshot was not observed",
+                409
+              );
+            }
             await quarantineWatchedManagedTokenState(
               normalizedPath,
-              error,
+              observedBaseSnapshot,
               observedSidecarSnapshot,
               async () => {
                 const recoveryGeneration =
@@ -1155,7 +1138,6 @@ export async function watchTeamAuthorizationConfigFile(
                     initialConfig,
                     recoveredConfig.members
                   );
-                  teamAuthorizationConfigsRequiringRecovery.delete(initialConfig);
                   cancelRetry();
                   recovered = true;
                 }
