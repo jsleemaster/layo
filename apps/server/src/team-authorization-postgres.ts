@@ -21,6 +21,13 @@ export interface TeamAuthorizationStateSnapshot {
 
 export interface TeamAuthorizationStateStore {
   read(scope: string): Promise<TeamAuthorizationStateSnapshot>;
+  initializeAbsent(
+    scope: string,
+    snapshot: TeamAuthorizationStateSnapshot
+  ): Promise<{
+    initialized: boolean;
+    snapshot: TeamAuthorizationStateSnapshot;
+  }>;
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -446,6 +453,49 @@ export async function createPostgresTeamAuthorizationStateStore(
         throw new Error(`authorization scope ${scope} does not exist`);
       }
       return snapshotFromRow(result.rows[0]!);
+    },
+
+    async initializeAbsent(scopeInput, snapshotInput) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const generation = validateGeneration(snapshotInput.generation);
+      const baseFingerprint = validateFingerprint(snapshotInput.baseFingerprint);
+      const state = parseSerializedState(snapshotInput.serializedState);
+      // Purpose: initialize bootstrap or restore state without mutating an existing scope.
+      const inserted = await pool.query<AuthorizationStateRow>(
+        `INSERT INTO layo_team_authorization_state
+          (scope, generation, base_fingerprint, state, schema_version)
+         VALUES ($1, $2::bigint, $3, $4::jsonb, $5)
+         ON CONFLICT (scope) DO NOTHING
+         RETURNING generation::text AS generation, base_fingerprint, state`,
+        [
+          scope,
+          generation,
+          baseFingerprint,
+          state.serializedState,
+          REQUIRED_SCHEMA_VERSION
+        ]
+      );
+      if (inserted.rowCount === 1) {
+        return {
+          initialized: true,
+          snapshot: snapshotFromRow(inserted.rows[0]!)
+        };
+      }
+
+      const existing = await pool.query<AuthorizationStateRow>(
+        `SELECT generation::text AS generation, base_fingerprint, state
+         FROM layo_team_authorization_state
+         WHERE scope = $1`,
+        [scope]
+      );
+      if (existing.rowCount !== 1) {
+        throw new Error(`authorization scope ${scope} initialization conflicted`);
+      }
+      return {
+        initialized: false,
+        snapshot: snapshotFromRow(existing.rows[0]!)
+      };
     },
 
     async mutate<T>(scopeInput: string, expectedFingerprintInput: string, operation: (
