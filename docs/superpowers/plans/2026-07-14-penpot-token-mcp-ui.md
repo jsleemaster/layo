@@ -201,11 +201,16 @@ Deployment remains a separate non-gating concern.
   sibling preview token stayed invalid after a transient truncated base read.
 - Deterministic RED `df0c0581` reproduced the exact recovery miss; RED Full
   `29336713035` failed that intended case.
-- GREEN `3c44aecf` adds bounded retry serialized by `reloadTail`, preserves
+- GREEN `3c44aecf` adds retry serialized by `reloadTail`, preserves
   immediate fail-close on the first bad read, and cancels retry state on success
   or watcher close. Focused authorization passed 15/15; typecheck passed.
-- Residual: permanently malformed input remains fail-closed. Retry is bounded
-  and process-local, not a multi-host generation or delivery guarantee.
+- Final external review found the README falsely described an exhausted retry
+  budget. Implementation failures re-arm after each poll for the watcher
+  lifetime while authorization remains fail-closed.
+- Documentation repair `ef6929e` states the unbounded process-local behavior;
+  maturity-gate regression `1731949` rejects the old exhausted-budget claim.
+- Residual: this retry is process-local, not a multi-host generation or delivery
+  guarantee. Persistent malformed input can continue retry logging.
 
 ### Removed-member orphan quarantine failure loop
 
@@ -260,8 +265,9 @@ Deployment remains a separate non-gating concern.
   typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
 - Storage Restore Drill `29379115246` and Storage Backup Retention
   `29379115265` passed on the same head.
-- Independent security review found no actionable finding and all external
-  review threads are resolved. Final docs-head verification/review remains.
+- Independent security review found no actionable code finding. The final
+  documentation review found one README retry-semantics P3; `ef6929e` and
+  `1731949` repair and guard it. Final repaired-head verification remains.
 - PR #308 is active and not merged. Squash merge and post-merge cleanup remain
   open, so this plan remains active and must not move to Completed Plans yet.
 
