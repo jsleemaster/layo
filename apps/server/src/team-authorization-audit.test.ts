@@ -47,7 +47,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
         await firstMutationReleased;
         return {
           baseFingerprint: snapshot.baseFingerprint,
-          serializedState: '{"version":2,"members":[{"userId":"owner-a"}]}',
+          serializedState: '{"version":2,"members":[]}',
           result: "first",
           auditEvent: {
             action: "token_created",
@@ -72,7 +72,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
         secondMutationEntered = true;
         return {
           baseFingerprint: snapshot.baseFingerprint,
-          serializedState: '{"version":2,"members":[{"userId":"owner-b"}]}',
+          serializedState: '{"version":2,"members":[]}',
           result: "second",
           auditEvent: {
             action: "token_revoked",
