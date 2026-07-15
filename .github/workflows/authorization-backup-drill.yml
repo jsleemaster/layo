@@ -1,0 +1,86 @@
+name: Authorization Backup Drill
+
+on:
+  schedule:
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/authorization-backup-drill.yml"
+      - "apps/server/src/team-authorization-postgres.ts"
+      - "apps/server/src/team-authorization-shared-cli.ts"
+      - "apps/server/src/team-authorization-shared-cli.test.ts"
+      - "apps/server/package.json"
+      - "docs/product/penpot-maturity-benchmark.md"
+      - "docs/product/penpot-shared-authorization-generation-delta.md"
+      - "docs/superpowers/plans/2026-07-15-penpot-shared-authorization-generation.md"
+      - "README.md"
+      - "pnpm-lock.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  authorization-backup-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: layo
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d layo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Purpose: exercise the operator-owned database path without hosted secrets.
+      LAYO_AUTHORIZATION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/layo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate, export, restore, and compare one scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          base_file="$tmp_dir/members.json"
+          first_export="$tmp_dir/authorization-before.json"
+          restored_export="$tmp_dir/authorization-after.json"
+          scope="ci-authorization-backup-drill"
+
+          printf '%s\n' '[{"userId":"ci-owner","role":"owner","teamIds":["ci-team"],"tokens":[{"id":"ci-root","name":"CI root","tokenHash":"0000000000000000000000000000000000000000000000000000000000000000"}]}]' > "$base_file"
+
+          pnpm --filter @layo/server authorization:migrate
+          pnpm --filter @layo/server authorization:bootstrap --scope "$scope" --base "$base_file" --empty
+          pnpm --filter @layo/server authorization:export --scope "$scope" --output "$first_export"
+
+          # Purpose: simulate loss of exactly one operator-selected authorization scope.
+          SCOPE="$scope" pnpm --filter @layo/server exec node --input-type=module -e 'import pg from "pg"; const pool = new pg.Pool({ connectionString: process.env.LAYO_AUTHORIZATION_DATABASE_URL }); try { const result = await pool.query("DELETE FROM layo_team_authorization_state WHERE scope = $1", [process.env.SCOPE]); if (result.rowCount !== 1) throw new Error("expected exactly one deleted authorization scope"); } finally { await pool.end(); }'
+
+          pnpm --filter @layo/server authorization:restore --scope "$scope" --input "$first_export" --confirm-absent-scope-restore
+          pnpm --filter @layo/server authorization:export --scope "$scope" --output "$restored_export"
+          cmp "$first_export" "$restored_export"
+
+          FIRST_EXPORT="$first_export" DATABASE_URL="$LAYO_AUTHORIZATION_DATABASE_URL" node --input-type=module -e 'import { readFile, stat } from "node:fs/promises"; const path = process.env.FIRST_EXPORT; const raw = await readFile(path, "utf8"); const artifact = JSON.parse(raw); if (raw.includes(process.env.DATABASE_URL)) throw new Error("database URL leaked into authorization export"); if (/"token"\s*:/.test(raw)) throw new Error("plaintext token field leaked into authorization export"); if (artifact.version !== 1 || artifact.scope !== "ci-authorization-backup-drill") throw new Error("unexpected authorization export identity"); if (((await stat(path)).mode & 0o077) !== 0) throw new Error("authorization export permissions are not private");'
