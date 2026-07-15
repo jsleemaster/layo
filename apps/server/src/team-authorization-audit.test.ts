@@ -128,4 +128,88 @@ describePostgres("PostgreSQL authorization audit log", () => {
     await first.close();
     await second.close();
   });
+  test("rejects nested credential metadata and rolls back state plus audit", async () => {
+    const scope = `audit-secret-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: "must-not-commit",
+          auditEvent: {
+            action: "token_created",
+            actorUserId: "owner-a",
+            subjectTokenId: "token-secret",
+            subjectTokenName: "Secret",
+            source: "http",
+            metadata: {
+              request: {
+                memberToken: "plaintext-secret"
+              }
+            }
+          }
+        })
+      )).rejects.toThrow(/forbidden field/i);
+
+      await expect(store.read(scope)).resolves.toMatchObject({
+        generation: "0"
+      });
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "0",
+        limit: 10
+      })).resolves.toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("does not append an audit event for a non-mutating transaction", async () => {
+    const scope = `audit-noop-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: false },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: "noop",
+          auditEvent: {
+            action: "base_reconciled",
+            actorUserId: "owner-a",
+            source: "operator",
+            metadata: {}
+          }
+        })
+      )).rejects.toThrow(/must not append an audit event/i);
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "0",
+        limit: 10
+      })).resolves.toEqual([]);
+    } finally {
+      await store.close();
+    }
+  });
+
 });
