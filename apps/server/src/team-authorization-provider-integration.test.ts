@@ -200,3 +200,33 @@ test("SSE rechecks the provider and closes after a shared credential is revoked"
     await server.close();
   }
 });
+
+test("HTTP close ends an active library SSE stream before waiting for sockets", async () => {
+  tempRoot = await mkdtemp(path.join(tmpdir(), "layo-provider-sse-close-"));
+  const server = createHttpServer(new FileStorage(tempRoot));
+  const address = await server.listen({ host: "127.0.0.1", port: 0 });
+  const controller = new AbortController();
+
+  try {
+    const response = await fetch(`${address}/libraries/events`, {
+      signal: controller.signal
+    });
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const initial = await reader.read();
+    expect(new TextDecoder().decode(initial.value)).toContain("event: ready");
+
+    const closeOutcome = await Promise.race([
+      server.close().then(() => "closed" as const),
+      new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 750);
+      })
+    ]);
+
+    expect(closeOutcome).toBe("closed");
+    await expect(reader.read()).resolves.toMatchObject({ done: true });
+  } finally {
+    controller.abort();
+    await server.close();
+  }
+});
