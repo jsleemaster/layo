@@ -772,6 +772,113 @@ describe("team library authorization", () => {
     }
   });
 
+  test("quarantines every removed sidecar member before reporting the original watcher error", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-bulk-removal-"));
+    const configPath = path.join(root, "members.json");
+    const removedMembers = [
+      {
+        userId: "removed-a",
+        role: "editor" as const,
+        teamIds: ["team-alpha"],
+        token: "removed-a-base-token"
+      },
+      {
+        userId: "removed-b",
+        role: "editor" as const,
+        teamIds: ["team-alpha"],
+        token: "removed-b-base-token"
+      }
+    ];
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    await writeFile(
+      configPath,
+      JSON.stringify([...removedMembers, survivingMember]),
+      "utf8"
+    );
+
+    let survivorActiveWhenOriginalErrorReported: boolean | undefined;
+    let quarantineSnapshotAtOriginalError:
+      | Promise<Array<{ userId?: string; quarantined?: boolean }>>
+      | undefined;
+    let sourceConfig:
+      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+      | undefined;
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => {
+        reloadErrors.push(error);
+        if (
+          (error as Error & { userId?: string }).userId === "removed-a"
+          && sourceConfig
+        ) {
+          survivorActiveWhenOriginalErrorReported = authenticationSucceeds(
+            sourceConfig,
+            "surviving-user",
+            "surviving-base-token"
+          );
+          quarantineSnapshotAtOriginalError = readFile(
+            configPath + ".tokens.json",
+            "utf8"
+          ).then((snapshot) => (
+            JSON.parse(snapshot) as {
+              members?: Array<{ userId?: string; quarantined?: boolean }>;
+            }
+          ).members ?? []);
+        }
+      }
+    });
+    sourceConfig = source.config;
+    const ids = ["removed-a-managed", "removed-b-managed"];
+    const secrets = ["removed-a-managed-secret", "removed-b-managed-secret"];
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      generateId: () => ids.shift() ?? "unexpected-id",
+      generateSecret: () => secrets.shift() ?? "unexpected-secret"
+    });
+
+    try {
+      await manager.createToken("removed-a", {
+        name: "Removed A token",
+        expiresInDays: null
+      });
+      await manager.createToken("removed-b", {
+        name: "Removed B token",
+        expiresInDays: null
+      });
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => reloadErrors.some(
+        (error) => (error as Error & { userId?: string }).userId === "removed-a"
+      ));
+
+      expect(survivorActiveWhenOriginalErrorReported).toBe(true);
+      const members = await quarantineSnapshotAtOriginalError;
+      expect(members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ userId: "removed-a", quarantined: true }),
+        expect.objectContaining({ userId: "removed-b", quarantined: true })
+      ]));
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-a",
+        "removed-a-managed-secret"
+      )).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-b",
+        "removed-b-managed-secret"
+      )).toBe(false);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("serializes recovery publication before applying a competing manager revocation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-recovery-race-"));
     const configPath = path.join(root, "members.json");
