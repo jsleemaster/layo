@@ -40,6 +40,13 @@ function sqlIdentifier(value: string): string {
   return `"${value}"`;
 }
 
+function sqlPassword(value: string): string {
+  if (!/^[a-z0-9_]+$/.test(value)) {
+    throw new Error("unsafe PostgreSQL test password");
+  }
+  return `'${value}'`;
+}
+
 async function waitForDatabaseLock(pool: Pool, applicationName: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -338,7 +345,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await migratePostgresTeamAuthorizationState({
         connectionString: scopedAdminConnection
       });
-      await admin.query(`CREATE ROLE ${roleSql} LOGIN PASSWORD $1`, [password]);
+      await admin.query(`CREATE ROLE ${roleSql} LOGIN PASSWORD ${sqlPassword(password)}`);
       await admin.query(`GRANT USAGE ON SCHEMA ${schemaSql} TO ${roleSql}`);
       await admin.query(
         `GRANT SELECT ON ${schemaSql}.layo_authorization_schema_migrations TO ${roleSql}`
