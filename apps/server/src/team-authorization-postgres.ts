@@ -3,20 +3,49 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { Pool, type PoolClient } from "pg";
 
-const REQUIRED_SCHEMA_VERSION = 1;
+const REQUIRED_DATABASE_SCHEMA_VERSION = 2;
+const AUTHORIZATION_STATE_SCHEMA_VERSION = 1;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
 const MAX_SERIALIZED_STATE_BYTES = 1_048_576;
 const MAX_SCOPE_BYTES = 512;
 const EMPTY_SERIALIZED_STATE = "{\"version\":2,\"members\":[]}";
-const MIGRATION_URL = new URL(
-  "../migrations/0001-team-authorization-state.sql",
-  import.meta.url
-);
+const MIGRATION_URLS = [
+  new URL("../migrations/0001-team-authorization-state.sql", import.meta.url),
+  new URL("../migrations/0002-team-authorization-audit.sql", import.meta.url)
+];
 
 export interface TeamAuthorizationStateSnapshot {
   generation: string;
   baseFingerprint: string;
   serializedState: string;
+}
+
+export type TeamAuthorizationAuditAction =
+  | "token_created"
+  | "token_revoked"
+  | "scope_bootstrapped"
+  | "scope_restored"
+  | "base_reconciled";
+
+export type TeamAuthorizationAuditSource = "http" | "mcp" | "operator";
+
+export interface TeamAuthorizationAuditEventInput {
+  action: TeamAuthorizationAuditAction;
+  actorUserId: string;
+  subjectTokenId?: string;
+  subjectTokenName?: string;
+  source: TeamAuthorizationAuditSource;
+  requestId?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface TeamAuthorizationAuditEvent
+  extends TeamAuthorizationAuditEventInput {
+  id: string;
+  scope: string;
+  generation: string;
+  createdAt: string;
+  archivedAt?: string;
 }
 
 export interface TeamAuthorizationStateStore {
@@ -39,13 +68,19 @@ export interface TeamAuthorizationStateStore {
       serializedState: string;
       result: T;
       changed?: boolean;
+      auditEvent?: TeamAuthorizationAuditEventInput;
     }>
   ): Promise<{
     generation: string;
     baseFingerprint: string;
     serializedState: string;
     result: T;
+    auditEvent?: TeamAuthorizationAuditEvent;
   }>;
+  listAuditEvents?(
+    scope: string,
+    options: { afterId: string; limit: number }
+  ): Promise<TeamAuthorizationAuditEvent[]>;
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -75,6 +110,21 @@ interface AuthorizationStateRow {
   generation: string;
   base_fingerprint: string;
   state: unknown;
+}
+
+interface AuthorizationAuditRow {
+  id: string;
+  scope: string;
+  generation: string;
+  action: TeamAuthorizationAuditAction;
+  actor_user_id: string;
+  subject_token_id: string | null;
+  subject_token_name: string | null;
+  source: TeamAuthorizationAuditSource;
+  request_id: string | null;
+  metadata: unknown;
+  created_at: Date | string;
+  archived_at: Date | string | null;
 }
 
 function validateConnectionString(connectionString: string): string {
@@ -116,6 +166,115 @@ function validateGeneration(generation: unknown): string {
     throw new Error("authorization generation must be an exact nonnegative decimal string");
   }
   return generation;
+}
+
+function validateAuditText(
+  value: unknown,
+  field: string,
+  optional = false
+): string | undefined {
+  if (value === undefined && optional) {
+    return undefined;
+  }
+  if (
+    typeof value !== "string"
+    || value !== value.trim()
+    || Buffer.byteLength(value, "utf8") < 1
+    || Buffer.byteLength(value, "utf8") > 512
+  ) {
+    throw new Error(`authorization audit ${field} is invalid`);
+  }
+  return value;
+}
+
+function validateAuditEventInput(
+  input: TeamAuthorizationAuditEventInput
+): TeamAuthorizationAuditEventInput {
+  const actions: TeamAuthorizationAuditAction[] = [
+    "token_created",
+    "token_revoked",
+    "scope_bootstrapped",
+    "scope_restored",
+    "base_reconciled"
+  ];
+  const sources: TeamAuthorizationAuditSource[] = ["http", "mcp", "operator"];
+  if (!actions.includes(input.action)) {
+    throw new Error("authorization audit action is invalid");
+  }
+  if (!sources.includes(input.source)) {
+    throw new Error("authorization audit source is invalid");
+  }
+  if (
+    !input.metadata
+    || typeof input.metadata !== "object"
+    || Array.isArray(input.metadata)
+  ) {
+    throw new Error("authorization audit metadata must be an object");
+  }
+  const metadata = JSON.stringify(input.metadata);
+  if (Buffer.byteLength(metadata, "utf8") > 16_384) {
+    throw new Error("authorization audit metadata is too large");
+  }
+  for (const key of Object.keys(input.metadata)) {
+    if (/(token|secret|hash|credential|database.?url)/i.test(key)) {
+      throw new Error("authorization audit metadata contains a forbidden field");
+    }
+  }
+  return {
+    action: input.action,
+    actorUserId: validateAuditText(input.actorUserId, "actorUserId")!,
+    subjectTokenId: validateAuditText(
+      input.subjectTokenId,
+      "subjectTokenId",
+      true
+    ),
+    subjectTokenName: validateAuditText(
+      input.subjectTokenName,
+      "subjectTokenName",
+      true
+    ),
+    source: input.source,
+    requestId: validateAuditText(input.requestId, "requestId", true),
+    metadata: JSON.parse(metadata) as Record<string, unknown>
+  };
+}
+
+function timestampToIso(value: Date | string, field: string): string {
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new Error(`authorization audit ${field} is invalid`);
+  }
+  return timestamp.toISOString();
+}
+
+function auditEventFromRow(row: AuthorizationAuditRow): TeamAuthorizationAuditEvent {
+  const id = validateGeneration(row.id);
+  if (id === "0") {
+    throw new Error("authorization audit id must be positive");
+  }
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, unknown>
+      : undefined;
+  if (!metadata) {
+    throw new Error("authorization audit metadata is invalid");
+  }
+  return {
+    id,
+    scope: validateScope(row.scope),
+    generation: validateGeneration(row.generation),
+    action: row.action,
+    actorUserId: row.actor_user_id,
+    subjectTokenId: row.subject_token_id ?? undefined,
+    subjectTokenName: row.subject_token_name ?? undefined,
+    source: row.source,
+    requestId: row.request_id ?? undefined,
+    metadata,
+    createdAt: timestampToIso(row.created_at, "createdAt"),
+    archivedAt: row.archived_at
+      ? timestampToIso(row.archived_at, "archivedAt")
+      : undefined
+  };
 }
 
 function orderedKeys(value: Record<string, unknown>): string[] {
@@ -396,13 +555,21 @@ export async function migratePostgresTeamAuthorizationState(
     if (!Number.isSafeInteger(currentVersion) || currentVersion < 0) {
       throw new Error("authorization schema version is invalid");
     }
-    if (currentVersion > REQUIRED_SCHEMA_VERSION) {
+    if (currentVersion > REQUIRED_DATABASE_SCHEMA_VERSION) {
       throw new Error(
-        `authorization schema version ${currentVersion} is newer than supported version ${REQUIRED_SCHEMA_VERSION}`
+        `authorization schema version ${currentVersion} is newer than supported version ${REQUIRED_DATABASE_SCHEMA_VERSION}`
       );
     }
-    if (currentVersion < REQUIRED_SCHEMA_VERSION) {
-      const migration = await readFile(MIGRATION_URL, "utf8");
+    for (
+      let version = currentVersion + 1;
+      version <= REQUIRED_DATABASE_SCHEMA_VERSION;
+      version += 1
+    ) {
+      const migrationUrl = MIGRATION_URLS[version - 1];
+      if (!migrationUrl) {
+        throw new Error(`authorization migration ${version} is missing`);
+      }
+      const migration = await readFile(migrationUrl, "utf8");
       await client.query(migration);
     }
     await client.query("COMMIT");
@@ -432,9 +599,9 @@ export async function createPostgresTeamAuthorizationStateStore(
     );
     const value = schema.rows[0]?.version;
     const version = value === null || value === undefined ? 0 : Number(value);
-    if (version !== REQUIRED_SCHEMA_VERSION) {
+    if (version !== REQUIRED_DATABASE_SCHEMA_VERSION) {
       throw new Error(
-        `authorization schema version ${String(value ?? "missing")} does not match required version ${REQUIRED_SCHEMA_VERSION}; run authorization:migrate`
+        `authorization schema version ${String(value ?? "missing")} does not match required version ${REQUIRED_DATABASE_SCHEMA_VERSION}; run authorization:migrate`
       );
     }
   } catch (error) {
@@ -492,7 +659,7 @@ export async function createPostgresTeamAuthorizationStateStore(
           generation,
           baseFingerprint,
           state.serializedState,
-          REQUIRED_SCHEMA_VERSION
+          AUTHORIZATION_STATE_SCHEMA_VERSION
         ]
       );
       if (inserted.rowCount === 1) {
@@ -528,6 +695,7 @@ export async function createPostgresTeamAuthorizationStateStore(
         serializedState: string;
         result: T;
         changed?: boolean;
+        auditEvent?: TeamAuthorizationAuditEventInput;
       }>
     ) {
       assertOpen();
@@ -563,6 +731,11 @@ export async function createPostgresTeamAuthorizationStateStore(
         const commitsMutation =
           transactionOptions.mutating && transaction.changed !== false;
         if (!commitsMutation) {
+          if (transaction.auditEvent) {
+            throw new Error(
+              "non-mutating authorization transaction must not append an audit event"
+            );
+          }
           if (
             baseFingerprint !== snapshot.baseFingerprint
             || state.serializedState !== snapshot.serializedState
@@ -584,14 +757,65 @@ export async function createPostgresTeamAuthorizationStateStore(
                updated_at = now()
            WHERE scope = $1
            RETURNING generation::text AS generation, base_fingerprint, state`,
-          [scope, baseFingerprint, state.serializedState, REQUIRED_SCHEMA_VERSION]
+          [scope, baseFingerprint, state.serializedState , AUTHORIZATION_STATE_SCHEMA_VERSION]
         );
         if (updated.rowCount !== 1) {
           throw new Error(`authorization scope ${scope} was not updated`);
         }
         const committed = snapshotFromRow(updated.rows[0]!);
+        let auditEvent: TeamAuthorizationAuditEvent | undefined;
+        if (transaction.auditEvent) {
+          const input = validateAuditEventInput(transaction.auditEvent);
+          const insertedAudit = await client.query<AuthorizationAuditRow>(
+            `INSERT INTO layo_authorization_audit_events
+              (
+                scope,
+                generation,
+                action,
+                actor_user_id,
+                subject_token_id,
+                subject_token_name,
+                source,
+                request_id,
+                metadata
+              )
+             VALUES ($1, $2::bigint, $3, $4, $5, $6, $7, $8, $9::jsonb)
+             RETURNING
+               id::text AS id,
+               scope,
+               generation::text AS generation,
+               action,
+               actor_user_id,
+               subject_token_id,
+               subject_token_name,
+               source,
+               request_id,
+               metadata,
+               created_at,
+               archived_at`,
+            [
+              scope,
+              committed.generation,
+              input.action,
+              input.actorUserId,
+              input.subjectTokenId ?? null,
+              input.subjectTokenName ?? null,
+              input.source,
+              input.requestId ?? null,
+              JSON.stringify(input.metadata)
+            ]
+          );
+          if (insertedAudit.rowCount !== 1) {
+            throw new Error("authorization audit event was not appended");
+          }
+          auditEvent = auditEventFromRow(insertedAudit.rows[0]!);
+        }
         await client.query("COMMIT");
-        return { ...committed, result: transaction.result };
+        return {
+          ...committed,
+          result: transaction.result,
+          auditEvent
+        };
       } catch (error) {
         const releaseError = await rollbackTransaction(client);
         client.release(releaseError);
@@ -602,6 +826,44 @@ export async function createPostgresTeamAuthorizationStateStore(
           client.release();
         }
       }
+    },
+
+    async listAuditEvents(
+      scopeInput: string,
+      options: { afterId: string; limit: number }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const afterId = validateGeneration(options.afterId);
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const result = await pool.query<AuthorizationAuditRow>(
+        `SELECT
+           id::text AS id,
+           scope,
+           generation::text AS generation,
+           action,
+           actor_user_id,
+           subject_token_id,
+           subject_token_name,
+           source,
+           request_id,
+           metadata,
+           created_at,
+           archived_at
+         FROM layo_authorization_audit_events
+         WHERE scope = $1
+           AND id > $2::bigint
+         ORDER BY id ASC
+         LIMIT $3`,
+        [scope, afterId, options.limit]
+      );
+      return result.rows.map(auditEventFromRow);
     },
 
     async mutate<T>(scopeInput: string, expectedFingerprintInput: string, operation: (
@@ -631,7 +893,7 @@ export async function createPostgresTeamAuthorizationStateStore(
             scope,
             expectedBaseFingerprint,
             initial.serializedState,
-            REQUIRED_SCHEMA_VERSION
+            AUTHORIZATION_STATE_SCHEMA_VERSION
           ]
         );
 
@@ -674,7 +936,7 @@ export async function createPostgresTeamAuthorizationStateStore(
                updated_at = now()
            WHERE scope = $1
            RETURNING generation::text AS generation, base_fingerprint, state`,
-          [scope, baseFingerprint, state.serializedState, REQUIRED_SCHEMA_VERSION]
+          [scope, baseFingerprint, state.serializedState , AUTHORIZATION_STATE_SCHEMA_VERSION]
         );
         if (updated.rowCount !== 1) {
           throw new Error(`authorization scope ${scope} was not updated`);
