@@ -55,7 +55,7 @@ This slice advances maturity gates 7, 8, and 10. It does not close audit consump
 - [x] Add a PostgreSQL 16 service to Full Verification and a test-only URL with secret-free purpose comments.
 - [x] Add `pg` and `@types/pg` through pnpm.
 - [x] Add a versioned migration table plus authorization scope table with primary-key scope, nonnegative bigint generation, 64-hex base fingerprint, JSONB state, schema version, updated timestamp, and an encoded-state size check.
-- [ ] Document separate migration and runtime roles: migration owns advisory-lock/DDL privileges; runtime receives only schema-version read and scope-row SELECT/INSERT/UPDATE privileges. Do not grant privileges from application SQL.
+- [x] Document separate migration and runtime roles: migration owns advisory-lock/DDL privileges; runtime receives only schema-version read and scope-row SELECT/INSERT/UPDATE privileges. Do not grant privileges from application SQL.
 - [x] Write a real PostgreSQL RED with two pools. Transaction A seeds/locks generation zero and pauses before its callback returns; prove B's callback cannot enter, release A, then prove B reads generation 1 and commits generation 2.
 - [x] Require rollback to preserve prior generation/state, different scopes to remain isolated, oversized/malformed state to fail, and generation above JavaScript safe integer to remain exact as a decimal string.
 - [x] Run the focused test and record the intended missing-store/migration RED.
@@ -187,14 +187,20 @@ export interface TeamAuthorizationStateStore {
 - Modify: `apps/server/src/mcp.ts`
 - Create or modify: focused startup/lifecycle tests
 
-- [ ] Require `LAYO_AUTHORIZATION_DATABASE_URL` and `LAYO_AUTHORIZATION_SHARED_SCOPE` together; reject partial configuration before HTTP listen or MCP connect.
-- [ ] Add short purpose comments without values/secrets around env wiring.
-- [ ] Return an async idempotent `close()` and `settled()` from the shared source/manager lifecycle.
-- [ ] HTTP close order: stop requests, stop refresh scheduling, drain, close pool.
-- [ ] MCP close order: stop transport/tool entry, stop refresh scheduling, drain, close pool.
-- [ ] Replace unawaitable `process.once("exit")` cleanup for shared resources with tested `SIGINT`, `SIGTERM`, transport-close, and startup-failure cleanup paths; keep a synchronous final safety hook only for resources that need none.
-- [ ] Prove no callback publishes after close and close is safe when called twice.
-- [ ] Re-run startup/lifecycle tests to GREEN.
+- [x] Require `LAYO_AUTHORIZATION_DATABASE_URL` and `LAYO_AUTHORIZATION_SHARED_SCOPE` together; reject partial configuration before HTTP listen or MCP connect.
+- [x] Add short purpose comments without values/secrets around env wiring.
+- [x] Return an async idempotent `close()` and `settled()` from the shared source/manager lifecycle.
+- [x] HTTP close order: stop requests, stop refresh scheduling, drain, close pool.
+- [x] MCP close order: stop transport/tool entry, stop refresh scheduling, drain, close pool.
+- [x] Replace unawaitable `process.once("exit")` cleanup for shared resources with tested `SIGINT`, `SIGTERM`, transport-close, and startup-failure cleanup paths; keep a synchronous final safety hook only for resources that need none.
+- [x] Prove no callback publishes after close and close is safe when called twice.
+- [x] Re-run startup/lifecycle tests to GREEN.
+
+**Task 6 evidence (2026-07-15):**
+
+- Review RED Full Verification `29390562604` stopped on focused missing contracts for whitespace partial configuration, active-SSE pre-close, stdin EOF/signal shutdown, and HTTP construction/listen failure cleanup.
+- Type repair RED `29391073510` stopped at the two shutdown-disposer annotations; async rejection RED `29391351523` then stopped only at deterministic failure reporting.
+- Exact lifecycle repair head `da8579012196393664d6a8c9e5324abc302a8a7b`: Full Verification `29391895624` passed maturity/design gates, typecheck, web build, 442 server tests, Rust/workspace tests, and full Playwright CLI e2e.
 
 ## Task 7: Operations, backup, and product evidence
 
@@ -207,12 +213,18 @@ export interface TeamAuthorizationStateStore {
 - Modify: this plan
 - Modify: storage/authorization backup workflows or add a focused authorization backup drill
 
-- [ ] Document filesystem default versus optional team-owned PostgreSQL authority.
-- [ ] Document explicit scope stability, request-time DB dependency, statement timeout, TLS/connection responsibility, migration privileges, hash-only state, and partial-config fail-close.
-- [ ] Add CI backup/restore proof for one authorization scope using the versioned export/restore commands; existing filesystem restore/retention evidence is not sufficient.
-- [ ] Document downgrade as explicit export plus operator action; never claim automatic stale-sidecar recovery.
-- [ ] Record Penpot reference commit, adopt/adapt/diverge decision, deterministic RED/GREEN IDs, and residual audit/general-recovery boundaries.
-- [ ] Keep the prior PR #308 local git exit-134 cleanup exception active until local status/current-branch/worktree checks actually succeed.
+- [x] Document filesystem default versus optional team-owned PostgreSQL authority.
+- [x] Document explicit scope stability, request-time DB dependency, statement timeout, TLS/connection responsibility, migration privileges, hash-only state, and partial-config fail-close.
+- [x] Add CI backup/restore proof for one authorization scope using the versioned export/restore commands; existing filesystem restore/retention evidence is not sufficient.
+- [x] Document downgrade as explicit export plus operator action; never claim automatic stale-sidecar recovery.
+- [x] Record Penpot reference commit, adopt/adapt/diverge decision, deterministic RED/GREEN IDs, and residual audit/general-recovery boundaries.
+- [x] Keep the prior PR #308 local git exit-134 cleanup exception active until local status/current-branch/worktree checks actually succeed.
+
+**Task 7 evidence (2026-07-15):**
+
+- `README.md` and `apps/server/.env.example` document the local filesystem default, shared-mode configuration pair, stable scope, request-time dependency, five-second statement timeout, role separation, TLS/operator boundary, hash-only state, and explicit downgrade.
+- `docs/product/penpot-shared-authorization-generation-delta.md`, the maturity benchmark, and `PLAN_STATUS.md` preserve the Penpot reference, adopt/adapt/diverge decision, RED/GREEN chain, and residual audit/recovery boundary.
+- Authorization Backup Drill `29392003479` passed PostgreSQL 16 migration, bootstrap, private versioned export, exact-scope deletion, explicit absent-scope restore, byte-identical re-export, and secret-leak checks.
 
 ## Task 8: Verification, review, merge, and cleanup
 
