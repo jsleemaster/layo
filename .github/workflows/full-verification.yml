@@ -29,6 +29,23 @@ jobs:
   full-verification:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    # Purpose: exercise the optional team-owned shared authorization transaction path.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: layo
+          POSTGRES_PASSWORD: layo-test-only
+          POSTGRES_DB: layo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U layo -d layo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      LAYO_TEST_POSTGRES_URL: postgresql://layo:layo-test-only@127.0.0.1:5432/layo
     steps:
       - name: Checkout
         uses: actions/checkout@v4
