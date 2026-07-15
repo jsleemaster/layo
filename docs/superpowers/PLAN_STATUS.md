@@ -28,6 +28,8 @@ Use this order when entering the repo:
 
 `2026-07-14-penpot-token-mcp-ui.md` - **Merged / retained local cleanup exception** after PR #308. Code and final documentation verification passed, all five review threads resolved, PR #308 squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`, and the remote feature branch was deleted. Required local `git status`, current-branch, and worktree checks still exit 134 even via `/usr/bin/git`, so local branch/worktree state is unverified and this plan must not enter Completed Plans yet. After the runtime recovers, rerun those checks without deleting dirty or user-owned worktrees, then archive this plan. The next product gap remains shared transactional multi-host identity/generation.
 
+`2026-07-15-penpot-shared-authorization-generation.md` - **Active / benchmark and RED gate**. Penpot `develop` commit `167aa7410f95bce91b9a80059624a3e3d9307f1e` persists access tokens in PostgreSQL and creates them inside `db/tx-run!`. Layo will adapt that ordering boundary as an optional team-owned PostgreSQL managed-state row with one explicit shared scope and monotonic generation, while preserving the operator members file and filesystem sidecar default. Next evidence is a real PostgreSQL two-client RED proving host-local file locking cannot preserve concurrent cross-host token mutations.
+
 ## Completed Plans
 
 | Plan | Status | Evidence |
