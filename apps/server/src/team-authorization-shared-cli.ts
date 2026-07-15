@@ -1,6 +1,7 @@
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   createPostgresTeamAuthorizationStateStore,
   type TeamAuthorizationStateSnapshot,
@@ -24,6 +25,7 @@ export interface TeamAuthorizationSharedCliOptions {
   env?: NodeJS.ProcessEnv;
   stdout?: CliOutput;
   createStore?: (databaseUrl: string) => Promise<TeamAuthorizationStateStore>;
+  beforeExportRename?: () => Promise<void>;
 }
 
 interface ParsedArguments {
@@ -237,10 +239,40 @@ async function runBootstrap(
   }
 }
 
+async function writePrivateArtifact(
+  outputPath: string,
+  output: string,
+  beforeRename?: () => Promise<void>
+): Promise<void> {
+  const temporaryPath = `${outputPath}.${process.pid}.${randomUUID()}.tmp`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(temporaryPath, "wx", 0o600);
+    await handle.chmod(0o600);
+    await handle.writeFile(output, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await beforeRename?.();
+    await rename(temporaryPath, outputPath);
+
+    const directory = await open(dirname(outputPath), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
 async function runExport(
   arguments_: ParsedArguments,
   store: TeamAuthorizationStateStore,
-  stdout: CliOutput
+  stdout: CliOutput,
+  beforeRename?: () => Promise<void>
 ): Promise<void> {
   rejectOptions(arguments_, ["--scope", "--output"], []);
   const scope = requiredValue(arguments_, "--scope");
@@ -255,14 +287,8 @@ async function runExport(
   const output = `${JSON.stringify(artifact, null, 2)}\n`;
   const outputPath = arguments_.values.get("--output");
   if (outputPath) {
-    const handle = await open(outputPath, "w", 0o600);
-    try {
-      await handle.chmod(0o600);
-      await handle.writeFile(output, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    // Purpose: replace a backup only after its private temporary file is durable.
+    await writePrivateArtifact(outputPath, output, beforeRename);
     return;
   }
   stdout.write(output);
@@ -321,7 +347,12 @@ export async function runTeamAuthorizationSharedCli(
     if (arguments_.command === "bootstrap") {
       await runBootstrap(arguments_, store);
     } else if (arguments_.command === "export") {
-      await runExport(arguments_, store, options.stdout ?? process.stdout);
+      await runExport(
+        arguments_,
+        store,
+        options.stdout ?? process.stdout,
+        options.beforeExportRename
+      );
     } else {
       await runRestore(arguments_, store);
     }
