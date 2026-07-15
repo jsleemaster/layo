@@ -451,7 +451,7 @@ export async function createPostgresTeamAuthorizationStateStore(
       try {
         await client.query("BEGIN");
         await setLocalStatementTimeout(client, statementTimeoutMs);
-        const inserted = await client.query(
+        await client.query(
           `INSERT INTO layo_team_authorization_state
             (scope, generation, base_fingerprint, state, schema_version)
            VALUES ($1, 0, $2, $3::jsonb, $4)
