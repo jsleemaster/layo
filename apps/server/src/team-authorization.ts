@@ -947,6 +947,7 @@ async function quarantinePersistedManagedTokenState(
 
 async function quarantineWatchedManagedTokenState(
   basePath: string,
+  error: ManagedTokenBindingError,
   observedSourceSnapshot: string | undefined,
   recoverWhileLocked: () => Promise<void>
 ): Promise<void> {
@@ -961,33 +962,27 @@ async function quarantineWatchedManagedTokenState(
     }
     const baseSnapshot = await readFile(basePath, "utf8");
     const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+    const baseUserIds = new Set(
+      baseConfig.members.map((member) => member.userId)
+    );
     const state = parseManagedTokenState(sourceSnapshot);
-    let changed = false;
-    let stable = false;
-    let unresolvedError: ManagedTokenBindingError | undefined;
+    const originalMember = state.members.find(
+      (member) => member.userId === error.userId
+    );
+    if (!originalMember) {
+      throw managementError(
+        "team authorization token sidecar member changed during quarantine",
+        409
+      );
+    }
 
-    for (let attempt = 0; attempt <= state.members.length; attempt += 1) {
-      try {
-        mergeManagedTokenState(baseConfig, state);
-        stable = true;
-        break;
-      } catch (error) {
-        if (!(error instanceof ManagedTokenBindingError)) {
-          throw error;
-        }
-        const member = state.members.find(
-          (candidate) => candidate.userId === error.userId
-        );
-        if (!member) {
-          throw managementError(
-            "team authorization token sidecar member changed during quarantine",
-            409
-          );
-        }
-        if (member.quarantined) {
-          unresolvedError = error;
-          break;
-        }
+    let changed = false;
+    if (!originalMember.quarantined) {
+      originalMember.quarantined = true;
+      changed = true;
+    }
+    for (const member of state.members) {
+      if (!baseUserIds.has(member.userId) && !member.quarantined) {
         member.quarantined = true;
         changed = true;
       }
@@ -1006,15 +1001,7 @@ async function quarantineWatchedManagedTokenState(
         baseSnapshot
       );
     }
-    if (unresolvedError) {
-      throw unresolvedError;
-    }
-    if (!stable) {
-      throw managementError(
-        "team authorization token quarantine did not converge",
-        409
-      );
-    }
+    mergeManagedTokenState(baseConfig, state);
     await recoverWhileLocked();
   });
 }
@@ -1135,6 +1122,7 @@ export async function watchTeamAuthorizationConfigFile(
             }
             await quarantineWatchedManagedTokenState(
               normalizedPath,
+              error,
               observedSidecarSnapshot,
               async () => {
                 const recoveryGeneration =
