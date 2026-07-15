@@ -168,8 +168,13 @@ the local-first default. RED runs `29384546474`, `29385917375`,
 established the store, operations, concurrency, provider, integration, and
 review-repair boundaries. Authorization Backup Drill `29392003479` proves a
 private versioned scope export can be explicitly restored and re-exported
-byte-identically on PostgreSQL 16. Final PR-head verification and review remain
-open gates. Durable audit-event consumption, general account recovery,
+byte-identically on PostgreSQL 16. Lifecycle follow-up REDs `29394310891`,
+`29394464321`, `29394980417`, and `29395174139` closed late SSE writes,
+close-rejection cleanup, and initial-authentication/pre-close registration
+races. Final code head `05cc03591e71e30f53d737f52070da92cf9c8f6a`
+passed Full Verification `29395377834` attempt 3 with 445 server and 200
+Playwright CLI cases; independent re-review found no P0-P2. Durable audit-event
+consumption, general account recovery,
 multi-region database operations, hosted identity/SSO, and agent-reviewed token
 mutation remain maturity gaps. See
 `docs/product/penpot-shared-authorization-generation-delta.md`.
