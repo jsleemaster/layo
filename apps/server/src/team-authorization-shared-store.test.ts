@@ -593,7 +593,8 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         expect(() => authenticateTeamMember(
           sharedConfig,
           "owner-user",
-          "layo_pat_late_list"
+          "layo_pat_late_list",
+          new Date("2026-07-15T12:30:02.000Z")
         )).toThrow("team member credentials are invalid");
         await expect(listStore.read(scope)).resolves.toMatchObject({
           generation: "2"
