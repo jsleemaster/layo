@@ -3,6 +3,10 @@ import { unwatchFile, watchFile, type StatsListener } from "node:fs";
 import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { withFileProcessMutationLock } from "./file-process-lock.js";
+import type {
+  TeamAuthorizationStateSnapshot,
+  TeamAuthorizationStateStore
+} from "./team-authorization-postgres.js";
 
 export type TeamAuthorizationRole = "owner" | "editor" | "viewer";
 
@@ -39,6 +43,14 @@ const teamAuthorizationConfigGenerations = new WeakMap<TeamAuthorizationConfig, 
 const teamAuthorizationConfigReloads = new WeakMap<
   TeamAuthorizationConfig,
   () => Promise<void>
+>();
+const sharedAuthorizationPublishedGenerations = new WeakMap<
+  TeamAuthorizationConfig,
+  string
+>();
+const sharedAuthorizationPublicationTails = new WeakMap<
+  TeamAuthorizationConfig,
+  Promise<void>
 >();
 
 function teamAuthorizationConfigGeneration(config: TeamAuthorizationConfig): number {
@@ -85,6 +97,25 @@ export interface TeamAuthorizationConfigSource {
   config: TeamAuthorizationConfig;
   close: () => void;
   settled: () => Promise<void>;
+}
+
+export interface TeamAuthorizationPrincipal {
+  userId?: string;
+  memberToken?: string;
+}
+
+export interface TeamAuthorizationProvider {
+  authenticate: (
+    principal: TeamAuthorizationPrincipal,
+    now?: Date
+  ) => AuthenticatedTeamMember | Promise<AuthenticatedTeamMember>;
+}
+
+export interface SharedTeamAuthorizationProviderOptions {
+  maxStableReadAttempts?: number;
+  publishSharedConfig?: (
+    config: TeamAuthorizationConfig
+  ) => void | Promise<void>;
 }
 
 export interface WatchTeamAuthorizationConfigFileOptions {
@@ -134,7 +165,9 @@ export interface TeamAuthorizationFileManager {
     principal: TeamAuthorizationManagementPrincipal,
     operation: TeamAuthorizationManagementOperation
   ) => Promise<TeamAuthorizationManagementResult>;
-  listTokens: (userId: string) => TeamAccessTokenMetadata[];
+  listTokens: (
+    userId: string
+  ) => TeamAccessTokenMetadata[] | Promise<TeamAccessTokenMetadata[]>;
   createToken: (
     userId: string,
     input: CreateTeamAccessTokenInput
@@ -152,6 +185,14 @@ export interface TeamAuthorizationFileManagerOptions {
   beforeSidecarRename?: () => Promise<void>;
   syncFile?: (handle: FileHandle) => Promise<void>;
   syncDirectory?: (directoryPath: string) => Promise<void>;
+  stateStore?: TeamAuthorizationStateStore;
+  sharedScope?: string;
+  publishSharedConfig?: (
+    config: TeamAuthorizationConfig
+  ) => void | Promise<void>;
+  scheduleSharedRefresh?: (
+    refresh: () => Promise<void>
+  ) => void;
 }
 
 export interface TeamMemberTokenSource {
@@ -224,6 +265,26 @@ export function createTeamAuthorizationFileManager(
   const normalizedPath = filePath.trim();
   if (!normalizedPath) {
     throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
+  }
+  const hasSharedStore = options.stateStore !== undefined;
+  const hasSharedScope = options.sharedScope !== undefined;
+  if (hasSharedStore !== hasSharedScope) {
+    throw new Error(
+      "team authorization stateStore and sharedScope must be configured together"
+    );
+  }
+  if (options.stateStore && options.sharedScope !== undefined) {
+    const sharedScope = options.sharedScope.trim();
+    if (!sharedScope) {
+      throw new Error("team authorization sharedScope must not be blank");
+    }
+    return createSharedTeamAuthorizationFileManager(
+      normalizedPath,
+      config,
+      options.stateStore,
+      sharedScope,
+      options
+    );
   }
   const sidecarPath = managedTokenSidecarPath(normalizedPath);
   const now = options.now ?? (() => new Date());
@@ -475,6 +536,632 @@ export function createTeamAuthorizationFileManager(
   };
 }
 
+type SharedManagementIdentity =
+  | { userId: string }
+  | { principal: TeamAuthorizationManagementPrincipal };
+
+interface SharedOperationResult {
+  result: TeamAuthorizationManagementResult;
+  changed: boolean;
+}
+
+function sharedManagementError(error: unknown): Error {
+  if (
+    error instanceof ManagedTokenBindingError
+    || (
+      error instanceof Error
+      && error.message === "authorization base fingerprint does not match shared state"
+    )
+  ) {
+    return managementError(error.message, 409);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function missingSharedScopeInstruction(
+  filePath: string,
+  scope: string
+): string {
+  return (
+    `shared authorization scope ${scope} is not initialized; `
+    + "run pnpm --filter @layo/server authorization:bootstrap "
+    + `--scope ${scope} --base ${filePath} --empty`
+  );
+}
+
+function requireSharedFingerprint(
+  snapshot: TeamAuthorizationStateSnapshot,
+  baseFingerprint: string
+): void {
+  if (snapshot.baseFingerprint !== baseFingerprint) {
+    throw managementError(
+      "authorization base fingerprint does not match shared state",
+      409
+    );
+  }
+}
+
+function sharedConfigFromSnapshot(
+  baseConfig: TeamAuthorizationConfig,
+  snapshot: TeamAuthorizationStateSnapshot
+): {
+  state: ManagedTokenState;
+  mergedConfig: TeamAuthorizationConfig;
+} {
+  const state = parseManagedTokenState(snapshot.serializedState);
+  try {
+    return {
+      state,
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true)
+    };
+  } catch (error) {
+    throw sharedManagementError(error);
+  }
+}
+
+function sharedConfigForOperation(
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState,
+  identity: SharedManagementIdentity,
+  operationNow: Date
+): { mergedConfig: TeamAuthorizationConfig; recovered: boolean } {
+  if (!("principal" in identity)) {
+    return {
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true),
+      recovered: false
+    };
+  }
+
+  const stateMember = state.members.find(
+    (candidate) => candidate.userId === identity.principal.userId
+  );
+  if (!stateMember?.quarantined) {
+    return {
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true),
+      recovered: false
+    };
+  }
+
+  const authenticated = authenticateTeamMember(
+    mergeManagedRevocationsForRecovery(baseConfig, state),
+    identity.principal.userId,
+    identity.principal.memberToken,
+    operationNow
+  );
+  reconcileManagedTokenStateMember(
+    state,
+    findManagedMember(baseConfig, authenticated.userId)
+  );
+  return {
+    mergedConfig: mergeManagedTokenState(baseConfig, state, true),
+    recovered: true
+  };
+}
+
+function applySharedManagementOperation(
+  identity: SharedManagementIdentity,
+  operation: TeamAuthorizationManagementOperation,
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState,
+  mergedConfig: TeamAuthorizationConfig,
+  operationNow: Date,
+  generateId: () => string,
+  generateSecret: () => string
+): SharedOperationResult {
+  let authenticatedMember: AuthenticatedTeamMember | undefined;
+  let userId: string;
+  if ("principal" in identity) {
+    authenticatedMember = authenticateTeamMember(
+      mergedConfig,
+      identity.principal.userId,
+      identity.principal.memberToken,
+      operationNow
+    );
+    userId = authenticatedMember.userId;
+  } else {
+    userId = identity.userId;
+  }
+  const member = findManagedMember(mergedConfig, userId);
+
+  if (operation.type === "list") {
+    return {
+      changed: false,
+      result: {
+        type: "list",
+        tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata),
+        ...(authenticatedMember?.tokenId
+          ? { activeTokenId: authenticatedMember.tokenId }
+          : {})
+      }
+    };
+  }
+
+  if (operation.type === "create") {
+    const name =
+      typeof operation.input?.name === "string"
+        ? operation.input.name.trim()
+        : "";
+    if (!name) {
+      throw managementError("team authorization token name is required", 400);
+    }
+    const expiresInDays = operation.input?.expiresInDays;
+    if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
+      throw managementError("invalid team authorization token expiration", 400);
+    }
+    const id = generateId().trim();
+    if (!id) {
+      throw new Error("generated team authorization token id must not be blank");
+    }
+    if (member.tokens?.some((credential) => credential.id === id)) {
+      throw managementError("team authorization token id already exists", 409);
+    }
+    const secret = generateSecret();
+    if (!secret) {
+      throw new Error("generated team authorization token must not be blank");
+    }
+    const createdAt = validManagementNow(operationNow);
+    const expiresAt =
+      expiresInDays === null
+        ? undefined
+        : new Date(
+            Date.parse(createdAt) + expiresInDays * 24 * 60 * 60 * 1_000
+          ).toISOString();
+    const credential: TeamMemberTokenCredential = {
+      id,
+      name,
+      tokenHash: hashToken(secret),
+      createdAt,
+      ...(expiresAt ? { expiresAt } : {})
+    };
+    managedTokenStateMember(
+      state,
+      findManagedMember(baseConfig, userId)
+    ).tokens.push(credential);
+    return {
+      changed: true,
+      result: {
+        type: "create",
+        created: {
+          token: secret,
+          metadata: toTeamAccessTokenMetadata(credential)
+        }
+      }
+    };
+  }
+
+  const normalizedTokenId = operation.tokenId.trim();
+  if (!normalizedTokenId) {
+    throw managementError("team authorization token id is required", 400);
+  }
+  if (
+    authenticatedMember?.tokenId === normalizedTokenId
+    && operation.confirmSelfRevoke !== true
+  ) {
+    throw managementError(
+      "confirmSelfRevoke must be true to revoke the active MCP principal token",
+      400
+    );
+  }
+  const credential = member.tokens?.find(
+    (candidate) => candidate.id === normalizedTokenId
+  );
+  if (!credential) {
+    throw managementError("team authorization token was not found", 404);
+  }
+  if (credential.revokedAt) {
+    return {
+      changed: false,
+      result: {
+        type: "revoke",
+        metadata: toTeamAccessTokenMetadata(credential)
+      }
+    };
+  }
+
+  const revokedAt = validManagementNow(operationNow);
+  managedTokenStateMember(
+    state,
+    findManagedMember(baseConfig, userId)
+  ).revocations.push({
+    tokenId: normalizedTokenId,
+    revokedAt
+  });
+  credential.revokedAt = revokedAt;
+  return {
+    changed: true,
+    result: {
+      type: "revoke",
+      metadata: toTeamAccessTokenMetadata(credential)
+    }
+  };
+}
+
+function compareAuthorizationGenerations(
+  left: string,
+  right: string
+): number {
+  return left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
+}
+
+async function publishSharedAuthorizationConfig(
+  config: TeamAuthorizationConfig,
+  nextConfig: TeamAuthorizationConfig,
+  generation: string,
+  publishSharedConfig: TeamAuthorizationFileManagerOptions["publishSharedConfig"]
+): Promise<void> {
+  const previous = sharedAuthorizationPublicationTails.get(config)
+    ?? Promise.resolve();
+  const publication = previous.catch(() => undefined).then(async () => {
+    const current = sharedAuthorizationPublishedGenerations.get(config);
+    if (
+      current !== undefined
+      && compareAuthorizationGenerations(generation, current) < 0
+    ) {
+      return;
+    }
+    if (publishSharedConfig) {
+      await publishSharedConfig(nextConfig);
+    } else {
+      replaceTeamAuthorizationMembers(config, nextConfig.members);
+    }
+    sharedAuthorizationPublishedGenerations.set(config, generation);
+  });
+  sharedAuthorizationPublicationTails.set(config, publication);
+  try {
+    await publication;
+  } finally {
+    if (sharedAuthorizationPublicationTails.get(config) === publication) {
+      sharedAuthorizationPublicationTails.delete(config);
+    }
+  }
+}
+
+const MAX_POSTGRES_BIGINT = 9_223_372_036_854_775_807n;
+
+function validSharedAuthorizationGeneration(value: string): string {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error(
+      "authorization generation must be an exact nonnegative decimal string"
+    );
+  }
+  if (BigInt(value) > MAX_POSTGRES_BIGINT) {
+    throw new Error("authorization generation exceeds PostgreSQL bigint");
+  }
+  return value;
+}
+
+function validStableReadAttempts(value: number | undefined): number {
+  const attempts = value ?? 3;
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw new Error(
+      "shared authorization maxStableReadAttempts must be an integer from 1 to 10"
+    );
+  }
+  return attempts;
+}
+
+export function createTeamAuthorizationProvider(
+  config: TeamAuthorizationConfig
+): TeamAuthorizationProvider {
+  return {
+    authenticate: (principal, now) =>
+      authenticateTeamMember(
+        config,
+        principal.userId,
+        principal.memberToken,
+        now
+      )
+  };
+}
+
+export function createSharedTeamAuthorizationProvider(
+  filePath: string,
+  config: TeamAuthorizationConfig,
+  stateStore: TeamAuthorizationStateStore,
+  sharedScope: string,
+  options: SharedTeamAuthorizationProviderOptions = {}
+): TeamAuthorizationProvider {
+  const normalizedPath = filePath.trim();
+  const normalizedScope = sharedScope.trim();
+  if (!normalizedPath) {
+    throw new Error("shared authorization base file path must not be blank");
+  }
+  if (!normalizedScope) {
+    throw new Error("team authorization sharedScope must not be blank");
+  }
+  const maxStableReadAttempts = validStableReadAttempts(
+    options.maxStableReadAttempts
+  );
+  let parsedCache:
+    | {
+        baseSnapshot: string;
+        generation: string;
+        serializedState: string;
+        mergedConfig: TeamAuthorizationConfig;
+      }
+    | undefined;
+
+  return {
+    authenticate: async (principal, now) => {
+      for (let attempt = 0; attempt < maxStableReadAttempts; attempt += 1) {
+        const baseSnapshot = await readFile(normalizedPath, "utf8");
+        const committed = await stateStore.read(normalizedScope);
+        const currentBaseSnapshot = await readFile(normalizedPath, "utf8");
+        if (currentBaseSnapshot !== baseSnapshot) {
+          continue;
+        }
+
+        const generation = validSharedAuthorizationGeneration(
+          committed.generation
+        );
+        const baseFingerprint =
+          canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+        if (committed.baseFingerprint !== baseFingerprint) {
+          continue;
+        }
+
+        let mergedConfig: TeamAuthorizationConfig;
+        if (
+          parsedCache?.baseSnapshot === baseSnapshot
+          && parsedCache.generation === generation
+          && parsedCache.serializedState === committed.serializedState
+        ) {
+          mergedConfig = parsedCache.mergedConfig;
+        } else {
+          const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+          mergedConfig = sharedConfigFromSnapshot(
+            baseConfig,
+            committed
+          ).mergedConfig;
+          parsedCache = {
+            baseSnapshot,
+            generation,
+            serializedState: committed.serializedState,
+            mergedConfig
+          };
+        }
+
+        await publishSharedAuthorizationConfig(
+          config,
+          mergedConfig,
+          generation,
+          options.publishSharedConfig
+        );
+        const publishedGeneration =
+          sharedAuthorizationPublishedGenerations.get(config);
+        if (
+          publishedGeneration !== undefined
+          && compareAuthorizationGenerations(
+            generation,
+            publishedGeneration
+          ) < 0
+        ) {
+          continue;
+        }
+
+        return authenticateTeamMember(
+          mergedConfig,
+          principal.userId,
+          principal.memberToken,
+          now
+        );
+      }
+      throw managementError(
+        "team authorization base and shared state did not stabilize",
+        409
+      );
+    }
+  };
+}
+
+function createSharedTeamAuthorizationFileManager(
+  filePath: string,
+  config: TeamAuthorizationConfig,
+  stateStore: TeamAuthorizationStateStore,
+  sharedScope: string,
+  options: TeamAuthorizationFileManagerOptions
+): TeamAuthorizationFileManager {
+  const transact = stateStore.transact?.bind(stateStore);
+  if (!transact) {
+    throw new Error(
+      "shared team authorization stateStore must support transact"
+    );
+  }
+  const now = options.now ?? (() => new Date());
+  const generateId = options.generateId ?? (() => randomUUID());
+  const generateSecret =
+    options.generateSecret
+    ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
+
+  const loadSharedSnapshot = async (): Promise<{
+    baseSnapshot: string;
+    committed: TeamAuthorizationStateSnapshot;
+  }> => {
+    const baseSnapshot = await readFile(filePath, "utf8");
+    const baseFingerprint =
+      canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+    const committed = await transact(
+      sharedScope,
+      baseFingerprint,
+      { mutating: false },
+      async (locked) => {
+        if (await readFile(filePath, "utf8") !== baseSnapshot) {
+          throw managementError(
+            "team authorization file changed during shared refresh",
+            409
+          );
+        }
+        return {
+          baseFingerprint,
+          serializedState: locked.serializedState,
+          result: undefined,
+          changed: false
+        };
+      }
+    );
+    return { baseSnapshot, committed };
+  };
+
+  const publishSnapshot = async (
+    baseSnapshot: string,
+    committed: TeamAuthorizationStateSnapshot
+  ): Promise<void> => {
+    const currentBaseSnapshot = await readFile(filePath, "utf8");
+    if (currentBaseSnapshot !== baseSnapshot) {
+      throw managementError(
+        "team authorization file changed after shared transaction",
+        409
+      );
+    }
+    requireSharedFingerprint(
+      committed,
+      canonicalTeamAuthorizationBaseFingerprint(currentBaseSnapshot)
+    );
+    const baseConfig = parseRequiredTeamAuthorizationConfig(currentBaseSnapshot);
+    const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+    await publishSharedAuthorizationConfig(
+      config,
+      mergedConfig,
+      committed.generation,
+      options.publishSharedConfig
+    );
+  };
+
+  const refreshSharedConfig = async (): Promise<void> => {
+    const { baseSnapshot, committed } = await loadSharedSnapshot();
+    await publishSnapshot(baseSnapshot, committed);
+  };
+
+  const scheduleRefresh = (): void => {
+    const refresh = async () => {
+      await refreshSharedConfig();
+    };
+    try {
+      if (options.scheduleSharedRefresh) {
+        options.scheduleSharedRefresh(refresh);
+      } else {
+        queueMicrotask(() => {
+          void refresh().catch(() => undefined);
+        });
+      }
+    } catch {
+      // The committed database state remains authoritative even if scheduling fails.
+    }
+  };
+
+  const publishCommittedSnapshot = async (
+    baseSnapshot: string,
+    committed: TeamAuthorizationStateSnapshot
+  ): Promise<void> => {
+    try {
+      await publishSnapshot(baseSnapshot, committed);
+    } catch {
+      replaceTeamAuthorizationMembers(config, []);
+      scheduleRefresh();
+    }
+  };
+
+  const executeOperation = async (
+    identity: SharedManagementIdentity,
+    operation: TeamAuthorizationManagementOperation
+  ): Promise<TeamAuthorizationManagementResult> => {
+    const baseSnapshot = await readFile(filePath, "utf8");
+    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+    const baseFingerprint =
+      canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+
+    let committed;
+    try {
+      committed = await transact(
+        sharedScope,
+        baseFingerprint,
+        { mutating: true },
+        async (locked) => {
+          const state = parseManagedTokenState(locked.serializedState);
+          const operationNow = now();
+          const { mergedConfig, recovered } = sharedConfigForOperation(
+            baseConfig,
+            state,
+            identity,
+            operationNow
+          );
+          const applied = applySharedManagementOperation(
+            identity,
+            operation,
+            baseConfig,
+            state,
+            mergedConfig,
+            operationNow,
+            generateId,
+            generateSecret
+          );
+          const changed = recovered || applied.changed;
+          if (await readFile(filePath, "utf8") !== baseSnapshot) {
+            throw managementError(
+              "team authorization file changed during token management",
+              409
+            );
+          }
+          return {
+            baseFingerprint,
+            serializedState: changed
+              ? serializeManagedTokenState(state)
+              : locked.serializedState,
+            result: { applied },
+            changed
+          };
+        }
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+        && error.message === `authorization scope ${sharedScope} does not exist`
+      ) {
+        throw new Error(missingSharedScopeInstruction(filePath, sharedScope));
+      }
+      throw sharedManagementError(error);
+    }
+
+    await publishCommittedSnapshot(baseSnapshot, committed);
+    return committed.result.applied.result;
+  };
+
+  return {
+    manageTokens: (principal, operation) =>
+      executeOperation({ principal }, operation),
+    listTokens: async (userId) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "list" }
+      );
+      if (result.type !== "list") {
+        throw new Error("unexpected team authorization list result");
+      }
+      return result.tokens;
+    },
+    createToken: async (userId, input) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "create", input }
+      );
+      if (result.type !== "create") {
+        throw new Error("unexpected team authorization create result");
+      }
+      return result.created;
+    },
+    revokeToken: async (userId, tokenId) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "revoke", tokenId }
+      );
+      if (result.type !== "revoke") {
+        throw new Error("unexpected team authorization revoke result");
+      }
+      return result.metadata;
+    }
+  };
+}
+
 function findManagedMember(
   config: TeamAuthorizationConfig,
   userId: string
@@ -677,6 +1364,10 @@ function parseManagedTokenState(input: string | undefined): ManagedTokenState {
   return { version: 2, members };
 }
 
+function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function canonicalCredentialHashes(
   credential: Pick<TeamMemberTokenCredential, "token" | "tokenHash" | "tokenHashes">
 ): string[] {
@@ -698,7 +1389,7 @@ function baseMemberFingerprint(member: TeamMemberCredential): string {
       expiresAt: token.expiresAt,
       revokedAt: token.revokedAt
     }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => compareCanonicalStrings(left.id, right.id));
   const canonical = {
     userId: member.userId,
     role: member.role,
@@ -710,6 +1401,106 @@ function baseMemberFingerprint(member: TeamMemberCredential): string {
     namedTokens
   };
   return hashToken(JSON.stringify(canonical));
+}
+
+export function canonicalTeamAuthorizationBaseFingerprint(
+  input: string
+): string {
+  const config = parseRequiredTeamAuthorizationConfig(input);
+  const canonicalMembers = config.members
+    .map((member) => ({
+      userId: member.userId,
+      fingerprint: baseMemberFingerprint(member)
+    }))
+    .sort((left, right) =>
+      compareCanonicalStrings(left.userId, right.userId)
+      || compareCanonicalStrings(left.fingerprint, right.fingerprint)
+    );
+  return hashToken(JSON.stringify(canonicalMembers));
+}
+
+function canonicalManagedToken(
+  token: TeamMemberTokenCredential
+): TeamMemberTokenCredential {
+  return {
+    id: token.id,
+    name: token.name,
+    ...(token.tokenHash ? { tokenHash: token.tokenHash } : {}),
+    ...(token.tokenHashes?.length
+      ? { tokenHashes: [...token.tokenHashes].sort() }
+      : {}),
+    ...(token.createdAt ? { createdAt: token.createdAt } : {}),
+    ...(token.notBefore ? { notBefore: token.notBefore } : {}),
+    ...(token.expiresAt ? { expiresAt: token.expiresAt } : {}),
+    ...(token.revokedAt ? { revokedAt: token.revokedAt } : {})
+  };
+}
+
+export function canonicalSharedManagedTokenState(
+  baseInput: string,
+  sidecarInput: string | undefined
+): string {
+  const baseConfig = parseRequiredTeamAuthorizationConfig(baseInput);
+  const state = parseManagedTokenState(sidecarInput);
+  const baseByUserId = new Map(
+    baseConfig.members.map((member) => [member.userId, member])
+  );
+
+  for (const stateMember of state.members) {
+    if (stateMember.baseFingerprint !== "") {
+      continue;
+    }
+    const baseMember = baseByUserId.get(stateMember.userId);
+    if (!baseMember) {
+      throw new ManagedTokenBindingError(
+        stateMember.userId,
+        "team authorization token sidecar member was removed"
+      );
+    }
+    stateMember.baseFingerprint = baseMemberFingerprint(baseMember);
+    stateMember.quarantined = false;
+  }
+
+  mergeManagedTokenState(baseConfig, state);
+  return serializeManagedTokenState(state);
+}
+
+function serializeManagedTokenState(state: ManagedTokenState): string {
+  const members = state.members
+    .map((member) => ({
+      userId: member.userId,
+      baseFingerprint: member.baseFingerprint,
+      quarantined: member.quarantined,
+      tokens: member.tokens
+        .map(canonicalManagedToken)
+        .sort((left, right) => compareCanonicalStrings(left.id, right.id)),
+      revocations: member.revocations
+        .map((revocation) => ({ ...revocation }))
+        .sort((left, right) => compareCanonicalStrings(left.tokenId, right.tokenId))
+    }))
+    .sort((left, right) => compareCanonicalStrings(left.userId, right.userId));
+  return JSON.stringify({ version: 2, members });
+}
+
+export function reconcileSharedManagedTokenState(
+  candidateBaseInput: string,
+  serializedState: string
+): string {
+  const candidateConfig = parseRequiredTeamAuthorizationConfig(candidateBaseInput);
+  const candidateByUserId = new Map(
+    candidateConfig.members.map((member) => [member.userId, member])
+  );
+  const state = parseManagedTokenState(serializedState);
+  for (const stateMember of state.members) {
+    const candidateMember = candidateByUserId.get(stateMember.userId);
+    if (
+      !candidateMember
+      || stateMember.baseFingerprint !== baseMemberFingerprint(candidateMember)
+    ) {
+      stateMember.quarantined = true;
+    }
+  }
+  return serializeManagedTokenState(state);
 }
 
 function createManagedTokenStateMember(

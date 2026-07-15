@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-14
+Last audited: 2026-07-15
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -27,6 +27,8 @@ Use this order when entering the repo:
 ## Current Active Plan
 
 `2026-07-14-penpot-token-mcp-ui.md` - **Merged / retained local cleanup exception** after PR #308. Code and final documentation verification passed, all five review threads resolved, PR #308 squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`, and the remote feature branch was deleted. Required local `git status`, current-branch, and worktree checks still exit 134 even via `/usr/bin/git`, so local branch/worktree state is unverified and this plan must not enter Completed Plans yet. After the runtime recovers, rerun those checks without deleting dirty or user-owned worktrees, then archive this plan. The next product gap remains shared transactional multi-host identity/generation.
+
+`2026-07-15-penpot-shared-authorization-generation.md` - **Active / squash merge gate**. Penpot `develop` commit `167aa7410f95bce91b9a80059624a3e3d9307f1e` is adapted as optional team-owned PostgreSQL authority for one explicit managed-token scope and monotonic generation, while filesystem authorization remains the local-first default. Independent review findings were converted through RED runs `29390562604`, `29394310891`, `29394464321`, `29394980417`, and `29395174139`; final lifecycle code head `05cc03591e71e30f53d737f52070da92cf9c8f6a` passed Full Verification `29395377834` attempt 3 and independent re-review found no P0-P2. Deterministic test-order head `a263f7c2b3a91c43c59bc6ac2c094ef48e28f956` then passed Full Verification `29396976596`, authorization backup `29396976519`, filesystem restore `29396976502`, and retention `29396976529`. Final evidence-only checks, squash merge, and post-merge cleanup remain.
 
 ## Completed Plans
 

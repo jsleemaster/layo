@@ -4,17 +4,17 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
 import {
-  authenticateTeamMember,
-  createTeamAuthorizationFileManager,
+  createTeamAuthorizationProvider,
   authorizeTeamLibraryRead,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
-  parseTeamAuthorizationConfig,
-  watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile,
   type TeamAuthorizationConfig,
-  type TeamAuthorizationFileManager
+  type TeamAuthorizationFileManager,
+  type TeamAuthorizationProvider
 } from "./team-authorization.js";
+import { createTeamAuthorizationRuntime } from "./team-authorization-runtime.js";
+import { installProcessShutdown } from "./process-shutdown.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
   return nodes.reduce((total, node) => total + 1 + countNodes(node.children), 0);
@@ -497,6 +497,7 @@ const writeToolAnnotations = {
 
 export interface McpServerOptions {
   libraryRegistryAuth?: TeamAuthorizationConfig;
+  libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
   libraryRegistryPrincipal?: {
     userId: string;
     memberToken: string;
@@ -505,17 +506,21 @@ export interface McpServerOptions {
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
-  const authenticateLibraryMember = () =>
-    options.libraryRegistryAuth
-      ? authenticateTeamMember(
-          options.libraryRegistryAuth,
-          options.libraryRegistryPrincipal?.userId,
-          options.libraryRegistryPrincipal?.memberToken
-        )
+  const libraryRegistryAuthorizationProvider =
+    options.libraryRegistryAuthorizationProvider
+    ?? (options.libraryRegistryAuth
+      ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
+      : undefined);
+  const authenticateLibraryMember = async () =>
+    libraryRegistryAuthorizationProvider
+      ? libraryRegistryAuthorizationProvider.authenticate({
+          userId: options.libraryRegistryPrincipal?.userId,
+          memberToken: options.libraryRegistryPrincipal?.memberToken
+        })
       : undefined;
 
   const authorizeLibraryRead = async (fileId: string) => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (member) {
       authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
     }
@@ -525,7 +530,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     fileId: string | undefined,
     list: (fileId?: string) => Promise<T[]>
   ): Promise<T[]> => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (fileId) {
       if (member) {
         authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
@@ -549,7 +554,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
   };
 
   const authorizeLibraryWrite = async (fileId: string) => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (member) {
       authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
@@ -562,7 +567,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
 
   if (
     options.teamAuthorizationManager
-    && options.libraryRegistryAuth
+    && libraryRegistryAuthorizationProvider
     && options.libraryRegistryPrincipal
   ) {
     const manager = options.teamAuthorizationManager;
@@ -1091,7 +1096,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId }) => {
-      const member = authenticateLibraryMember();
+      const member = await authenticateLibraryMember();
       let libraries;
       if (fileId) {
         if (member) {
@@ -2415,51 +2420,92 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  // The operator-owned file takes precedence so MCP observes the same live credential rotation.
-  const libraryRegistryAuthSource = process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE
-    ? await watchTeamAuthorizationConfigFile(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE, {
-        onError: (error) => console.error("library registry authorization reload failed", error)
-      })
-    : undefined;
-  // The environment fallback preserves static local MCP setups.
-  const libraryRegistryAuth =
-    libraryRegistryAuthSource?.config
-    ?? parseTeamAuthorizationConfig(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS);
-  // The operator-owned token file takes precedence so MCP principal rotation is restart-free.
-  const libraryRegistryPrincipalTokenSource = process.env.LAYO_MCP_MEMBER_TOKEN_FILE
-    ? await watchTeamMemberTokenFile(process.env.LAYO_MCP_MEMBER_TOKEN_FILE, {
-        onError: (error) => console.error("MCP member token reload failed", error)
-      })
-    : undefined;
-  // The static value remains available for local setups without a mounted secret.
-  const staticLibraryRegistryPrincipalToken = process.env.LAYO_MCP_MEMBER_TOKEN;
-  const libraryRegistryPrincipal =
-    process.env.LAYO_MCP_USER_ID
-    && (libraryRegistryPrincipalTokenSource || staticLibraryRegistryPrincipalToken)
-      ? {
-          userId: process.env.LAYO_MCP_USER_ID,
-          get memberToken() {
-            return libraryRegistryPrincipalTokenSource?.token.value
-              ?? staticLibraryRegistryPrincipalToken!;
+  // Purpose: configure optional team-owned shared authorization before MCP accepts tools.
+  const authorizationRuntime = await createTeamAuthorizationRuntime(process.env);
+  let libraryRegistryPrincipalTokenSource:
+    | Awaited<ReturnType<typeof watchTeamMemberTokenFile>>
+    | undefined;
+
+  try {
+    // The operator-owned token file takes precedence so MCP principal rotation is restart-free.
+    libraryRegistryPrincipalTokenSource = process.env.LAYO_MCP_MEMBER_TOKEN_FILE
+      ? await watchTeamMemberTokenFile(process.env.LAYO_MCP_MEMBER_TOKEN_FILE, {
+          onError: (error) => console.error("MCP member token reload failed", error)
+        })
+      : undefined;
+    // The static value remains available for local setups without a mounted secret.
+    const staticLibraryRegistryPrincipalToken = process.env.LAYO_MCP_MEMBER_TOKEN;
+    const libraryRegistryPrincipal =
+      process.env.LAYO_MCP_USER_ID
+      && (libraryRegistryPrincipalTokenSource || staticLibraryRegistryPrincipalToken)
+        ? {
+            userId: process.env.LAYO_MCP_USER_ID,
+            get memberToken() {
+              return libraryRegistryPrincipalTokenSource?.token.value
+                ?? staticLibraryRegistryPrincipalToken!;
+            }
           }
+        : undefined;
+    const server = createMcpServer(undefined, {
+      libraryRegistryAuth: authorizationRuntime.libraryRegistryAuth,
+      libraryRegistryAuthorizationProvider:
+        authorizationRuntime.authorizationProvider,
+      libraryRegistryPrincipal,
+      teamAuthorizationManager: authorizationRuntime.teamAuthorizationManager
+    });
+    const transport = new StdioServerTransport();
+    let disposeShutdown: () => void = () => undefined;
+    let resourceClosePromise: Promise<void> | undefined;
+    const closeResources = (): Promise<void> => {
+      resourceClosePromise ??= (async () => {
+        disposeShutdown();
+        libraryRegistryPrincipalTokenSource?.close();
+        // Purpose: drain shared authorization work before closing its PostgreSQL pool.
+        await authorizationRuntime.close();
+      })();
+      return resourceClosePromise;
+    };
+    let shutdownPromise: Promise<void> | undefined;
+    const shutdown = (): Promise<void> => {
+      shutdownPromise ??= (async () => {
+        try {
+          await server.close();
+        } finally {
+          await closeResources();
         }
-      : undefined;
-  const teamAuthorizationManager =
-    process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE && libraryRegistryAuthSource
-      ? createTeamAuthorizationFileManager(
-          process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE,
-          libraryRegistryAuthSource.config
-        )
-      : undefined;
-  const server = createMcpServer(undefined, {
-    libraryRegistryAuth,
-    libraryRegistryPrincipal,
-    teamAuthorizationManager
-  });
-  const transport = new StdioServerTransport();
-  process.once("exit", () => {
-    libraryRegistryAuthSource?.close();
+      })();
+      return shutdownPromise;
+    };
+    disposeShutdown = installProcessShutdown({
+      processEvents: process,
+      stdinEvents: process.stdin,
+      shutdown,
+      closeSynchronousResources: () => {
+        libraryRegistryPrincipalTokenSource?.close();
+      },
+      onError: (error) => {
+        console.error("Layo MCP shutdown failed", error);
+        process.exitCode = 1;
+      }
+    });
+
+    try {
+      await server.connect(transport);
+      const protocolOnClose = transport.onclose;
+      transport.onclose = () => {
+        protocolOnClose?.();
+        void closeResources().catch((error) => {
+          console.error("Layo MCP authorization cleanup failed", error);
+          process.exitCode = 1;
+        });
+      };
+    } catch (error) {
+      await shutdown().catch(() => undefined);
+      throw error;
+    }
+  } catch (error) {
     libraryRegistryPrincipalTokenSource?.close();
-  });
-  await server.connect(transport);
+    await authorizationRuntime.close().catch(() => undefined);
+    throw error;
+  }
 }

@@ -297,7 +297,7 @@ describe("team authorization managed token sidecar", () => {
       quarantineReleaseResolve();
       await create;
       expect(settledBeforeQuarantine).toBe(false);
-      expect(manager.listTokens("owner-user").map((token) => token.id)).toEqual([
+      expect((await manager.listTokens("owner-user")).map((token) => token.id)).toEqual([
         "base-token",
         "base-sibling",
         "fresh-token"

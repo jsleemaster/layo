@@ -316,6 +316,37 @@ replacement. Operators may tune bounded contention with
 stolen. This is same-host/filesystem coordination, not shared transactional
 multi-host identity storage.
 
+For a team-owned multi-host deployment, set both
+`LAYO_AUTHORIZATION_DATABASE_URL` and one stable
+`LAYO_AUTHORIZATION_SHARED_SCOPE`; setting only one, or setting either to
+whitespace, fails before HTTP listens or MCP connects. Shared mode also requires
+`LAYO_LIBRARY_REGISTRY_MEMBERS_FILE`: the operator file remains the base
+identity source while PostgreSQL is authoritative for the hash-only managed
+token state and its exact monotonic generation. Every protected HTTP, MCP, and
+library SSE poll reads that scope at request time. A PostgreSQL outage therefore
+fails authorization closed instead of serving a process cache as authority.
+
+Run `pnpm --filter @layo/server authorization:migrate` before starting shared
+mode. Use a migration role that can create/alter the authorization tables and
+write the migration ledger; use a separate runtime role limited to reading the
+ledger and selecting, inserting, and updating
+`layo_team_authorization_state`. The PostgreSQL client enforces a 5-second
+statement timeout. Connection reachability, certificate trust, TLS mode,
+credentials, rotation, pooling limits, monitoring, and database backup remain
+operator responsibilities encoded outside the repository, normally in the
+connection URL or platform configuration. Never commit the URL.
+
+Treat the scope as a durable deployment identifier, not a per-process or
+per-release value. Before destructive maintenance or downgrade, export it with
+`authorization:export --scope <scope> --output <private-file>`. Restore accepts
+only an absent scope and requires both the same explicit `--scope` and
+`--confirm-absent-scope-restore`; it never overwrites live state. The scheduled
+`Authorization Backup Drill` proves migration, bootstrap, private versioned
+export, deletion, explicit restore, and byte-identical re-export against
+PostgreSQL 16. Downgrade is an operator-controlled export/stop/restore or
+reconfiguration procedure. Switching back to filesystem mode does not import or
+trust a stale `.tokens.json` sidecar automatically.
+
 Plaintext from token creation is one-time response state: it is absent from the
 sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. The browser clears it on dismissal, another create, identity change,
@@ -328,14 +359,12 @@ member id, and member token are unchanged. Current-token revocation requires
 explicit confirmation, clears the active credential, and leaves the local team
 available for root-token recovery.
 
-The file watcher and managers that share its in-memory authorization config also
-coordinate process-locally: mutations wait for the current reload/quarantine
-tail, and quarantine writes apply only to the exact sidecar snapshot that
-triggered them. This prevents a remove/reintroduce watcher callback from
-quarantining a fresh generation in the same process. It is not distributed
-coordination. Multiple hosts still need shared transactional identity storage
-with one monotonic generation/version or CAS contract before watcher,
-authentication, quarantine, and mutation decisions can be ordered globally.
+In filesystem mode, the file watcher and managers that share its in-memory
+authorization config coordinate process-locally: mutations wait for the current
+reload/quarantine tail, and quarantine writes apply only to the exact sidecar
+snapshot that triggered them. Shared PostgreSQL mode replaces the sidecar
+ordering authority with a row lock and one monotonic generation for the selected
+scope; it does not turn the operator members file into hosted account storage.
 
 A transient unreadable or truncated operator-file reload fails closed
 immediately, then schedules a process-local retry serialized through the same

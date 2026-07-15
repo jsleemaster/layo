@@ -40,9 +40,10 @@ describe("team access token administration", () => {
           expiresAt: "2026-08-13T12:00:00.000Z"
         }
       });
-      expect(manager.listTokens("owner-user")).toEqual([created.metadata]);
-      expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("token");
-      expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("tokenHash");
+      const listed = await manager.listTokens("owner-user");
+      expect(listed).toEqual([created.metadata]);
+      expect(listed[0]).not.toHaveProperty("token");
+      expect(listed[0]).not.toHaveProperty("tokenHash");
 
       expect(await readFile(configPath, "utf8")).toBe(base);
       const persisted = await readFile(`${configPath}.tokens.json`, "utf8");

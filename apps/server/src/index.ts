@@ -1,35 +1,21 @@
-import { createHttpServer } from "./http.js";
-import {
-  createTeamAuthorizationFileManager,
-  parseTeamAuthorizationConfig,
-  watchTeamAuthorizationConfigFile
-} from "./team-authorization.js";
+import { startHttpServer } from "./http-startup.js";
+import { installProcessShutdown } from "./process-shutdown.js";
 
-const port = Number(process.env.PORT ?? 4317);
-const host = process.env.HOST ?? "127.0.0.1";
-// The operator-owned file takes precedence so credential rotation does not restart the server.
-const libraryRegistryAuthSource = process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE
-  ? await watchTeamAuthorizationConfigFile(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE, {
-      onError: (error) => console.error("library registry authorization reload failed", error)
-    })
-  : undefined;
-// The environment fallback keeps single-process local setups configuration-only.
-const libraryRegistryAuth =
-  libraryRegistryAuthSource?.config
-  ?? parseTeamAuthorizationConfig(process.env.LAYO_LIBRARY_REGISTRY_MEMBERS);
-// Token administration is writable only when the operator selected a watched file.
-const teamAuthorizationManager = libraryRegistryAuthSource
-  ? createTeamAuthorizationFileManager(
-      process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE!,
-      libraryRegistryAuthSource.config
-    )
-  : undefined;
-const server = createHttpServer(undefined, {
-  libraryRegistryAuth,
-  teamAuthorizationManager
+const started = await startHttpServer(process.env);
+let disposeShutdown: () => void = () => undefined;
+const shutdown = async (): Promise<void> => {
+  try {
+    await started.shutdown();
+  } finally {
+    disposeShutdown();
+  }
+};
+disposeShutdown = installProcessShutdown({
+  processEvents: process,
+  shutdown,
+  closeSynchronousResources: () => undefined,
+  onError: (error) => {
+    console.error("Layo server shutdown failed", error);
+    process.exitCode = 1;
+  }
 });
-server.addHook("onClose", async () => {
-  libraryRegistryAuthSource?.close();
-});
-
-await server.listen({ host, port });

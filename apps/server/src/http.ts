@@ -6,15 +6,16 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
 import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./external-migration.js";
 import {
-  authenticateTeamMember,
   authorizeTeamLibraryRead,
+  createTeamAuthorizationProvider,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
   type TeamAccessTokenExpiryDays,
   type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
-  type TeamAuthorizationFileManager
+  type TeamAuthorizationFileManager,
+  type TeamAuthorizationProvider
 } from "./team-authorization.js";
 import {
   FILE_ARCHIVE_MIME_TYPE,
@@ -29,10 +30,17 @@ import {
   type GeometryPatch
 } from "./storage.js";
 
+export function canWriteEventStream(
+  response: { destroyed: boolean; writableEnded: boolean }
+): boolean {
+  return !response.destroyed && !response.writableEnded;
+}
+
 export interface HttpServerOptions {
   webBasePath?: string;
   webDistDir?: string | null;
   libraryRegistryAuth?: TeamAuthorizationConfig;
+  libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
   teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
@@ -46,6 +54,17 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const server = Fastify({ logger: true });
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
+  let eventStreamsClosing = false;
+  const closeServer = server.close.bind(server);
+  server.close = ((...args: [] | [(error?: Error) => void]) => {
+    eventStreamsClosing = true;
+    return args.length === 0 ? closeServer() : closeServer(args[0]);
+  }) as FastifyInstance["close"];
+  const libraryRegistryAuthorizationProvider =
+    options.libraryRegistryAuthorizationProvider
+    ?? (options.libraryRegistryAuth
+      ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
+      : undefined);
 
   type LibraryRequest = {
     headers: {
@@ -54,28 +73,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   };
 
-  const authenticateLibraryMember = (request: LibraryRequest) => {
-    if (!options.libraryRegistryAuth) {
+  const authenticateLibraryMember = async (request: LibraryRequest) => {
+    if (!libraryRegistryAuthorizationProvider) {
       return undefined;
     }
-    return authenticateTeamMember(
-      options.libraryRegistryAuth,
-      Array.isArray(request.headers["x-layo-user-id"])
+    return libraryRegistryAuthorizationProvider.authenticate({
+      userId: Array.isArray(request.headers["x-layo-user-id"])
         ? request.headers["x-layo-user-id"][0]
         : request.headers["x-layo-user-id"],
-      bearerToken(request.headers.authorization)
-    );
+      memberToken: bearerToken(request.headers.authorization)
+    });
   };
 
   const authorizeLibraryRead = async (request: LibraryRequest, fileId: string) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (member) {
       authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
     }
   };
 
   const authorizeLibraryWrite = async (request: LibraryRequest, fileId: string) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (member) {
       authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
@@ -111,7 +129,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get("/health", async () => ({ ok: true }));
 
   const requireTeamAuthorizationManager = () => {
-    if (!options.teamAuthorizationManager || !options.libraryRegistryAuth) {
+    if (!options.teamAuthorizationManager || !libraryRegistryAuthorizationProvider) {
       throw Object.assign(
         new Error("team access token administration requires file-backed authorization"),
         { code: "EUNAVAILABLE", statusCode: 503 }
@@ -225,7 +243,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
-  server.addHook("onClose", async () => {
+  server.addHook("preClose", async () => {
+    eventStreamsClosing = true;
+    // Purpose: end long-lived responses before Node waits for active sockets.
     for (const close of [...commentEventStreamClosers]) {
       close();
     }
@@ -320,7 +340,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (request.query.fileId) {
       if (member) {
         authorizeTeamLibraryRead(
@@ -363,12 +383,15 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { fileId?: string; after?: string } }>(
     "/libraries/events",
     async (request, reply) => {
-      const initialMember = authenticateLibraryMember(request);
+      const initialMember = await authenticateLibraryMember(request);
       if (initialMember && request.query.fileId) {
         authorizeTeamLibraryRead(
           initialMember,
           await storage.getTeamIdForFile(request.query.fileId)
         );
+      }
+      if (eventStreamsClosing) {
+        return reply.code(503).send({ error: "server is closing" });
       }
 
       reply.hijack();
@@ -381,7 +404,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       });
 
       const sendBlock = (eventName: string, payload: unknown) => {
-        if (reply.raw.destroyed) {
+        if (!canWriteEventStream(reply.raw)) {
           return;
         }
         reply.raw.write(`event: ${eventName}\n`);
@@ -402,14 +425,17 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           clearInterval(pollId);
         }
         libraryRegistryStreamClosers.delete(close);
+        if (canWriteEventStream(reply.raw)) {
+          reply.raw.end();
+        }
       };
       const sendPendingEvents = async () => {
-        if (sending || reply.raw.destroyed) {
+        if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
         try {
-          const currentMember = authenticateLibraryMember(request);
+          const currentMember = await authenticateLibraryMember(request);
           if (currentMember && request.query.fileId) {
             authorizeTeamLibraryRead(
               currentMember,
@@ -449,7 +475,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       };
 
       heartbeatId = setInterval(() => {
-        if (!reply.raw.destroyed) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
@@ -712,6 +738,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
+      if (eventStreamsClosing) {
+        return reply.code(503).send({ error: "server is closing" });
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -722,7 +751,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       });
 
       const sendBlock = (eventName: string, payload: unknown) => {
-        if (reply.raw.destroyed) {
+        if (!canWriteEventStream(reply.raw)) {
           return;
         }
         reply.raw.write(`event: ${eventName}\n`);
@@ -732,7 +761,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
       const sendPendingEvents = async () => {
-        if (sending || reply.raw.destroyed) {
+        if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
@@ -759,7 +788,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       };
 
       const heartbeatId = setInterval(() => {
-        if (!reply.raw.destroyed) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
@@ -771,6 +800,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         clearInterval(heartbeatId);
         clearInterval(pollId);
         commentEventStreamClosers.delete(close);
+        if (canWriteEventStream(reply.raw)) {
+          reply.raw.end();
+        }
       };
 
       commentEventStreamClosers.add(close);
