@@ -85,11 +85,13 @@ Final docs-head Full `29335855757` then failed 377/378 server tests because a
 sibling preview token stayed invalid after one transient truncated base-file
 read. Deterministic RED `df0c0581` reproduced that exact reload-recovery gap;
 RED Full `29336713035` failed the intended case. GREEN `3c44aecf` adds a
-bounded retry serialized by `reloadTail`: the first bad read fails closed
-immediately, success cancels retry state, and watcher close cancels pending
-retry work. Focused authorization tests passed 15/15 and typecheck passed.
-Permanently malformed input remains fail-closed after the bounded budget, and
-the retry remains process-local.
+retry serialized by `reloadTail`: the first bad read fails closed immediately,
+every failed reload re-arms after the poll interval, success cancels retry state,
+and watcher close cancels pending work. Focused authorization tests passed
+15/15 and typecheck passed. Final review P3 caught the README's incorrect
+bounded-budget claim; `ef6929e` corrected the watcher-lifetime behavior and
+`1731949` added a maturity-gate regression. Persistent malformed input remains
+fail-closed while retries and logging can continue; the loop is process-local.
 
 Focused real-network Playwright passed 3/3 and the direct headed interaction
 passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
@@ -137,9 +139,14 @@ Full Verification `29379115279` passed on
 `aabff5fa59d280e5b736cc972a2f02b234667d40`, including maturity/design gates,
 typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
 Restore `29379115246` and retention `29379115265` passed on the same head.
-Independent security review found no actionable issue and all review threads
-are resolved. PR #308 is not merged; final docs-head verification/review and
-post-merge cleanup remain open. Deployment remains non-gating.
+Independent security review found no actionable code issue and all five review
+threads are resolved. Final repaired docs head `de3e88ea` passed Full
+`29380205891`, restore `29380205922`, and retention `29380205936`.
+PR #308 was squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`;
+remote post-merge checks confirmed the merge and feature-branch deletion.
+Required local status/current-branch/worktree checks still exit 134, so the plan
+retains an explicit cleanup exception instead of claiming completion.
+Deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps

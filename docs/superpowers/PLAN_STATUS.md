@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-07-14-penpot-token-mcp-ui.md` - **Active / final repaired-docs gate** on PR #308. External review loops closed removed-member survivor lockout, quarantined/v1 startup recovery, immediate survivor restoration, locked publication and close quiescence, bulk orphan removal, and reintroduction non-resurrection. RED Full runs `29376307034`, `29377023368`, and `29378304736` proved the exact gaps; failed broad repairs `2f6f155` and `c8445a1` were rejected by the 20x reintroduction stress. Final code `aabff5f` passed Full `29379115279`, restore `29379115246`, and retention `29379115265`. Final documentation review then found the README incorrectly claimed a bounded retry budget; `ef6929e` corrects the unbounded watcher-lifetime behavior and `1731949` adds a maturity-gate regression. Repaired docs-head verification, squash merge, and post-merge cleanup remain open.
+`2026-07-14-penpot-token-mcp-ui.md` - **Merged / retained local cleanup exception** after PR #308. Code and final documentation verification passed, all five review threads resolved, PR #308 squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`, and the remote feature branch was deleted. Required local `git status`, current-branch, and worktree checks still exit 134 even via `/usr/bin/git`, so local branch/worktree state is unverified and this plan must not enter Completed Plans yet. After the runtime recovers, rerun those checks without deleting dirty or user-owned worktrees, then archive this plan. The next product gap remains shared transactional multi-host identity/generation.
 
 ## Completed Plans
 

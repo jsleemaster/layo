@@ -1,7 +1,7 @@
 # Penpot Token MCP and UI Delta
 
 Last checked: 2026-07-14
-Status: PR #308 active; final external-review P3 documentation repair under verification; not merged
+Status: Product merged by PR #308; retained local post-merge cleanup exception
 
 ## Retrieval Summary
 
@@ -13,12 +13,12 @@ Status: PR #308 active; final external-review P3 documentation repair under veri
   operator members file remains external and is never replaced.
 - Secret rule: plaintext is one-time response/component state; persistence is
   SHA-256 only and clipboard copy is the only intentional external copy.
-- Current gate: final code head
-  `aabff5fa59d280e5b736cc972a2f02b234667d40` passed Full Verification
-  `29379115279`, restore `29379115246`, and retention `29379115265`.
-  Final review then found one README retry-semantics mismatch. Commits
-  `ef6929e` and `1731949` correct the operator contract and add a maturity
-  gate; PR #308 remains unmerged while that documentation head verifies.
+- Final code head `aabff5fa59d280e5b736cc972a2f02b234667d40`
+  passed Full `29379115279`, restore `29379115246`, and retention
+  `29379115265`. Final documentation head `de3e88ea` passed Full
+  `29380205891`, restore `29380205922`, and retention `29380205936`
+  after `ef6929e` and `1731949` corrected and guarded retry semantics.
+  PR #308 was squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`.
 
 ## Penpot Reference And Decision
 
@@ -298,6 +298,7 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Deployment is deliberately non-gating for this slice. Vercel passed on
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
-- PR #308 has repaired every code finding and the final README semantics P3.
-  Final documentation-head verification, squash merge, and post-merge cleanup
-  remain Task 4 work.
+- PR #308 repaired every code finding and the final README semantics P3, passed
+  the final documentation-head gate, squash-merged, and its remote branch was
+  deleted. Local status/current-branch/worktree checks still exit 134, so the
+  cleanup PR records that exception and does not claim plan completion.
