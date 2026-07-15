@@ -606,6 +606,157 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
     });
   });
 
+  test("refreshes listTokens from PostgreSQL instead of serving a stale shared cache", async () => {
+    await withBaseFiles(async (_root, firstBasePath, secondBasePath) => {
+      const scope = `fresh-list-${randomUUID()}`;
+      const writerStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const readerStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      await initializeScope(writerStore, scope, base);
+      const writer = createTeamAuthorizationFileManager(
+        firstBasePath,
+        configFrom(base),
+        {
+          stateStore: writerStore,
+          sharedScope: scope,
+          now: () => new Date("2026-07-15T12:45:00.000Z"),
+          generateId: () => "fresh-list-token",
+          generateSecret: () => "layo_pat_fresh_list"
+        }
+      );
+      const reader = createTeamAuthorizationFileManager(
+        secondBasePath,
+        configFrom(base),
+        { stateStore: readerStore, sharedScope: scope }
+      );
+
+      try {
+        await writer.manageTokens(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            type: "create",
+            input: { name: "Fresh list", expiresInDays: null }
+          }
+        );
+
+        await expect(reader.listTokens("owner-user")).resolves.toEqual([
+          expect.objectContaining({ id: "fresh-list-token" })
+        ]);
+      } finally {
+        await Promise.all([writerStore.close(), readerStore.close()]);
+      }
+    });
+  });
+
+  test("recovers one quarantined member while other quarantined members remain isolated", async () => {
+    await withBaseFiles(async (root, firstBasePath) => {
+      const scope = `multi-quarantine-${randomUUID()}`;
+      const store = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      await initializeScope(store, scope, base);
+      const manager = createTeamAuthorizationFileManager(
+        firstBasePath,
+        configFrom(base),
+        {
+          stateStore: store,
+          sharedScope: scope,
+          now: () => new Date("2026-07-15T12:50:00.000Z"),
+          generateId: (() => {
+            const ids = ["owner-managed-token", "viewer-managed-token"];
+            return () => ids.shift() ?? "unexpected-token";
+          })(),
+          generateSecret: (() => {
+            const secrets = ["layo_pat_owner_managed", "layo_pat_viewer_managed"];
+            return () => secrets.shift() ?? "layo_pat_unexpected";
+          })()
+        }
+      );
+      const candidatePath = path.join(root, "candidate-multi-change.json");
+
+      try {
+        await manager.createToken("owner-user", {
+          name: "Owner managed",
+          expiresInDays: null
+        });
+        await manager.createToken("unmanaged-user", {
+          name: "Viewer managed",
+          expiresInDays: null
+        });
+        const candidate = ownerBase() as any[];
+        candidate[0].token = "changed-owner-base-secret";
+        candidate[1].token = "changed-viewer-base-secret";
+        await writeFile(candidatePath, JSON.stringify(candidate), "utf8");
+
+        await runTeamAuthorizationBaseReconciliation({
+          stateStore: store,
+          sharedScope: scope,
+          currentBaseFingerprint:
+            canonicalTeamAuthorizationBaseFingerprint(base),
+          expectedGeneration: "2",
+          candidateBasePath: candidatePath
+        });
+
+        const recoveredManager = createTeamAuthorizationFileManager(
+          candidatePath,
+          configFrom(await readFile(candidatePath, "utf8")),
+          { stateStore: store, sharedScope: scope }
+        );
+        await expect(recoveredManager.manageTokens(
+          {
+            userId: "owner-user",
+            memberToken: "changed-owner-base-secret"
+          },
+          { type: "list" }
+        )).resolves.toMatchObject({ type: "list" });
+
+        const ownerRecovered = await store.read(scope);
+        expect(ownerRecovered.generation).toBe("4");
+        expect(JSON.parse(ownerRecovered.serializedState).members).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              userId: "owner-user",
+              quarantined: false
+            }),
+            expect.objectContaining({
+              userId: "unmanaged-user",
+              quarantined: true
+            })
+          ])
+        );
+
+        await expect(recoveredManager.manageTokens(
+          {
+            userId: "unmanaged-user",
+            memberToken: "changed-viewer-base-secret"
+          },
+          { type: "list" }
+        )).resolves.toMatchObject({ type: "list" });
+        const bothRecovered = await store.read(scope);
+        expect(bothRecovered.generation).toBe("5");
+        expect(JSON.parse(bothRecovered.serializedState).members).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              userId: "owner-user",
+              quarantined: false
+            }),
+            expect.objectContaining({
+              userId: "unmanaged-user",
+              quarantined: false
+            })
+          ])
+        );
+      } finally {
+        await store.close();
+      }
+    });
+  });
+
   test("survives restart in PostgreSQL and never reads or writes the filesystem sidecar in shared mode", async () => {
     await withBaseFiles(async (_root, firstBasePath, secondBasePath) => {
       const scope = `restart-${randomUUID()}`;
