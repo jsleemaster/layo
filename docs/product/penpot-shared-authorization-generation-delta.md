@@ -94,6 +94,13 @@ while every new lifecycle regression passed; the unchanged-head third attempt
 completed the suite. Independent lifecycle re-review confirmed all original and
 follow-up findings resolved with no P0-P2.
 
+A subsequent exact-head gate exposed that the older-generation test assumed
+invocation order equaled asynchronous store-read order. Head
+`a263f7c2b3a91c43c59bc6ac2c094ef48e28f956` adds an explicit first-read
+barrier. Full Verification `29396976596`, Authorization Backup Drill
+`29396976519`, Storage Restore Drill `29396976502`, and Storage Backup
+Retention `29396976529` all passed on that same head.
+
 ## Operations Boundary
 
 The migration role owns schema creation and the migration ledger. The runtime
