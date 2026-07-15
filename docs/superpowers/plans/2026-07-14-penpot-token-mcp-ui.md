@@ -273,7 +273,9 @@ Deployment remains a separate non-gating concern.
   `5df21e360aff0970b009e7e911007167d6f83f96` on 2026-07-15.
 - Post-merge `gh pr view` confirmed MERGED and the original remote branch was
   deleted. Local `git status`, current-branch, and worktree commands still
-  exited 134 in this runtime, so no dirty local worktree was modified or deleted.
+  exited 134 even through `/usr/bin/git`. This is a retained cleanup exception:
+  local branch/worktree state is unverified, no local worktree was modified or
+  deleted, and Task 4 cannot be marked fully complete until those checks succeed.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -289,4 +291,4 @@ Deployment remains a separate non-gating concern.
 - [x] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
 - [x] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
 - [x] Squash merge PR #308.
-- [x] Run required post-merge cleanup checks and delete the remote branch.
+- [ ] Resolve the retained local cleanup exception: run status, current-branch, and worktree checks successfully. The original remote branch is already deleted.
