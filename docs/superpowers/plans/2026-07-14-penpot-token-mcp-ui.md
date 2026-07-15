@@ -258,18 +258,22 @@ Deployment remains a separate non-gating concern.
   `29379115265` passed. Independent security review found no actionable
   finding; all PR review threads are resolved.
 
-### Current merge gate
+### Completion evidence
 
-- Final code head: `aabff5fa59d280e5b736cc972a2f02b234667d40`.
-- Full Verification `29379115279` passed on that head: maturity/design gates,
-  typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
-- Storage Restore Drill `29379115246` and Storage Backup Retention
-  `29379115265` passed on the same head.
-- Independent security review found no actionable code finding. The final
-  documentation review found one README retry-semantics P3; `ef6929e` and
-  `1731949` repair and guard it. Final repaired-head verification remains.
-- PR #308 is active and not merged. Squash merge and post-merge cleanup remain
-  open, so this plan remains active and must not move to Completed Plans yet.
+- Final code head `aabff5fa59d280e5b736cc972a2f02b234667d40`
+  passed Full `29379115279`, restore `29379115246`, and retention
+  `29379115265`, including 385 server cases, Rust, and Playwright CLI e2e.
+- Independent security review found no actionable code finding. Final
+  documentation review P3 was repaired by `ef6929e` and guarded by
+  `1731949`; all five review threads are resolved.
+- Final documentation head `de3e88ea542c062b001dec39ea3c3397a7b5179a`
+  passed Full `29380205891`, restore `29380205922`, and retention
+  `29380205936`.
+- PR #308 squash-merged as
+  `5df21e360aff0970b009e7e911007167d6f83f96` on 2026-07-15.
+- Post-merge `gh pr view` confirmed MERGED and the original remote branch was
+  deleted. Local `git status`, current-branch, and worktree commands still
+  exited 134 in this runtime, so no dirty local worktree was modified or deleted.
 
 ### Task 4: Verification, review, and durable evidence
 
@@ -283,6 +287,6 @@ Deployment remains a separate non-gating concern.
 - [x] Run Full Verification, Storage Restore Drill, and Storage Backup Retention.
 - [x] Request external code review and feed every actionable finding into a focused RED.
 - [x] Update product docs with Penpot reference, adopt/adapt decision, RED/GREEN IDs, direct browser evidence, and remaining agent-reviewability/audit/shared-storage risks.
-- [ ] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
-- [ ] Squash merge PR #308.
-- [ ] Run required post-merge cleanup checks and delete the remote branch.
+- [x] Bring the active PR to ready-to-merge evidence with no review findings or open review threads.
+- [x] Squash merge PR #308.
+- [x] Run required post-merge cleanup checks and delete the remote branch.
