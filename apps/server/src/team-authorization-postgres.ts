@@ -173,14 +173,17 @@ function validateManagedToken(value: unknown, memberId: string): string {
     throw new Error(`authorization managed state token for ${memberId} is invalid`);
   }
 
-  const hashPattern = /^[0-9a-f]{64}$/;
+  const hashPattern = /^[0-9a-f]{64}$/i;
   const hasTokenHash = value.tokenHash !== undefined;
   const hasTokenHashes = value.tokenHashes !== undefined;
   if (
     hasTokenHash
     && (typeof value.tokenHash !== "string" || !hashPattern.test(value.tokenHash))
   ) {
-    throw new Error("authorization managed state tokenHash must be a lowercase SHA-256 hash");
+    throw new Error("authorization managed state tokenHash must be a SHA-256 hash");
+  }
+  if (typeof value.tokenHash === "string") {
+    value.tokenHash = value.tokenHash.toLowerCase();
   }
   if (
     hasTokenHashes
@@ -190,11 +193,13 @@ function validateManagedToken(value: unknown, memberId: string): string {
       || !value.tokenHashes.every(
         (hash) => typeof hash === "string" && hashPattern.test(hash)
       )
-      || new Set(value.tokenHashes).size !== value.tokenHashes.length
     )
   ) {
-    throw new Error(
-      "authorization managed state tokenHashes must be unique lowercase SHA-256 hashes"
+    throw new Error("authorization managed state tokenHashes must be SHA-256 hashes");
+  }
+  if (Array.isArray(value.tokenHashes)) {
+    value.tokenHashes = Array.from(
+      new Set(value.tokenHashes.map((hash) => (hash as string).toLowerCase()))
     );
   }
   if (!hasTokenHash && !hasTokenHashes) {
@@ -320,11 +325,15 @@ async function setLocalStatementTimeout(
   );
 }
 
-async function rollbackQuietly(client: PoolClient): Promise<void> {
+async function rollbackTransaction(
+  client: PoolClient
+): Promise<Error | undefined> {
   try {
     await client.query("ROLLBACK");
-  } catch {
-    // The original transaction error is the actionable failure.
+    return undefined;
+  } catch (error) {
+    // Purpose: discard a connection whose transaction state could not be recovered.
+    return error instanceof Error ? error : new Error(String(error));
   }
 }
 
@@ -334,9 +343,11 @@ export async function migratePostgresTeamAuthorizationState(
   const connectionString = validateConnectionString(options.connectionString);
   const statementTimeoutMs = validateStatementTimeout(options.statementTimeoutMs);
   const pool = new Pool({ connectionString, statement_timeout: statementTimeoutMs });
-  const client = await pool.connect();
+  let client: PoolClient | undefined;
+  let releaseError: Error | undefined;
 
   try {
+    client = await pool.connect();
     await client.query("BEGIN");
     await setLocalStatementTimeout(client, statementTimeoutMs);
     // Purpose: serialize every authorization migrator on one stable database lock.
@@ -370,10 +381,12 @@ export async function migratePostgresTeamAuthorizationState(
     }
     await client.query("COMMIT");
   } catch (error) {
-    await rollbackQuietly(client);
+    if (client) {
+      releaseError = await rollbackTransaction(client);
+    }
     throw error;
   } finally {
-    client.release();
+    client?.release(releaseError);
     await pool.end();
   }
 }
@@ -500,10 +513,13 @@ export async function createPostgresTeamAuthorizationStateStore(
         await client.query("COMMIT");
         return { ...committed, result: mutation.result };
       } catch (error) {
-        await rollbackQuietly(client);
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
         throw error;
       } finally {
-        client.release();
+        if (!client.released) {
+          client.release();
+        }
       }
     },
 
