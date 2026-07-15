@@ -18,7 +18,11 @@ export function installProcessShutdown(
   let shutdownPromise: Promise<void> | undefined;
   const triggerShutdown = () => {
     if (!shutdownPromise) {
-      shutdownPromise = Promise.resolve().then(options.shutdown);
+      try {
+        shutdownPromise = options.shutdown();
+      } catch (error) {
+        shutdownPromise = Promise.reject(error);
+      }
       void shutdownPromise.catch(options.onError);
     }
   };
