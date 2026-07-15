@@ -45,6 +45,7 @@ describe("team access token HTTP administration", () => {
       generateId: () => "token-deploy",
       generateSecret: () => "layo_pat_http_secret"
     });
+    const manageTokens = vi.spyOn(manager, "manageTokens");
     const server = createHttpServer(new FileStorage(path.join(root, "storage")), {
       libraryRegistryAuth: source.config,
       teamAuthorizationManager: manager
@@ -111,6 +112,18 @@ describe("team access token HTTP administration", () => {
           revokedAt: "2026-07-14T12:00:00.000Z"
         }
       });
+
+      const auditContexts = manageTokens.mock.calls.map(([principal]) =>
+        (principal as typeof principal & {
+          audit?: { source?: string; requestId?: string };
+        }).audit
+      );
+      expect(auditContexts).toHaveLength(5);
+      expect(auditContexts.every((audit) => audit?.source === "http")).toBe(true);
+      const requestIds = auditContexts.map((audit) => audit?.requestId);
+      expect(requestIds.every((requestId) => typeof requestId === "string" && requestId.length > 0))
+        .toBe(true);
+      expect(new Set(requestIds)).toHaveLength(requestIds.length);
     } finally {
       source.close();
       await server.close();
