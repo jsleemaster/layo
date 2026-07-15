@@ -89,6 +89,20 @@ test.each([
       LAYO_AUTHORIZATION_SHARED_SCOPE: "team-alpha"
     },
     missing: "LAYO_AUTHORIZATION_DATABASE_URL"
+  },
+  {
+    env: {
+      LAYO_AUTHORIZATION_DATABASE_URL: "   ",
+      LAYO_AUTHORIZATION_SHARED_SCOPE: "team-alpha"
+    },
+    missing: "LAYO_AUTHORIZATION_DATABASE_URL"
+  },
+  {
+    env: {
+      LAYO_AUTHORIZATION_DATABASE_URL: "postgres://authorization",
+      LAYO_AUTHORIZATION_SHARED_SCOPE: "   "
+    },
+    missing: "LAYO_AUTHORIZATION_SHARED_SCOPE"
   }
 ])("rejects partial shared authorization configuration before opening resources", async ({ env, missing }) => {
   const fixture = dependencies();
