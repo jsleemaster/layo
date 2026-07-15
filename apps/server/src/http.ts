@@ -6,15 +6,16 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { AgentBatchInput, AgentFindQuery } from "./agent-control.js";
 import { reviewExternalMigrationArchive, type ExternalMigrationSource } from "./external-migration.js";
 import {
-  authenticateTeamMember,
   authorizeTeamLibraryRead,
+  createTeamAuthorizationProvider,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
   type TeamAccessTokenExpiryDays,
   type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
-  type TeamAuthorizationFileManager
+  type TeamAuthorizationFileManager,
+  type TeamAuthorizationProvider
 } from "./team-authorization.js";
 import {
   FILE_ARCHIVE_MIME_TYPE,
@@ -33,6 +34,7 @@ export interface HttpServerOptions {
   webBasePath?: string;
   webDistDir?: string | null;
   libraryRegistryAuth?: TeamAuthorizationConfig;
+  libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
   teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
@@ -46,6 +48,11 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   const server = Fastify({ logger: true });
   const commentEventStreamClosers = new Set<() => void>();
   const libraryRegistryStreamClosers = new Set<() => void>();
+  const libraryRegistryAuthorizationProvider =
+    options.libraryRegistryAuthorizationProvider
+    ?? (options.libraryRegistryAuth
+      ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
+      : undefined);
 
   type LibraryRequest = {
     headers: {
@@ -54,28 +61,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   };
 
-  const authenticateLibraryMember = (request: LibraryRequest) => {
-    if (!options.libraryRegistryAuth) {
+  const authenticateLibraryMember = async (request: LibraryRequest) => {
+    if (!libraryRegistryAuthorizationProvider) {
       return undefined;
     }
-    return authenticateTeamMember(
-      options.libraryRegistryAuth,
-      Array.isArray(request.headers["x-layo-user-id"])
+    return libraryRegistryAuthorizationProvider.authenticate({
+      userId: Array.isArray(request.headers["x-layo-user-id"])
         ? request.headers["x-layo-user-id"][0]
         : request.headers["x-layo-user-id"],
-      bearerToken(request.headers.authorization)
-    );
+      memberToken: bearerToken(request.headers.authorization)
+    });
   };
 
   const authorizeLibraryRead = async (request: LibraryRequest, fileId: string) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (member) {
       authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
     }
   };
 
   const authorizeLibraryWrite = async (request: LibraryRequest, fileId: string) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (member) {
       authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
@@ -111,7 +117,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get("/health", async () => ({ ok: true }));
 
   const requireTeamAuthorizationManager = () => {
-    if (!options.teamAuthorizationManager || !options.libraryRegistryAuth) {
+    if (!options.teamAuthorizationManager) {
       throw Object.assign(
         new Error("team access token administration requires file-backed authorization"),
         { code: "EUNAVAILABLE", statusCode: 503 }
@@ -320,7 +326,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
-    const member = authenticateLibraryMember(request);
+    const member = await authenticateLibraryMember(request);
     if (request.query.fileId) {
       if (member) {
         authorizeTeamLibraryRead(
@@ -363,7 +369,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { fileId?: string; after?: string } }>(
     "/libraries/events",
     async (request, reply) => {
-      const initialMember = authenticateLibraryMember(request);
+      const initialMember = await authenticateLibraryMember(request);
       if (initialMember && request.query.fileId) {
         authorizeTeamLibraryRead(
           initialMember,
@@ -409,7 +415,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         }
         sending = true;
         try {
-          const currentMember = authenticateLibraryMember(request);
+          const currentMember = await authenticateLibraryMember(request);
           if (currentMember && request.query.fileId) {
             authorizeTeamLibraryRead(
               currentMember,
