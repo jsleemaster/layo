@@ -93,7 +93,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
     await expect(firstMutation).resolves.toMatchObject({ generation: "1" });
     await expect(secondMutation).resolves.toMatchObject({ generation: "2" });
 
-    const events = await first.listAuditEvents(scope, {
+    const events = await first.listAuditEvents!(scope, {
       afterId: "0",
       limit: 10
     });
