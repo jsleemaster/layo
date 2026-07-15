@@ -96,7 +96,13 @@ function wrapSharedManager(
     createToken: (userId, input) =>
       track(() => manager.createToken(userId, input)),
     revokeToken: (userId, tokenId) =>
-      track(() => manager.revokeToken(userId, tokenId))
+      track(() => manager.revokeToken(userId, tokenId)),
+    ...(manager.listAuditEvents
+      ? {
+          listAuditEvents: (principal, options) =>
+            track(() => manager.listAuditEvents!(principal, options))
+        }
+      : {})
   };
 }
 
