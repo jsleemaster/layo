@@ -161,6 +161,90 @@ test("manages named account tokens over the isolated real network", async ({ con
   await expect(page.getByTestId("team-status")).not.toContainText("팀 없음");
 });
 
+test("shows owner authorization activity, paginates exact ids, and clears it for an editor", async ({ page }) => {
+  const auditRequests: Array<{ afterId: string; userId?: string }> = [];
+  await page.route(/\/account\/authorization-audit\?/, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const afterId = url.searchParams.get("afterId") ?? "";
+    const userId = request.headers()["x-layo-user-id"];
+    auditRequests.push({ afterId, userId });
+
+    if (userId === "review-user") {
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "owner role is required to read authorization audit history"
+        })
+      });
+      return;
+    }
+
+    const first = afterId === "0";
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "Cache-Control": "no-store" },
+      body: JSON.stringify({
+        events: [{
+          id: first ? "9007199254740994" : "9007199254740995",
+          scope: "team-alpha",
+          generation: first ? "9007199254740993" : "9007199254740994",
+          action: first ? "token_created" : "token_revoked",
+          actorUserId: "local-user",
+          subjectTokenId: first ? "created-token" : "sibling-token",
+          subjectTokenName: first ? "Deploy automation" : "Review automation",
+          source: first ? "http" : "mcp",
+          metadata: {},
+          createdAt: first
+            ? "2026-07-15T12:00:00.000Z"
+            : "2026-07-15T12:01:00.000Z"
+        }],
+        ...(first ? { nextAfterId: "9007199254740994" } : {})
+      })
+    });
+  });
+
+  await createAuthenticatedLocalTeam(page);
+  const activity = page.getByTestId("authorization-audit");
+  await expect(activity).toBeVisible();
+  await expect(page.getByTestId("authorization-audit-row-9007199254740994"))
+    .toContainText("토큰 생성");
+  await expect(activity).toContainText("Deploy automation");
+  await expect(activity).toContainText("세대 9007199254740993");
+
+  await page.getByTestId("authorization-audit-more").click();
+  await expect(page.getByTestId("authorization-audit-row-9007199254740995"))
+    .toContainText("토큰 해지");
+  expect(auditRequests.map(({ afterId }) => afterId)).toContain(
+    "9007199254740994"
+  );
+
+  await page.getByRole("button", { name: "설정 내보내기" }).click();
+  const manifest = page.getByTestId("team-manifest");
+  const changedIdentity = JSON.parse(await manifest.inputValue()) as {
+    currentUserId: string;
+    members: Array<Record<string, unknown>>;
+  };
+  changedIdentity.currentUserId = "review-user";
+  changedIdentity.members.push({
+    userId: "review-user",
+    displayName: "검토 사용자",
+    color: "#0f9f8f",
+    role: "editor"
+  });
+  await manifest.fill(JSON.stringify(changedIdentity));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+
+  await expect(page.getByTestId("account-token-member")).toContainText("review-user");
+  await expect(page.getByTestId("authorization-audit-status")).toContainText(
+    "owner role is required"
+  );
+  await expect(page.getByTestId("authorization-audit-list").locator("li")).toHaveCount(0);
+  expect(auditRequests.some(({ userId }) => userId === "review-user")).toBe(true);
+});
+
 test("guards pending operations, network errors, and stale identity responses", async ({ page }) => {
   await createAuthenticatedLocalTeam(page);
 
