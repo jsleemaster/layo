@@ -991,7 +991,10 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         currentBaseFingerprint: currentFingerprint,
         expectedGeneration: "0",
         candidateBasePath: secondCandidatePath
-      });
+      }).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error })
+      );
 
       try {
         await waitForDatabaseLock(observer, secondApplicationName);
@@ -1003,8 +1006,9 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
             JSON.stringify(firstCandidate)
           )
         });
-        await expect(secondReconcile).rejects.toMatchObject({
-          statusCode: 409
+        await expect(secondReconcile).resolves.toMatchObject({
+          status: "rejected",
+          error: { statusCode: 409 }
         });
 
         await expect(firstStore.read(scope)).resolves.toMatchObject({
