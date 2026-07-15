@@ -59,6 +59,17 @@ Deterministic RED evidence:
   typecheck.
 - Full Verification `29391351523`: async shutdown rejection reporting occurred
   outside the focused deterministic test boundary.
+- Full Verification `29394310891`: independent review reproduced writes after
+  an SSE response had already ended.
+- Full Verification `29394464321`: after the SSE write guard passed, the
+  remaining focused test proved authorization cleanup was skipped when
+  `server.close()` rejected.
+- Full Verification `29394980417`: delayed initial authentication proved a
+  stream could register after the first closer-set drain.
+- Full Verification `29395174139`: the first pre-close-state repair still
+  returned 200 because Fastify could resume the handler before invoking
+  `preClose`; this rejected the lifecycle-order assumption and moved the
+  boundary to the synchronous `server.close()` call.
 
 GREEN evidence established before the lifecycle review:
 
@@ -74,9 +85,14 @@ GREEN evidence established before the lifecycle review:
   bootstrap, versioned export, exact-scope deletion, explicit restore,
   byte-identical re-export, private artifact mode, and secret-leak checks.
 
-The final repaired PR-head Full Verification, storage drills, independent review,
-and merge evidence remain Task 8 gates and must be added before this document is
-marked complete.
+Final lifecycle code head
+`05cc03591e71e30f53d737f52070da92cf9c8f6a`: Full Verification
+`29395377834` attempt 3 passed maturity/design gates, typecheck, web build,
+all 445 server tests, Rust/workspace tests, and 200 Playwright CLI e2e cases.
+Attempts 1 and 2 stopped in two different pre-existing timing-sensitive tests
+while every new lifecycle regression passed; the unchanged-head third attempt
+completed the suite. Independent lifecycle re-review confirmed all original and
+follow-up findings resolved with no P0-P2.
 
 ## Operations Boundary
 
