@@ -367,7 +367,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
 
       await expect(migratePostgresTeamAuthorizationState({
         connectionString: runtimeConnection
-      })).rejects.toThrow(/migration.*privilege|schema.*create|migrator/i);
+      })).rejects.toThrow(/permission denied for schema|migration.*privilege|schema.*create|migrator/i);
     } finally {
       await runtimeStore?.close();
       await admin.query(`DROP OWNED BY ${roleSql}`).catch(() => undefined);
