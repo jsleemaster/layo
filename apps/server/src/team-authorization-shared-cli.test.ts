@@ -126,6 +126,20 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
     });
   });
 
+  test("requires the database URL, explicit scope, and bootstrap base file", async () => {
+    await expect(runTeamAuthorizationSharedCli([
+      "export", "--scope", "required-env"
+    ], { env: {} })).rejects.toThrow("LAYO_AUTHORIZATION_DATABASE_URL is required");
+
+    await expect(runTeamAuthorizationSharedCli([
+      "export"
+    ], { env: cliEnv() })).rejects.toThrow("--scope is required");
+
+    await expect(runTeamAuthorizationSharedCli([
+      "bootstrap", "--scope", `required-base-${randomUUID()}`, "--empty"
+    ], { env: cliEnv() })).rejects.toThrow("--base is required");
+  });
+
   test("bootstraps empty state at generation zero with a canonical whole-base fingerprint", async () => {
     await withFiles(async (_root, basePath) => {
       const scope = `empty-${randomUUID()}`;
