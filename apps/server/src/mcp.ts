@@ -586,7 +586,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         inputSchema: {}
       },
       async () => {
-        const result = await manager.manageTokens(principal, { type: "list" });
+        const result = await manager.manageTokens(
+          { ...principal, audit: { source: "mcp" } }, { type: "list" });
         if (result.type !== "list") {
           throw new Error("unexpected team authorization list result");
         }
@@ -619,7 +620,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         }
       },
       async ({ name, expiresInDays }) => {
-        const result = await manager.manageTokens(principal, {
+        const result = await manager.manageTokens(
+          { ...principal, audit: { source: "mcp" } }, {
           type: "create",
           input: { name, expiresInDays }
         });
@@ -656,7 +658,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         }
       },
       async ({ tokenId, confirmSelfRevoke }) => {
-        const result = await manager.manageTokens(principal, {
+        const result = await manager.manageTokens(
+          { ...principal, audit: { source: "mcp" } }, {
           type: "revoke",
           tokenId,
           confirmSelfRevoke
