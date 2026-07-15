@@ -231,7 +231,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   });
 
-  server.addHook("onClose", async () => {
+  server.addHook("preClose", async () => {
+    // Purpose: end long-lived responses before Node waits for active sockets.
     for (const close of [...commentEventStreamClosers]) {
       close();
     }
@@ -408,6 +409,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           clearInterval(pollId);
         }
         libraryRegistryStreamClosers.delete(close);
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+          reply.raw.end();
+        }
       };
       const sendPendingEvents = async () => {
         if (sending || reply.raw.destroyed) {
@@ -777,6 +781,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         clearInterval(heartbeatId);
         clearInterval(pollId);
         commentEventStreamClosers.delete(close);
+        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+          reply.raw.end();
+        }
       };
 
       commentEventStreamClosers.add(close);
