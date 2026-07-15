@@ -162,15 +162,22 @@ export interface TeamAuthorizationStateStore {
 - Create: `apps/server/src/team-authorization-shared-auth.test.ts`
 - Modify: relevant HTTP/MCP authorization tests
 
-- [ ] Add an async authorization source/provider used by every protected HTTP route, SSE poll, MCP tool, and token-management operation.
-- [ ] Before authentication, read the current operator base file, read PostgreSQL, then reread the base file. Accept only equal base snapshots whose canonical fingerprint equals the shared row; retry a bounded number of times on an in-flight base write, then fail closed.
-- [ ] Write RED proving a base change between database read and authentication cannot use a watched cache or accept the old credential.
-- [ ] Write RED proving host B rejects a token on the first protected request after host A commits revocation, without waiting for watcher polling.
-- [ ] Require unchanged generations to avoid reparsing managed state but still complete the stable base/database/base read before auth.
-- [ ] Write deterministic outage/timeout/malformed-generation/unsafe-bigint RED cases: startup and each protected request fail closed, cached credentials are not accepted, and recovery publishes only the newest generation.
-- [ ] Prevent a slow stale read from republishing after a newer generation or after close.
-- [ ] Preserve unconfigured local-first synchronous behavior.
-- [ ] Re-run HTTP, SSE, MCP, and management tests to GREEN.
+- [x] Add an async authorization source/provider used by every protected HTTP route, SSE poll, MCP tool, and token-management operation.
+- [x] Before authentication, read the current operator base file, read PostgreSQL, then reread the base file. Accept only equal base snapshots whose canonical fingerprint equals the shared row; retry a bounded number of times on an in-flight base write, then fail closed.
+- [x] Write RED proving a base change between database read and authentication cannot use a watched cache or accept the old credential.
+- [x] Write RED proving host B rejects a token on the first protected request after host A commits revocation, without waiting for watcher polling.
+- [x] Require unchanged generations to avoid reparsing managed state but still complete the stable base/database/base read before auth.
+- [x] Write deterministic outage/timeout/malformed-generation/unsafe-bigint RED cases: startup and each protected request fail closed, cached credentials are not accepted, and recovery publishes only the newest generation.
+- [x] Prevent a slow stale read from republishing after a newer generation or after close.
+- [x] Preserve unconfigured local-first synchronous behavior.
+- [x] Re-run HTTP, SSE, MCP, and management tests to GREEN.
+
+**Task 5 evidence (2026-07-15):**
+
+- Provider contract RED: Full Verification `29388355639` failed because `createTeamAuthorizationProvider` and `createSharedTeamAuthorizationProvider` did not exist.
+- Request-path integration RED: Full Verification `29388618800` failed because HTTP and MCP did not accept a request-time authorization provider.
+- First GREEN attempt `29388717693` proved the new HTTP, MCP, and SSE provider tests passed, while three existing token-administration tests caught an over-broad manager gate that returned 500 instead of the required 503 without an authorization source.
+- The manager gate now requires both a manager and an authorization provider. Exact head `b5bc7fd7ec0be1f5a40302fe396ff4517936b370`: Full Verification `29388825857` passed maturity/design gates, typecheck, web build, all 427 server tests, Rust/workspace tests, and Playwright CLI e2e in 10m12s. Storage Restore Drill `29388825795` and Retention `29388825808` passed on the same head.
 
 ## Task 6: Async lifecycle and startup wiring
 
