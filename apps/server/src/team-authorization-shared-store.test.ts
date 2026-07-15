@@ -424,17 +424,27 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
       });
       const base = await readFile(firstBasePath, "utf8");
       await initializeScope(failingStore, scope, base);
+      const failingConfig = configFrom(base);
+      let publicationAttempts = 0;
+      let scheduledRefresh: (() => Promise<void>) | undefined;
       const failingManager = createTeamAuthorizationFileManager(
         firstBasePath,
-        configFrom(base),
+        failingConfig,
         {
           stateStore: failingStore,
           sharedScope: scope,
           now: () => new Date("2026-07-15T12:00:00.000Z"),
           generateId: () => "committed-token",
           generateSecret: () => "layo_pat_committed_once",
-          publishSharedConfig: async () => {
-            throw new Error("injected local cache publication failure");
+          publishSharedConfig: async (nextConfig) => {
+            publicationAttempts += 1;
+            if (publicationAttempts === 1) {
+              throw new Error("injected local cache publication failure");
+            }
+            failingConfig.members = nextConfig.members;
+          },
+          scheduleSharedRefresh: (refresh) => {
+            scheduledRefresh = refresh;
           }
         }
       );
@@ -470,6 +480,14 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           tokenHash("layo_pat_committed_once")
         );
         expect(committed.serializedState).not.toContain("layo_pat_committed_once");
+        expect(failingConfig.members).toEqual([]);
+        expect(scheduledRefresh).toBeTypeOf("function");
+        await scheduledRefresh!();
+        expect(authenticateTeamMember(
+          failingConfig,
+          "owner-user",
+          "layo_pat_committed_once"
+        )).toMatchObject({ tokenId: "committed-token" });
 
         await expect(healthyManager.manageTokens(
           { userId: "owner-user", memberToken: "layo_pat_committed_once" },
@@ -485,6 +503,90 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         )).toMatchObject({ tokenId: "committed-token" });
       } finally {
         await Promise.all([failingStore.close(), healthyStore.close()]);
+      }
+    });
+  });
+
+  test("does not let a late list publish an older generation over a newer revoke", async () => {
+    await withBaseFiles(async (_root, firstBasePath, secondBasePath) => {
+      const scope = `late-list-${randomUUID()}`;
+      const listStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const revokeStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      await initializeScope(listStore, scope, base);
+      const sharedConfig = configFrom(base);
+      const seedManager = createTeamAuthorizationFileManager(
+        firstBasePath,
+        sharedConfig,
+        {
+          stateStore: listStore,
+          sharedScope: scope,
+          now: () => new Date("2026-07-15T12:30:00.000Z"),
+          generateId: () => "late-list-token",
+          generateSecret: () => "layo_pat_late_list"
+        }
+      );
+      await seedManager.manageTokens(
+        { userId: "owner-user", memberToken: "owner-base-secret" },
+        {
+          type: "create",
+          input: { name: "Late list", expiresInDays: null }
+        }
+      );
+
+      const listReachedPublication = deferred();
+      const listMayPublish = deferred();
+      const listManager = createTeamAuthorizationFileManager(
+        firstBasePath,
+        sharedConfig,
+        {
+          stateStore: listStore,
+          sharedScope: scope,
+          publishSharedConfig: async (nextConfig) => {
+            listReachedPublication.resolve();
+            await listMayPublish.promise;
+            sharedConfig.members = nextConfig.members;
+          }
+        }
+      );
+      const revokeManager = createTeamAuthorizationFileManager(
+        secondBasePath,
+        sharedConfig,
+        {
+          stateStore: revokeStore,
+          sharedScope: scope,
+          now: () => new Date("2026-07-15T12:30:01.000Z")
+        }
+      );
+
+      try {
+        const lateList = listManager.manageTokens(
+          { userId: "owner-user", memberToken: "layo_pat_late_list" },
+          { type: "list" }
+        );
+        await listReachedPublication.promise;
+        await revokeManager.manageTokens(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { type: "revoke", tokenId: "late-list-token" }
+        );
+        listMayPublish.resolve();
+        await lateList;
+
+        expect(() => authenticateTeamMember(
+          sharedConfig,
+          "owner-user",
+          "layo_pat_late_list"
+        )).toThrow("team member credentials are invalid");
+        await expect(listStore.read(scope)).resolves.toMatchObject({
+          generation: "2"
+        });
+      } finally {
+        listMayPublish.resolve();
+        await Promise.all([listStore.close(), revokeStore.close()]);
       }
     });
   });
@@ -613,6 +715,59 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
             tokenHash: tokenHash("layo_pat_preserved")
           }],
           revocations: [{ tokenId: "preserved-token" }]
+        });
+
+        const candidateBase = await readFile(candidatePath, "utf8");
+        const recoveredConfig = configFrom(candidateBase);
+        const recoveredManager = createTeamAuthorizationFileManager(
+          candidatePath,
+          recoveredConfig,
+          { stateStore: store, sharedScope: scope }
+        );
+        await expect(recoveredManager.manageTokens(
+          { userId: "owner-user", memberToken: "changed-owner-base-secret" },
+          { type: "list" }
+        )).resolves.toMatchObject({ type: "list" });
+        const recovered = await store.read(scope);
+        expect(recovered.generation).toBe("4");
+        const recoveredState = JSON.parse(recovered.serializedState) as {
+          members: Array<{
+            userId: string;
+            quarantined: boolean;
+            revocations: Array<{ tokenId: string }>;
+          }>;
+        };
+        expect(recoveredState.members.find(
+          ({ userId }) => userId === "owner-user"
+        )).toMatchObject({
+          quarantined: false,
+          revocations: [{ tokenId: "preserved-token" }]
+        });
+      } finally {
+        await store.close();
+      }
+    });
+  });
+
+  test("does not advance generation for an identical offline reconciliation", async () => {
+    await withBaseFiles(async (_root, firstBasePath) => {
+      const scope = `reconcile-noop-${randomUUID()}`;
+      const store = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      const fingerprint = canonicalTeamAuthorizationBaseFingerprint(base);
+      await initializeScope(store, scope, base);
+      try {
+        await expect(runTeamAuthorizationBaseReconciliation({
+          stateStore: store,
+          sharedScope: scope,
+          currentBaseFingerprint: fingerprint,
+          expectedGeneration: "0",
+          candidateBasePath: firstBasePath
+        })).resolves.toEqual({
+          generation: "0",
+          baseFingerprint: fingerprint
         });
       } finally {
         await store.close();
