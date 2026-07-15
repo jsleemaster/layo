@@ -2,7 +2,7 @@ import { startHttpServer } from "./http-startup.js";
 import { installProcessShutdown } from "./process-shutdown.js";
 
 const started = await startHttpServer(process.env);
-let disposeShutdown = () => undefined;
+let disposeShutdown: () => void = () => undefined;
 const shutdown = async (): Promise<void> => {
   try {
     await started.shutdown();
