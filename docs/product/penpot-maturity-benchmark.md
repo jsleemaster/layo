@@ -143,8 +143,10 @@ Independent security review found no actionable code issue and all five review
 threads are resolved. Final repaired docs head `de3e88ea` passed Full
 `29380205891`, restore `29380205922`, and retention `29380205936`.
 PR #308 was squash-merged as `5df21e360aff0970b009e7e911007167d6f83f96`;
-post-merge checks confirmed the merged PR and the remote feature branch was
-deleted. Deployment remains non-gating.
+remote post-merge checks confirmed the merge and feature-branch deletion.
+Required local status/current-branch/worktree checks still exit 134, so the plan
+retains an explicit cleanup exception instead of claiming completion.
+Deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps
