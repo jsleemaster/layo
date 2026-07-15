@@ -30,6 +30,12 @@ import {
   type GeometryPatch
 } from "./storage.js";
 
+export function canWriteEventStream(
+  response: { destroyed: boolean; writableEnded: boolean }
+): boolean {
+  return !response.destroyed && !response.writableEnded;
+}
+
 export interface HttpServerOptions {
   webBasePath?: string;
   webDistDir?: string | null;
@@ -388,7 +394,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       });
 
       const sendBlock = (eventName: string, payload: unknown) => {
-        if (reply.raw.destroyed) {
+        if (!canWriteEventStream(reply.raw)) {
           return;
         }
         reply.raw.write(`event: ${eventName}\n`);
@@ -409,12 +415,12 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           clearInterval(pollId);
         }
         libraryRegistryStreamClosers.delete(close);
-        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.end();
         }
       };
       const sendPendingEvents = async () => {
-        if (sending || reply.raw.destroyed) {
+        if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
@@ -459,7 +465,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       };
 
       heartbeatId = setInterval(() => {
-        if (!reply.raw.destroyed) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
@@ -732,7 +738,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       });
 
       const sendBlock = (eventName: string, payload: unknown) => {
-        if (reply.raw.destroyed) {
+        if (!canWriteEventStream(reply.raw)) {
           return;
         }
         reply.raw.write(`event: ${eventName}\n`);
@@ -742,7 +748,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
       const sendPendingEvents = async () => {
-        if (sending || reply.raw.destroyed) {
+        if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
@@ -769,7 +775,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       };
 
       const heartbeatId = setInterval(() => {
-        if (!reply.raw.destroyed) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
@@ -781,7 +787,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         clearInterval(heartbeatId);
         clearInterval(pollId);
         commentEventStreamClosers.delete(close);
-        if (!reply.raw.destroyed && !reply.raw.writableEnded) {
+        if (canWriteEventStream(reply.raw)) {
           reply.raw.end();
         }
       };
