@@ -52,17 +52,17 @@ This slice advances maturity gates 7, 8, and 10. It does not close audit consump
 - Modify: `pnpm-lock.yaml`
 - Modify: `.github/workflows/full-verification.yml`
 
-- [ ] Add a PostgreSQL 16 service to Full Verification and a test-only URL with secret-free purpose comments.
-- [ ] Add `pg` and `@types/pg` through pnpm.
-- [ ] Add a versioned migration table plus authorization scope table with primary-key scope, nonnegative bigint generation, 64-hex base fingerprint, JSONB state, schema version, updated timestamp, and an encoded-state size check.
+- [x] Add a PostgreSQL 16 service to Full Verification and a test-only URL with secret-free purpose comments.
+- [x] Add `pg` and `@types/pg` through pnpm.
+- [x] Add a versioned migration table plus authorization scope table with primary-key scope, nonnegative bigint generation, 64-hex base fingerprint, JSONB state, schema version, updated timestamp, and an encoded-state size check.
 - [ ] Document separate migration and runtime roles: migration owns advisory-lock/DDL privileges; runtime receives only schema-version read and scope-row SELECT/INSERT/UPDATE privileges. Do not grant privileges from application SQL.
-- [ ] Write a real PostgreSQL RED with two pools. Transaction A seeds/locks generation zero and pauses before its callback returns; prove B's callback cannot enter, release A, then prove B reads generation 1 and commits generation 2.
-- [ ] Require rollback to preserve prior generation/state, different scopes to remain isolated, oversized/malformed state to fail, and generation above JavaScript safe integer to remain exact as a decimal string.
-- [ ] Run the focused test and record the intended missing-store/migration RED.
-- [ ] Implement an explicit `authorization:migrate` command that takes a fixed PostgreSQL advisory lock, applies versioned migrations idempotently, and records schema version. Runtime startup only validates the required schema version and never needs DDL privileges.
-- [ ] Add a two-client migration race test proving one ordered migration result and runtime startup tests for missing/newer schema versions.
-- [ ] Implement atomic seed, locked reread, callback transaction, exact bigint parsing, commit, rollback, statement timeout, and idempotent close.
-- [ ] Re-run the focused suite to GREEN.
+- [x] Write a real PostgreSQL RED with two pools. Transaction A seeds/locks generation zero and pauses before its callback returns; prove B's callback cannot enter, release A, then prove B reads generation 1 and commits generation 2.
+- [x] Require rollback to preserve prior generation/state, different scopes to remain isolated, oversized/malformed state to fail, and generation above JavaScript safe integer to remain exact as a decimal string.
+- [x] Run the focused test and record the intended missing-store/migration RED.
+- [x] Implement an explicit `authorization:migrate` command that takes a fixed PostgreSQL advisory lock, applies versioned migrations idempotently, and records schema version. Runtime startup only validates the required schema version and never needs DDL privileges.
+- [x] Add a two-client migration race test proving one ordered migration result and runtime startup tests for missing/newer schema versions.
+- [x] Implement atomic seed, locked reread, callback transaction, exact bigint parsing, commit, rollback, statement timeout, and idempotent close.
+- [x] Re-run the focused suite to GREEN.
 
 Store contract:
 
@@ -94,14 +94,23 @@ export interface TeamAuthorizationStateStore {
 - Modify: `apps/server/package.json`
 - Modify: `apps/server/src/team-authorization.ts`
 
-- [ ] Write RED coverage for `bootstrap --empty` and `bootstrap --from-sidecar` into an absent scope.
-- [ ] When two hosts bootstrap concurrently, require identical canonical base fingerprint and serialized state; reject a conflicting loser without changing generation/state.
-- [ ] Reject bootstrap when the database scope is nonempty, when the sidecar has plaintext/malformed state, or when the current base cannot merge the sidecar.
-- [ ] Add `export` that emits a secret-free versioned JSON artifact with scope, generation string, base fingerprint, and hash-only state.
-- [ ] Add `restore` only for an absent scope. Reject every existing-scope restore, including matching fingerprint/generation, so a stale backup cannot resurrect revoked tokens over live state. Preserve the artifact generation as provenance while the restored row starts from that exact generation; require an explicit operator confirmation flag and test stale-backup/live-scope no-write behavior.
+- [x] Write RED coverage for `bootstrap --empty` and `bootstrap --from-sidecar` into an absent scope.
+- [x] When two hosts bootstrap concurrently, require identical canonical base fingerprint and serialized state; reject a conflicting loser without changing generation/state.
+- [x] Reject bootstrap when the database scope is nonempty, when the sidecar has plaintext/malformed state, or when the current base cannot merge the sidecar.
+- [x] Add `export` that emits a secret-free versioned JSON artifact with scope, generation string, base fingerprint, and hash-only state.
+- [x] Add `restore` only for an absent scope. Reject every existing-scope restore, including matching fingerprint/generation, so a stale backup cannot resurrect revoked tokens over live state. Preserve the artifact generation as provenance while the restored row starts from that exact generation; require an explicit operator confirmation flag and test stale-backup/live-scope no-write behavior.
 - [ ] Require shared runtime startup to fail when the scope is absent with an exact bootstrap instruction. Runtime startup must never auto-import a sidecar.
 - [ ] Prove shared mode ignores a stale sidecar after bootstrap and filesystem mode remains unchanged.
-- [ ] Add package scripts for migrate/bootstrap/export/restore and focused GREEN tests.
+- [x] Add package scripts for migrate/bootstrap/export/restore and focused GREEN tests.
+
+
+**Task 1-2 evidence (2026-07-15):**
+
+- Store RED: Full Verification `29383180698` failed on rollback scope recreation and plaintext state acceptance.
+- CLI RED: Full Verification `29384285521` failed because the explicit shared CLI contract did not exist.
+- Task 1 review found rollback cleanup, sidecar hash normalization, and pool lifecycle gaps; follow-up review was clean at `bb9ba622f02314ac0a744f6f9da9526c323927cf`.
+- Task 2 review found locale ordering, export permissions/error precedence, and atomic backup publication gaps; follow-up review was clean at `5562b3cb8ad6ba7d559ce29d4c9edd227b39cf99`.
+- Full Verification `29385113162` passed maturity gates, typecheck, build, and core PostgreSQL suites on the Task 2 exact head before Playwright completion. Storage Restore Drill `29385113134` and Retention `29385113107` are the corresponding exact-head runs.
 
 ## Task 3: Canonical whole-base fingerprint and reconciliation RED
 
