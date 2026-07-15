@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
 import { describe, expect, test } from "vitest";
 import {
   createPostgresTeamAuthorizationStateStore,
@@ -10,17 +11,53 @@ const describePostgres = connectionString ? describe : describe.skip;
 const fingerprint = "a".repeat(64);
 const emptyState = JSON.stringify({ version: 2, members: [] });
 
+function memberState(userId: string) {
+  return {
+    userId,
+    baseFingerprint: fingerprint,
+    quarantined: false,
+    tokens: [],
+    revocations: []
+  };
+}
+
+function withApplicationName(urlValue: string, applicationName: string): string {
+  const url = new URL(urlValue);
+  url.searchParams.set("application_name", applicationName);
+  return url.toString();
+}
+
+async function waitForDatabaseLock(pool: Pool, applicationName: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ wait_event_type: string | null }>(
+      `SELECT wait_event_type
+         FROM pg_stat_activity
+        WHERE application_name = $1
+          AND state = 'active'`,
+      [applicationName]
+    );
+    if (result.rows.some((row) => row.wait_event_type === "Lock")) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for the second authorization writer to block");
+}
+
 describePostgres("PostgreSQL team authorization state store", () => {
   test("serializes concurrent first writers into exact bigint generations", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const applicationName = `layo-second-writer-${randomUUID()}`;
     const first = await createPostgresTeamAuthorizationStateStore({
       connectionString: connectionString!,
       statementTimeoutMs: 5_000
     });
     const second = await createPostgresTeamAuthorizationStateStore({
-      connectionString: connectionString!,
+      connectionString: withApplicationName(connectionString!, applicationName),
       statementTimeoutMs: 5_000
     });
+    const observer = new Pool({ connectionString: connectionString! });
     const scope = `first-writer-${randomUUID()}`;
     let releaseFirst!: () => void;
     let firstEntered!: () => void;
@@ -48,7 +85,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
             baseFingerprint: fingerprint,
             serializedState: JSON.stringify({
               version: 2,
-              members: [{ userId: "first", tokens: [], revocations: [] }]
+              members: [memberState("first")]
             }),
             result: "first"
           };
@@ -70,14 +107,14 @@ describePostgres("PostgreSQL team authorization state store", () => {
             baseFingerprint: fingerprint,
             serializedState: JSON.stringify({
               ...parsed,
-              members: [...parsed.members, { userId: "second", tokens: [], revocations: [] }]
+              members: [...parsed.members, memberState("second")]
             }),
             result: "second"
           };
         }
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await waitForDatabaseLock(observer, applicationName);
       expect(secondEntered).toBe(false);
       releaseFirst();
 
@@ -89,22 +126,22 @@ describePostgres("PostgreSQL team authorization state store", () => {
         generation: "2",
         result: "second"
       });
-      await expect(first.read(scope)).resolves.toMatchObject({
+      const final = await first.read(scope);
+      expect(final).toMatchObject({
         generation: "2",
         baseFingerprint: fingerprint
       });
-      const final = await first.read(scope);
       expect(JSON.parse(final.serializedState)).toMatchObject({
         version: 2,
         members: [{ userId: "first" }, { userId: "second" }]
       });
     } finally {
       releaseFirst?.();
-      await Promise.all([first.close(), second.close()]);
+      await Promise.all([first.close(), second.close(), observer.end()]);
     }
   });
 
-  test("rolls back callback failures without advancing generation", async () => {
+  test("rolls back a failed first mutation to an absent scope", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
       connectionString: connectionString!
@@ -115,17 +152,43 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await expect(store.mutate(scope, fingerprint, async () => {
         throw new Error("injected mutation failure");
       })).rejects.toThrow("injected mutation failure");
-      await expect(store.read(scope)).resolves.toEqual({
-        generation: "0",
-        baseFingerprint: fingerprint,
-        serializedState: emptyState
-      });
+      await expect(store.read(scope)).rejects.toThrow(
+        `authorization scope ${scope} does not exist`
+      );
     } finally {
       await store.close();
     }
   });
 
-  test("isolates scopes and keeps bigint generations exact", async () => {
+  test("rejects plaintext and malformed managed state without advancing generation", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const scope = `plaintext-${randomUUID()}`;
+    const plaintextState = JSON.stringify({
+      version: 2,
+      members: [{
+        ...memberState("owner-user"),
+        tokens: [{ id: "bad", name: "Bad", token: "plaintext" }]
+      }]
+    });
+
+    try {
+      await expect(store.mutate(scope, fingerprint, async () => ({
+        baseFingerprint: fingerprint,
+        serializedState: plaintextState,
+        result: null
+      }))).rejects.toThrow(/hash-only|plaintext|managed state/i);
+      await expect(store.read(scope)).rejects.toThrow(
+        `authorization scope ${scope} does not exist`
+      );
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("isolates scopes", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
       connectionString: connectionString!
@@ -149,6 +212,42 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await expect(store.read(secondScope)).resolves.toMatchObject({ generation: "1" });
     } finally {
       await store.close();
+    }
+  });
+
+  test("keeps generations exact above Number.MAX_SAFE_INTEGER", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const admin = new Pool({ connectionString: connectionString! });
+    const scope = `bigint-${randomUUID()}`;
+
+    try {
+      await store.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: fingerprint,
+        serializedState: snapshot.serializedState,
+        result: null
+      }));
+      await admin.query(
+        `UPDATE layo_team_authorization_state
+            SET generation = $2::bigint
+          WHERE scope = $1`,
+        [scope, "9007199254740993"]
+      );
+
+      await expect(store.read(scope)).resolves.toMatchObject({
+        generation: "9007199254740993"
+      });
+      await expect(store.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: fingerprint,
+        serializedState: snapshot.serializedState,
+        result: null
+      }))).resolves.toMatchObject({
+        generation: "9007199254740994"
+      });
+    } finally {
+      await Promise.all([store.close(), admin.end()]);
     }
   });
 });
