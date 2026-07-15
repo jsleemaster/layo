@@ -2454,7 +2454,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
       teamAuthorizationManager: authorizationRuntime.teamAuthorizationManager
     });
     const transport = new StdioServerTransport();
-    let disposeShutdown = () => undefined;
+    let disposeShutdown: () => void = () => undefined;
     let resourceClosePromise: Promise<void> | undefined;
     const closeResources = (): Promise<void> => {
       resourceClosePromise ??= (async () => {
