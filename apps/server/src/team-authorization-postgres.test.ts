@@ -27,6 +27,19 @@ function withApplicationName(urlValue: string, applicationName: string): string 
   return url.toString();
 }
 
+function withSearchPath(urlValue: string, schema: string): string {
+  const url = new URL(urlValue);
+  url.searchParams.set("options", `-csearch_path=${schema}`);
+  return url.toString();
+}
+
+function sqlIdentifier(value: string): string {
+  if (!/^[a-z][a-z0-9_]*$/.test(value)) {
+    throw new Error("unsafe PostgreSQL test identifier");
+  }
+  return `"${value}"`;
+}
+
 async function waitForDatabaseLock(pool: Pool, applicationName: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -250,4 +263,111 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await Promise.all([store.close(), admin.end()]);
     }
   });
+
+  test("serializes concurrent migrators in an isolated schema", async () => {
+    const admin = new Pool({ connectionString: connectionString! });
+    const schema = `layo_migration_${randomUUID().replaceAll("-", "")}`;
+    const schemaSql = sqlIdentifier(schema);
+    const scopedConnection = withSearchPath(connectionString!, schema);
+
+    try {
+      await admin.query(`CREATE SCHEMA ${schemaSql}`);
+      await expect(Promise.all([
+        migratePostgresTeamAuthorizationState({ connectionString: scopedConnection }),
+        migratePostgresTeamAuthorizationState({ connectionString: scopedConnection })
+      ])).resolves.toEqual([undefined, undefined]);
+      const store = await createPostgresTeamAuthorizationStateStore({
+        connectionString: scopedConnection
+      });
+      await store.close();
+    } finally {
+      await admin.query(`DROP SCHEMA IF EXISTS ${schemaSql} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test("rejects missing and newer authorization schemas", async () => {
+    const admin = new Pool({ connectionString: connectionString! });
+    const schema = `layo_version_${randomUUID().replaceAll("-", "")}`;
+    const schemaSql = sqlIdentifier(schema);
+    const scopedConnection = withSearchPath(connectionString!, schema);
+
+    try {
+      await admin.query(`CREATE SCHEMA ${schemaSql}`);
+      await expect(createPostgresTeamAuthorizationStateStore({
+        connectionString: scopedConnection
+      })).rejects.toThrow(/schema is missing|authorization:migrate/i);
+
+      await migratePostgresTeamAuthorizationState({ connectionString: scopedConnection });
+      await admin.query(
+        `INSERT INTO ${schemaSql}.layo_authorization_schema_migrations (version)
+         VALUES (2)`
+      );
+
+      await expect(migratePostgresTeamAuthorizationState({
+        connectionString: scopedConnection
+      })).rejects.toThrow(/newer than supported version/i);
+      await expect(createPostgresTeamAuthorizationStateStore({
+        connectionString: scopedConnection
+      })).rejects.toThrow(/does not match required version/i);
+    } finally {
+      await admin.query(`DROP SCHEMA IF EXISTS ${schemaSql} CASCADE`);
+      await admin.end();
+    }
+  });
+
+  test("separates migrator DDL privileges from runtime state access", async () => {
+    const admin = new Pool({ connectionString: connectionString! });
+    const suffix = randomUUID().replaceAll("-", "");
+    const schema = `layo_runtime_${suffix}`;
+    const role = `layo_runtime_${suffix}`;
+    const password = `runtime_${suffix}`;
+    const schemaSql = sqlIdentifier(schema);
+    const roleSql = sqlIdentifier(role);
+    const scopedAdminConnection = withSearchPath(connectionString!, schema);
+    const runtimeUrl = new URL(scopedAdminConnection);
+    runtimeUrl.username = role;
+    runtimeUrl.password = password;
+    const runtimeConnection = runtimeUrl.toString();
+    let runtimeStore: Awaited<
+      ReturnType<typeof createPostgresTeamAuthorizationStateStore>
+    > | undefined;
+
+    try {
+      await admin.query(`CREATE SCHEMA ${schemaSql}`);
+      await migratePostgresTeamAuthorizationState({
+        connectionString: scopedAdminConnection
+      });
+      await admin.query(`CREATE ROLE ${roleSql} LOGIN PASSWORD $1`, [password]);
+      await admin.query(`GRANT USAGE ON SCHEMA ${schemaSql} TO ${roleSql}`);
+      await admin.query(
+        `GRANT SELECT ON ${schemaSql}.layo_authorization_schema_migrations TO ${roleSql}`
+      );
+      await admin.query(
+        `GRANT SELECT, INSERT, UPDATE
+           ON ${schemaSql}.layo_team_authorization_state TO ${roleSql}`
+      );
+
+      runtimeStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: runtimeConnection
+      });
+      const scope = `runtime-${suffix}`;
+      await expect(runtimeStore.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: fingerprint,
+        serializedState: snapshot.serializedState,
+        result: null
+      }))).resolves.toMatchObject({ generation: "1" });
+
+      await expect(migratePostgresTeamAuthorizationState({
+        connectionString: runtimeConnection
+      })).rejects.toThrow(/migration.*privilege|schema.*create|migrator/i);
+    } finally {
+      await runtimeStore?.close();
+      await admin.query(`DROP OWNED BY ${roleSql}`).catch(() => undefined);
+      await admin.query(`DROP ROLE IF EXISTS ${roleSql}`).catch(() => undefined);
+      await admin.query(`DROP SCHEMA IF EXISTS ${schemaSql} CASCADE`);
+      await admin.end();
+    }
+  });
+
 });
