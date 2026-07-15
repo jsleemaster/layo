@@ -806,7 +806,8 @@ function createSharedTeamAuthorizationFileManager(
             serializedState: mutating
               ? serializeManagedTokenState(state)
               : locked.serializedState,
-            result: { applied, mergedConfig }
+            result: { applied, mergedConfig },
+            changed: applied.changed
           };
         }
       );
