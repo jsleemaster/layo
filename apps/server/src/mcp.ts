@@ -4,8 +4,8 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
 import {
-  authenticateTeamMember,
   createTeamAuthorizationFileManager,
+  createTeamAuthorizationProvider,
   authorizeTeamLibraryRead,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
@@ -13,7 +13,8 @@ import {
   watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile,
   type TeamAuthorizationConfig,
-  type TeamAuthorizationFileManager
+  type TeamAuthorizationFileManager,
+  type TeamAuthorizationProvider
 } from "./team-authorization.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
@@ -497,6 +498,7 @@ const writeToolAnnotations = {
 
 export interface McpServerOptions {
   libraryRegistryAuth?: TeamAuthorizationConfig;
+  libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
   libraryRegistryPrincipal?: {
     userId: string;
     memberToken: string;
@@ -505,17 +507,21 @@ export interface McpServerOptions {
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
-  const authenticateLibraryMember = () =>
-    options.libraryRegistryAuth
-      ? authenticateTeamMember(
-          options.libraryRegistryAuth,
-          options.libraryRegistryPrincipal?.userId,
-          options.libraryRegistryPrincipal?.memberToken
-        )
+  const libraryRegistryAuthorizationProvider =
+    options.libraryRegistryAuthorizationProvider
+    ?? (options.libraryRegistryAuth
+      ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
+      : undefined);
+  const authenticateLibraryMember = async () =>
+    libraryRegistryAuthorizationProvider
+      ? libraryRegistryAuthorizationProvider.authenticate({
+          userId: options.libraryRegistryPrincipal?.userId,
+          memberToken: options.libraryRegistryPrincipal?.memberToken
+        })
       : undefined;
 
   const authorizeLibraryRead = async (fileId: string) => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (member) {
       authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
     }
@@ -525,7 +531,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     fileId: string | undefined,
     list: (fileId?: string) => Promise<T[]>
   ): Promise<T[]> => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (fileId) {
       if (member) {
         authorizeTeamLibraryRead(member, await storage.getTeamIdForFile(fileId));
@@ -549,7 +555,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
   };
 
   const authorizeLibraryWrite = async (fileId: string) => {
-    const member = authenticateLibraryMember();
+    const member = await authenticateLibraryMember();
     if (member) {
       authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
@@ -562,7 +568,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
 
   if (
     options.teamAuthorizationManager
-    && options.libraryRegistryAuth
+    && libraryRegistryAuthorizationProvider
     && options.libraryRegistryPrincipal
   ) {
     const manager = options.teamAuthorizationManager;
@@ -1091,7 +1097,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId }) => {
-      const member = authenticateLibraryMember();
+      const member = await authenticateLibraryMember();
       let libraries;
       if (fileId) {
         if (member) {
