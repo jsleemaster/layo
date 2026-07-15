@@ -57,17 +57,34 @@ maintainer-operated telemetry/archive endpoint.
 - Modify: `apps/server/src/team-authorization-postgres.test.ts`
 - Modify: `.github/workflows/full-verification.yml`
 
-- [ ] Add an immutable audit table with bigint id, scope, generation, action,
+- [x] Add an immutable audit table with bigint id, scope, generation, action,
       actor, subject metadata, source, request id, created timestamp, archived
       timestamp, bounded JSON metadata, and indexes for scope/id and unarchived
       export.
-- [ ] Extend migration versioning without granting privileges in application SQL.
-- [ ] RED: two clients mutate one scope and produce state generations 1/2 plus
+- [x] Extend migration versioning without granting privileges in application SQL.
+- [x] RED: two clients mutate one scope and produce state generations 1/2 plus
       audit ids in commit order.
 - [ ] RED: callback failure, no-op, serialization failure, oversized metadata,
       plaintext-like forbidden fields, and state update failure append nothing.
 - [ ] RED: event id/generation above JavaScript safe integer remains exact.
-- [ ] Implement one transaction for state update plus audit append.
+- [x] Implement one transaction for state update plus audit append.
+
+**Task 1 evidence (2026-07-15):**
+
+- Contract RED Full Verification `29399966499` failed because
+  `TeamAuthorizationStateStore.listAuditEvents` did not exist.
+- First GREEN attempt `29400368590` reached core tests and exposed only a
+  malformed managed-state fixture plus the old newer-schema sentinel.
+- Exact initial transaction head `6f8edc1844496d5eb84a54581bc633ff37b1a1ed`
+  passed Full Verification `29400734216`.
+- Secret-safety RED `29401321360` proved nested
+  `request.memberToken` metadata committed before recursive validation.
+- Repaired head `52dc85fb220df11ad534ae0cac18f312bffb0043`
+  rejects secret-related keys at every metadata depth, rejects cycles and
+  no-op audit append, and passed Full Verification `29401692453`.
+- Oversized metadata, exact event ids above JavaScript safe integer, injected
+  state-update failure, and broader migration privilege proof remain open Task
+  1 gates and are intentionally not checked.
 
 ## Task 2: Mutation attribution
 
