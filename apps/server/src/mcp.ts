@@ -573,6 +573,49 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     const manager = options.teamAuthorizationManager;
     const principal = options.libraryRegistryPrincipal;
 
+    if (manager.listAuditEvents) {
+      const listAuditEvents = manager.listAuditEvents.bind(manager);
+      server.registerTool(
+        "list_authorization_audit",
+        {
+          description:
+            "List owner-only shared authorization audit events with an exact cursor.",
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false
+          },
+          inputSchema: {
+            afterId: z
+              .string()
+              .regex(/^(0|[1-9][0-9]*)$/)
+              .default("0")
+              .describe("Exact decimal event id cursor"),
+            limit: z
+              .number()
+              .int()
+              .min(1)
+              .max(100)
+              .default(50)
+              .describe("Maximum events to return")
+          }
+        },
+        async ({ afterId, limit }) => {
+          const result = await listAuditEvents(
+            { ...principal, audit: { source: "mcp" } },
+            { afterId, limit }
+          );
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+      );
+    }
+
     server.registerTool(
       "list_account_tokens",
       {
