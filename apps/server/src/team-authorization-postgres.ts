@@ -460,6 +460,7 @@ export async function createPostgresTeamAuthorizationStateStore(
       const expectedBaseFingerprint = validateFingerprint(expectedFingerprintInput);
       const initial = parseSerializedState(EMPTY_SERIALIZED_STATE);
       const client = await pool.connect();
+      let released = false;
 
       try {
         await client.query("BEGIN");
@@ -515,9 +516,10 @@ export async function createPostgresTeamAuthorizationStateStore(
       } catch (error) {
         const releaseError = await rollbackTransaction(client);
         client.release(releaseError);
+        released = true;
         throw error;
       } finally {
-        if (!client.released) {
+        if (!released) {
           client.release();
         }
       }
