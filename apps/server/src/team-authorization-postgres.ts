@@ -38,6 +38,7 @@ export interface TeamAuthorizationStateStore {
       baseFingerprint: string;
       serializedState: string;
       result: T;
+      changed?: boolean;
     }>
   ): Promise<{
     generation: string;
@@ -54,6 +55,7 @@ export interface TeamAuthorizationStateStore {
       baseFingerprint: string;
       serializedState: string;
       result: T;
+      changed?: boolean;
     }>
   ): Promise<{
     generation: string;
@@ -557,13 +559,15 @@ export async function createPostgresTeamAuthorizationStateStore(
         const transaction = await operation(snapshot);
         const baseFingerprint = validateFingerprint(transaction.baseFingerprint);
         const state = parseSerializedState(transaction.serializedState);
-        if (!transactionOptions.mutating) {
+        const commitsMutation =
+          transactionOptions.mutating && transaction.changed !== false;
+        if (!commitsMutation) {
           if (
             baseFingerprint !== snapshot.baseFingerprint
             || state.serializedState !== snapshot.serializedState
           ) {
             throw new Error(
-              "read-only authorization transaction must not change shared state"
+              "non-mutating authorization transaction must not change shared state"
             );
           }
           await client.query("COMMIT");
@@ -605,6 +609,7 @@ export async function createPostgresTeamAuthorizationStateStore(
       baseFingerprint: string;
       serializedState: string;
       result: T;
+      changed?: boolean;
     }>) {
       assertOpen();
       const scope = validateScope(scopeInput);
