@@ -342,6 +342,17 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         expect(afterRejectedMutation.serializedState).not.toContain(
           tokenHash("layo_pat_must_not_commit")
         );
+
+        await expect(firstManager.manageTokens(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { type: "revoke", tokenId: "soon-revoked" }
+        )).resolves.toMatchObject({
+          type: "revoke",
+          metadata: { id: "soon-revoked" }
+        });
+        await expect(firstStore.read(scope)).resolves.toEqual(
+          afterRejectedMutation
+        );
       } finally {
         await Promise.all([firstStore.close(), secondStore.close()]);
       }
@@ -535,6 +546,76 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           .rejects.toMatchObject({ code: "ENOENT" });
       } finally {
         await restartedStore.close();
+      }
+    });
+  });
+
+  test("offline reconciliation preserves revocations and quarantines incompatible managed members", async () => {
+    await withBaseFiles(async (root, firstBasePath) => {
+      const scope = `reconcile-preserve-${randomUUID()}`;
+      const store = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      await initializeScope(store, scope, base);
+      const manager = createTeamAuthorizationFileManager(
+        firstBasePath,
+        configFrom(base),
+        {
+          stateStore: store,
+          sharedScope: scope,
+          now: () => new Date("2026-07-15T14:00:00.000Z"),
+          generateId: () => "preserved-token",
+          generateSecret: () => "layo_pat_preserved"
+        }
+      );
+      const candidatePath = path.join(root, "candidate-owner-change.json");
+
+      try {
+        await manager.manageTokens(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            type: "create",
+            input: { name: "Preserved", expiresInDays: null }
+          }
+        );
+        await manager.manageTokens(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { type: "revoke", tokenId: "preserved-token" }
+        );
+        const candidate = ownerBase() as any[];
+        candidate[0].token = "changed-owner-base-secret";
+        await writeFile(candidatePath, JSON.stringify(candidate), "utf8");
+
+        await expect(runTeamAuthorizationBaseReconciliation({
+          stateStore: store,
+          sharedScope: scope,
+          currentBaseFingerprint:
+            canonicalTeamAuthorizationBaseFingerprint(base),
+          expectedGeneration: "2",
+          candidateBasePath: candidatePath
+        })).resolves.toMatchObject({ generation: "3" });
+
+        const reconciled = await store.read(scope);
+        const state = JSON.parse(reconciled.serializedState) as {
+          members: Array<{
+            userId: string;
+            quarantined: boolean;
+            tokens: Array<{ id: string; tokenHash: string }>;
+            revocations: Array<{ tokenId: string }>;
+          }>;
+        };
+        const owner = state.members.find(({ userId }) => userId === "owner-user");
+        expect(owner).toMatchObject({
+          quarantined: true,
+          tokens: [{
+            id: "preserved-token",
+            tokenHash: tokenHash("layo_pat_preserved")
+          }],
+          revocations: [{ tokenId: "preserved-token" }]
+        });
+      } finally {
+        await store.close();
       }
     });
   });
