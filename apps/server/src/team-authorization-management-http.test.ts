@@ -250,6 +250,66 @@ describe("team access token HTTP administration", () => {
     }
   });
 
+  test("passes an exact owner cursor and HTTP request attribution to audit history", async () => {
+    const listAuditEvents = vi.fn(async () => ({
+      events: [{
+        id: "9007199254740994",
+        scope: "team-alpha",
+        generation: "9007199254740993",
+        action: "token_created" as const,
+        actorUserId: "owner-user",
+        subjectTokenId: "token-deploy",
+        subjectTokenName: "Deploy automation",
+        source: "http" as const,
+        requestId: "original-request",
+        metadata: {},
+        createdAt: "2026-07-15T12:00:00.000Z"
+      }],
+      nextAfterId: "9007199254740994"
+    }));
+    const manager = {
+      manageTokens: vi.fn(),
+      listTokens: vi.fn(),
+      createToken: vi.fn(),
+      revokeToken: vi.fn(),
+      listAuditEvents
+    } as unknown as TeamAuthorizationFileManager;
+    const server = createHttpServer(new FileStorage(), {
+      libraryRegistryAuth: { members: [] },
+      teamAuthorizationManager: manager
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/account/authorization-audit?afterId=9007199254740993&limit=25",
+        headers: credentials("owner-user", "legacy-owner-token")
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(listAuditEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "owner-user",
+          memberToken: "legacy-owner-token",
+          audit: {
+            source: "http",
+            requestId: expect.any(String)
+          }
+        }),
+        { afterId: "9007199254740993", limit: 25 }
+      );
+      expect(response.json()).toEqual({
+        events: [expect.objectContaining({
+          id: "9007199254740994",
+          generation: "9007199254740993"
+        })],
+        nextAfterId: "9007199254740994"
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   test.each([
     {
       method: "GET" as const,
