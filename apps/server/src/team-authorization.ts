@@ -4,6 +4,7 @@ import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { withFileProcessMutationLock } from "./file-process-lock.js";
 import type {
+  TeamAuthorizationAuditEvent,
   TeamAuthorizationAuditEventInput,
   TeamAuthorizationAuditSource,
   TeamAuthorizationStateSnapshot,
@@ -166,6 +167,16 @@ export type TeamAuthorizationManagementResult =
   | { type: "create"; created: CreatedTeamAccessToken }
   | { type: "revoke"; metadata: TeamAccessTokenMetadata };
 
+export interface TeamAuthorizationAuditListOptions {
+  afterId: string;
+  limit: number;
+}
+
+export interface TeamAuthorizationAuditPage {
+  events: TeamAuthorizationAuditEvent[];
+  nextAfterId?: string;
+}
+
 export interface TeamAuthorizationFileManager {
   manageTokens: (
     principal: TeamAuthorizationManagementPrincipal,
@@ -182,6 +193,10 @@ export interface TeamAuthorizationFileManager {
     userId: string,
     tokenId: string
   ) => Promise<TeamAccessTokenMetadata>;
+  listAuditEvents?: (
+    principal: TeamAuthorizationManagementPrincipal,
+    options: TeamAuthorizationAuditListOptions
+  ) => Promise<TeamAuthorizationAuditPage>;
 }
 
 export interface TeamAuthorizationFileManagerOptions {
@@ -563,6 +578,29 @@ function sharedManagementError(error: unknown): Error {
     return managementError(error.message, 409);
   }
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function validateAuditListOptions(
+  options: TeamAuthorizationAuditListOptions
+): TeamAuthorizationAuditListOptions {
+  const afterId = options.afterId.trim();
+  if (!/^(0|[1-9][0-9]*)$/.test(afterId)) {
+    throw managementError(
+      "authorization audit afterId must be an exact decimal string",
+      400
+    );
+  }
+  if (
+    !Number.isSafeInteger(options.limit)
+    || options.limit < 1
+    || options.limit > 100
+  ) {
+    throw managementError(
+      "authorization audit limit must be between 1 and 100",
+      400
+    );
+  }
+  return { afterId, limit: options.limit };
 }
 
 function missingSharedScopeInstruction(
@@ -1024,6 +1062,7 @@ function createSharedTeamAuthorizationFileManager(
   options: TeamAuthorizationFileManagerOptions
 ): TeamAuthorizationFileManager {
   const transact = stateStore.transact?.bind(stateStore);
+  const listAuditEvents = stateStore.listAuditEvents?.bind(stateStore);
   if (!transact) {
     throw new Error(
       "shared team authorization stateStore must support transact"
@@ -1190,9 +1229,49 @@ function createSharedTeamAuthorizationFileManager(
     return committed.result.applied.result;
   };
 
+  const listSharedAuditEvents = listAuditEvents
+    ? async (
+        principal: TeamAuthorizationManagementPrincipal,
+        input: TeamAuthorizationAuditListOptions
+      ): Promise<TeamAuthorizationAuditPage> => {
+        const { afterId, limit } = validateAuditListOptions(input);
+        const { baseSnapshot, committed } = await loadSharedSnapshot();
+        const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+        const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+        const authenticated = authenticateTeamMember(
+          mergedConfig,
+          principal.userId,
+          principal.memberToken,
+          now()
+        );
+        if (authenticated.role !== "owner") {
+          throw managementError(
+            "owner role is required to read authorization audit history",
+            403
+          );
+        }
+
+        const rows = await listAuditEvents(
+          sharedScope,
+          { afterId, limit: limit + 1 }
+        );
+        const events = rows.slice(0, limit);
+        await publishCommittedSnapshot(baseSnapshot, committed);
+        return {
+          events,
+          ...(rows.length > limit && events.length > 0
+            ? { nextAfterId: events[events.length - 1]!.id }
+            : {})
+        };
+      }
+    : undefined;
+
   return {
     manageTokens: (principal, operation) =>
       executeOperation({ principal }, operation),
+    ...(listSharedAuditEvents
+      ? { listAuditEvents: listSharedAuditEvents }
+      : {}),
     listTokens: async (userId) => {
       const result = await executeOperation(
         { userId },
