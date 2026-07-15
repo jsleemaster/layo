@@ -186,6 +186,40 @@ test("shared close rejects new work, drains in-flight authentication, and closes
   expect(fixture.store.close).toHaveBeenCalledOnce();
 });
 
+test("shared close drains scheduled refreshes and ignores scheduling after close", async () => {
+  const refresh = deferred<void>();
+  const fixture = dependencies();
+  let scheduleRefresh:
+    | ((operation: () => Promise<void>) => void)
+    | undefined;
+  fixture.values.createFileManager = vi.fn((_filePath, _config, options) => {
+    scheduleRefresh = options?.scheduleSharedRefresh;
+    return fixture.manager;
+  });
+  const runtime = await createTeamAuthorizationRuntime(
+    {
+      LAYO_LIBRARY_REGISTRY_MEMBERS_FILE: "/run/layo/members.json",
+      LAYO_AUTHORIZATION_DATABASE_URL: "postgres://authorization",
+      LAYO_AUTHORIZATION_SHARED_SCOPE: "team-alpha"
+    },
+    fixture.values
+  );
+
+  scheduleRefresh!(() => refresh.promise);
+  const close = runtime.close();
+  await Promise.resolve();
+  expect(fixture.store.close).not.toHaveBeenCalled();
+
+  refresh.resolve();
+  await close;
+  expect(fixture.store.close).toHaveBeenCalledOnce();
+
+  const lateRefresh = vi.fn(async () => undefined);
+  scheduleRefresh!(lateRefresh);
+  await runtime.settled();
+  expect(lateRefresh).not.toHaveBeenCalled();
+});
+
 test("local mode remains database-free and closes the watched source", async () => {
   const fixture = dependencies();
   const runtime = await createTeamAuthorizationRuntime(
