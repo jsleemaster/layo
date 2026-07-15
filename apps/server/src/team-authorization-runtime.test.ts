@@ -55,7 +55,7 @@ function dependencies(overrides: Partial<TeamAuthorizationRuntimeDependencies> =
   const provider: TeamAuthorizationProvider = {
     authenticate: vi.fn(async () => ({
       userId: "owner-user",
-      role: "owner",
+      role: "owner" as const,
       teamIds: ["team-alpha"]
     }))
   };
