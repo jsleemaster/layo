@@ -677,6 +677,10 @@ function parseManagedTokenState(input: string | undefined): ManagedTokenState {
   return { version: 2, members };
 }
 
+function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function canonicalCredentialHashes(
   credential: Pick<TeamMemberTokenCredential, "token" | "tokenHash" | "tokenHashes">
 ): string[] {
@@ -698,7 +702,7 @@ function baseMemberFingerprint(member: TeamMemberCredential): string {
       expiresAt: token.expiresAt,
       revokedAt: token.revokedAt
     }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+    .sort((left, right) => compareCanonicalStrings(left.id, right.id));
   const canonical = {
     userId: member.userId,
     role: member.role,
@@ -722,8 +726,8 @@ export function canonicalTeamAuthorizationBaseFingerprint(
       fingerprint: baseMemberFingerprint(member)
     }))
     .sort((left, right) =>
-      left.userId.localeCompare(right.userId)
-      || left.fingerprint.localeCompare(right.fingerprint)
+      compareCanonicalStrings(left.userId, right.userId)
+      || compareCanonicalStrings(left.fingerprint, right.fingerprint)
     );
   return hashToken(JSON.stringify(canonicalMembers));
 }
@@ -778,12 +782,12 @@ export function canonicalSharedManagedTokenState(
       quarantined: member.quarantined,
       tokens: member.tokens
         .map(canonicalManagedToken)
-        .sort((left, right) => left.id.localeCompare(right.id)),
+        .sort((left, right) => compareCanonicalStrings(left.id, right.id)),
       revocations: member.revocations
         .map((revocation) => ({ ...revocation }))
-        .sort((left, right) => left.tokenId.localeCompare(right.tokenId))
+        .sort((left, right) => compareCanonicalStrings(left.tokenId, right.tokenId))
     }))
-    .sort((left, right) => left.userId.localeCompare(right.userId));
+    .sort((left, right) => compareCanonicalStrings(left.userId, right.userId));
   return JSON.stringify({ version: 2, members });
 }
 
