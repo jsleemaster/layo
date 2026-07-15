@@ -28,6 +28,23 @@ export interface TeamAuthorizationStateStore {
     initialized: boolean;
     snapshot: TeamAuthorizationStateSnapshot;
   }>;
+  transact?<T>(
+    scope: string,
+    expectedBaseFingerprint: string,
+    options: { mutating: boolean },
+    operation: (
+      snapshot: TeamAuthorizationStateSnapshot
+    ) => Promise<{
+      baseFingerprint: string;
+      serializedState: string;
+      result: T;
+    }>
+  ): Promise<{
+    generation: string;
+    baseFingerprint: string;
+    serializedState: string;
+    result: T;
+  }>;
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -496,6 +513,90 @@ export async function createPostgresTeamAuthorizationStateStore(
         initialized: false,
         snapshot: snapshotFromRow(existing.rows[0]!)
       };
+    },
+
+    async transact<T>(
+      scopeInput: string,
+      expectedFingerprintInput: string,
+      transactionOptions: { mutating: boolean },
+      operation: (
+        snapshot: TeamAuthorizationStateSnapshot
+      ) => Promise<{
+        baseFingerprint: string;
+        serializedState: string;
+        result: T;
+      }>
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const expectedBaseFingerprint = validateFingerprint(expectedFingerprintInput);
+      if (typeof transactionOptions.mutating !== "boolean") {
+        throw new Error("authorization transaction mutating flag is required");
+      }
+      const client = await pool.connect();
+      let released = false;
+
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        const locked = await client.query<AuthorizationStateRow>(
+          `SELECT generation::text AS generation, base_fingerprint, state
+           FROM layo_team_authorization_state
+           WHERE scope = $1
+           FOR UPDATE`,
+          [scope]
+        );
+        if (locked.rowCount !== 1) {
+          throw new Error(`authorization scope ${scope} does not exist`);
+        }
+        const snapshot = snapshotFromRow(locked.rows[0]!);
+        if (snapshot.baseFingerprint !== expectedBaseFingerprint) {
+          throw new Error("authorization base fingerprint does not match shared state");
+        }
+
+        const transaction = await operation(snapshot);
+        const baseFingerprint = validateFingerprint(transaction.baseFingerprint);
+        const state = parseSerializedState(transaction.serializedState);
+        if (!transactionOptions.mutating) {
+          if (
+            baseFingerprint !== snapshot.baseFingerprint
+            || state.serializedState !== snapshot.serializedState
+          ) {
+            throw new Error(
+              "read-only authorization transaction must not change shared state"
+            );
+          }
+          await client.query("COMMIT");
+          return { ...snapshot, result: transaction.result };
+        }
+
+        const updated = await client.query<AuthorizationStateRow>(
+          `UPDATE layo_team_authorization_state
+           SET generation = generation + 1,
+               base_fingerprint = $2,
+               state = $3::jsonb,
+               schema_version = $4,
+               updated_at = now()
+           WHERE scope = $1
+           RETURNING generation::text AS generation, base_fingerprint, state`,
+          [scope, baseFingerprint, state.serializedState, REQUIRED_SCHEMA_VERSION]
+        );
+        if (updated.rowCount !== 1) {
+          throw new Error(`authorization scope ${scope} was not updated`);
+        }
+        const committed = snapshotFromRow(updated.rows[0]!);
+        await client.query("COMMIT");
+        return { ...committed, result: transaction.result };
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
+      }
     },
 
     async mutate<T>(scopeInput: string, expectedFingerprintInput: string, operation: (

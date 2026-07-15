@@ -3,6 +3,10 @@ import { unwatchFile, watchFile, type StatsListener } from "node:fs";
 import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { withFileProcessMutationLock } from "./file-process-lock.js";
+import type {
+  TeamAuthorizationStateSnapshot,
+  TeamAuthorizationStateStore
+} from "./team-authorization-postgres.js";
 
 export type TeamAuthorizationRole = "owner" | "editor" | "viewer";
 
@@ -152,6 +156,11 @@ export interface TeamAuthorizationFileManagerOptions {
   beforeSidecarRename?: () => Promise<void>;
   syncFile?: (handle: FileHandle) => Promise<void>;
   syncDirectory?: (directoryPath: string) => Promise<void>;
+  stateStore?: TeamAuthorizationStateStore;
+  sharedScope?: string;
+  publishSharedConfig?: (
+    config: TeamAuthorizationConfig
+  ) => void | Promise<void>;
 }
 
 export interface TeamMemberTokenSource {
@@ -224,6 +233,26 @@ export function createTeamAuthorizationFileManager(
   const normalizedPath = filePath.trim();
   if (!normalizedPath) {
     throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
+  }
+  const hasSharedStore = options.stateStore !== undefined;
+  const hasSharedScope = options.sharedScope !== undefined;
+  if (hasSharedStore !== hasSharedScope) {
+    throw new Error(
+      "team authorization stateStore and sharedScope must be configured together"
+    );
+  }
+  if (options.stateStore && options.sharedScope !== undefined) {
+    const sharedScope = options.sharedScope.trim();
+    if (!sharedScope) {
+      throw new Error("team authorization sharedScope must not be blank");
+    }
+    return createSharedTeamAuthorizationFileManager(
+      normalizedPath,
+      config,
+      options.stateStore,
+      sharedScope,
+      options
+    );
   }
   const sidecarPath = managedTokenSidecarPath(normalizedPath);
   const now = options.now ?? (() => new Date());
@@ -452,6 +481,364 @@ export function createTeamAuthorizationFileManager(
   return {
     manageTokens,
     listTokens,
+    createToken: async (userId, input) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "create", input }
+      );
+      if (result.type !== "create") {
+        throw new Error("unexpected team authorization create result");
+      }
+      return result.created;
+    },
+    revokeToken: async (userId, tokenId) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "revoke", tokenId }
+      );
+      if (result.type !== "revoke") {
+        throw new Error("unexpected team authorization revoke result");
+      }
+      return result.metadata;
+    }
+  };
+}
+
+type SharedManagementIdentity =
+  | { userId: string }
+  | { principal: TeamAuthorizationManagementPrincipal };
+
+interface SharedOperationResult {
+  result: TeamAuthorizationManagementResult;
+  changed: boolean;
+}
+
+function sharedManagementError(error: unknown): Error {
+  if (
+    error instanceof ManagedTokenBindingError
+    || (
+      error instanceof Error
+      && error.message === "authorization base fingerprint does not match shared state"
+    )
+  ) {
+    return managementError(error.message, 409);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function missingSharedScopeInstruction(
+  filePath: string,
+  scope: string
+): string {
+  return (
+    `shared authorization scope ${scope} is not initialized; `
+    + "run pnpm --filter @layo/server authorization:bootstrap "
+    + `--scope ${scope} --base ${filePath} --empty`
+  );
+}
+
+function requireSharedFingerprint(
+  snapshot: TeamAuthorizationStateSnapshot,
+  baseFingerprint: string
+): void {
+  if (snapshot.baseFingerprint !== baseFingerprint) {
+    throw managementError(
+      "authorization base fingerprint does not match shared state",
+      409
+    );
+  }
+}
+
+function sharedConfigFromSnapshot(
+  baseConfig: TeamAuthorizationConfig,
+  snapshot: TeamAuthorizationStateSnapshot
+): {
+  state: ManagedTokenState;
+  mergedConfig: TeamAuthorizationConfig;
+} {
+  const state = parseManagedTokenState(snapshot.serializedState);
+  try {
+    return {
+      state,
+      mergedConfig: mergeManagedTokenState(baseConfig, state)
+    };
+  } catch (error) {
+    throw sharedManagementError(error);
+  }
+}
+
+function applySharedManagementOperation(
+  identity: SharedManagementIdentity,
+  operation: TeamAuthorizationManagementOperation,
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState,
+  mergedConfig: TeamAuthorizationConfig,
+  operationNow: Date,
+  generateId: () => string,
+  generateSecret: () => string
+): SharedOperationResult {
+  let authenticatedMember: AuthenticatedTeamMember | undefined;
+  let userId: string;
+  if ("principal" in identity) {
+    authenticatedMember = authenticateTeamMember(
+      mergedConfig,
+      identity.principal.userId,
+      identity.principal.memberToken,
+      operationNow
+    );
+    userId = authenticatedMember.userId;
+  } else {
+    userId = identity.userId;
+  }
+  const member = findManagedMember(mergedConfig, userId);
+
+  if (operation.type === "list") {
+    return {
+      changed: false,
+      result: {
+        type: "list",
+        tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata),
+        ...(authenticatedMember?.tokenId
+          ? { activeTokenId: authenticatedMember.tokenId }
+          : {})
+      }
+    };
+  }
+
+  if (operation.type === "create") {
+    const name =
+      typeof operation.input?.name === "string"
+        ? operation.input.name.trim()
+        : "";
+    if (!name) {
+      throw managementError("team authorization token name is required", 400);
+    }
+    const expiresInDays = operation.input?.expiresInDays;
+    if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
+      throw managementError("invalid team authorization token expiration", 400);
+    }
+    const id = generateId().trim();
+    if (!id) {
+      throw new Error("generated team authorization token id must not be blank");
+    }
+    if (member.tokens?.some((credential) => credential.id === id)) {
+      throw managementError("team authorization token id already exists", 409);
+    }
+    const secret = generateSecret();
+    if (!secret) {
+      throw new Error("generated team authorization token must not be blank");
+    }
+    const createdAt = validManagementNow(operationNow);
+    const expiresAt =
+      expiresInDays === null
+        ? undefined
+        : new Date(
+            Date.parse(createdAt) + expiresInDays * 24 * 60 * 60 * 1_000
+          ).toISOString();
+    const credential: TeamMemberTokenCredential = {
+      id,
+      name,
+      tokenHash: hashToken(secret),
+      createdAt,
+      ...(expiresAt ? { expiresAt } : {})
+    };
+    managedTokenStateMember(
+      state,
+      findManagedMember(baseConfig, userId)
+    ).tokens.push(credential);
+    return {
+      changed: true,
+      result: {
+        type: "create",
+        created: {
+          token: secret,
+          metadata: toTeamAccessTokenMetadata(credential)
+        }
+      }
+    };
+  }
+
+  const normalizedTokenId = operation.tokenId.trim();
+  if (!normalizedTokenId) {
+    throw managementError("team authorization token id is required", 400);
+  }
+  if (
+    authenticatedMember?.tokenId === normalizedTokenId
+    && operation.confirmSelfRevoke !== true
+  ) {
+    throw managementError(
+      "confirmSelfRevoke must be true to revoke the active MCP principal token",
+      400
+    );
+  }
+  const credential = member.tokens?.find(
+    (candidate) => candidate.id === normalizedTokenId
+  );
+  if (!credential) {
+    throw managementError("team authorization token was not found", 404);
+  }
+  if (credential.revokedAt) {
+    return {
+      changed: false,
+      result: {
+        type: "revoke",
+        metadata: toTeamAccessTokenMetadata(credential)
+      }
+    };
+  }
+
+  const revokedAt = validManagementNow(operationNow);
+  managedTokenStateMember(
+    state,
+    findManagedMember(baseConfig, userId)
+  ).revocations.push({
+    tokenId: normalizedTokenId,
+    revokedAt
+  });
+  credential.revokedAt = revokedAt;
+  return {
+    changed: true,
+    result: {
+      type: "revoke",
+      metadata: toTeamAccessTokenMetadata(credential)
+    }
+  };
+}
+
+async function publishSharedAuthorizationConfig(
+  config: TeamAuthorizationConfig,
+  nextConfig: TeamAuthorizationConfig,
+  publishSharedConfig: TeamAuthorizationFileManagerOptions["publishSharedConfig"]
+): Promise<void> {
+  if (publishSharedConfig) {
+    await publishSharedConfig(nextConfig);
+    return;
+  }
+  replaceTeamAuthorizationMembers(config, nextConfig.members);
+}
+
+function createSharedTeamAuthorizationFileManager(
+  filePath: string,
+  config: TeamAuthorizationConfig,
+  stateStore: TeamAuthorizationStateStore,
+  sharedScope: string,
+  options: TeamAuthorizationFileManagerOptions
+): TeamAuthorizationFileManager {
+  const transact = stateStore.transact?.bind(stateStore);
+  if (!transact) {
+    throw new Error(
+      "shared team authorization stateStore must support transact"
+    );
+  }
+  const now = options.now ?? (() => new Date());
+  const generateId = options.generateId ?? (() => randomUUID());
+  const generateSecret =
+    options.generateSecret
+    ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
+
+  const publishCommittedSnapshot = async (
+    baseSnapshot: string,
+    committed: TeamAuthorizationStateSnapshot
+  ): Promise<void> => {
+    try {
+      const currentBaseSnapshot = await readFile(filePath, "utf8");
+      if (currentBaseSnapshot !== baseSnapshot) {
+        throw managementError(
+          "team authorization file changed after shared token commit",
+          409
+        );
+      }
+      requireSharedFingerprint(
+        committed,
+        canonicalTeamAuthorizationBaseFingerprint(currentBaseSnapshot)
+      );
+      const baseConfig = parseRequiredTeamAuthorizationConfig(currentBaseSnapshot);
+      const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+      await publishSharedAuthorizationConfig(
+        config,
+        mergedConfig,
+        options.publishSharedConfig
+      );
+    } catch {
+      replaceTeamAuthorizationMembers(config, []);
+    }
+  };
+
+  const executeOperation = async (
+    identity: SharedManagementIdentity,
+    operation: TeamAuthorizationManagementOperation
+  ): Promise<TeamAuthorizationManagementResult> => {
+    const baseSnapshot = await readFile(filePath, "utf8");
+    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+    const baseFingerprint =
+      canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+    const mutating = operation.type !== "list";
+
+    let committed;
+    try {
+      committed = await transact(
+        sharedScope,
+        baseFingerprint,
+        { mutating },
+        async (locked) => {
+          const { state, mergedConfig } = sharedConfigFromSnapshot(
+            baseConfig,
+            locked
+          );
+          const applied = applySharedManagementOperation(
+            identity,
+            operation,
+            baseConfig,
+            state,
+            mergedConfig,
+            now(),
+            generateId,
+            generateSecret
+          );
+          if (await readFile(filePath, "utf8") !== baseSnapshot) {
+            throw managementError(
+              "team authorization file changed during token management",
+              409
+            );
+          }
+          return {
+            baseFingerprint,
+            serializedState: mutating
+              ? serializeManagedTokenState(state)
+              : locked.serializedState,
+            result: { applied, mergedConfig }
+          };
+        }
+      );
+    } catch (error) {
+      if (
+        error instanceof Error
+        && error.message === `authorization scope ${sharedScope} does not exist`
+      ) {
+        throw new Error(missingSharedScopeInstruction(filePath, sharedScope));
+      }
+      throw sharedManagementError(error);
+    }
+
+    if (!mutating) {
+      await publishSharedAuthorizationConfig(
+        config,
+        committed.result.mergedConfig,
+        options.publishSharedConfig
+      );
+    } else {
+      await publishCommittedSnapshot(baseSnapshot, committed);
+    }
+    return committed.result.applied.result;
+  };
+
+  return {
+    manageTokens: (principal, operation) =>
+      executeOperation({ principal }, operation),
+    listTokens: (userId) => {
+      const member = findManagedMember(config, userId);
+      return (member.tokens ?? []).map(toTeamAccessTokenMetadata);
+    },
     createToken: async (userId, input) => {
       const result = await executeOperation(
         { userId },
@@ -775,6 +1162,10 @@ export function canonicalSharedManagedTokenState(
   }
 
   mergeManagedTokenState(baseConfig, state);
+  return serializeManagedTokenState(state);
+}
+
+function serializeManagedTokenState(state: ManagedTokenState): string {
   const members = state.members
     .map((member) => ({
       userId: member.userId,
@@ -789,6 +1180,27 @@ export function canonicalSharedManagedTokenState(
     }))
     .sort((left, right) => compareCanonicalStrings(left.userId, right.userId));
   return JSON.stringify({ version: 2, members });
+}
+
+export function reconcileSharedManagedTokenState(
+  candidateBaseInput: string,
+  serializedState: string
+): string {
+  const candidateConfig = parseRequiredTeamAuthorizationConfig(candidateBaseInput);
+  const candidateByUserId = new Map(
+    candidateConfig.members.map((member) => [member.userId, member])
+  );
+  const state = parseManagedTokenState(serializedState);
+  for (const stateMember of state.members) {
+    const candidateMember = candidateByUserId.get(stateMember.userId);
+    if (
+      !candidateMember
+      || stateMember.baseFingerprint !== baseMemberFingerprint(candidateMember)
+    ) {
+      stateMember.quarantined = true;
+    }
+  }
+  return serializeManagedTokenState(state);
 }
 
 function createManagedTokenStateMember(

@@ -133,19 +133,44 @@ function pauseFirstMutation(
   mayCommit: Deferred
 ): TeamAuthorizationStateStore {
   let first = true;
+  const pause = async <T>(
+    snapshot: TeamAuthorizationStateSnapshot,
+    operation: (
+      snapshot: TeamAuthorizationStateSnapshot
+    ) => Promise<{
+      baseFingerprint: string;
+      serializedState: string;
+      result: T;
+    }>
+  ) => {
+    const result = await operation(snapshot);
+    if (first) {
+      first = false;
+      callbackEntered.resolve();
+      await mayCommit.promise;
+    }
+    return result;
+  };
   return {
     read: (scope) => store.read(scope),
     initializeAbsent: (scope, snapshot) => store.initializeAbsent(scope, snapshot),
+    transact: (scope, fingerprint, options, operation) => {
+      if (!store.transact) {
+        throw new Error("test store does not support transact");
+      }
+      return store.transact(
+        scope,
+        fingerprint,
+        options,
+        (snapshot) => pause(snapshot, operation)
+      );
+    },
     mutate: (scope, fingerprint, operation) =>
-      store.mutate(scope, fingerprint, async (snapshot) => {
-        const result = await operation(snapshot);
-        if (first) {
-          first = false;
-          callbackEntered.resolve();
-          await mayCommit.promise;
-        }
-        return result;
-      }),
+      store.mutate(
+        scope,
+        fingerprint,
+        (snapshot) => pause(snapshot, operation)
+      ),
     close: () => store.close()
   };
 }

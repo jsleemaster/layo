@@ -9,7 +9,8 @@ import {
 } from "./team-authorization-postgres.js";
 import {
   canonicalSharedManagedTokenState,
-  canonicalTeamAuthorizationBaseFingerprint
+  canonicalTeamAuthorizationBaseFingerprint,
+  reconcileSharedManagedTokenState
 } from "./team-authorization.js";
 
 export { canonicalTeamAuthorizationBaseFingerprint };
@@ -29,9 +30,22 @@ export interface TeamAuthorizationSharedCliOptions {
 }
 
 interface ParsedArguments {
-  command: "bootstrap" | "export" | "restore";
+  command: "bootstrap" | "export" | "restore" | "reconcile-base";
   values: Map<string, string>;
   switches: Set<string>;
+}
+
+export interface TeamAuthorizationBaseReconciliationOptions {
+  stateStore: TeamAuthorizationStateStore;
+  sharedScope: string;
+  currentBaseFingerprint: string;
+  expectedGeneration: string;
+  candidateBasePath: string;
+}
+
+export interface TeamAuthorizationBaseReconciliationResult {
+  generation: string;
+  baseFingerprint: string;
 }
 
 interface SharedAuthorizationArtifact {
@@ -48,11 +62,21 @@ function parseArguments(argv: string[]): ParsedArguments {
     commandInput !== "bootstrap"
     && commandInput !== "export"
     && commandInput !== "restore"
+    && commandInput !== "reconcile-base"
   ) {
-    throw new Error("authorization command must be bootstrap, export, or restore");
+    throw new Error(
+      "authorization command must be bootstrap, export, restore, or reconcile-base"
+    );
   }
 
-  const valueOptions = new Set(["--scope", "--base", "--output", "--input"]);
+  const valueOptions = new Set([
+    "--scope",
+    "--base",
+    "--output",
+    "--input",
+    "--current-fingerprint",
+    "--expected-generation"
+  ]);
   const switchOptions = new Set([
     "--empty",
     "--from-sidecar",
@@ -326,6 +350,128 @@ async function runRestore(
   }
 }
 
+function reconciliationConflict(message: string): Error {
+  return Object.assign(new Error(message), {
+    code: "EEXIST",
+    statusCode: 409
+  });
+}
+
+export async function runTeamAuthorizationBaseReconciliation(
+  options: TeamAuthorizationBaseReconciliationOptions
+): Promise<TeamAuthorizationBaseReconciliationResult> {
+  const scope = options.sharedScope.trim();
+  if (!scope) {
+    throw new Error("sharedScope is required");
+  }
+  const currentBaseFingerprint = options.currentBaseFingerprint.trim();
+  if (!/^[0-9a-f]{64}$/.test(currentBaseFingerprint)) {
+    throw new Error(
+      "currentBaseFingerprint must be 64 lowercase hexadecimal characters"
+    );
+  }
+  const expectedGeneration = options.expectedGeneration.trim();
+  if (!/^(0|[1-9][0-9]*)$/.test(expectedGeneration)) {
+    throw new Error("expectedGeneration must be an exact decimal string");
+  }
+  const candidateBasePath = options.candidateBasePath.trim();
+  if (!candidateBasePath) {
+    throw new Error("candidateBasePath is required");
+  }
+
+  const candidateBase = await readFile(candidateBasePath, "utf8");
+  const candidateFingerprint =
+    canonicalTeamAuthorizationBaseFingerprint(candidateBase);
+  const transact = options.stateStore.transact?.bind(options.stateStore);
+  if (!transact) {
+    throw new Error(
+      "shared team authorization stateStore must support transact"
+    );
+  }
+  try {
+    const committed = await transact(
+      scope,
+      currentBaseFingerprint,
+      { mutating: true },
+      async (locked) => {
+        if (locked.generation !== expectedGeneration) {
+          throw reconciliationConflict(
+            `authorization generation conflict: expected ${expectedGeneration}, `
+            + `received ${locked.generation}`
+          );
+        }
+        if (locked.baseFingerprint !== currentBaseFingerprint) {
+          throw reconciliationConflict(
+            "authorization current base fingerprint changed"
+          );
+        }
+        const serializedState = reconcileSharedManagedTokenState(
+          candidateBase,
+          locked.serializedState
+        );
+        if (await readFile(candidateBasePath, "utf8") !== candidateBase) {
+          throw reconciliationConflict(
+            "authorization candidate base changed during reconciliation"
+          );
+        }
+        return {
+          baseFingerprint: candidateFingerprint,
+          serializedState,
+          result: undefined
+        };
+      }
+    );
+    return {
+      generation: committed.generation,
+      baseFingerprint: committed.baseFingerprint
+    };
+  } catch (error) {
+    if (
+      error instanceof Error
+      && (
+        error.message ===
+          "authorization base fingerprint does not match shared state"
+        || error.message.includes("authorization generation conflict")
+        || error.message === "authorization current base fingerprint changed"
+        || error.message ===
+          "authorization candidate base changed during reconciliation"
+      )
+    ) {
+      if ("statusCode" in error) {
+        throw error;
+      }
+      throw reconciliationConflict(error.message);
+    }
+    throw error;
+  }
+}
+
+async function runReconcileBase(
+  arguments_: ParsedArguments,
+  store: TeamAuthorizationStateStore
+): Promise<void> {
+  rejectOptions(
+    arguments_,
+    [
+      "--scope",
+      "--base",
+      "--current-fingerprint",
+      "--expected-generation"
+    ],
+    []
+  );
+  await runTeamAuthorizationBaseReconciliation({
+    stateStore: store,
+    sharedScope: requiredValue(arguments_, "--scope"),
+    currentBaseFingerprint: requiredValue(
+      arguments_,
+      "--current-fingerprint"
+    ),
+    expectedGeneration: requiredValue(arguments_, "--expected-generation"),
+    candidateBasePath: requiredValue(arguments_, "--base")
+  });
+}
+
 export async function runTeamAuthorizationSharedCli(
   argv: string[],
   options: TeamAuthorizationSharedCliOptions = {}
@@ -353,8 +499,10 @@ export async function runTeamAuthorizationSharedCli(
         options.stdout ?? process.stdout,
         options.beforeExportRename
       );
-    } else {
+    } else if (arguments_.command === "restore") {
       await runRestore(arguments_, store);
+    } else {
+      await runReconcileBase(arguments_, store);
     }
   } catch (error) {
     commandFailed = true;
