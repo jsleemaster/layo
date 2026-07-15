@@ -69,6 +69,19 @@ async function waitForDatabaseLock(
   throw new Error("second shared authorization transaction never blocked");
 }
 
+async function waitForGeneration(
+  store: TeamAuthorizationStateStore,
+  scope: string,
+  generation: string
+): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
+    if ((await store.read(scope)).generation === generation) {
+      return;
+    }
+  }
+  throw new Error(`authorization scope ${scope} never reached generation ${generation}`);
+}
+
 function ownerBase(): unknown[] {
   return [
     {
@@ -569,12 +582,13 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           { type: "list" }
         );
         await listReachedPublication.promise;
-        await revokeManager.manageTokens(
+        const revoke = revokeManager.manageTokens(
           { userId: "owner-user", memberToken: "owner-base-secret" },
           { type: "revoke", tokenId: "late-list-token" }
         );
+        await waitForGeneration(listStore, scope, "2");
         listMayPublish.resolve();
-        await lateList;
+        await Promise.all([lateList, revoke]);
 
         expect(() => authenticateTeamMember(
           sharedConfig,
