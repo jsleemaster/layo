@@ -702,9 +702,12 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           candidateBasePath: candidatePath
         });
 
+        const recoveredConfig = configFrom(
+          await readFile(candidatePath, "utf8")
+        );
         const recoveredManager = createTeamAuthorizationFileManager(
           candidatePath,
-          configFrom(await readFile(candidatePath, "utf8")),
+          recoveredConfig,
           { stateStore: store, sharedScope: scope }
         );
         await expect(recoveredManager.manageTokens(
@@ -714,6 +717,17 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           },
           { type: "list" }
         )).resolves.toMatchObject({ type: "list" });
+
+        expect(authenticateTeamMember(
+          recoveredConfig,
+          "owner-user",
+          "changed-owner-base-secret"
+        )).toMatchObject({ userId: "owner-user" });
+        expect(authenticateTeamMember(
+          recoveredConfig,
+          "unmanaged-user",
+          "changed-viewer-base-secret"
+        )).toMatchObject({ userId: "unmanaged-user" });
 
         const ownerRecovered = await store.read(scope);
         expect(ownerRecovered.generation).toBe("4");
