@@ -119,6 +119,166 @@ function canonicalizeJson(value: unknown): unknown {
   return value;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertManagedStateKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  context: string
+): void {
+  const unexpected = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unexpected.length > 0) {
+    throw new Error(
+      `authorization managed state ${context} contains unsupported field ${unexpected[0]}`
+    );
+  }
+}
+
+function validateManagedTimestamp(value: unknown, context: string): void {
+  if (
+    typeof value !== "string"
+    || !Number.isFinite(Date.parse(value))
+    || new Date(value).toISOString() !== value
+  ) {
+    throw new Error(`authorization managed state ${context} must be an ISO timestamp`);
+  }
+}
+
+function validateManagedToken(value: unknown, memberId: string): string {
+  if (!isRecord(value)) {
+    throw new Error("authorization managed state token must be an object");
+  }
+  assertManagedStateKeys(
+    value,
+    [
+      "id",
+      "name",
+      "tokenHash",
+      "tokenHashes",
+      "createdAt",
+      "notBefore",
+      "expiresAt",
+      "revokedAt"
+    ],
+    "token"
+  );
+  if (
+    typeof value.id !== "string"
+    || !value.id.trim()
+    || typeof value.name !== "string"
+    || !value.name.trim()
+  ) {
+    throw new Error(`authorization managed state token for ${memberId} is invalid`);
+  }
+
+  const hashPattern = /^[0-9a-f]{64}$/;
+  const hasTokenHash = value.tokenHash !== undefined;
+  const hasTokenHashes = value.tokenHashes !== undefined;
+  if (
+    hasTokenHash
+    && (typeof value.tokenHash !== "string" || !hashPattern.test(value.tokenHash))
+  ) {
+    throw new Error("authorization managed state tokenHash must be a lowercase SHA-256 hash");
+  }
+  if (
+    hasTokenHashes
+    && (
+      !Array.isArray(value.tokenHashes)
+      || value.tokenHashes.length === 0
+      || !value.tokenHashes.every(
+        (hash) => typeof hash === "string" && hashPattern.test(hash)
+      )
+      || new Set(value.tokenHashes).size !== value.tokenHashes.length
+    )
+  ) {
+    throw new Error(
+      "authorization managed state tokenHashes must be unique lowercase SHA-256 hashes"
+    );
+  }
+  if (!hasTokenHash && !hasTokenHashes) {
+    throw new Error("authorization managed state tokens must contain hashes only");
+  }
+
+  for (const key of ["createdAt", "notBefore", "expiresAt", "revokedAt"] as const) {
+    if (value[key] !== undefined) {
+      validateManagedTimestamp(value[key], `token ${value.id} ${key}`);
+    }
+  }
+  if (
+    typeof value.notBefore === "string"
+    && typeof value.expiresAt === "string"
+    && Date.parse(value.expiresAt) <= Date.parse(value.notBefore)
+  ) {
+    throw new Error("authorization managed state token expiresAt must follow notBefore");
+  }
+  return value.id.trim();
+}
+
+function validateManagedState(value: Record<string, unknown>): void {
+  assertManagedStateKeys(value, ["version", "members"], "root");
+  if (value.version !== 2 || !Array.isArray(value.members)) {
+    throw new Error("authorization managed state must use version 2 with a members array");
+  }
+
+  const memberIds = new Set<string>();
+  for (const candidate of value.members) {
+    if (!isRecord(candidate)) {
+      throw new Error("authorization managed state member must be an object");
+    }
+    assertManagedStateKeys(
+      candidate,
+      ["userId", "baseFingerprint", "quarantined", "tokens", "revocations"],
+      "member"
+    );
+    if (
+      typeof candidate.userId !== "string"
+      || !candidate.userId.trim()
+      || typeof candidate.baseFingerprint !== "string"
+      || !/^[0-9a-f]{64}$/.test(candidate.baseFingerprint)
+      || typeof candidate.quarantined !== "boolean"
+      || !Array.isArray(candidate.tokens)
+      || !Array.isArray(candidate.revocations)
+    ) {
+      throw new Error("authorization managed state member is invalid");
+    }
+
+    const memberId = candidate.userId.trim();
+    if (memberIds.has(memberId)) {
+      throw new Error("authorization managed state contains duplicate members");
+    }
+    memberIds.add(memberId);
+
+    const tokenIds = candidate.tokens.map((token) =>
+      validateManagedToken(token, memberId)
+    );
+    if (new Set(tokenIds).size !== tokenIds.length) {
+      throw new Error("authorization managed state contains duplicate token ids");
+    }
+
+    const revokedTokenIds = new Set<string>();
+    for (const revocation of candidate.revocations) {
+      if (!isRecord(revocation)) {
+        throw new Error("authorization managed state revocation must be an object");
+      }
+      assertManagedStateKeys(revocation, ["tokenId", "revokedAt"], "revocation");
+      if (typeof revocation.tokenId !== "string" || !revocation.tokenId.trim()) {
+        throw new Error("authorization managed state revocation tokenId is invalid");
+      }
+      validateManagedTimestamp(
+        revocation.revokedAt,
+        `revocation ${revocation.tokenId} revokedAt`
+      );
+      const tokenId = revocation.tokenId.trim();
+      if (revokedTokenIds.has(tokenId)) {
+        throw new Error("authorization managed state contains duplicate revocations");
+      }
+      revokedTokenIds.add(tokenId);
+    }
+  }
+}
+
 function parseSerializedState(serializedState: string): {
   serializedState: string;
   value: Record<string, unknown>;
@@ -129,9 +289,10 @@ function parseSerializedState(serializedState: string): {
   } catch {
     throw new Error("authorization state must be valid JSON");
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error("authorization state must be a JSON object");
   }
+  validateManagedState(parsed);
   const value = canonicalizeJson(parsed) as Record<string, unknown>;
   const canonical = JSON.stringify(value);
   if (Buffer.byteLength(canonical, "utf8") > MAX_SERIALIZED_STATE_BYTES) {
@@ -257,19 +418,6 @@ export async function createPostgresTeamAuthorizationStateStore(
     }
   }
 
-  async function seedAfterRollback(
-    scope: string,
-    fingerprint: string
-  ): Promise<void> {
-    const initial = parseSerializedState(EMPTY_SERIALIZED_STATE);
-    await pool.query(
-      `INSERT INTO layo_team_authorization_state
-        (scope, generation, base_fingerprint, state, schema_version)
-       VALUES ($1, 0, $2, $3::jsonb, $4)
-       ON CONFLICT (scope) DO NOTHING`,
-      [scope, fingerprint, initial.serializedState, REQUIRED_SCHEMA_VERSION]
-    );
-  }
 
   return {
     async read(scopeInput) {
@@ -299,7 +447,6 @@ export async function createPostgresTeamAuthorizationStateStore(
       const expectedBaseFingerprint = validateFingerprint(expectedFingerprintInput);
       const initial = parseSerializedState(EMPTY_SERIALIZED_STATE);
       const client = await pool.connect();
-      let seeded = false;
 
       try {
         await client.query("BEGIN");
@@ -316,7 +463,6 @@ export async function createPostgresTeamAuthorizationStateStore(
             REQUIRED_SCHEMA_VERSION
           ]
         );
-        seeded = inserted.rowCount === 1;
 
         const locked = await client.query<AuthorizationStateRow>(
           `SELECT generation::text AS generation, base_fingerprint, state
@@ -355,9 +501,6 @@ export async function createPostgresTeamAuthorizationStateStore(
         return { ...committed, result: mutation.result };
       } catch (error) {
         await rollbackQuietly(client);
-        if (seeded && !closed) {
-          await seedAfterRollback(scope, expectedBaseFingerprint);
-        }
         throw error;
       } finally {
         client.release();
