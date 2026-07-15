@@ -115,12 +115,31 @@ broad quarantine-ignore hypothesis `4d6f0af` broke explicit recovery tests; the
 final narrow repair `1b1888f` / `914fc72` ignores only quarantined orphan
 members while retaining binding checks for re-added users.
 
-Full Verification `29343398679` passed on
-`914fc7226c5632344d4f5e8e1f4c750006b968a2`, including maturity/design gates,
-typecheck, web build, Core, and Playwright CLI e2e. Restore `29343394961` and
-retention `29343395030` passed on the same head. PR #308 is ready for its final
-review and merge gate but is not merged; post-merge cleanup remains open.
-Deployment remains non-gating.
+A second external review found two more recovery gaps: quarantined/v1 sidecars
+could prevent startup before explicit base-credential recovery, and successful
+quarantine still left survivors unavailable until the next poll. RED
+`3a0b640` / Full `29376307034` failed exactly those two cases. The first
+repair exposed an in-flight watcher lock after close in Full `29376572991`;
+deterministic lifecycle and stale-publication RED `0e3d2a4` / Full
+`29377023368` then proved both close/callback and competing-revocation races.
+The repaired path adds an explicit `settled()` boundary and keeps quarantine,
+stable reread, and survivor publication in one sidecar process lock.
+
+Latest external review then found bulk removal quarantined only one orphan per
+poll. RED `fad4ae2` / Full `29378304736` proved survivor lockout. The broad
+all-binding-failure repair `2f6f155` and present-base skip `c8445a1` were
+rejected after the existing 20x remove/reintroduce stress exposed dormant-token
+resurrection. Final `aabff5f` quarantines every orphan from the exact observed
+removal snapshot under one lock, rechecks the current base before persistence,
+and leaves a reintroduced generation fail-closed until explicit reconciliation.
+
+Full Verification `29379115279` passed on
+`aabff5fa59d280e5b736cc972a2f02b234667d40`, including maturity/design gates,
+typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
+Restore `29379115246` and retention `29379115265` passed on the same head.
+Independent security review found no actionable issue and all review threads
+are resolved. PR #308 is not merged; final docs-head verification/review and
+post-merge cleanup remain open. Deployment remains non-gating.
 
 This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
 loop), not closure of those gates or the whole maturity benchmark. Residual gaps
