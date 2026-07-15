@@ -230,3 +230,55 @@ test("HTTP close ends an active library SSE stream before waiting for sockets", 
     await server.close();
   }
 });
+
+test("HTTP close rejects a library SSE that finishes authentication after pre-close", async () => {
+  tempRoot = await mkdtemp(path.join(tmpdir(), "layo-provider-sse-preclose-race-"));
+  let releaseAuthentication!: () => void;
+  const authenticationReleased = new Promise<void>((resolve) => {
+    releaseAuthentication = resolve;
+  });
+  let authenticationStarted!: () => void;
+  const authenticationEntered = new Promise<void>((resolve) => {
+    authenticationStarted = resolve;
+  });
+  const provider: TeamAuthorizationProvider = {
+    async authenticate() {
+      authenticationStarted();
+      await authenticationReleased;
+      return member();
+    }
+  };
+  const server = createHttpServer(new FileStorage(tempRoot), {
+    libraryRegistryAuth: staleConfig,
+    libraryRegistryAuthorizationProvider: provider
+  });
+  const address = await server.listen({ host: "127.0.0.1", port: 0 });
+  const controller = new AbortController();
+
+  try {
+    const responsePromise = fetch(`${address}/libraries/events`, {
+      headers: {
+        authorization: "Bearer stale-token",
+        "x-layo-user-id": "shared-viewer"
+      },
+      signal: controller.signal
+    });
+    await authenticationEntered;
+    const closePromise = server.close();
+    releaseAuthentication();
+
+    const closeOutcome = await Promise.race([
+      closePromise.then(() => "closed" as const),
+      new Promise<"timeout">((resolve) => {
+        setTimeout(() => resolve("timeout"), 750);
+      })
+    ]);
+
+    expect(closeOutcome).toBe("closed");
+    await expect(responsePromise).resolves.toMatchObject({ status: 503 });
+  } finally {
+    controller.abort();
+    releaseAuthentication();
+    await server.close();
+  }
+});
