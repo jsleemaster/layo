@@ -156,6 +156,25 @@ token mutations, and broader account recovery. Process-local watcher
 coordination does not close the multi-host generation gap.
 Deployment remains a separate non-gating concern for this local-first product
 slice. See `docs/product/penpot-token-mcp-ui-delta.md`.
+
+The next authorization generation adapts Penpot `develop` commit
+`167aa7410f95bce91b9a80059624a3e3d9307f1e`: optional team-owned PostgreSQL
+now provides one explicit scope row, transactional managed-token mutations, an
+exact monotonic generation, request-time HTTP/MCP/SSE reads, fail-closed outage
+behavior, bounded state/scope validation, deterministic bootstrap/export/restore,
+and drain-before-pool-close lifecycle handling. Filesystem authorization remains
+the local-first default. RED runs `29384546474`, `29385917375`,
+`29386840736`, `29388355639`, `29388618800`, and `29390562604`
+established the store, operations, concurrency, provider, integration, and
+review-repair boundaries. Authorization Backup Drill `29392003479` proves a
+private versioned scope export can be explicitly restored and re-exported
+byte-identically on PostgreSQL 16. Final PR-head verification and review remain
+open gates. Durable audit-event consumption, general account recovery,
+multi-region database operations, hosted identity/SSO, and agent-reviewed token
+mutation remain maturity gaps. See
+`docs/product/penpot-shared-authorization-generation-delta.md`.
+Deployment remains non-gating.
+
 ## Maturity Dimensions
 
 | Dimension | Penpot benchmark | Layo current posture | Layo target |
