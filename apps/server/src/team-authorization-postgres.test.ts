@@ -392,7 +392,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await migratePostgresTeamAuthorizationState({ connectionString: scopedConnection });
       await admin.query(
         `INSERT INTO ${schemaSql}.layo_authorization_schema_migrations (version)
-         VALUES (2)`
+         VALUES (3)`
       );
 
       await expect(migratePostgresTeamAuthorizationState({
