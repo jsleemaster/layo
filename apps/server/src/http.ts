@@ -226,7 +226,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.get<{
     Querystring: { afterId?: string; limit?: string };
-  }>("/account/authorization-audit", async (request) => {
+  }>("/account/authorization-audit", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
     const { listAuditEvents } = requireTeamAuthorizationAuditManager();
     const afterId = request.query.afterId ?? "0";
     const limit = request.query.limit === undefined
