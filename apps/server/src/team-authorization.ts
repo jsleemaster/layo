@@ -573,7 +573,7 @@ function sharedConfigFromSnapshot(
   try {
     return {
       state,
-      mergedConfig: mergeManagedTokenState(baseConfig, state)
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true)
     };
   } catch (error) {
     throw sharedManagementError(error);
