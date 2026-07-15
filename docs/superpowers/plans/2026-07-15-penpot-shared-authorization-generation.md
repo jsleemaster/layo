@@ -233,7 +233,7 @@ export interface TeamAuthorizationStateStore {
 - [x] Request independent security/code review focused on seed races, SQL injection, transaction rollback, bigint overflow, state size, stale generation, request-time outage behavior, scope disclosure, base divergence, migration conflict, plaintext leakage, and async shutdown.
 - [x] Convert every actionable finding into a deterministic RED and repeat until review is clean.
 - [x] Update the PR body with Penpot reference, failure evidence, verification, and deliberate divergence.
-- [ ] Squash merge only the exact reviewed and verified head.
+- [x] Squash merge only the exact reviewed and verified head.
 - [ ] Run post-merge cleanup. If local system binaries still exit 134, preserve the explicit cleanup exception and do not claim local worktree cleanup.
 
 **Task 8 review evidence (2026-07-15):**
@@ -243,3 +243,9 @@ export interface TeamAuthorizationStateStore {
 - A further initial-authentication/pre-close race produced actual-network RED `29394980417`. Repair attempt `29395174139` rejected the assumption that Fastify `preClose` always publishes state before an in-flight handler resumes.
 - Final code head `05cc03591e71e30f53d737f52070da92cf9c8f6a` publishes closing state synchronously at `server.close()`, rejects post-close SSE hijack, suppresses ended-response writes, and always closes authorization runtime. Full Verification `29395377834` attempt 3 passed all gates with 445 server tests and 200 Playwright CLI cases. Independent re-review found no P0-P2.
 - A later merge-gate run exposed nondeterministic read-entry ordering in the slow-generation test itself. Head `a263f7c2b3a91c43c59bc6ac2c094ef48e28f956` adds an explicit first-read barrier; Full Verification `29396976596`, Authorization Backup Drill `29396976519`, Storage Restore Drill `29396976502`, and Storage Backup Retention `29396976529` passed on that exact head.
+
+**Merge and cleanup evidence (2026-07-15):**
+
+- Evidence-only head `fd1783c6861a9d7bf63580e7acccc6e4a279cd73` passed Full Verification `29397873608`, Authorization Backup Drill `29397873842`, Storage Restore Drill `29397873471`, and Storage Backup Retention `29397873455`.
+- PR #310 squash-merged as `9a710fc6bbd9b81d6ef68d8d5f4421aae28803a9` at 2026-07-15 07:48 UTC. Remote merge state and feature-branch deletion were verified.
+- Required local `git status --short --branch`, `git branch --show-current`, and `git worktree list` still exit 134. The post-merge cleanup checkbox remains open and the local branch/worktree exception is retained; no dirty or user-owned worktree was deleted.
