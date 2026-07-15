@@ -34,18 +34,34 @@ function tokenHash(secret: string): string {
 }
 
 function baseMembers(secret = "owner-base-secret"): unknown[] {
-  return [{
-    userId: "owner-user",
-    role: "owner",
-    teamIds: ["team-beta", "team-alpha"],
-    token: secret,
-    tokens: [{
-      id: "operator-token",
-      name: "Operator token",
-      token: "operator-plaintext",
-      createdAt: "2026-07-15T00:00:00.000Z"
-    }]
-  }];
+  return [
+    {
+      userId: "owner-user",
+      role: "owner",
+      teamIds: ["team-beta", "team-alpha"],
+      token: secret,
+      tokens: [
+        {
+          id: "operator-token-b",
+          name: "Operator token B",
+          token: "operator-plaintext-b",
+          createdAt: "2026-07-15T00:00:00.000Z"
+        },
+        {
+          id: "operator-token-a",
+          name: "Operator token A",
+          tokenHash: tokenHash("operator-plaintext-a"),
+          createdAt: "2026-07-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      userId: "viewer-user",
+      role: "viewer",
+      teamIds: ["team-beta"],
+      tokenHash: tokenHash("viewer-base-secret")
+    }
+  ];
 }
 
 async function withFiles(
@@ -114,10 +130,16 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
     await withFiles(async (_root, basePath) => {
       const scope = `empty-${randomUUID()}`;
       const firstBase = JSON.stringify(baseMembers(), null, 2);
-      const reorderedBase = JSON.stringify([{
-        ...(baseMembers()[0] as Record<string, unknown>),
-        teamIds: ["team-alpha", "team-beta"]
-      }]);
+      const reorderedMembers = baseMembers();
+      const owner = reorderedMembers[0] as Record<string, unknown>;
+      const reorderedBase = JSON.stringify([
+        reorderedMembers[1],
+        {
+          ...owner,
+          teamIds: ["team-alpha", "team-beta"],
+          tokens: [...(owner.tokens as unknown[])].reverse()
+        }
+      ]);
       await writeFile(basePath, firstBase, "utf8");
 
       await runTeamAuthorizationSharedCli([
