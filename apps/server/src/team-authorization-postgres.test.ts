@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState
@@ -64,6 +64,20 @@ async function waitForDatabaseLock(pool: Pool, applicationName: string): Promise
   }
   throw new Error("timed out waiting for the second authorization writer to block");
 }
+
+test("closes the migration pool when the initial connection fails", async () => {
+  const endSpy = vi.spyOn(Pool.prototype, "end");
+
+  try {
+    await expect(migratePostgresTeamAuthorizationState({
+      connectionString: "postgres://127.0.0.1:1/layo?connect_timeout=1",
+      statementTimeoutMs: 100
+    })).rejects.toThrow();
+    expect(endSpy).toHaveBeenCalled();
+  } finally {
+    endSpy.mockRestore();
+  }
+});
 
 describePostgres("PostgreSQL team authorization state store", () => {
   test("serializes concurrent first writers into exact bigint generations", async () => {
@@ -203,6 +217,46 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await expect(store.read(scope)).rejects.toThrow(
         `authorization scope ${scope} does not exist`
       );
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("canonicalizes hash casing and duplicate hashes like the sidecar parser", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const scope = `canonical-hashes-${randomUUID()}`;
+    const uppercaseHash = "A".repeat(64);
+    const duplicateHash = "B".repeat(64);
+
+    try {
+      const committed = await store.mutate(scope, fingerprint, async () => ({
+        baseFingerprint: fingerprint,
+        serializedState: JSON.stringify({
+          version: 2,
+          members: [{
+            ...memberState("owner-user"),
+            tokens: [{
+              id: "portable",
+              name: "Portable",
+              tokenHash: uppercaseHash,
+              tokenHashes: [duplicateHash, duplicateHash.toLowerCase()]
+            }]
+          }]
+        }),
+        result: null
+      }));
+      const state = JSON.parse(committed.serializedState) as {
+        members: Array<{
+          tokens: Array<{ tokenHash: string; tokenHashes: string[] }>;
+        }>;
+      };
+      expect(state.members[0]?.tokens[0]).toMatchObject({
+        tokenHash: uppercaseHash.toLowerCase(),
+        tokenHashes: [duplicateHash.toLowerCase()]
+      });
     } finally {
       await store.close();
     }
