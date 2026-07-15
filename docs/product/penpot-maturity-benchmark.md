@@ -173,8 +173,12 @@ byte-identically on PostgreSQL 16. Lifecycle follow-up REDs `29394310891`,
 close-rejection cleanup, and initial-authentication/pre-close registration
 races. Final code head `05cc03591e71e30f53d737f52070da92cf9c8f6a`
 passed Full Verification `29395377834` attempt 3 with 445 server and 200
-Playwright CLI cases; independent re-review found no P0-P2. Durable audit-event
-consumption, general account recovery,
+Playwright CLI cases; independent re-review found no P0-P2. The final
+deterministic read-order test repair head
+`a263f7c2b3a91c43c59bc6ac2c094ef48e28f956` passed Full Verification
+`29396976596` plus authorization backup `29396976519`, filesystem restore
+`29396976502`, and retention `29396976529` on the same head. Durable
+audit-event consumption, general account recovery,
 multi-region database operations, hosted identity/SSO, and agent-reviewed token
 mutation remain maturity gaps. See
 `docs/product/penpot-shared-authorization-generation-delta.md`.
