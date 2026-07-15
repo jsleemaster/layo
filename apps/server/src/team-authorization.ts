@@ -1234,35 +1234,46 @@ function createSharedTeamAuthorizationFileManager(
         principal: TeamAuthorizationManagementPrincipal,
         input: TeamAuthorizationAuditListOptions
       ): Promise<TeamAuthorizationAuditPage> => {
-        const { afterId, limit } = validateAuditListOptions(input);
-        const { baseSnapshot, committed } = await loadSharedSnapshot();
-        const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
-        const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
-        const authenticated = authenticateTeamMember(
-          mergedConfig,
-          principal.userId,
-          principal.memberToken,
-          now()
-        );
-        if (authenticated.role !== "owner") {
+        try {
+          const { afterId, limit } = validateAuditListOptions(input);
+          const { baseSnapshot, committed } = await loadSharedSnapshot();
+          const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+          const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+          const authenticated = authenticateTeamMember(
+            mergedConfig,
+            principal.userId,
+            principal.memberToken,
+            now()
+          );
+          if (authenticated.role !== "owner") {
+            throw managementError(
+              "owner role is required to read authorization audit history",
+              403
+            );
+          }
+
+          const rows = await listAuditEvents(
+            sharedScope,
+            { afterId, limit: limit + 1 }
+          );
+          const events = rows.slice(0, limit);
+          await publishCommittedSnapshot(baseSnapshot, committed);
+          return {
+            events,
+            ...(rows.length > limit && events.length > 0
+              ? { nextAfterId: events[events.length - 1]!.id }
+              : {})
+          };
+        } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
+            throw error;
+          }
           throw managementError(
-            "owner role is required to read authorization audit history",
-            403
+            "authorization audit history is unavailable",
+            503
           );
         }
-
-        const rows = await listAuditEvents(
-          sharedScope,
-          { afterId, limit: limit + 1 }
-        );
-        const events = rows.slice(0, limit);
-        await publishCommittedSnapshot(baseSnapshot, committed);
-        return {
-          events,
-          ...(rows.length > limit && events.length > 0
-            ? { nextAfterId: events[events.length - 1]!.id }
-            : {})
-        };
       }
     : undefined;
 
