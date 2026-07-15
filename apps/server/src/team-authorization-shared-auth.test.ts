@@ -197,10 +197,15 @@ describe("team authorization providers", () => {
         release = resolve;
       });
       let reads = 0;
+      let firstReadStarted!: () => void;
+      const firstReadEntered = new Promise<void>((resolve) => {
+        firstReadStarted = resolve;
+      });
       const fingerprint = canonicalTeamAuthorizationBaseFingerprint(base);
       const store = readOnlyStore(async () => {
         reads += 1;
         if (reads === 1) {
+          firstReadStarted();
           await delayed;
           return {
             generation: "1",
@@ -226,6 +231,7 @@ describe("team authorization providers", () => {
         userId: "owner-user",
         memberToken: secret
       }, new Date("2026-07-15T15:00:30.000Z"));
+      await firstReadEntered;
       await expect(provider.authenticate({
         userId: "owner-user",
         memberToken: "owner-base-secret"
