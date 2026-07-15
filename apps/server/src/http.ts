@@ -67,6 +67,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       : undefined);
 
   type LibraryRequest = {
+    id: string;
     headers: {
       authorization?: string | string[];
       "x-layo-user-id"?: string | string[];
@@ -142,7 +143,11 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     userId: Array.isArray(request.headers["x-layo-user-id"])
       ? request.headers["x-layo-user-id"][0] ?? ""
       : request.headers["x-layo-user-id"] ?? "",
-    memberToken: bearerToken(request.headers.authorization) ?? ""
+    memberToken: bearerToken(request.headers.authorization) ?? "",
+    audit: {
+      source: "http" as const,
+      requestId: request.id
+    }
   });
 
   const accountTokenMetadataResponse = (
