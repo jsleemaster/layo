@@ -211,14 +211,26 @@ function validateAuditEventInput(
   ) {
     throw new Error("authorization audit metadata must be an object");
   }
+  const pending: object[] = [input.metadata];
+  const visited = new WeakSet<object>();
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) {
+      throw new Error("authorization audit metadata must not contain cycles");
+    }
+    visited.add(current);
+    for (const [key, value] of Object.entries(current)) {
+      if (/(token|secret|hash|credential|database.?url)/i.test(key)) {
+        throw new Error("authorization audit metadata contains a forbidden field");
+      }
+      if (value && typeof value === "object") {
+        pending.push(value);
+      }
+    }
+  }
   const metadata = JSON.stringify(input.metadata);
   if (Buffer.byteLength(metadata, "utf8") > 16_384) {
     throw new Error("authorization audit metadata is too large");
-  }
-  for (const key of Object.keys(input.metadata)) {
-    if (/(token|secret|hash|credential|database.?url)/i.test(key)) {
-      throw new Error("authorization audit metadata contains a forbidden field");
-    }
   }
   return {
     action: input.action,
