@@ -237,7 +237,31 @@ process-local, not a shared multi-host generation or delivery guarantee.
 | Commits `1b1888f` / `914fc72` | Narrow GREEN | Ignore only quarantined orphans; retain binding, revocation, restart, and explicit re-add behavior |
 | Full `29343398679` | Final GREEN | On `914fc7226c5632344d4f5e8e1f4c750006b968a2`; gates, typecheck, build, Core, and Playwright all passed |
 | Restore `29343394961` | Passed | Repaired-head storage restore drill |
-| Retention `29343395030` | Passed | Repaired-head backup retention |
+| Retention `29343395030` | Passed | First orphan-repair backup retention |
+| External re-review P1/P2 | Actionable | Quarantined startup blocked explicit recovery; survivors waited for the next poll after successful quarantine |
+| Commit `3a0b640` / Full `29376307034` | Deterministic RED | Both startup and immediate-survivor cases failed; 380/382 server tests passed |
+| Full `29376572991` | Failure learning | Recovery behavior passed, but in-flight `.layo-locks` work raced fixture cleanup after close |
+| Commit `0e3d2a4` / Full `29377023368` | Deterministic RED | Close still emitted a callback and competing revocation was republished; 382/384 passed |
+| Commits `463ca6e` / `19bdc0b` | Locked GREEN | Quarantine, stable reread, publication, competing-manager order, and close plus settled are covered |
+| External bulk-removal P2 | Actionable | Only one orphan was quarantined per poll, keeping survivors unavailable |
+| Commit `fad4ae2` / Full `29378304736` | Deterministic RED | Bulk survivor remained unavailable before the original error report; 384/385 passed |
+| Commit `2f6f155` / Full `29378477598` | Failed hypothesis | Quarantining all binding failures resurrected dormant tokens in all 20 reintroduction stress iterations |
+| Commit `c8445a1` / Full `29378879310` | Failed hypothesis | Skipping a reintroduced observed removal let a queued reload republish the dormant generation; 20/20 failed |
+| Commit `aabff5f` | Final repair | Quarantine every orphan from the observed removal snapshot; current-base freshness and explicit reintroduction recovery remain enforced |
+| Full `29379115279` | Final GREEN | On `aabff5fa59d280e5b736cc972a2f02b234667d40`; gates, typecheck, build, 385 Core server cases, Rust, and Playwright passed |
+| Restore `29379115246` | Passed | Final repaired-head storage restore drill |
+| Retention `29379115265` | Passed | Final repaired-head backup retention |
+
+The follow-up recovery root causes were separate: startup used strict merge
+before a manager could reconcile a quarantined generation; watcher recovery
+reported the original error before restoring survivors; recovery publication
+released the sidecar lock before publishing; close had no drain boundary; and
+bulk removal processed one orphan per retry. The final path suppresses
+quarantined managed tokens at startup while preserving operator revocations,
+publishes stable survivors inside the mutation lock, exposes `settled()`, and
+quarantines all orphans from the exact observed base snapshot. A current-base
+reintroduction blocks publication and requires explicit base-credential
+reconciliation, so dormant managed tokens cannot reappear.
 
 The P1 root cause was that quarantine persisted the removed member but
 `mergeManagedTokenState` still treated that known orphan as a fresh binding
@@ -270,5 +294,6 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
 - Deployment is deliberately non-gating for this slice. Vercel passed on
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
-- PR #308 has repaired and fully verified the external-review P1. Final review,
-  squash merge, and post-merge cleanup remain Task 4 work.
+- PR #308 has repaired and fully verified all external-review findings through
+  the final code head. Final docs-head verification/review, squash merge, and
+  post-merge cleanup remain Task 4 work.
