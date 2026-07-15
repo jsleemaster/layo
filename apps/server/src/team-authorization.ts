@@ -712,6 +712,81 @@ function baseMemberFingerprint(member: TeamMemberCredential): string {
   return hashToken(JSON.stringify(canonical));
 }
 
+export function canonicalTeamAuthorizationBaseFingerprint(
+  input: string
+): string {
+  const config = parseRequiredTeamAuthorizationConfig(input);
+  const canonicalMembers = config.members
+    .map((member) => ({
+      userId: member.userId,
+      fingerprint: baseMemberFingerprint(member)
+    }))
+    .sort((left, right) =>
+      left.userId.localeCompare(right.userId)
+      || left.fingerprint.localeCompare(right.fingerprint)
+    );
+  return hashToken(JSON.stringify(canonicalMembers));
+}
+
+function canonicalManagedToken(
+  token: TeamMemberTokenCredential
+): TeamMemberTokenCredential {
+  return {
+    id: token.id,
+    name: token.name,
+    ...(token.tokenHash ? { tokenHash: token.tokenHash } : {}),
+    ...(token.tokenHashes?.length
+      ? { tokenHashes: [...token.tokenHashes].sort() }
+      : {}),
+    ...(token.createdAt ? { createdAt: token.createdAt } : {}),
+    ...(token.notBefore ? { notBefore: token.notBefore } : {}),
+    ...(token.expiresAt ? { expiresAt: token.expiresAt } : {}),
+    ...(token.revokedAt ? { revokedAt: token.revokedAt } : {})
+  };
+}
+
+export function canonicalSharedManagedTokenState(
+  baseInput: string,
+  sidecarInput: string | undefined
+): string {
+  const baseConfig = parseRequiredTeamAuthorizationConfig(baseInput);
+  const state = parseManagedTokenState(sidecarInput);
+  const baseByUserId = new Map(
+    baseConfig.members.map((member) => [member.userId, member])
+  );
+
+  for (const stateMember of state.members) {
+    if (stateMember.baseFingerprint !== "") {
+      continue;
+    }
+    const baseMember = baseByUserId.get(stateMember.userId);
+    if (!baseMember) {
+      throw new ManagedTokenBindingError(
+        stateMember.userId,
+        "team authorization token sidecar member was removed"
+      );
+    }
+    stateMember.baseFingerprint = baseMemberFingerprint(baseMember);
+    stateMember.quarantined = false;
+  }
+
+  mergeManagedTokenState(baseConfig, state);
+  const members = state.members
+    .map((member) => ({
+      userId: member.userId,
+      baseFingerprint: member.baseFingerprint,
+      quarantined: member.quarantined,
+      tokens: member.tokens
+        .map(canonicalManagedToken)
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      revocations: member.revocations
+        .map((revocation) => ({ ...revocation }))
+        .sort((left, right) => left.tokenId.localeCompare(right.tokenId))
+    }))
+    .sort((left, right) => left.userId.localeCompare(right.userId));
+  return JSON.stringify({ version: 2, members });
+}
+
 function createManagedTokenStateMember(
   member: TeamMemberCredential
 ): ManagedTokenStateMember {
