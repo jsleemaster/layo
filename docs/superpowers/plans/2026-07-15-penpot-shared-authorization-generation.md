@@ -55,11 +55,13 @@ This slice advances maturity gates 7, 8, and 10. It does not close audit consump
 - [ ] Add a PostgreSQL 16 service to Full Verification and a test-only URL with secret-free purpose comments.
 - [ ] Add `pg` and `@types/pg` through pnpm.
 - [ ] Add a versioned migration table plus authorization scope table with primary-key scope, nonnegative bigint generation, 64-hex base fingerprint, JSONB state, schema version, updated timestamp, and an encoded-state size check.
-- [ ] Document the minimum runtime/migration privileges separately; do not grant privileges from application SQL.
+- [ ] Document separate migration and runtime roles: migration owns advisory-lock/DDL privileges; runtime receives only schema-version read and scope-row SELECT/INSERT/UPDATE privileges. Do not grant privileges from application SQL.
 - [ ] Write a real PostgreSQL RED with two pools. Transaction A seeds/locks generation zero and pauses before its callback returns; prove B's callback cannot enter, release A, then prove B reads generation 1 and commits generation 2.
 - [ ] Require rollback to preserve prior generation/state, different scopes to remain isolated, oversized/malformed state to fail, and generation above JavaScript safe integer to remain exact as a decimal string.
 - [ ] Run the focused test and record the intended missing-store/migration RED.
-- [ ] Implement migration application, atomic seed, locked reread, callback transaction, exact bigint parsing, commit, rollback, statement timeout, and idempotent close.
+- [ ] Implement an explicit `authorization:migrate` command that takes a fixed PostgreSQL advisory lock, applies versioned migrations idempotently, and records schema version. Runtime startup only validates the required schema version and never needs DDL privileges.
+- [ ] Add a two-client migration race test proving one ordered migration result and runtime startup tests for missing/newer schema versions.
+- [ ] Implement atomic seed, locked reread, callback transaction, exact bigint parsing, commit, rollback, statement timeout, and idempotent close.
 - [ ] Re-run the focused suite to GREEN.
 
 Store contract:
@@ -96,7 +98,7 @@ export interface TeamAuthorizationStateStore {
 - [ ] When two hosts bootstrap concurrently, require identical canonical base fingerprint and serialized state; reject a conflicting loser without changing generation/state.
 - [ ] Reject bootstrap when the database scope is nonempty, when the sidecar has plaintext/malformed state, or when the current base cannot merge the sidecar.
 - [ ] Add `export` that emits a secret-free versioned JSON artifact with scope, generation string, base fingerprint, and hash-only state.
-- [ ] Add `restore` that writes only an absent scope unless an explicit expected generation/fingerprint matches; test conflict/no-write behavior.
+- [ ] Add `restore` only for an absent scope. Reject every existing-scope restore, including matching fingerprint/generation, so a stale backup cannot resurrect revoked tokens over live state. Preserve the artifact generation as provenance while the restored row starts from that exact generation; require an explicit operator confirmation flag and test stale-backup/live-scope no-write behavior.
 - [ ] Require shared runtime startup to fail when the scope is absent with an exact bootstrap instruction. Runtime startup must never auto-import a sidecar.
 - [ ] Prove shared mode ignores a stale sidecar after bootstrap and filesystem mode remains unchanged.
 - [ ] Add package scripts for migrate/bootstrap/export/restore and focused GREEN tests.
@@ -111,8 +113,8 @@ export interface TeamAuthorizationStateStore {
 - [ ] Include all identity-relevant role, team, lifecycle, token metadata, and credential hashes; never include plaintext itself, only its hash.
 - [ ] Write a real PostgreSQL two-manager RED proving unmanaged member/role/team divergence fails closed.
 - [ ] Require a stale host to remain closed after another host reconciles a new base fingerprint.
-- [ ] Define explicit reconciliation: only a principal authenticated by the current local root/legacy base may replace the scope fingerprint inside the locked transaction; preserve revocations, quarantine incompatible managed generations, and increment generation once.
-- [ ] Write concurrent reconciliation RED: one canonical base wins; a competing different base receives 409 and cannot overwrite it.
+- [ ] Do not allow runtime principals to reconcile a scope-level base fingerprint. Add an explicit offline `authorization:reconcile-base` operator command requiring the current shared fingerprint, expected generation, and candidate base file; inside one locked transaction preserve revocations, quarantine incompatible managed generations, replace the canonical fingerprint, and increment generation once.
+- [ ] Write a stale/divergent runtime-host RED proving its locally valid owner credential cannot reconcile. Write concurrent offline reconciliation RED: one expected generation wins and a different candidate receives conflict without overwrite.
 - [ ] Implement shared manager options `stateStore` and required `sharedScope`.
 - [ ] Keep default filesystem locking/sidecar persistence byte-for-byte behavior unchanged.
 - [ ] Re-run sidecar, management, and shared-store suites to GREEN.
@@ -141,8 +143,10 @@ export interface TeamAuthorizationStateStore {
 - Modify: relevant HTTP/MCP authorization tests
 
 - [ ] Add an async authorization source/provider used by every protected HTTP route, SSE poll, MCP tool, and token-management operation.
+- [ ] Before authentication, read the current operator base file, read PostgreSQL, then reread the base file. Accept only equal base snapshots whose canonical fingerprint equals the shared row; retry a bounded number of times on an in-flight base write, then fail closed.
+- [ ] Write RED proving a base change between database read and authentication cannot use a watched cache or accept the old credential.
 - [ ] Write RED proving host B rejects a token on the first protected request after host A commits revocation, without waiting for watcher polling.
-- [ ] Require unchanged generations to avoid reparsing but still complete the database read before auth.
+- [ ] Require unchanged generations to avoid reparsing managed state but still complete the stable base/database/base read before auth.
 - [ ] Write deterministic outage/timeout/malformed-generation/unsafe-bigint RED cases: startup and each protected request fail closed, cached credentials are not accepted, and recovery publishes only the newest generation.
 - [ ] Prevent a slow stale read from republishing after a newer generation or after close.
 - [ ] Preserve unconfigured local-first synchronous behavior.
