@@ -99,6 +99,25 @@ export interface TeamAuthorizationConfigSource {
   settled: () => Promise<void>;
 }
 
+export interface TeamAuthorizationPrincipal {
+  userId?: string;
+  memberToken?: string;
+}
+
+export interface TeamAuthorizationProvider {
+  authenticate: (
+    principal: TeamAuthorizationPrincipal,
+    now?: Date
+  ) => AuthenticatedTeamMember | Promise<AuthenticatedTeamMember>;
+}
+
+export interface SharedTeamAuthorizationProviderOptions {
+  maxStableReadAttempts?: number;
+  publishSharedConfig?: (
+    config: TeamAuthorizationConfig
+  ) => void | Promise<void>;
+}
+
 export interface WatchTeamAuthorizationConfigFileOptions {
   pollIntervalMs?: number;
   onError?: (error: Error) => void;
@@ -795,6 +814,144 @@ async function publishSharedAuthorizationConfig(
       sharedAuthorizationPublicationTails.delete(config);
     }
   }
+}
+
+const MAX_POSTGRES_BIGINT = 9_223_372_036_854_775_807n;
+
+function validSharedAuthorizationGeneration(value: string): string {
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) {
+    throw new Error(
+      "authorization generation must be an exact nonnegative decimal string"
+    );
+  }
+  if (BigInt(value) > MAX_POSTGRES_BIGINT) {
+    throw new Error("authorization generation exceeds PostgreSQL bigint");
+  }
+  return value;
+}
+
+function validStableReadAttempts(value: number | undefined): number {
+  const attempts = value ?? 3;
+  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw new Error(
+      "shared authorization maxStableReadAttempts must be an integer from 1 to 10"
+    );
+  }
+  return attempts;
+}
+
+export function createTeamAuthorizationProvider(
+  config: TeamAuthorizationConfig
+): TeamAuthorizationProvider {
+  return {
+    authenticate: (principal, now) =>
+      authenticateTeamMember(
+        config,
+        principal.userId,
+        principal.memberToken,
+        now
+      )
+  };
+}
+
+export function createSharedTeamAuthorizationProvider(
+  filePath: string,
+  config: TeamAuthorizationConfig,
+  stateStore: TeamAuthorizationStateStore,
+  sharedScope: string,
+  options: SharedTeamAuthorizationProviderOptions = {}
+): TeamAuthorizationProvider {
+  const normalizedPath = filePath.trim();
+  const normalizedScope = sharedScope.trim();
+  if (!normalizedPath) {
+    throw new Error("shared authorization base file path must not be blank");
+  }
+  if (!normalizedScope) {
+    throw new Error("team authorization sharedScope must not be blank");
+  }
+  const maxStableReadAttempts = validStableReadAttempts(
+    options.maxStableReadAttempts
+  );
+  let parsedCache:
+    | {
+        baseSnapshot: string;
+        generation: string;
+        serializedState: string;
+        mergedConfig: TeamAuthorizationConfig;
+      }
+    | undefined;
+
+  return {
+    authenticate: async (principal, now) => {
+      for (let attempt = 0; attempt < maxStableReadAttempts; attempt += 1) {
+        const baseSnapshot = await readFile(normalizedPath, "utf8");
+        const committed = await stateStore.read(normalizedScope);
+        const currentBaseSnapshot = await readFile(normalizedPath, "utf8");
+        if (currentBaseSnapshot !== baseSnapshot) {
+          continue;
+        }
+
+        const generation = validSharedAuthorizationGeneration(
+          committed.generation
+        );
+        const baseFingerprint =
+          canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+        if (committed.baseFingerprint !== baseFingerprint) {
+          continue;
+        }
+
+        let mergedConfig: TeamAuthorizationConfig;
+        if (
+          parsedCache?.baseSnapshot === baseSnapshot
+          && parsedCache.generation === generation
+          && parsedCache.serializedState === committed.serializedState
+        ) {
+          mergedConfig = parsedCache.mergedConfig;
+        } else {
+          const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+          mergedConfig = sharedConfigFromSnapshot(
+            baseConfig,
+            committed
+          ).mergedConfig;
+          parsedCache = {
+            baseSnapshot,
+            generation,
+            serializedState: committed.serializedState,
+            mergedConfig
+          };
+        }
+
+        await publishSharedAuthorizationConfig(
+          config,
+          mergedConfig,
+          generation,
+          options.publishSharedConfig
+        );
+        const publishedGeneration =
+          sharedAuthorizationPublishedGenerations.get(config);
+        if (
+          publishedGeneration !== undefined
+          && compareAuthorizationGenerations(
+            generation,
+            publishedGeneration
+          ) < 0
+        ) {
+          continue;
+        }
+
+        return authenticateTeamMember(
+          mergedConfig,
+          principal.userId,
+          principal.memberToken,
+          now
+        );
+      }
+      throw managementError(
+        "team authorization base and shared state did not stabilize",
+        409
+      );
+    }
+  };
 }
 
 function createSharedTeamAuthorizationFileManager(
