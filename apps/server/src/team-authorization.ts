@@ -146,7 +146,9 @@ export interface TeamAuthorizationFileManager {
     principal: TeamAuthorizationManagementPrincipal,
     operation: TeamAuthorizationManagementOperation
   ) => Promise<TeamAuthorizationManagementResult>;
-  listTokens: (userId: string) => TeamAccessTokenMetadata[];
+  listTokens: (
+    userId: string
+  ) => TeamAccessTokenMetadata[] | Promise<TeamAccessTokenMetadata[]>;
   createToken: (
     userId: string,
     input: CreateTeamAccessTokenInput
@@ -584,33 +586,37 @@ function sharedConfigForOperation(
   identity: SharedManagementIdentity,
   operationNow: Date
 ): { mergedConfig: TeamAuthorizationConfig; recovered: boolean } {
-  try {
+  if (!("principal" in identity)) {
     return {
-      mergedConfig: mergeManagedTokenState(baseConfig, state),
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true),
       recovered: false
     };
-  } catch (error) {
-    if (!(error instanceof ManagedTokenBindingError) || !("principal" in identity)) {
-      throw sharedManagementError(error);
-    }
-    const authenticated = authenticateTeamMember(
-      mergeManagedRevocationsForRecovery(baseConfig, state),
-      identity.principal.userId,
-      identity.principal.memberToken,
-      operationNow
-    );
-    if (authenticated.userId !== error.userId) {
-      throw sharedManagementError(error);
-    }
-    reconcileManagedTokenStateMember(
-      state,
-      findManagedMember(baseConfig, authenticated.userId)
-    );
+  }
+
+  const stateMember = state.members.find(
+    (candidate) => candidate.userId === identity.principal.userId
+  );
+  if (!stateMember?.quarantined) {
     return {
-      mergedConfig: mergeManagedTokenState(baseConfig, state),
-      recovered: true
+      mergedConfig: mergeManagedTokenState(baseConfig, state, true),
+      recovered: false
     };
   }
+
+  const authenticated = authenticateTeamMember(
+    mergeManagedRevocationsForRecovery(baseConfig, state),
+    identity.principal.userId,
+    identity.principal.memberToken,
+    operationNow
+  );
+  reconcileManagedTokenStateMember(
+    state,
+    findManagedMember(baseConfig, authenticated.userId)
+  );
+  return {
+    mergedConfig: mergeManagedTokenState(baseConfig, state, true),
+    recovered: true
+  };
 }
 
 function applySharedManagementOperation(
@@ -966,9 +972,15 @@ function createSharedTeamAuthorizationFileManager(
   return {
     manageTokens: (principal, operation) =>
       executeOperation({ principal }, operation),
-    listTokens: (userId) => {
-      const member = findManagedMember(config, userId);
-      return (member.tokens ?? []).map(toTeamAccessTokenMetadata);
+    listTokens: async (userId) => {
+      const result = await executeOperation(
+        { userId },
+        { type: "list" }
+      );
+      if (result.type !== "list") {
+        throw new Error("unexpected team authorization list result");
+      }
+      return result.tokens;
     },
     createToken: async (userId, input) => {
       const result = await executeOperation(
