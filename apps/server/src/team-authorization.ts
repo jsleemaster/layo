@@ -44,6 +44,14 @@ const teamAuthorizationConfigReloads = new WeakMap<
   TeamAuthorizationConfig,
   () => Promise<void>
 >();
+const sharedAuthorizationPublishedGenerations = new WeakMap<
+  TeamAuthorizationConfig,
+  string
+>();
+const sharedAuthorizationPublicationTails = new WeakMap<
+  TeamAuthorizationConfig,
+  Promise<void>
+>();
 
 function teamAuthorizationConfigGeneration(config: TeamAuthorizationConfig): number {
   return teamAuthorizationConfigGenerations.get(config) ?? 0;
@@ -161,6 +169,9 @@ export interface TeamAuthorizationFileManagerOptions {
   publishSharedConfig?: (
     config: TeamAuthorizationConfig
   ) => void | Promise<void>;
+  scheduleSharedRefresh?: (
+    refresh: () => Promise<void>
+  ) => void;
 }
 
 export interface TeamMemberTokenSource {
@@ -567,6 +578,41 @@ function sharedConfigFromSnapshot(
   }
 }
 
+function sharedConfigForOperation(
+  baseConfig: TeamAuthorizationConfig,
+  state: ManagedTokenState,
+  identity: SharedManagementIdentity,
+  operationNow: Date
+): { mergedConfig: TeamAuthorizationConfig; recovered: boolean } {
+  try {
+    return {
+      mergedConfig: mergeManagedTokenState(baseConfig, state),
+      recovered: false
+    };
+  } catch (error) {
+    if (!(error instanceof ManagedTokenBindingError) || !("principal" in identity)) {
+      throw sharedManagementError(error);
+    }
+    const authenticated = authenticateTeamMember(
+      mergeManagedRevocationsForRecovery(baseConfig, state),
+      identity.principal.userId,
+      identity.principal.memberToken,
+      operationNow
+    );
+    if (authenticated.userId !== error.userId) {
+      throw sharedManagementError(error);
+    }
+    reconcileManagedTokenStateMember(
+      state,
+      findManagedMember(baseConfig, authenticated.userId)
+    );
+    return {
+      mergedConfig: mergeManagedTokenState(baseConfig, state),
+      recovered: true
+    };
+  }
+}
+
 function applySharedManagementOperation(
   identity: SharedManagementIdentity,
   operation: TeamAuthorizationManagementOperation,
@@ -705,16 +751,44 @@ function applySharedManagementOperation(
   };
 }
 
+function compareAuthorizationGenerations(
+  left: string,
+  right: string
+): number {
+  return left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
+}
+
 async function publishSharedAuthorizationConfig(
   config: TeamAuthorizationConfig,
   nextConfig: TeamAuthorizationConfig,
+  generation: string,
   publishSharedConfig: TeamAuthorizationFileManagerOptions["publishSharedConfig"]
 ): Promise<void> {
-  if (publishSharedConfig) {
-    await publishSharedConfig(nextConfig);
-    return;
+  const previous = sharedAuthorizationPublicationTails.get(config)
+    ?? Promise.resolve();
+  const publication = previous.catch(() => undefined).then(async () => {
+    const current = sharedAuthorizationPublishedGenerations.get(config);
+    if (
+      current !== undefined
+      && compareAuthorizationGenerations(generation, current) < 0
+    ) {
+      return;
+    }
+    if (publishSharedConfig) {
+      await publishSharedConfig(nextConfig);
+    } else {
+      replaceTeamAuthorizationMembers(config, nextConfig.members);
+    }
+    sharedAuthorizationPublishedGenerations.set(config, generation);
+  });
+  sharedAuthorizationPublicationTails.set(config, publication);
+  try {
+    await publication;
+  } finally {
+    if (sharedAuthorizationPublicationTails.get(config) === publication) {
+      sharedAuthorizationPublicationTails.delete(config);
+    }
   }
-  replaceTeamAuthorizationMembers(config, nextConfig.members);
 }
 
 function createSharedTeamAuthorizationFileManager(
@@ -736,31 +810,91 @@ function createSharedTeamAuthorizationFileManager(
     options.generateSecret
     ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
 
+  const loadSharedSnapshot = async (): Promise<{
+    baseSnapshot: string;
+    committed: TeamAuthorizationStateSnapshot;
+  }> => {
+    const baseSnapshot = await readFile(filePath, "utf8");
+    const baseFingerprint =
+      canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+    const committed = await transact(
+      sharedScope,
+      baseFingerprint,
+      { mutating: false },
+      async (locked) => {
+        if (await readFile(filePath, "utf8") !== baseSnapshot) {
+          throw managementError(
+            "team authorization file changed during shared refresh",
+            409
+          );
+        }
+        return {
+          baseFingerprint,
+          serializedState: locked.serializedState,
+          result: undefined,
+          changed: false
+        };
+      }
+    );
+    return { baseSnapshot, committed };
+  };
+
+  const publishSnapshot = async (
+    baseSnapshot: string,
+    committed: TeamAuthorizationStateSnapshot
+  ): Promise<void> => {
+    const currentBaseSnapshot = await readFile(filePath, "utf8");
+    if (currentBaseSnapshot !== baseSnapshot) {
+      throw managementError(
+        "team authorization file changed after shared transaction",
+        409
+      );
+    }
+    requireSharedFingerprint(
+      committed,
+      canonicalTeamAuthorizationBaseFingerprint(currentBaseSnapshot)
+    );
+    const baseConfig = parseRequiredTeamAuthorizationConfig(currentBaseSnapshot);
+    const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+    await publishSharedAuthorizationConfig(
+      config,
+      mergedConfig,
+      committed.generation,
+      options.publishSharedConfig
+    );
+  };
+
+  const refreshSharedConfig = async (): Promise<void> => {
+    const { baseSnapshot, committed } = await loadSharedSnapshot();
+    await publishSnapshot(baseSnapshot, committed);
+  };
+
+  const scheduleRefresh = (): void => {
+    const refresh = async () => {
+      await refreshSharedConfig();
+    };
+    try {
+      if (options.scheduleSharedRefresh) {
+        options.scheduleSharedRefresh(refresh);
+      } else {
+        queueMicrotask(() => {
+          void refresh().catch(() => undefined);
+        });
+      }
+    } catch {
+      // The committed database state remains authoritative even if scheduling fails.
+    }
+  };
+
   const publishCommittedSnapshot = async (
     baseSnapshot: string,
     committed: TeamAuthorizationStateSnapshot
   ): Promise<void> => {
     try {
-      const currentBaseSnapshot = await readFile(filePath, "utf8");
-      if (currentBaseSnapshot !== baseSnapshot) {
-        throw managementError(
-          "team authorization file changed after shared token commit",
-          409
-        );
-      }
-      requireSharedFingerprint(
-        committed,
-        canonicalTeamAuthorizationBaseFingerprint(currentBaseSnapshot)
-      );
-      const baseConfig = parseRequiredTeamAuthorizationConfig(currentBaseSnapshot);
-      const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
-      await publishSharedAuthorizationConfig(
-        config,
-        mergedConfig,
-        options.publishSharedConfig
-      );
+      await publishSnapshot(baseSnapshot, committed);
     } catch {
       replaceTeamAuthorizationMembers(config, []);
+      scheduleRefresh();
     }
   };
 
@@ -772,18 +906,21 @@ function createSharedTeamAuthorizationFileManager(
     const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
     const baseFingerprint =
       canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
-    const mutating = operation.type !== "list";
 
     let committed;
     try {
       committed = await transact(
         sharedScope,
         baseFingerprint,
-        { mutating },
+        { mutating: true },
         async (locked) => {
-          const { state, mergedConfig } = sharedConfigFromSnapshot(
+          const state = parseManagedTokenState(locked.serializedState);
+          const operationNow = now();
+          const { mergedConfig, recovered } = sharedConfigForOperation(
             baseConfig,
-            locked
+            state,
+            identity,
+            operationNow
           );
           const applied = applySharedManagementOperation(
             identity,
@@ -791,10 +928,11 @@ function createSharedTeamAuthorizationFileManager(
             baseConfig,
             state,
             mergedConfig,
-            now(),
+            operationNow,
             generateId,
             generateSecret
           );
+          const changed = recovered || applied.changed;
           if (await readFile(filePath, "utf8") !== baseSnapshot) {
             throw managementError(
               "team authorization file changed during token management",
@@ -803,11 +941,11 @@ function createSharedTeamAuthorizationFileManager(
           }
           return {
             baseFingerprint,
-            serializedState: mutating
+            serializedState: changed
               ? serializeManagedTokenState(state)
               : locked.serializedState,
-            result: { applied, mergedConfig },
-            changed: applied.changed
+            result: { applied },
+            changed
           };
         }
       );
@@ -821,15 +959,7 @@ function createSharedTeamAuthorizationFileManager(
       throw sharedManagementError(error);
     }
 
-    if (!mutating) {
-      await publishSharedAuthorizationConfig(
-        config,
-        committed.result.mergedConfig,
-        options.publishSharedConfig
-      );
-    } else {
-      await publishCommittedSnapshot(baseSnapshot, committed);
-    }
+    await publishCommittedSnapshot(baseSnapshot, committed);
     return committed.result.applied.result;
   };
 
