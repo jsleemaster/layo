@@ -26,7 +26,7 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-07-14-penpot-token-mcp-ui.md` - **Active / final review gate** on PR #308. External review found a removed-member orphan P1; RED `e4c4126` / Full `29342714708` reproduced survivor lockout, broad-ignore hypothesis `4d6f0af` failed existing recovery tests, and narrow repair `1b1888f` / `914fc72` preserves revocations, restart safety, and explicit re-add recovery. Full `29343398679`, restore `29343394961`, and retention `29343395030` passed on repaired head `914fc7226c5632344d4f5e8e1f4c750006b968a2`. Final fresh review, thread resolution, squash merge, and post-merge cleanup remain open.
+`2026-07-14-penpot-token-mcp-ui.md` - **Active / final docs gate** on PR #308. External review loops closed removed-member survivor lockout, quarantined/v1 startup recovery, immediate survivor restoration, locked publication and close quiescence, bulk orphan removal, and reintroduction non-resurrection. RED Full runs `29376307034`, `29377023368`, and `29378304736` proved the exact gaps; failed broad repairs `2f6f155` and `c8445a1` were rejected by the 20x reintroduction stress. Final `aabff5f` passed Full `29379115279`, restore `29379115246`, and retention `29379115265`; independent review found no actionable finding and all review threads are resolved. Final docs-head verification/review, squash merge, and post-merge cleanup remain open.
 
 ## Completed Plans
 
