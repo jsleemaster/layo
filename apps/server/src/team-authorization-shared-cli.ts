@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import {
@@ -255,7 +255,14 @@ async function runExport(
   const output = `${JSON.stringify(artifact, null, 2)}\n`;
   const outputPath = arguments_.values.get("--output");
   if (outputPath) {
-    await writeFile(outputPath, output, { encoding: "utf8", mode: 0o600 });
+    const handle = await open(outputPath, "w", 0o600);
+    try {
+      await handle.chmod(0o600);
+      await handle.writeFile(output, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     return;
   }
   stdout.write(output);
@@ -308,6 +315,8 @@ export async function runTeamAuthorizationSharedCli(
     ?? (async (connectionString: string) =>
       createPostgresTeamAuthorizationStateStore({ connectionString }));
   const store = await createStore(databaseUrl);
+  let commandFailed = false;
+  let commandError: unknown;
   try {
     if (arguments_.command === "bootstrap") {
       await runBootstrap(arguments_, store);
@@ -316,8 +325,24 @@ export async function runTeamAuthorizationSharedCli(
     } else {
       await runRestore(arguments_, store);
     }
+  } catch (error) {
+    commandFailed = true;
+    commandError = error;
+    throw error;
   } finally {
-    await store.close();
+    try {
+      await store.close();
+    } catch (closeError) {
+      if (!commandFailed) {
+        throw closeError;
+      }
+      if (commandError instanceof Error && commandError.cause === undefined) {
+        Object.defineProperty(commandError, "cause", {
+          configurable: true,
+          value: closeError
+        });
+      }
+    }
   }
 }
 
