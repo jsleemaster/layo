@@ -70,6 +70,7 @@ describe("team access token MCP administration", () => {
       generateId: () => "owner-created",
       generateSecret: () => "layo_pat_mcp_secret"
     });
+    const manageTokens = vi.spyOn(manager, "manageTokens");
     const client = await connect({
       libraryRegistryAuth: source.config,
       libraryRegistryPrincipal: {
@@ -125,6 +126,13 @@ describe("team access token MCP administration", () => {
     });
     expect(JSON.stringify(revoked)).not.toContain("layo_pat_mcp_secret");
     expect(JSON.stringify(revoked)).not.toContain("tokenHash");
+
+    expect(manageTokens).toHaveBeenCalledTimes(3);
+    for (const [principal] of manageTokens.mock.calls) {
+      expect(principal).toMatchObject({ audit: { source: "mcp" } });
+      expect((principal as typeof principal & { audit?: { requestId?: string } }).audit)
+        .not.toHaveProperty("requestId");
+    }
 
     expect(await readFile(configPath, "utf8")).toBe(baseSnapshot);
     const persistedText = await readFile(`${configPath}.tokens.json`, "utf8");
