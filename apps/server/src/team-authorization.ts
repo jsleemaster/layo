@@ -4,6 +4,8 @@ import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { withFileProcessMutationLock } from "./file-process-lock.js";
 import type {
+  TeamAuthorizationAuditEventInput,
+  TeamAuthorizationAuditSource,
   TeamAuthorizationStateSnapshot,
   TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
@@ -148,6 +150,10 @@ export interface CreatedTeamAccessToken {
 export interface TeamAuthorizationManagementPrincipal {
   userId: string;
   memberToken: string;
+  audit?: {
+    source: TeamAuthorizationAuditSource;
+    requestId?: string;
+  };
 }
 
 export type TeamAuthorizationManagementOperation =
@@ -543,6 +549,7 @@ type SharedManagementIdentity =
 interface SharedOperationResult {
   result: TeamAuthorizationManagementResult;
   changed: boolean;
+  actorUserId: string;
 }
 
 function sharedManagementError(error: unknown): Error {
@@ -666,6 +673,7 @@ function applySharedManagementOperation(
   if (operation.type === "list") {
     return {
       changed: false,
+      actorUserId: userId,
       result: {
         type: "list",
         tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata),
@@ -719,6 +727,7 @@ function applySharedManagementOperation(
     ).tokens.push(credential);
     return {
       changed: true,
+      actorUserId: userId,
       result: {
         type: "create",
         created: {
@@ -751,6 +760,7 @@ function applySharedManagementOperation(
   if (credential.revokedAt) {
     return {
       changed: false,
+      actorUserId: userId,
       result: {
         type: "revoke",
         metadata: toTeamAccessTokenMetadata(credential)
@@ -769,10 +779,62 @@ function applySharedManagementOperation(
   credential.revokedAt = revokedAt;
   return {
     changed: true,
+    actorUserId: userId,
     result: {
       type: "revoke",
       metadata: toTeamAccessTokenMetadata(credential)
     }
+  };
+}
+
+function sharedManagementAuditEvent(
+  identity: SharedManagementIdentity,
+  applied: SharedOperationResult,
+  recovered: boolean
+): TeamAuthorizationAuditEventInput | undefined {
+  if (!applied.changed && !recovered) {
+    return undefined;
+  }
+
+  const audit = "principal" in identity ? identity.principal.audit : undefined;
+  const attribution = {
+    actorUserId: applied.actorUserId,
+    source: audit?.source ?? "operator" as TeamAuthorizationAuditSource,
+    ...(audit?.requestId ? { requestId: audit.requestId } : {})
+  };
+
+  if (applied.changed && applied.result.type === "create") {
+    const metadata = applied.result.created.metadata;
+    return {
+      action: "token_created",
+      ...attribution,
+      subjectTokenId: metadata.id,
+      subjectTokenName: metadata.name,
+      metadata: {
+        ...(metadata.expiresAt ? { expiresAt: metadata.expiresAt } : {}),
+        ...(recovered ? { baseReconciled: true } : {})
+      }
+    };
+  }
+
+  if (applied.changed && applied.result.type === "revoke") {
+    const metadata = applied.result.metadata;
+    return {
+      action: "token_revoked",
+      ...attribution,
+      subjectTokenId: metadata.id,
+      subjectTokenName: metadata.name,
+      metadata: {
+        ...(metadata.revokedAt ? { revokedAt: metadata.revokedAt } : {}),
+        ...(recovered ? { baseReconciled: true } : {})
+      }
+    };
+  }
+
+  return {
+    action: "base_reconciled",
+    ...attribution,
+    metadata: { reason: "credential_recovery" }
   };
 }
 
@@ -1102,13 +1164,15 @@ function createSharedTeamAuthorizationFileManager(
               409
             );
           }
+          const auditEvent = sharedManagementAuditEvent(identity, applied, recovered);
           return {
             baseFingerprint,
             serializedState: changed
               ? serializeManagedTokenState(state)
               : locked.serializedState,
             result: { applied },
-            changed
+            changed,
+            ...(auditEvent ? { auditEvent } : {})
           };
         }
       );
