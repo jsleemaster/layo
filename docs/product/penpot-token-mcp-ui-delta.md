@@ -1,7 +1,7 @@
 # Penpot Token MCP and UI Delta
 
 Last checked: 2026-07-14
-Status: Completed by PR #308 squash merge `5df21e360aff0970b009e7e911007167d6f83f96`
+Status: Product merged by PR #308; retained local post-merge cleanup exception
 
 ## Retrieval Summary
 
@@ -299,5 +299,6 @@ unrelated focus workaround. Superseded Full runs `29332319714`,
   `bd7acd`, but preview availability does not prove the local-first MCP/UI
   contract.
 - PR #308 repaired every code finding and the final README semantics P3, passed
-  the final documentation-head gate, and squash-merged. The dedicated cleanup
-  PR records completion and remote-branch cleanup evidence.
+  the final documentation-head gate, squash-merged, and its remote branch was
+  deleted. Local status/current-branch/worktree checks still exit 134, so the
+  cleanup PR records that exception and does not claim plan completion.
