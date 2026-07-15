@@ -137,7 +137,7 @@ function canonicalJson(value: unknown): string {
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(source[key])}`)
       .join(",")}}`;
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "undefined";
 }
 
 function snapshotsMatch(
