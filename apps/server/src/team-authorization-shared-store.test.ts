@@ -238,7 +238,11 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
 
       try {
         const firstCreate = firstManager.manageTokens(
-          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            userId: "owner-user",
+            memberToken: "owner-base-secret",
+            audit: { source: "http", requestId: "request-host-a" }
+          },
           {
             type: "create",
             input: { name: "Host A", expiresInDays: null }
@@ -247,7 +251,11 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         await callbackEntered.promise;
 
         const secondCreate = secondManager.manageTokens(
-          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            userId: "owner-user",
+            memberToken: "owner-base-secret",
+            audit: { source: "mcp" }
+          },
           {
             type: "create",
             input: { name: "Host B", expiresInDays: null }
@@ -272,6 +280,36 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         expect(committed.serializedState).not.toContain("layo_pat_host_a");
         expect(committed.serializedState).not.toContain("layo_pat_host_b");
         expect(committed.serializedState).not.toMatch(/"token"\s*:/);
+
+        const events = await secondStore.listAuditEvents?.(
+          scope,
+          { afterId: "0", limit: 10 }
+        );
+        expect(events).toEqual([
+          expect.objectContaining({
+            scope,
+            generation: "1",
+            action: "token_created",
+            actorUserId: "owner-user",
+            subjectTokenId: "host-a-token",
+            subjectTokenName: "Host A",
+            source: "http",
+            requestId: "request-host-a",
+            metadata: {}
+          }),
+          expect.objectContaining({
+            scope,
+            generation: "2",
+            action: "token_created",
+            actorUserId: "owner-user",
+            subjectTokenId: "host-b-token",
+            subjectTokenName: "Host B",
+            source: "mcp",
+            metadata: {}
+          })
+        ]);
+        expect(JSON.stringify(events)).not.toContain("layo_pat_host");
+        expect(JSON.stringify(events)).not.toContain("tokenHash");
       } finally {
         mayCommit.resolve();
         await Promise.all([
