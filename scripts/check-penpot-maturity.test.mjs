@@ -53,6 +53,14 @@ test("merged Penpot solid multi-stroke plan is not routed as active", async () =
   assert.match(status, /`2026-07-05-penpot-solid-multi-stroke-flattening\.md` \| Completed/);
 });
 
+test("README documents authorization watcher retries as unbounded and process-local", async () => {
+  const readme = await readText("README.md");
+
+  assert.match(readme, /Retries remain unbounded for the lifetime of the watcher/);
+  assert.match(readme, /Permanently malformed configuration remains fail-closed/);
+  assert.doesNotMatch(readme, /retry budget is exhausted/);
+});
+
 test("active top-level docs no longer frame Layo as a small personal editor", async () => {
   const docs = {
     "README.md": await readText("README.md"),

@@ -57,12 +57,20 @@ describe("team authorization cross-process mutations", () => {
       await writeFile(releasePath, "release\n", "utf8");
       await Promise.all(exits);
 
-      const members = JSON.parse(await readFile(configPath, "utf8")) as Array<{
+      const baseMembers = JSON.parse(await readFile(configPath, "utf8")) as Array<{
         tokens?: Array<{ id: string }>;
       }>;
-      expect(members[0]?.tokens?.map((token) => token.id).sort()).toEqual(
+      expect(baseMembers[0]?.tokens).toBeUndefined();
+      const sidecar = JSON.parse(
+        await readFile(`${configPath}.tokens.json`, "utf8")
+      ) as {
+        members: Array<{ tokens: Array<{ id: string }> }>;
+      };
+      expect(sidecar.members[0]?.tokens.map((token) => token.id).sort()).toEqual(
         Array.from({ length: 6 }, (_, index) => `process-token-${index}`)
       );
+      expect(JSON.stringify(sidecar)).not.toContain("layo_pat_process_");
+      expect(JSON.stringify(sidecar)).not.toMatch(/"token"\\s*:/);
     } finally {
       for (const child of children) {
         if (child.exitCode === null) {
@@ -129,18 +137,32 @@ describe("team authorization cross-process mutations", () => {
       await writeFile(releasePath, "release\n", "utf8");
       await Promise.all(exits);
 
-      const members = JSON.parse(await readFile(configPath, "utf8")) as Array<{
+      const baseMembers = JSON.parse(await readFile(configPath, "utf8")) as Array<{
         tokens?: Array<{ id: string; revokedAt?: string }>;
       }>;
-      expect(members[0]?.tokens).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: "existing-token",
-            revokedAt: "2026-07-14T12:00:00.000Z"
-          }),
-          expect.objectContaining({ id: "new-token" })
-        ])
+      expect(baseMembers[0]?.tokens).toEqual([
+        expect.objectContaining({ id: "existing-token" })
+      ]);
+      expect(baseMembers[0]?.tokens?.[0]).not.toHaveProperty("revokedAt");
+      const sidecar = JSON.parse(
+        await readFile(`${configPath}.tokens.json`, "utf8")
+      ) as {
+        members: Array<{
+          tokens: Array<{ id: string }>;
+          revocations: Array<{ tokenId: string; revokedAt: string }>;
+        }>;
+      };
+      expect(sidecar.members[0]?.tokens).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: "new-token" })])
       );
+      expect(sidecar.members[0]?.revocations).toEqual([
+        {
+          tokenId: "existing-token",
+          revokedAt: "2026-07-14T12:00:00.000Z"
+        }
+      ]);
+      expect(JSON.stringify(sidecar)).not.toContain("layo_pat_new");
+      expect(JSON.stringify(sidecar)).not.toMatch(/"token"\\s*:/);
     } finally {
       for (const child of children) {
         if (child.exitCode === null) {

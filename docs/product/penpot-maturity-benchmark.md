@@ -39,17 +39,116 @@ implementation slice reveals a new gap.
 
 ## Current Token Administration Evidence
 
-PR #306 adapts Penpot's account-level personal access token lifecycle to Layo's
-operator-owned local-first authorization file. Authenticated members can create
-named tokens with Penpot-compatible expiry choices, receive the plaintext once,
-list metadata, and individually revoke credentials while sibling credentials
-remain valid. Hash-only persistence and restart durability are covered by server
-tests. PR #307 adds resource-keyed cross-process authorization locking with
-same-host abandoned-lock recovery, live-lock protection, bounded waits, and a
-six-process no-loss regression. MCP administration, UI management, multi-host
-transactional identity storage, audit events, and shared hosted identity storage
-remain below the benchmark.
+PR #306 established account-level create/list/revoke over the operator-owned
+authorization file, and PR #307 serialized same-host process mutations. PR #308
+**adapts** Penpot's account access-token workflow rather than copying its hosted
+account architecture. The reference behavior is Penpot's descriptive token
+name, Never/30/60/90/180-day expiry choices, one-time copy, metadata list, and
+deletion:
 
+- https://help.penpot.app/technical-guide/integration/#access-tokens
+- https://help.penpot.app/mcp/
+
+The adapted Layo scope is authenticated self-only administration through HTTP
+and deterministic MCP plus compact Korean controls in team settings. The
+operator members file remains externally owned. Managed hashes and revocation
+overlays live in `<members-file>.tokens.json` version 2, bound to the current
+operator-member fingerprint; account administration never replaces the base
+file. Version 1 entries are quarantined until explicit root-credential recovery,
+and reconciliation preserves prior base-token revocations. Plaintext is returned
+once, stored only as SHA-256, and intentionally leaves component memory only
+through explicit clipboard copy.
+
+MCP authorization and mutation use one freshly parsed, process-locked snapshot.
+The browser invalidates stale list/create/revoke responses by operation
+generation, identity, and direct `collabSession` object reference. The same-identity P1
+RED `69ea991` showed a delayed create response crossing replacement of a
+`collabSession` with equal team/member/token values. Implementation commits
+`3047`, `d342`, and `fd51` added direct `collabSession` reference invalidation. Review then
+found the first test was a false positive because it did not prove the
+replacement retained the same token; corrected test `bd7acd` explicitly
+preserves that token, waits for the replacement list request, and still proves
+the delayed secret/result is discarded.
+
+The watcher remove/reintroduce race first appeared intermittently in failed Full
+`29333986663`. Deterministic RED `4f75d7` holds quarantine while the same
+member is restored and a fresh generation starts. Full `29334373513` executed
+that RED and failed exactly the intended `settledBeforeQuarantine` assertion
+with 358/359 server tests passing. GREEN `35ef` serializes managers behind
+the process-local reload/quarantine tail and binds quarantine to the observed
+sidecar snapshot. Full `29334572132` reached Core GREEN before supersession.
+Stress commit `ff7` repeated the exact race 20 times; Full `29334928481`
+again reached Core GREEN before supersession. Security re-review approved the
+repair with no actionable blocker.
+
+Final docs-head Full `29335855757` then failed 377/378 server tests because a
+sibling preview token stayed invalid after one transient truncated base-file
+read. Deterministic RED `df0c0581` reproduced that exact reload-recovery gap;
+RED Full `29336713035` failed the intended case. GREEN `3c44aecf` adds a
+bounded retry serialized by `reloadTail`: the first bad read fails closed
+immediately, success cancels retry state, and watcher close cancels pending
+retry work. Focused authorization tests passed 15/15 and typecheck passed.
+Permanently malformed input remains fail-closed after the bounded budget, and
+the retry remains process-local.
+
+Focused real-network Playwright passed 3/3 and the direct headed interaction
+passed 1/1: copy changed to `복사됨`, sibling revocation to `해지됨`, and
+confirmed self-revocation left an empty credential field with recovery guidance.
+
+The final equal-identity browser proof required three distinct failure loops.
+Full `29337201074` exposed fixture activation missing from
+`createRelayTeam`; `d7c60f` added explicit UI credential apply and an
+authenticated replacement GET. Review then found generation masking in the
+session-reference test; deterministic RED `8686d0` / `032f45` and RED Full
+`29339023854` failed exactly expected true-to-be-false, while GREEN
+`bc6823` / `218ddde` extracted the predicate and App delegation. Full
+`29339246720` then exposed a test-oracle error: unavailable-relay reconnect
+attempts produced socket count 8, not eight sessions. `9eae96f` removed only
+that count while retaining fixed identity, replacement status, authenticated
+replacement GET, and old-response absence. Fresh review found no findings.
+
+External review then found a P1 removal failure: a managed-token sidecar member
+left behind after operator removal repeatedly failed binding, so every watcher
+retry cleared all principals and indefinitely locked out surviving members. RED
+`e4c4126` and Full `29342714708` reproduced the survivor timeout. The first
+broad quarantine-ignore hypothesis `4d6f0af` broke explicit recovery tests; the
+final narrow repair `1b1888f` / `914fc72` ignores only quarantined orphan
+members while retaining binding checks for re-added users.
+
+A second external review found two more recovery gaps: quarantined/v1 sidecars
+could prevent startup before explicit base-credential recovery, and successful
+quarantine still left survivors unavailable until the next poll. RED
+`3a0b640` / Full `29376307034` failed exactly those two cases. The first
+repair exposed an in-flight watcher lock after close in Full `29376572991`;
+deterministic lifecycle and stale-publication RED `0e3d2a4` / Full
+`29377023368` then proved both close/callback and competing-revocation races.
+The repaired path adds an explicit `settled()` boundary and keeps quarantine,
+stable reread, and survivor publication in one sidecar process lock.
+
+Latest external review then found bulk removal quarantined only one orphan per
+poll. RED `fad4ae2` / Full `29378304736` proved survivor lockout. The broad
+all-binding-failure repair `2f6f155` and present-base skip `c8445a1` were
+rejected after the existing 20x remove/reintroduce stress exposed dormant-token
+resurrection. Final `aabff5f` quarantines every orphan from the exact observed
+removal snapshot under one lock, rechecks the current base before persistence,
+and leaves a reintroduced generation fail-closed until explicit reconciliation.
+
+Full Verification `29379115279` passed on
+`aabff5fa59d280e5b736cc972a2f02b234667d40`, including maturity/design gates,
+typecheck, web build, 385 Core server cases, Rust, and Playwright CLI e2e.
+Restore `29379115246` and retention `29379115265` passed on the same head.
+Independent security review found no actionable issue and all review threads
+are resolved. PR #308 is not merged; final docs-head verification/review and
+post-merge cleanup remain open. Deployment remains non-gating.
+
+This is evidence toward gates 7 (extensibility), 8 (operations), and 10 (failure
+loop), not closure of those gates or the whole maturity benchmark. Residual gaps
+are durable audit-event consumption, shared transactional multi-host identity
+with one monotonic authorization generation, agent dry-run/reviewability for
+token mutations, and broader account recovery. Process-local watcher
+coordination does not close the multi-host generation gap.
+Deployment remains a separate non-gating concern for this local-first product
+slice. See `docs/product/penpot-token-mcp-ui-delta.md`.
 ## Maturity Dimensions
 
 | Dimension | Penpot benchmark | Layo current posture | Layo target |

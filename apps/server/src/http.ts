@@ -12,6 +12,7 @@ import {
   authorizeTeamLibraryWrite,
   bearerToken,
   type TeamAccessTokenExpiryDays,
+  type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
   type TeamAuthorizationFileManager
 } from "./team-authorization.js";
@@ -119,40 +120,72 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return options.teamAuthorizationManager;
   };
 
+  const accountTokenPrincipal = (request: LibraryRequest) => ({
+    userId: Array.isArray(request.headers["x-layo-user-id"])
+      ? request.headers["x-layo-user-id"][0] ?? ""
+      : request.headers["x-layo-user-id"] ?? "",
+    memberToken: bearerToken(request.headers.authorization) ?? ""
+  });
+
+  const accountTokenMetadataResponse = (
+    metadata: TeamAccessTokenMetadata
+  ): TeamAccessTokenMetadata => ({
+    id: metadata.id,
+    name: metadata.name,
+    ...(metadata.createdAt ? { createdAt: metadata.createdAt } : {}),
+    ...(metadata.expiresAt ? { expiresAt: metadata.expiresAt } : {}),
+    ...(metadata.revokedAt ? { revokedAt: metadata.revokedAt } : {})
+  });
+
   server.get("/account/tokens", async (request) => {
-    const manager = requireTeamAuthorizationManager();
-    const member = authenticateLibraryMember(request);
-    if (!member) {
-      throw new Error("team authorization configuration is unavailable");
+    const result = await requireTeamAuthorizationManager().manageTokens(
+      accountTokenPrincipal(request),
+      { type: "list" }
+    );
+    if (result.type !== "list") {
+      throw new Error("unexpected team authorization list result");
     }
-    return { tokens: manager.listTokens(member.userId) };
+    return {
+      tokens: result.tokens.map(accountTokenMetadataResponse),
+      ...(result.activeTokenId ? { activeTokenId: result.activeTokenId } : {})
+    };
   });
 
   server.post<{
     Body: { name: string; expiresInDays: TeamAccessTokenExpiryDays };
   }>("/account/tokens", async (request, reply) => {
-    const manager = requireTeamAuthorizationManager();
-    const member = authenticateLibraryMember(request);
-    if (!member) {
-      throw new Error("team authorization configuration is unavailable");
+    const result = await requireTeamAuthorizationManager().manageTokens(
+      accountTokenPrincipal(request),
+      { type: "create", input: request.body }
+    );
+    if (result.type !== "create") {
+      throw new Error("unexpected team authorization create result");
     }
-    const created = await manager.createToken(member.userId, request.body);
-    return reply.code(201).send(created);
+    return reply.code(201).send({
+      token: result.created.token,
+      metadata: accountTokenMetadataResponse(result.created.metadata)
+    });
   });
 
-  server.delete<{ Params: { tokenId: string } }>(
-    "/account/tokens/:tokenId",
-    async (request) => {
-      const manager = requireTeamAuthorizationManager();
-      const member = authenticateLibraryMember(request);
-      if (!member) {
-        throw new Error("team authorization configuration is unavailable");
+  server.delete<{
+    Params: { tokenId: string };
+    Body: { confirmSelfRevoke?: boolean };
+  }>("/account/tokens/:tokenId", async (request) => {
+    const result = await requireTeamAuthorizationManager().manageTokens(
+      accountTokenPrincipal(request),
+      {
+        type: "revoke",
+        tokenId: request.params.tokenId,
+        confirmSelfRevoke: request.body?.confirmSelfRevoke === true
       }
-      return {
-        metadata: await manager.revokeToken(member.userId, request.params.tokenId)
-      };
+    );
+    if (result.type !== "revoke") {
+      throw new Error("unexpected team authorization revoke result");
     }
-  );
+    return {
+      metadata: accountTokenMetadataResponse(result.metadata)
+    };
+  });
 
   server.options("*", async (_request, reply) => {
     return reply.code(204).send();

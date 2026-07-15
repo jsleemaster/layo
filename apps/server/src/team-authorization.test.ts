@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { unwatchFile } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -8,10 +9,12 @@ import {
   authorizeTeamLibraryRead,
   authorizeTeamLibraryWrite,
   bearerToken,
+  createTeamAuthorizationFileManager,
   parseTeamAuthorizationConfig,
   watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile
 } from "./team-authorization";
+import { fileProcessMutationLockPath } from "./file-process-lock";
 
 describe("team library authorization", () => {
   test("parses normalized plaintext and SHA-256 member credentials", () => {
@@ -336,6 +339,74 @@ describe("team library authorization", () => {
     }
   });
 
+  test("retries a transient truncated revocation write without another watcher event", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-token-retry-"));
+    const configPath = path.join(root, "members.json");
+    const members = (revokedAt?: string) => JSON.stringify([
+      {
+        userId: "automation-user",
+        role: "editor",
+        teamIds: ["team-alpha"],
+        tokens: [
+          {
+            id: "deploy",
+            name: "Deploy automation",
+            token: "deploy-secret",
+            ...(revokedAt ? { revokedAt } : {})
+          },
+          {
+            id: "preview",
+            name: "Preview automation",
+            token: "preview-secret"
+          }
+        ]
+      }
+    ]);
+    const completedConfig = members(new Date(Date.now() - 1_000).toISOString());
+    await writeFile(configPath, members(), "utf8");
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => {
+        reloadErrors.push(error);
+        unwatchFile(configPath);
+      }
+    });
+
+    try {
+      await writeFile(
+        configPath,
+        completedConfig.slice(0, Math.floor(completedConfig.length / 2)),
+        "utf8"
+      );
+      await waitFor(() => reloadErrors.length >= 2);
+
+      expect(() =>
+        authenticateTeamMember(source.config, "automation-user", "preview-secret")
+      ).toThrow("team member credentials are invalid");
+
+      await writeFile(configPath, completedConfig, "utf8");
+      await waitFor(() => {
+        try {
+          return authenticateTeamMember(
+            source.config,
+            "automation-user",
+            "preview-secret"
+          ).tokenId === "preview";
+        } catch {
+          return false;
+        }
+      });
+
+      expect(() =>
+        authenticateTeamMember(source.config, "automation-user", "deploy-secret")
+      ).toThrow("team member credentials are invalid");
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("rejects invalid credential lifecycle configuration", () => {
     expect(() =>
       parseTeamAuthorizationConfig(
@@ -484,7 +555,7 @@ describe("team library authorization", () => {
     }
   });
 
-  test("retains the last valid credentials when a watched file becomes malformed", async () => {
+  test("fails cached authentication closed while a watched file is malformed and recovers after repair", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-"));
     const configPath = path.join(root, "members.json");
     await writeFile(configPath, credentialJson("stable-token"), "utf8");
@@ -496,13 +567,629 @@ describe("team library authorization", () => {
 
     try {
       await writeFile(configPath, "{ malformed", "utf8");
-      await waitFor(() => reloadErrors.length === 1);
+      await waitFor(() => reloadErrors.length > 0);
 
-      expect(
+      expect(() =>
         authenticateTeamMember(source.config, "editor-user", "stable-token")
-      ).toMatchObject({ userId: "editor-user", role: "editor" });
+      ).toThrow("team member credentials are invalid");
+
+      await writeFile(configPath, credentialJson("recovered-token"), "utf8");
+      await waitFor(() => {
+        try {
+          return authenticateTeamMember(
+            source.config,
+            "editor-user",
+            "recovered-token"
+          ).userId === "editor-user";
+        } catch {
+          return false;
+        }
+      });
+      expect(() =>
+        authenticateTeamMember(source.config, "editor-user", "stable-token")
+      ).toThrow("team member credentials are invalid");
     } finally {
       source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+
+  test("exposes a quiescence boundary for in-flight quarantine work after close", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-close-settled-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    let quarantineStartedResolve: (() => void) | undefined;
+    const quarantineStarted = new Promise<void>((resolve) => {
+      quarantineStartedResolve = resolve;
+    });
+    let releaseQuarantineResolve: (() => void) | undefined;
+    const releaseQuarantine = new Promise<void>((resolve) => {
+      releaseQuarantineResolve = resolve;
+    });
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+    const closeErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      beforeManagedTokenQuarantine: async () => {
+        quarantineStartedResolve?.();
+        await releaseQuarantine;
+      },
+      onError: (error) => closeErrors.push(error)
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      generateId: () => "removed-managed",
+      generateSecret: () => "removed-managed-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await quarantineStarted;
+
+      source.close();
+      let settled = false;
+      const settling = source.settled().then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      releaseQuarantineResolve?.();
+      await settling;
+      expect(settled).toBe(true);
+      expect(closeErrors).toEqual([]);
+      expect(authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-base-token"
+      )).toBe(false);
+      await rm(root, { recursive: true, force: true });
+    } finally {
+      releaseQuarantineResolve?.();
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("starts with a quarantined v1 sidecar so a valid base credential can reconcile it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-v1-recovery-"));
+    const configPath = path.join(root, "members.json");
+    const operatorRevokedSecret = "operator-revoked-secret";
+    const baseMember = {
+      userId: "recovery-user",
+      role: "owner" as const,
+      teamIds: ["team-alpha"],
+      token: "recovery-base-token",
+      tokens: [
+        {
+          id: "operator-revoked",
+          name: "Operator token",
+          tokenHash: createHash("sha256").update(operatorRevokedSecret).digest("hex")
+        }
+      ]
+    };
+    await writeFile(configPath, JSON.stringify([baseMember]), "utf8");
+    await writeFile(
+      configPath + ".tokens.json",
+      JSON.stringify({
+        version: 1,
+        members: [
+          {
+            userId: "recovery-user",
+            tokens: [
+              {
+                id: "legacy-managed",
+                name: "Legacy managed token",
+                tokenHash: createHash("sha256")
+                  .update("legacy-managed-secret")
+                  .digest("hex")
+              }
+            ],
+            revocations: [
+              {
+                tokenId: "operator-revoked",
+                revokedAt: "2026-07-14T10:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      }),
+      "utf8"
+    );
+
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    try {
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        "recovery-base-token"
+      )).toBe(true);
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        "legacy-managed-secret"
+      )).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        operatorRevokedSecret
+      )).toBe(false);
+
+      const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+        now: () => new Date("2026-07-14T12:00:00.000Z"),
+        generateId: () => "recovered-generation",
+        generateSecret: () => "recovered-generation-secret"
+      });
+      await expect(manager.manageTokens(
+        { userId: "recovery-user", memberToken: "recovery-base-token" },
+        {
+          type: "create",
+          input: { name: "Recovered generation", expiresInDays: null }
+        }
+      )).resolves.toMatchObject({
+        type: "create",
+        created: { metadata: { id: "recovered-generation" } }
+      });
+
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        "recovered-generation-secret"
+      )).toBe(true);
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        "legacy-managed-secret"
+      )).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "recovery-user",
+        operatorRevokedSecret
+      )).toBe(false);
+      await waitForSidecarMember(configPath, "recovery-user", false);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("quarantines every removed sidecar member before reporting the original watcher error", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-bulk-removal-"));
+    const configPath = path.join(root, "members.json");
+    const removedMembers = [
+      {
+        userId: "removed-a",
+        role: "editor" as const,
+        teamIds: ["team-alpha"],
+        token: "removed-a-base-token"
+      },
+      {
+        userId: "removed-b",
+        role: "editor" as const,
+        teamIds: ["team-alpha"],
+        token: "removed-b-base-token"
+      }
+    ];
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    await writeFile(
+      configPath,
+      JSON.stringify([...removedMembers, survivingMember]),
+      "utf8"
+    );
+
+    let survivorActiveWhenOriginalErrorReported: boolean | undefined;
+    let quarantineSnapshotAtOriginalError:
+      | Promise<Array<{ userId?: string; quarantined?: boolean }>>
+      | undefined;
+    let sourceConfig:
+      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+      | undefined;
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => {
+        reloadErrors.push(error);
+        if (
+          (error as Error & { userId?: string }).userId === "removed-a"
+          && sourceConfig
+        ) {
+          survivorActiveWhenOriginalErrorReported = authenticationSucceeds(
+            sourceConfig,
+            "surviving-user",
+            "surviving-base-token"
+          );
+          quarantineSnapshotAtOriginalError = readFile(
+            configPath + ".tokens.json",
+            "utf8"
+          ).then((snapshot) => (
+            JSON.parse(snapshot) as {
+              members?: Array<{ userId?: string; quarantined?: boolean }>;
+            }
+          ).members ?? []);
+        }
+      }
+    });
+    sourceConfig = source.config;
+    const ids = ["removed-a-managed", "removed-b-managed"];
+    const secrets = ["removed-a-managed-secret", "removed-b-managed-secret"];
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      generateId: () => ids.shift() ?? "unexpected-id",
+      generateSecret: () => secrets.shift() ?? "unexpected-secret"
+    });
+
+    try {
+      await manager.createToken("removed-a", {
+        name: "Removed A token",
+        expiresInDays: null
+      });
+      await manager.createToken("removed-b", {
+        name: "Removed B token",
+        expiresInDays: null
+      });
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => reloadErrors.some(
+        (error) => (error as Error & { userId?: string }).userId === "removed-a"
+      ));
+
+      expect(survivorActiveWhenOriginalErrorReported).toBe(true);
+      const members = await quarantineSnapshotAtOriginalError;
+      expect(members).toEqual(expect.arrayContaining([
+        expect.objectContaining({ userId: "removed-a", quarantined: true }),
+        expect.objectContaining({ userId: "removed-b", quarantined: true })
+      ]));
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-a",
+        "removed-a-managed-secret"
+      )).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-b",
+        "removed-b-managed-secret"
+      )).toBe(false);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("serializes recovery publication before applying a competing manager revocation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-recovery-race-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+
+    let injectManagerMutation = false;
+    let externalManager:
+      | ReturnType<typeof createTeamAuthorizationFileManager>
+      | undefined;
+    let competingRevocation:
+      | ReturnType<ReturnType<typeof createTeamAuthorizationFileManager>["revokeToken"]>
+      | undefined;
+    let competingRevocationCompleted = false;
+    let competingRevocationWasBlocked = false;
+    let recoveryLockObserved = false;
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      beforeManagedTokenRecoveryPublish: async () => {
+        if (!injectManagerMutation || !externalManager) {
+          return;
+        }
+        const ownerPath = path.join(
+          fileProcessMutationLockPath(configPath + ".tokens.json"),
+          "owner.json"
+        );
+        recoveryLockObserved = JSON.parse(
+          await readFile(ownerPath, "utf8")
+        ).schemaVersion === 1;
+        competingRevocation = externalManager
+          .revokeToken("surviving-user", "surviving-managed")
+          .then((result) => {
+            competingRevocationCompleted = true;
+            return result;
+          });
+        await Promise.resolve();
+        competingRevocationWasBlocked = !competingRevocationCompleted;
+      },
+      onError: (error) => reloadErrors.push(error)
+    });
+    const ids = ["removed-managed", "surviving-managed"];
+    const secrets = ["removed-managed-secret", "surviving-managed-secret"];
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => ids.shift() ?? "unexpected-id",
+      generateSecret: () => secrets.shift() ?? "unexpected-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+      await manager.createToken("surviving-user", {
+        name: "Surviving managed token",
+        expiresInDays: null
+      });
+      externalManager = createTeamAuthorizationFileManager(
+        configPath,
+        { members: [] },
+        { now: () => new Date("2026-07-14T13:00:00.000Z") }
+      );
+      injectManagerMutation = true;
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => reloadErrors.some(
+        (error) => error.message === "team authorization token sidecar member was removed"
+      ));
+
+      expect(recoveryLockObserved).toBe(true);
+      expect(competingRevocationWasBlocked).toBe(true);
+      expect(competingRevocation).toBeDefined();
+      await competingRevocation;
+      await waitFor(() => !authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-managed-secret"
+      ));
+      await source.settled();
+      expect(authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-managed-secret"
+      )).toBe(false);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("restores surviving principals before reporting a successful watched quarantine", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-immediate-recovery-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token"
+    };
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+    const quarantineErrors: Error[] = [];
+    let survivorActiveWhenQuarantineReported: boolean | undefined;
+    let sourceConfig:
+      | NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>
+      | undefined;
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => {
+        quarantineErrors.push(error);
+        if (
+          error.message === "team authorization token sidecar member was removed"
+          && sourceConfig
+        ) {
+          survivorActiveWhenQuarantineReported = authenticationSucceeds(
+            sourceConfig,
+            "surviving-user",
+            "surviving-base-token"
+          );
+        }
+      }
+    });
+    sourceConfig = source.config;
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      generateId: () => "removed-managed",
+      generateSecret: () => "removed-managed-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => quarantineErrors.some(
+        (error) => error.message === "team authorization token sidecar member was removed"
+      ));
+
+      expect(survivorActiveWhenQuarantineReported).toBe(true);
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-user",
+        "removed-managed-secret"
+      )).toBe(false);
+      await waitForSidecarMember(configPath, "removed-user", true);
+    } finally {
+      source.close();
+      await source.settled();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("quarantines a removed member without locking out survivors or resurrecting managed tokens", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-team-auth-member-removal-"));
+    const configPath = path.join(root, "members.json");
+    const removedMember = {
+      userId: "removed-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "removed-base-token"
+    };
+    const survivingMember = {
+      userId: "surviving-user",
+      role: "editor" as const,
+      teamIds: ["team-alpha"],
+      token: "surviving-base-token",
+      tokens: [
+        {
+          id: "surviving-revoked",
+          name: "Revoked operator token",
+          tokenHash: createHash("sha256")
+            .update("surviving-revoked-secret")
+            .digest("hex")
+        }
+      ]
+    };
+    await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
+    const reloadErrors: Error[] = [];
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 10,
+      onError: (error) => reloadErrors.push(error)
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => "removed-managed",
+      generateSecret: () => "removed-managed-secret"
+    });
+
+    try {
+      await manager.createToken("removed-user", {
+        name: "Removed managed token",
+        expiresInDays: null
+      });
+      await manager.revokeToken("surviving-user", "surviving-revoked");
+      expect(
+        authenticateTeamMember(source.config, "removed-user", "removed-managed-secret")
+      ).toMatchObject({ tokenId: "removed-managed" });
+
+      await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
+      await waitFor(() => reloadErrors.some(
+        (error) => error.message === "team authorization token sidecar member was removed"
+      ));
+      await waitForSidecarMember(configPath, "removed-user", true);
+      await waitFor(() => authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-base-token"
+      ));
+
+      expect(authenticationSucceeds(
+        source.config,
+        "removed-user",
+        "removed-managed-secret"
+      )).toBe(false);
+      expect(authenticationSucceeds(
+        source.config,
+        "surviving-user",
+        "surviving-revoked-secret"
+      )).toBe(false);
+
+      source.close();
+      await source.settled();
+      const restarted = await watchTeamAuthorizationConfigFile(configPath, {
+        pollIntervalMs: 10
+      });
+      try {
+        expect(
+          authenticateTeamMember(
+            restarted.config,
+            "surviving-user",
+            "surviving-base-token"
+          )
+        ).toMatchObject({ userId: "surviving-user" });
+        expect(authenticationSucceeds(
+          restarted.config,
+          "surviving-user",
+          "surviving-revoked-secret"
+        )).toBe(false);
+
+        await writeFile(
+          configPath,
+          JSON.stringify([removedMember, survivingMember]),
+          "utf8"
+        );
+        const restartedManager = createTeamAuthorizationFileManager(
+          configPath,
+          restarted.config,
+          {
+            now: () => new Date("2026-07-14T13:00:00.000Z"),
+            generateId: () => "readded-managed",
+            generateSecret: () => "readded-managed-secret"
+          }
+        );
+        await expect(restartedManager.manageTokens(
+          { userId: "removed-user", memberToken: "removed-base-token" },
+          {
+            type: "create",
+            input: { name: "Re-added generation", expiresInDays: null }
+          }
+        )).resolves.toMatchObject({
+          type: "create",
+          created: { metadata: { id: "readded-managed" } }
+        });
+
+        expect(authenticationSucceeds(
+          restarted.config,
+          "removed-user",
+          "removed-managed-secret"
+        )).toBe(false);
+        expect(authenticationSucceeds(
+          restarted.config,
+          "removed-user",
+          "readded-managed-secret"
+        )).toBe(true);
+        expect(authenticationSucceeds(
+          restarted.config,
+          "surviving-user",
+          "surviving-base-token"
+        )).toBe(true);
+        expect(authenticationSucceeds(
+          restarted.config,
+          "surviving-user",
+          "surviving-revoked-secret"
+        )).toBe(false);
+        await waitForSidecarMember(configPath, "removed-user", false);
+      } finally {
+        restarted.close();
+        await restarted.settled();
+      }
+    } finally {
+      source.close();
+      await source.settled();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -553,4 +1240,40 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("timed out waiting for watched authorization reload");
+}
+
+
+function authenticationSucceeds(
+  config: NonNullable<ReturnType<typeof parseTeamAuthorizationConfig>>,
+  userId: string,
+  token: string
+): boolean {
+  try {
+    authenticateTeamMember(config, userId, token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForSidecarMember(
+  configPath: string,
+  userId: string,
+  quarantined: boolean
+): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const sidecar = JSON.parse(
+      await readFile(configPath + ".tokens.json", "utf8")
+    ) as {
+      members?: Array<{ userId?: string; quarantined?: boolean }>;
+    };
+    if (sidecar.members?.some(
+      (member) => member.userId === userId && member.quarantined === quarantined
+    )) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("timed out waiting for managed token sidecar quarantine");
 }

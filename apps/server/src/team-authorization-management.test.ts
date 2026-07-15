@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +14,8 @@ describe("team access token administration", () => {
   test("creates a named token while returning its secret only once", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
     const configPath = path.join(root, "members.json");
-    await writeFile(configPath, ownerConfig(), "utf8");
+    const base = ownerConfig();
+    await writeFile(configPath, base, "utf8");
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 10
     });
@@ -42,8 +44,10 @@ describe("team access token administration", () => {
       expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("token");
       expect(manager.listTokens("owner-user")[0]).not.toHaveProperty("tokenHash");
 
-      const persisted = await readFile(configPath, "utf8");
+      expect(await readFile(configPath, "utf8")).toBe(base);
+      const persisted = await readFile(`${configPath}.tokens.json`, "utf8");
       expect(persisted).not.toContain("layo_pat_one_time_secret");
+      expect(persisted).not.toMatch(/"token"\\s*:/);
       expect(persisted).toContain(
         createHash("sha256").update("layo_pat_one_time_secret").digest("hex")
       );
@@ -205,6 +209,95 @@ describe("team access token administration", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  test("preserves a concurrent operator rewrite and leaves the issued token unusable", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, ownerConfigWithExistingToken(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    const operatorMembers = JSON.parse(ownerConfigWithExistingToken());
+    operatorMembers[0].tokens[0].revokedAt = "2026-07-14T11:59:00.000Z";
+    const operatorConfig = `${JSON.stringify(operatorMembers, null, 2)}\n`;
+    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
+      now: () => new Date("2026-07-14T12:00:00.000Z"),
+      generateId: () => {
+        writeFileSync(configPath, operatorConfig, "utf8");
+        return "token-after-authentication";
+      },
+      generateSecret: () => "layo_pat_must_not_persist"
+    });
+
+    try {
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "existing-secret" },
+          {
+            type: "create",
+            input: { name: "Concurrent create", expiresInDays: 30 }
+          }
+        )
+      ).rejects.toMatchObject({
+        message: "team authorization file changed during token management",
+        statusCode: 409
+      });
+      const persistedBase = await readFile(configPath, "utf8");
+      expect(persistedBase).toBe(operatorConfig);
+      expect(persistedBase).not.toContain("layo_pat_must_not_persist");
+      await expect(
+        readFile(`${configPath}.tokens.json`, "utf8")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+
+  test("returns the active named token id only from atomic list authentication", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-admin-"));
+    const configPath = path.join(root, "members.json");
+    await writeFile(configPath, ownerConfigWithExistingToken(), "utf8");
+    const source = await watchTeamAuthorizationConfigFile(configPath, {
+      pollIntervalMs: 60_000
+    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config);
+
+    try {
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "existing-secret" },
+          { type: "list" }
+        )
+      ).resolves.toEqual({
+        type: "list",
+        tokens: [{
+          id: "existing-token",
+          name: "Existing",
+          createdAt: "2026-07-14T00:00:00.000Z"
+        }],
+        activeTokenId: "existing-token"
+      });
+
+      await expect(
+        manager.manageTokens(
+          { userId: "owner-user", memberToken: "legacy-owner-token" },
+          { type: "list" }
+        )
+      ).resolves.toEqual({
+        type: "list",
+        tokens: [{
+          id: "existing-token",
+          name: "Existing",
+          createdAt: "2026-07-14T00:00:00.000Z"
+        }]
+      });
+    } finally {
+      source.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
 });
 
 function ownerConfigWithExistingToken(): string {

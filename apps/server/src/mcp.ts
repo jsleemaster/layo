@@ -5,13 +5,15 @@ import { z } from "zod";
 import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
 import {
   authenticateTeamMember,
+  createTeamAuthorizationFileManager,
   authorizeTeamLibraryRead,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   parseTeamAuthorizationConfig,
   watchTeamAuthorizationConfigFile,
   watchTeamMemberTokenFile,
-  type TeamAuthorizationConfig
+  type TeamAuthorizationConfig,
+  type TeamAuthorizationFileManager
 } from "./team-authorization.js";
 
 function countNodes(nodes: DesignNode[] = []): number {
@@ -499,6 +501,7 @@ export interface McpServerOptions {
     userId: string;
     memberToken: string;
   };
+  teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
@@ -556,6 +559,117 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     name: "layo",
     version: "0.1.0"
   });
+
+  if (
+    options.teamAuthorizationManager
+    && options.libraryRegistryAuth
+    && options.libraryRegistryPrincipal
+  ) {
+    const manager = options.teamAuthorizationManager;
+    const principal = options.libraryRegistryPrincipal;
+
+    server.registerTool(
+      "list_account_tokens",
+      {
+        description: "List account access token metadata for the authenticated team member.",
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        },
+        inputSchema: {}
+      },
+      async () => {
+        const result = await manager.manageTokens(principal, { type: "list" });
+        if (result.type !== "list") {
+          throw new Error("unexpected team authorization list result");
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ tokens: result.tokens }, null, 2)
+            }
+          ]
+        };
+      }
+    );
+
+    server.registerTool(
+      "create_account_token",
+      {
+        description: "Create an account access token for the authenticated team member.",
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false
+        },
+        inputSchema: {
+          name: z.string().describe("Descriptive token name"),
+          expiresInDays: z
+            .union([z.literal(30), z.literal(60), z.literal(90), z.literal(180), z.null()])
+            .describe("Token lifetime in days, or null for no expiry")
+        }
+      },
+      async ({ name, expiresInDays }) => {
+        const result = await manager.manageTokens(principal, {
+          type: "create",
+          input: { name, expiresInDays }
+        });
+        if (result.type !== "create") {
+          throw new Error("unexpected team authorization create result");
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result.created, null, 2)
+            }
+          ]
+        };
+      }
+    );
+
+    server.registerTool(
+      "revoke_account_token",
+      {
+        description: "Revoke one account access token for the authenticated team member.",
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: true,
+          openWorldHint: false
+        },
+        inputSchema: {
+          tokenId: z.string().describe("Token id returned by list_account_tokens"),
+          confirmSelfRevoke: z
+            .boolean()
+            .default(false)
+            .describe("Explicitly acknowledge revoking the active named MCP principal token")
+        }
+      },
+      async ({ tokenId, confirmSelfRevoke }) => {
+        const result = await manager.manageTokens(principal, {
+          type: "revoke",
+          tokenId,
+          confirmSelfRevoke
+        });
+        if (result.type !== "revoke") {
+          throw new Error("unexpected team authorization revoke result");
+        }
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ metadata: result.metadata }, null, 2)
+            }
+          ]
+        };
+      }
+    );
+  }
 
   server.registerTool(
     "list_files",
@@ -2330,9 +2444,17 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
           }
         }
       : undefined;
+  const teamAuthorizationManager =
+    process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE && libraryRegistryAuthSource
+      ? createTeamAuthorizationFileManager(
+          process.env.LAYO_LIBRARY_REGISTRY_MEMBERS_FILE,
+          libraryRegistryAuthSource.config
+        )
+      : undefined;
   const server = createMcpServer(undefined, {
     libraryRegistryAuth,
-    libraryRegistryPrincipal
+    libraryRegistryPrincipal,
+    teamAuthorizationManager
   });
   const transport = new StdioServerTransport();
   process.once("exit", () => {
