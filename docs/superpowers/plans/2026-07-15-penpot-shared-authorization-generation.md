@@ -99,8 +99,8 @@ export interface TeamAuthorizationStateStore {
 - [x] Reject bootstrap when the database scope is nonempty, when the sidecar has plaintext/malformed state, or when the current base cannot merge the sidecar.
 - [x] Add `export` that emits a secret-free versioned JSON artifact with scope, generation string, base fingerprint, and hash-only state.
 - [x] Add `restore` only for an absent scope. Reject every existing-scope restore, including matching fingerprint/generation, so a stale backup cannot resurrect revoked tokens over live state. Preserve the artifact generation as provenance while the restored row starts from that exact generation; require an explicit operator confirmation flag and test stale-backup/live-scope no-write behavior.
-- [ ] Require shared runtime startup to fail when the scope is absent with an exact bootstrap instruction. Runtime startup must never auto-import a sidecar.
-- [ ] Prove shared mode ignores a stale sidecar after bootstrap and filesystem mode remains unchanged.
+- [x] Require shared runtime startup to fail when the scope is absent with an exact bootstrap instruction. Runtime startup must never auto-import a sidecar.
+- [x] Prove shared mode ignores a stale sidecar after bootstrap and filesystem mode remains unchanged.
 - [x] Add package scripts for migrate/bootstrap/export/restore and focused GREEN tests.
 
 
@@ -118,15 +118,15 @@ export interface TeamAuthorizationStateStore {
 - Modify: `apps/server/src/team-authorization.ts`
 - Create: `apps/server/src/team-authorization-shared-store.test.ts`
 
-- [ ] Export/test one deterministic canonical whole-base fingerprint independent of JSON whitespace and member/token ordering.
-- [ ] Include all identity-relevant role, team, lifecycle, token metadata, and credential hashes; never include plaintext itself, only its hash.
-- [ ] Write a real PostgreSQL two-manager RED proving unmanaged member/role/team divergence fails closed.
-- [ ] Require a stale host to remain closed after another host reconciles a new base fingerprint.
-- [ ] Do not allow runtime principals to reconcile a scope-level base fingerprint. Add an explicit offline `authorization:reconcile-base` operator command requiring the current shared fingerprint, expected generation, and candidate base file; inside one locked transaction preserve revocations, quarantine incompatible managed generations, replace the canonical fingerprint, and increment generation once.
-- [ ] Write a stale/divergent runtime-host RED proving its locally valid owner credential cannot reconcile. Write concurrent offline reconciliation RED: one expected generation wins and a different candidate receives conflict without overwrite.
-- [ ] Implement shared manager options `stateStore` and required `sharedScope`.
-- [ ] Keep default filesystem locking/sidecar persistence byte-for-byte behavior unchanged.
-- [ ] Re-run sidecar, management, and shared-store suites to GREEN.
+- [x] Export/test one deterministic canonical whole-base fingerprint independent of JSON whitespace and member/token ordering.
+- [x] Include all identity-relevant role, team, lifecycle, token metadata, and credential hashes; never include plaintext itself, only its hash.
+- [x] Write a real PostgreSQL two-manager RED proving unmanaged member/role/team divergence fails closed.
+- [x] Require a stale host to remain closed after another host reconciles a new base fingerprint.
+- [x] Do not allow runtime principals to reconcile a scope-level base fingerprint. Add an explicit offline `authorization:reconcile-base` operator command requiring the current shared fingerprint, expected generation, and candidate base file; inside one locked transaction preserve revocations, quarantine incompatible managed generations, replace the canonical fingerprint, and increment generation once.
+- [x] Write a stale/divergent runtime-host RED proving its locally valid owner credential cannot reconcile. Write concurrent offline reconciliation RED: one expected generation wins and a different candidate receives conflict without overwrite.
+- [x] Implement shared manager options `stateStore` and required `sharedScope`.
+- [x] Keep default filesystem locking/sidecar persistence byte-for-byte behavior unchanged.
+- [x] Re-run sidecar, management, and shared-store suites to GREEN.
 
 ## Task 4: Commit/publication semantics and concurrent mutation
 
@@ -134,13 +134,24 @@ export interface TeamAuthorizationStateStore {
 - Modify: `apps/server/src/team-authorization.ts`
 - Modify: `apps/server/src/team-authorization-shared-store.test.ts`
 
-- [ ] Write two-manager concurrent create RED and require both hashes, one global generation sequence, and no plaintext in PostgreSQL.
-- [ ] Re-read and authenticate against the locked latest state inside every mutation callback; stale/revoked principals cannot overwrite newer state.
-- [ ] Re-read the local base immediately before returning the transaction callback so a pre-commit base change rolls back.
-- [ ] After commit, treat the database result as authoritative. If local base/cache publication fails, clear the local config, schedule refresh, return the committed result/one-time secret, and never report a false rollback.
-- [ ] Add an injected post-commit publication failure RED proving the created secret is returned exactly once, the hash remains committed, and another healthy host can authenticate it.
-- [ ] Add revoke/list/reconciliation variants and restart proof.
-- [ ] Re-run focused suites to GREEN.
+- [x] Write two-manager concurrent create RED and require both hashes, one global generation sequence, and no plaintext in PostgreSQL.
+- [x] Re-read and authenticate against the locked latest state inside every mutation callback; stale/revoked principals cannot overwrite newer state.
+- [x] Re-read the local base immediately before returning the transaction callback so a pre-commit base change rolls back.
+- [x] After commit, treat the database result as authoritative. If local base/cache publication fails, clear the local config, schedule refresh, return the committed result/one-time secret, and never report a false rollback.
+- [x] Add an injected post-commit publication failure RED proving the created secret is returned exactly once, the hash remains committed, and another healthy host can authenticate it.
+- [x] Add revoke/list/reconciliation variants and restart proof.
+- [x] Re-run focused suites to GREEN.
+
+**Task 3-4 evidence (2026-07-15):**
+
+- Initial shared-manager RED: Full Verification `29385474812` failed on the missing reconciliation API and shared manager options.
+- No-op generation RED: Full Verification `29386020111` proved idempotent revoke incorrectly advanced generation.
+- Review converted stale list publication, post-commit refresh, quarantine recovery, raw mutate no-op, identical reconciliation, and PostgreSQL no-op cases into focused regression coverage.
+- Late-list verification `29386441354` exposed a test-time error: revocation was fixed at `12:30:01Z` while authentication used the earlier CI wall clock. The regression now supplies an explicit post-revocation time; exact-head Full Verification `29386579896` passed.
+- Independent review then found stale direct listings and multi-member quarantine deadlock. RED `29387074305` failed in exactly those two cases; shared listings now transact through PostgreSQL and quarantined managed state is isolated per member.
+- Full Verification `29387261850` passed all 419 tests but caught an unhandled concurrent-reconciliation rejection. The loser Promise now receives a rejection handler at creation, eliminating the test-harness race.
+- Publication RED `29387591852` proved a recovered member's committed state could not republish while another member remained quarantined. Publication now excludes only quarantined managed tokens and retains valid operator base credentials.
+- Exact reviewed head `8638a9d155d46f14ec343b1d16d42d2b6ce1e1c7`: Full Verification `29387700993` passed maturity/design gates, typecheck, web build, core tests, and Playwright CLI e2e in 10m40s. Storage Restore Drill `29387701003` and Retention `29387700996` passed. Independent P0-P2 review was clean.
 
 ## Task 5: Request-time revocation and outage behavior
 
