@@ -117,7 +117,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get("/health", async () => ({ ok: true }));
 
   const requireTeamAuthorizationManager = () => {
-    if (!options.teamAuthorizationManager) {
+    if (!options.teamAuthorizationManager || !libraryRegistryAuthorizationProvider) {
       throw Object.assign(
         new Error("team access token administration requires file-backed authorization"),
         { code: "EUNAVAILABLE", statusCode: 503 }
