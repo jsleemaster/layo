@@ -36,6 +36,8 @@ export interface TeamAuthorizationConfig {
 }
 
 const teamAuthorizationConfigGenerations = new WeakMap<TeamAuthorizationConfig, number>();
+const teamAuthorizationConfigsRequiringRecovery =
+  new WeakSet<TeamAuthorizationConfig>();
 const teamAuthorizationConfigReloads = new WeakMap<
   TeamAuthorizationConfig,
   () => Promise<void>
@@ -280,6 +282,7 @@ export function createTeamAuthorizationFileManager(
     try {
       const currentConfig = await readMergedTeamAuthorizationConfig(normalizedPath);
       replaceTeamAuthorizationMembers(config, currentConfig.members);
+      teamAuthorizationConfigsRequiringRecovery.delete(config);
     } catch (error) {
       if (error instanceof ManagedTokenBindingError) {
         await quarantinePersistedManagedTokenState(
@@ -314,6 +317,12 @@ export function createTeamAuthorizationFileManager(
 
       try {
         nextConfig = mergeManagedTokenState(baseConfig, state);
+        if (teamAuthorizationConfigsRequiringRecovery.has(config)) {
+          throw new ManagedTokenBindingError(
+            "principal" in identity ? identity.principal.userId : identity.userId,
+            "team authorization config requires explicit recovery"
+          );
+        }
       } catch (error) {
         if (
           !(error instanceof ManagedTokenBindingError)
@@ -975,12 +984,11 @@ async function quarantineWatchedManagedTokenState(
         409
       );
     }
+    if (baseUserIds.has(error.userId)) {
+      throw error;
+    }
 
     let changed = false;
-    if (!originalMember.quarantined) {
-      originalMember.quarantined = true;
-      changed = true;
-    }
     for (const member of state.members) {
       if (!baseUserIds.has(member.userId) && !member.quarantined) {
         member.quarantined = true;
@@ -1111,8 +1119,12 @@ export async function watchTeamAuthorizationConfigFile(
           return;
         }
         replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
+        teamAuthorizationConfigsRequiringRecovery.delete(initialConfig);
       } catch (error) {
         replaceTeamAuthorizationMembers(initialConfig, []);
+        if (error instanceof ManagedTokenBindingError) {
+          teamAuthorizationConfigsRequiringRecovery.add(initialConfig);
+        }
         let recovered = false;
         if (error instanceof ManagedTokenBindingError) {
           try {
@@ -1141,6 +1153,7 @@ export async function watchTeamAuthorizationConfigFile(
                     initialConfig,
                     recoveredConfig.members
                   );
+                  teamAuthorizationConfigsRequiringRecovery.delete(initialConfig);
                   cancelRetry();
                   recovered = true;
                 }
