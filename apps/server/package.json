@@ -14,7 +14,8 @@
     "authorization:migrate": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-postgres.ts",
     "authorization:bootstrap": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts bootstrap",
     "authorization:export": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts export",
-    "authorization:restore": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts restore"
+    "authorization:restore": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts restore",
+    "authorization:reconcile-base": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts reconcile-base"
   },
   "dependencies": {
     "@layo/collaboration": "workspace:*",
