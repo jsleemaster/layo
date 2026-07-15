@@ -287,6 +287,7 @@ describe("team access token HTTP administration", () => {
       });
 
       expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
       expect(listAuditEvents).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: "owner-user",
