@@ -947,7 +947,6 @@ async function quarantinePersistedManagedTokenState(
 
 async function quarantineWatchedManagedTokenState(
   basePath: string,
-  error: ManagedTokenBindingError,
   observedSourceSnapshot: string | undefined,
   recoverWhileLocked: () => Promise<void>
 ): Promise<void> {
@@ -960,18 +959,41 @@ async function quarantineWatchedManagedTokenState(
         409
       );
     }
+    const baseSnapshot = await readFile(basePath, "utf8");
+    const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
     const state = parseManagedTokenState(sourceSnapshot);
-    const member = state.members.find(
-      (candidate) => candidate.userId === error.userId
-    );
-    if (!member) {
-      throw managementError(
-        "team authorization token sidecar member changed during quarantine",
-        409
-      );
+    let changed = false;
+    let stable = false;
+    let unresolvedError: ManagedTokenBindingError | undefined;
+
+    for (let attempt = 0; attempt <= state.members.length; attempt += 1) {
+      try {
+        mergeManagedTokenState(baseConfig, state);
+        stable = true;
+        break;
+      } catch (error) {
+        if (!(error instanceof ManagedTokenBindingError)) {
+          throw error;
+        }
+        const member = state.members.find(
+          (candidate) => candidate.userId === error.userId
+        );
+        if (!member) {
+          throw managementError(
+            "team authorization token sidecar member changed during quarantine",
+            409
+          );
+        }
+        if (member.quarantined) {
+          unresolvedError = error;
+          break;
+        }
+        member.quarantined = true;
+        changed = true;
+      }
     }
-    if (!member.quarantined) {
-      member.quarantined = true;
+
+    if (changed) {
       await persistManagedTokenState(
         basePath,
         sidecarPath,
@@ -980,7 +1002,17 @@ async function quarantineWatchedManagedTokenState(
         {
           syncFile: (handle) => handle.sync(),
           syncDirectory
-        }
+        },
+        baseSnapshot
+      );
+    }
+    if (unresolvedError) {
+      throw unresolvedError;
+    }
+    if (!stable) {
+      throw managementError(
+        "team authorization token quarantine did not converge",
+        409
       );
     }
     await recoverWhileLocked();
@@ -1103,7 +1135,6 @@ export async function watchTeamAuthorizationConfigFile(
             }
             await quarantineWatchedManagedTokenState(
               normalizedPath,
-              error,
               observedSidecarSnapshot,
               async () => {
                 const recoveryGeneration =
