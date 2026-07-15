@@ -374,8 +374,18 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       expect(stdout).not.toContain("operator-plaintext");
 
       const outputPath = path.join(root, "authorization-backup.json");
-      await writeFile(outputPath, "stale", { encoding: "utf8", mode: 0o644 });
+      await writeFile(outputPath, "previous-backup", { encoding: "utf8", mode: 0o644 });
       await chmod(outputPath, 0o644);
+      await expect(runTeamAuthorizationSharedCli([
+        "export", "--scope", exportScope, "--output", outputPath
+      ], {
+        env: cliEnv(),
+        beforeExportRename: async () => {
+          throw new Error("injected export rename failure");
+        }
+      })).rejects.toThrow("injected export rename failure");
+      expect(await readFile(outputPath, "utf8")).toBe("previous-backup");
+
       await runTeamAuthorizationSharedCli([
         "export", "--scope", exportScope, "--output", outputPath
       ], { env: cliEnv() });
