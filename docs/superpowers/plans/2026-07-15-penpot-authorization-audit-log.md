@@ -1,7 +1,7 @@
 # Penpot Authorization Audit Log Plan
 
 Date: 2026-07-15
-Status: active
+Status: ready for merge
 Penpot reference: `develop` commit `167aa7410f95bce91b9a80059624a3e3d9307f1e`
 Prior merge: PR #310 / `9a710fc6bbd9b81d6ef68d8d5f4421aae28803a9`
 Cleanup record: PR #311 / `2f3b90a21db1ba8dfc62576d1d06493a6dd300be`
@@ -233,7 +233,7 @@ Evidence:
 
 - [x] Update README, environment template, maturity benchmark, PLAN_STATUS, and a
       focused product delta.
-- [ ] Run focused tests, Full Verification, authorization audit archive drill,
+- [x] Run focused tests, Full Verification, authorization audit archive drill,
       authorization backup drill, filesystem restore, and retention on one head.
 - [x] Request independent review for transaction atomicity, secret leakage,
       cursor isolation, SQL injection, bigint overflow, exporter crash windows,
@@ -241,6 +241,20 @@ Evidence:
 - [x] Convert every finding into a deterministic RED until review is clean.
 - [ ] Update PR body, squash merge exact reviewed head, and run post-merge
       cleanup without deleting dirty/user-owned worktrees.
+
+**Final implementation evidence (2026-07-16):**
+
+- Failure-learning RED Full Verification `29470552246` reproduced both remaining
+  review gaps: Unicode control labels returned 201 and an absent `changed:false`
+  legacy mutation committed generation zero.
+- Exact implementation head `8fcf77eb391f8249ab8d4efbc3a4bd65bed944a0`
+  passed Full Verification `29471094368`, including Core tests and Playwright
+  CLI E2E.
+- The same head passed Authorization Backup `29471094371`, Authorization Audit
+  Archive `29471094405`, Storage Restore `29471094381`, and Storage Backup
+  Retention `29471094391`.
+- Independent exact-head re-review found no remaining blocker across both review
+  rounds. The final documentation head must repeat the same gates before merge.
 
 Deployment remains non-gating. The prior local git exit-134 cleanup exceptions
 remain explicit until local status/current-branch/worktree checks actually
