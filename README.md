@@ -326,6 +326,19 @@ token state and its exact monotonic generation. Every protected HTTP, MCP, and
 library SSE poll reads that scope at request time. A PostgreSQL outage therefore
 fails authorization closed instead of serving a process cache as authority.
 
+To enable agent-reviewed account-token creation and revocation in shared mode,
+set the same secret `LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY` on every server
+instance. It must contain at least 32 UTF-8 bytes, must be generated and rotated
+as an operator secret, and must never be committed or exposed to clients. MCP
+create/revoke defaults to a secret-free dry-run review. A five-minute HMAC
+receipt binds the authenticated user, canonical mutation, shared scope, and
+exact authorization generation; commit verifies it inside the PostgreSQL
+row-locked transaction before generating token material. Changed commits
+advance the generation, making a successful receipt replay stale. No-op reviews
+return no receipt. Filesystem MCP mutation is deliberately unavailable because
+it cannot provide this shared generation guarantee; direct HTTP and Korean
+browser account controls remain supported.
+
 Run `pnpm --filter @layo/server authorization:migrate` before starting shared
 mode. Use a migration role that can create/alter the authorization tables and
 write the migration ledger; use a separate runtime role limited to reading the

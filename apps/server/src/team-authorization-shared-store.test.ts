@@ -201,6 +201,103 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
     });
   });
 
+  test("allows exactly one cross-host commit for one reviewed mutation receipt", async () => {
+    await withBaseFiles(async (_root, firstBasePath, secondBasePath) => {
+      const scope = `reviewed-commit-${randomUUID()}`;
+      const firstStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const secondStore = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      const base = await readFile(firstBasePath, "utf8");
+      await initializeScope(firstStore, scope, base);
+      let generatedIds = 0;
+      let generatedSecrets = 0;
+      const managerOptions = {
+        sharedScope: scope,
+        reviewSigningKey: "shared-review-signing-key-with-at-least-32-bytes",
+        now: () => new Date("2026-07-16T02:00:00.000Z"),
+        generateId: () => {
+          generatedIds += 1;
+          return `reviewed-token-${generatedIds}`;
+        },
+        generateSecret: () => {
+          generatedSecrets += 1;
+          return `layo_pat_reviewed_${generatedSecrets}`;
+        }
+      };
+      const firstManager = createTeamAuthorizationFileManager(
+        firstBasePath,
+        configFrom(base),
+        { ...managerOptions, stateStore: firstStore }
+      );
+      const secondManager = createTeamAuthorizationFileManager(
+        secondBasePath,
+        configFrom(await readFile(secondBasePath, "utf8")),
+        { ...managerOptions, stateStore: secondStore }
+      );
+      const principal = {
+        userId: "owner-user",
+        memberToken: "owner-base-secret",
+        audit: { source: "mcp" as const }
+      };
+
+      try {
+        const review = await firstManager.reviewTokenMutation!(principal, {
+          type: "create",
+          input: { name: "Concurrent reviewed token", expiresInDays: 30 }
+        });
+        const operation = {
+          type: "create" as const,
+          input: {
+            name: "Concurrent reviewed token",
+            expiresInDays: 30 as const
+          },
+          reviewReceipt: review.receipt!
+        };
+        const outcomes = await Promise.allSettled([
+          firstManager.manageTokens(principal, operation),
+          secondManager.manageTokens(principal, operation)
+        ]);
+
+        const fulfilled = outcomes.filter(
+          (outcome) => outcome.status === "fulfilled"
+        );
+        const rejected = outcomes.filter(
+          (outcome) => outcome.status === "rejected"
+        );
+        expect(fulfilled).toHaveLength(1);
+        expect(rejected).toHaveLength(1);
+        expect(rejected[0]!.reason).toMatchObject({ statusCode: 409 });
+        expect(generatedIds).toBe(1);
+        expect(generatedSecrets).toBe(1);
+
+        const committed = await firstStore.read(scope);
+        expect(committed.generation).toBe("1");
+        expect(committed.serializedState).toContain(
+          tokenHash("layo_pat_reviewed_1")
+        );
+        const audit = await firstStore.listAuditEvents!(scope, {
+          afterId: "0",
+          limit: 10
+        });
+        expect(audit).toEqual([
+          expect.objectContaining({
+            scope,
+            generation: "1",
+            action: "token_created",
+            actorUserId: "owner-user",
+            subjectTokenName: "Concurrent reviewed token",
+            source: "mcp"
+          })
+        ]);
+      } finally {
+        await Promise.all([firstStore.close(), secondStore.close()]);
+      }
+    });
+  });
+
   test("serializes concurrent token creates across hosts and commits generation two with hashes only", async () => {
     await withBaseFiles(async (_root, firstBasePath, secondBasePath) => {
       const scope = `concurrent-create-${randomUUID()}`;

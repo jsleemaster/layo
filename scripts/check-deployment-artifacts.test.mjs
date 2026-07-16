@@ -163,6 +163,7 @@ test("vercel static deployment exposes health without shared ephemeral document 
   assert.equal(config.framework, "vite");
   assert.equal(config.outputDirectory, "apps/web/dist");
   assert.equal(config.buildCommand.includes("pnpm --filter @layo/web build"), true);
+  assert.equal(config.git?.deploymentEnabled, false);
   assert.deepEqual(config.rewrites, [
     { source: "/health", destination: "/api/health" }
   ]);

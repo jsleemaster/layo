@@ -160,15 +160,9 @@ async function runStdioMcpEdit() {
 }
 
 
-test("stdio MCP manages only the authenticated member's file-backed account tokens", async () => {
+test("stdio MCP refuses file-backed account token mutation without reviewed shared authorization", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "layo-mcp-stdio-tokens-"));
   const membersFile = path.join(root, "members.json");
-  const otherToken = {
-    id: "other-existing",
-    name: "Other automation",
-    tokenHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    createdAt: "2026-07-13T12:00:00.000Z"
-  };
   await writeFile(
     membersFile,
     JSON.stringify([
@@ -177,55 +171,28 @@ test("stdio MCP manages only the authenticated member's file-backed account toke
         role: "owner",
         teamIds: ["team-alpha"],
         token: "owner-member-token"
-      },
-      {
-        userId: "other-user",
-        role: "editor",
-        teamIds: ["team-alpha"],
-        token: "other-member-token",
-        tokens: [otherToken]
       }
     ]),
     "utf8"
   );
-
   const baseSnapshot = await readFile(membersFile, "utf8");
 
   try {
     const result = await runStdioTokenManagement(membersFile);
-    expect(result.created.token).toMatch(/^layo_pat_/);
-    expect(result.created.metadata).toMatchObject({ name: "Stdio deploy automation" });
-    expect(result.listed).toEqual({ tokens: [result.created.metadata] });
-    expect(result.revoked.metadata).toMatchObject({
-      id: result.created.metadata.id,
-      revokedAt: expect.any(String)
+    expect(result.attempted).toMatchObject({
+      isError: true,
+      content: [
+        expect.objectContaining({
+          text: expect.stringMatching(
+            /shared PostgreSQL authorization.*REVIEW_SIGNING_KEY/
+          )
+        })
+      ]
     });
-
+    expect(result.listed).toEqual({ tokens: [] });
     expect(await readFile(membersFile, "utf8")).toBe(baseSnapshot);
-    const persistedText = await readFile(`${membersFile}.tokens.json`, "utf8");
-    const persisted = JSON.parse(persistedText);
-    const owner = persisted.members.find(
-      (member) => member.userId === "owner-user"
-    );
-    expect(owner.tokens).toEqual([
-      expect.objectContaining({
-        id: result.created.metadata.id,
-        name: "Stdio deploy automation",
-        tokenHash: expect.stringMatching(/^[a-f0-9]{64}$/)
-      })
-    ]);
-    expect(owner.revocations).toEqual([
-      {
-        tokenId: result.created.metadata.id,
-        revokedAt: result.revoked.metadata.revokedAt
-      }
-    ]);
-    expect(persistedText).not.toContain(result.created.token);
-    expect(persistedText).not.toMatch(/"token"\\s*:/);
-    expect(owner.tokens[0]).not.toHaveProperty("token");
-    const baseMembers = JSON.parse(baseSnapshot);
-    const other = baseMembers.find((member) => member.userId === "other-user");
-    expect(other.tokens).toEqual([otherToken]);
+    await expect(readFile(`${membersFile}.tokens.json`, "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -260,19 +227,15 @@ async function runStdioTokenManagement(membersFile) {
 
     try {
       await client.connect(transport);
-      const created = parseToolJson(await client.callTool({
+      const attempted = await client.callTool({
         name: "create_account_token",
         arguments: { name: "Stdio deploy automation", expiresInDays: 30 }
-      }));
+      });
       const listed = parseToolJson(await client.callTool({
         name: "list_account_tokens",
         arguments: {}
       }));
-      const revoked = parseToolJson(await client.callTool({
-        name: "revoke_account_token",
-        arguments: { tokenId: created.metadata.id }
-      }));
-      console.log(JSON.stringify({ created, listed, revoked }));
+      console.log(JSON.stringify({ attempted, listed }));
     } finally {
       await client.close().catch(() => undefined);
     }

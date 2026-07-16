@@ -22,6 +22,7 @@ export interface TeamAuthorizationRuntimeEnvironment {
   LAYO_LIBRARY_REGISTRY_MEMBERS?: string;
   LAYO_AUTHORIZATION_DATABASE_URL?: string;
   LAYO_AUTHORIZATION_SHARED_SCOPE?: string;
+  LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY?: string;
 }
 
 export interface TeamAuthorizationRuntimeDependencies {
@@ -91,6 +92,12 @@ function wrapSharedManager(
   return {
     manageTokens: (principal, operation) =>
       track(() => manager.manageTokens(principal, operation)),
+    ...(manager.reviewTokenMutation
+      ? {
+          reviewTokenMutation: (principal, operation) =>
+            track(() => manager.reviewTokenMutation!(principal, operation))
+        }
+      : {}),
     listTokens: (userId) =>
       track(() => manager.listTokens(userId)),
     createToken: (userId, input) =>
@@ -114,6 +121,8 @@ export async function createTeamAuthorizationRuntime(
     environment.LAYO_AUTHORIZATION_DATABASE_URL?.trim() || undefined;
   const sharedScope =
     environment.LAYO_AUTHORIZATION_SHARED_SCOPE?.trim() || undefined;
+  const reviewSigningKey =
+    environment.LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY || undefined;
   const databaseConfigured = databaseUrl !== undefined;
   const scopeConfigured = sharedScope !== undefined;
   if (databaseConfigured !== scopeConfigured) {
@@ -222,6 +231,7 @@ export async function createTeamAuthorizationRuntime(
       {
         stateStore,
         sharedScope,
+        ...(reviewSigningKey ? { reviewSigningKey } : {}),
         scheduleSharedRefresh: (refresh) => {
           if (!closing) {
             void track(refresh).catch(() => undefined);

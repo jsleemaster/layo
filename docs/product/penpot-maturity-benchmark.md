@@ -184,6 +184,36 @@ mutation remain maturity gaps. See
 `docs/product/penpot-shared-authorization-generation-delta.md`.
 Deployment remains non-gating.
 
+## Current Agent-Reviewed Token Mutation Evidence
+
+PR #314 adapts Penpot `develop` commit
+`c50ec233aefed813497266f264f0ee4896387d9b` by preserving the documented
+human access-token lifecycle while making MCP create/revoke review-first.
+Shared deployments with an operator-owned signing key issue five-minute
+secret-free HMAC receipts that bind principal, canonical operation, scope, and
+exact PostgreSQL authorization generation. Commit verifies the receipt inside
+the row-locked transaction before token ID or secret generation. Successful
+changed commits advance generation so replay is stale; no-op revoke reviews
+return no receipt and append no duplicate audit.
+
+The first corrected RED Full Verification `29478548306` failed only on the
+missing review and receipt contract. Independent design review rejected a bare
+generation precondition because it did not bind input or principal and because
+preview-time absolute expiry could drift. The repaired design uses a canonical
+operation digest, relative lifetime summary, authenticated receipt, and
+commit-time expiry. A two-connection PostgreSQL regression proves one winner,
+one stale conflict, one secret generation, one generation increment, and one
+audit event. Full `29479346079` exposed authentication-order regressions in
+legacy MCP tests; Full `29479619577` then passed all 476 Core tests and failed
+only the now-replaced historical filesystem stdio mutation expectation at
+Playwright 200/201.
+
+This is evidence toward gates 7, 9, and 10, not closure of those gates or the
+whole benchmark. General account recovery, hosted identity/SSO, multi-region
+database operations, and broader reviewed administration remain open.
+Deployment remains non-gating. See
+`docs/product/penpot-agent-reviewed-token-mutation-delta.md`.
+
 ## Maturity Dimensions
 
 | Dimension | Penpot benchmark | Layo current posture | Layo target |

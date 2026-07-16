@@ -9,5 +9,8 @@
       "source": "/health",
       "destination": "/api/health"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": false
+  }
 }

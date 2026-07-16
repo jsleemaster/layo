@@ -27,54 +27,32 @@ afterEach(async () => {
 });
 
 describe("team access token MCP administration", () => {
-  test("advertises and applies authenticated create, list, and revoke with exact safety annotations", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "layo-token-mcp-success-"));
+  test("keeps filesystem MCP token mutations unavailable without a shared review signer", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-token-mcp-local-review-"));
     roots.push(root);
     const configPath = path.join(root, "members.json");
-    const otherToken = {
-      id: "other-token",
-      name: "Other automation",
-      tokenHash: tokenHash("other-token-secret"),
-      createdAt: "2026-07-13T12:00:00.000Z"
-    };
     await writeFile(
       configPath,
-      JSON.stringify(
-        [
-          {
-            userId: "owner-user",
-            role: "owner",
-            teamIds: ["team-alpha"],
-            token: "owner-member-token"
-          },
-          {
-            userId: "other-user",
-            role: "editor",
-            teamIds: ["team-alpha"],
-            token: "other-member-token",
-            tokens: [otherToken]
-          }
-        ],
-        null,
-        2
-      ),
+      JSON.stringify([
+        {
+          userId: "owner-user",
+          role: "owner",
+          teamIds: ["team-alpha"],
+          token: "owner-member-token"
+        }
+      ], null, 2),
       "utf8"
     );
-    const baseSnapshot = await readFile(configPath, "utf8");
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 60_000
     });
     sources.push(source);
-    const manager = createTeamAuthorizationFileManager(configPath, source.config, {
-      now: () => new Date("2026-07-14T12:00:00.000Z"),
-      generateId: () => "owner-created",
-      generateSecret: () => "layo_pat_mcp_secret"
-    });
+    const manager = createTeamAuthorizationFileManager(configPath, source.config);
     const manageTokens = vi.spyOn(manager, "manageTokens");
     const client = await connect({
       libraryRegistryAuth: source.config,
       libraryRegistryPrincipal: {
-        userId: " owner-user ",
+        userId: "owner-user",
         memberToken: "owner-member-token"
       },
       teamAuthorizationManager: manager
@@ -89,81 +67,130 @@ describe("team access token MCP administration", () => {
       readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false
     });
     expect(byName.get("revoke_account_token")?.annotations).toEqual({
-      readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false
+      readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false
     });
 
-    const created = parseToolJson(await client.callTool({
+    const blocked = await client.callTool({
+      name: "create_account_token",
+      arguments: { name: "Deploy automation", expiresInDays: 30 }
+    });
+    expect(blocked).toMatchObject({
+      isError: true,
+      content: [
+        expect.objectContaining({
+          text: expect.stringMatching(/shared PostgreSQL authorization.*REVIEW_SIGNING_KEY/)
+        })
+      ]
+    });
+    expect(manageTokens).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      { type: "list" }
+    );
+  });
+
+  test("defaults account token mutations to review and requires its exact generation to commit", async () => {
+    const reviewTokenMutation = vi.fn(async () => ({
+      type: "create" as const,
+      expectedGeneration: "9007199254740993",
+      changed: true,
+      summary: {
+        name: "Deploy automation",
+        expiresInDays: 30
+      },
+      receipt: "opaque-reviewed-receipt",
+      receiptExpiresAt: "2026-07-16T01:05:00.000Z"
+    }));
+    const manageTokens = vi.fn(async () => ({
+      type: "create" as const,
+      created: {
+        token: "layo_pat_committed_secret",
+        metadata: {
+          id: "committed-token",
+          name: "Deploy automation",
+          createdAt: "2026-07-16T01:00:00.000Z",
+          expiresAt: "2026-08-15T01:00:00.000Z"
+        }
+      }
+    }));
+    const manager = {
+      ...noOpManager(),
+      reviewTokenMutation,
+      manageTokens
+    } as unknown as TeamAuthorizationFileManager;
+    const client = await connect({
+      libraryRegistryAuth: authorization(),
+      libraryRegistryPrincipal: {
+        userId: "owner-user",
+        memberToken: "owner-member-token"
+      },
+      teamAuthorizationManager: manager
+    });
+
+    const reviewed = parseToolJson(await client.callTool({
       name: "create_account_token",
       arguments: { name: "Deploy automation", expiresInDays: 30 }
     }));
-    expect(created).toEqual({
-      token: "layo_pat_mcp_secret",
-      metadata: {
-        id: "owner-created",
-        name: "Deploy automation",
-        createdAt: "2026-07-14T12:00:00.000Z",
-        expiresAt: "2026-08-13T12:00:00.000Z"
+    expect(reviewed).toEqual({
+      review: {
+        type: "create",
+        expectedGeneration: "9007199254740993",
+        changed: true,
+        summary: {
+          name: "Deploy automation",
+          expiresInDays: 30
+        },
+        receipt: "opaque-reviewed-receipt",
+        receiptExpiresAt: "2026-07-16T01:05:00.000Z"
       }
     });
-
-    const listed = parseToolJson(await client.callTool({
-      name: "list_account_tokens",
-      arguments: {}
-    }));
-    expect(listed).toEqual({ tokens: [created.metadata] });
-    expect(JSON.stringify(listed)).not.toContain("layo_pat_mcp_secret");
-    expect(JSON.stringify(listed)).not.toContain("tokenHash");
-
-    const revoked = parseToolJson(await client.callTool({
-      name: "revoke_account_token",
-      arguments: { tokenId: "owner-created" }
-    }));
-    expect(revoked).toEqual({
-      metadata: {
-        ...created.metadata,
-        revokedAt: "2026-07-14T12:00:00.000Z"
-      }
-    });
-    expect(JSON.stringify(revoked)).not.toContain("layo_pat_mcp_secret");
-    expect(JSON.stringify(revoked)).not.toContain("tokenHash");
-
-    expect(manageTokens).toHaveBeenCalledTimes(3);
-    for (const [principal] of manageTokens.mock.calls) {
-      expect(principal).toMatchObject({ audit: { source: "mcp" } });
-      expect((principal as typeof principal & { audit?: { requestId?: string } }).audit)
-        .not.toHaveProperty("requestId");
-    }
-
-    expect(await readFile(configPath, "utf8")).toBe(baseSnapshot);
-    const persistedText = await readFile(`${configPath}.tokens.json`, "utf8");
-    const persisted = JSON.parse(persistedText) as {
-      members: Array<{
-        userId: string;
-        tokens: Array<Record<string, unknown>>;
-        revocations: Array<Record<string, unknown>>;
-      }>;
-    };
-    const owner = persisted.members.find((member) => member.userId === "owner-user");
-    expect(owner?.tokens).toEqual([
-      expect.objectContaining({
-        id: "owner-created",
-        tokenHash: tokenHash("layo_pat_mcp_secret")
-      })
-    ]);
-    expect(owner?.revocations).toEqual([
+    expect(reviewTokenMutation).toHaveBeenCalledWith(
       {
-        tokenId: "owner-created",
-        revokedAt: "2026-07-14T12:00:00.000Z"
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      {
+        type: "create",
+        input: { name: "Deploy automation", expiresInDays: 30 }
       }
-    ]);
-    expect(persistedText).not.toContain("layo_pat_mcp_secret");
-    expect(persistedText).not.toMatch(/"token"\\s*:/);
-    expect(owner?.tokens[0]).not.toHaveProperty("token");
-    const baseMembers = JSON.parse(baseSnapshot);
-    const other = baseMembers.find(
-      (member: { userId: string }) => member.userId === "other-user"
     );
-    expect(other.tokens).toEqual([otherToken]);
+    expect(manageTokens).not.toHaveBeenCalled();
+    expect(JSON.stringify(reviewed)).not.toContain("layo_pat_");
+
+    const committed = parseToolJson(await client.callTool({
+      name: "create_account_token",
+      arguments: {
+        name: "Deploy automation",
+        expiresInDays: 30,
+        dryRun: false,
+        reviewReceipt: "opaque-reviewed-receipt"
+      }
+    }));
+    expect(committed).toEqual({
+      token: "layo_pat_committed_secret",
+      metadata: {
+        id: "committed-token",
+        name: "Deploy automation",
+        createdAt: "2026-07-16T01:00:00.000Z",
+        expiresAt: "2026-08-15T01:00:00.000Z"
+      }
+    });
+    expect(manageTokens).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      {
+        type: "create",
+        input: { name: "Deploy automation", expiresInDays: 30 },
+        reviewReceipt: "opaque-reviewed-receipt"
+      }
+    );
   });
 
   test("passes an exact owner cursor and MCP attribution to audit history", async () => {
@@ -294,37 +321,28 @@ describe("team access token MCP administration", () => {
     expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(JSON.parse(changed));
   });
 
-  test("requires explicit acknowledgement before revoking the active named principal token", async () => {
+  test("keeps active self-revocation unavailable on filesystem MCP without a review signer", async () => {
     const setup = await connectFileBackedMcp();
 
     const result = await setup.client.callTool({
       name: "revoke_account_token",
-      arguments: { tokenId: "principal-token" }
+      arguments: {
+        tokenId: "principal-token",
+        confirmSelfRevoke: true
+      }
     });
 
     expect(result).toMatchObject({
       isError: true,
-      content: [expect.objectContaining({ text: expect.stringMatching(/confirmSelfRevoke/) })]
+      content: [
+        expect.objectContaining({
+          text: expect.stringMatching(/shared PostgreSQL authorization.*REVIEW_SIGNING_KEY/)
+        })
+      ]
     });
     expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(
       JSON.parse(membersFile())
     );
-  });
-
-  test("revokes the active named principal only with acknowledgement and returns no secret", async () => {
-    const setup = await connectFileBackedMcp();
-
-    const result = parseToolJson(await setup.client.callTool({
-      name: "revoke_account_token",
-      arguments: { tokenId: "principal-token", confirmSelfRevoke: true }
-    }));
-
-    expect(result.metadata).toMatchObject({
-      id: "principal-token",
-      revokedAt: "2026-07-14T12:00:00.000Z"
-    });
-    expect(JSON.stringify(result)).not.toContain("principal-secret");
-    expect(JSON.stringify(result)).not.toContain("tokenHash");
   });
 });
 

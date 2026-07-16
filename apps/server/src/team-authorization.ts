@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { unwatchFile, watchFile, type StatsListener } from "node:fs";
 import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
@@ -157,10 +157,53 @@ export interface TeamAuthorizationManagementPrincipal {
   };
 }
 
-export type TeamAuthorizationManagementOperation =
-  | { type: "list" }
+export type TeamAuthorizationMutationOperation =
   | { type: "create"; input: CreateTeamAccessTokenInput }
   | { type: "revoke"; tokenId: string; confirmSelfRevoke?: boolean };
+
+export type TeamAuthorizationManagementOperation =
+  | { type: "list" }
+  | (TeamAuthorizationMutationOperation & { reviewReceipt?: string });
+
+type TeamAuthorizationMutationPreview =
+  | {
+      type: "create";
+      changed: boolean;
+      summary: {
+        name: string;
+        expiresInDays: TeamAccessTokenExpiryDays;
+      };
+    }
+  | {
+      type: "revoke";
+      changed: boolean;
+      summary: {
+        metadata: TeamAccessTokenMetadata;
+      };
+    };
+
+export type TeamAuthorizationMutationReview =
+  | {
+      type: "create";
+      expectedGeneration: string;
+      changed: boolean;
+      summary: {
+        name: string;
+        expiresInDays: TeamAccessTokenExpiryDays;
+      };
+      receipt?: string;
+      receiptExpiresAt?: string;
+    }
+  | {
+      type: "revoke";
+      expectedGeneration: string;
+      changed: boolean;
+      summary: {
+        metadata: TeamAccessTokenMetadata;
+      };
+      receipt?: string;
+      receiptExpiresAt?: string;
+    };
 
 export type TeamAuthorizationManagementResult =
   | { type: "list"; tokens: TeamAccessTokenMetadata[]; activeTokenId?: string }
@@ -182,6 +225,10 @@ export interface TeamAuthorizationFileManager {
     principal: TeamAuthorizationManagementPrincipal,
     operation: TeamAuthorizationManagementOperation
   ) => Promise<TeamAuthorizationManagementResult>;
+  reviewTokenMutation?: (
+    principal: TeamAuthorizationManagementPrincipal,
+    operation: TeamAuthorizationMutationOperation
+  ) => Promise<TeamAuthorizationMutationReview>;
   listTokens: (
     userId: string
   ) => TeamAccessTokenMetadata[] | Promise<TeamAccessTokenMetadata[]>;
@@ -203,6 +250,7 @@ export interface TeamAuthorizationFileManagerOptions {
   now?: () => Date;
   generateId?: () => string;
   generateSecret?: () => string;
+  reviewSigningKey?: string;
   beforeSidecarRename?: () => Promise<void>;
   syncFile?: (handle: FileHandle) => Promise<void>;
   syncDirectory?: (directoryPath: string) => Promise<void>;
@@ -680,6 +728,211 @@ function sharedConfigForOperation(
   };
 }
 
+const AUTHORIZATION_MUTATION_REVIEW_TTL_MS = 5 * 60 * 1_000;
+const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
+
+interface AuthorizationMutationReceiptPayload {
+  version: 1;
+  scope: string;
+  actorUserId: string;
+  generation: string;
+  operationDigest: string;
+  issuedAt: string;
+  expiresAt: string;
+  nonce: string;
+}
+
+function validateReviewSigningKey(input: string): string {
+  if (Buffer.byteLength(input, "utf8") < 32) {
+    throw new Error(
+      "LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY must contain at least 32 UTF-8 bytes"
+    );
+  }
+  return input;
+}
+
+function canonicalTeamAuthorizationMutation(
+  operation: TeamAuthorizationMutationOperation
+): TeamAuthorizationMutationOperation {
+  if (operation.type === "create") {
+    const name = validateTeamAccessTokenName(operation.input?.name);
+    const expiresInDays = operation.input?.expiresInDays;
+    if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
+      throw managementError("invalid team authorization token expiration", 400);
+    }
+    return { type: "create", input: { name, expiresInDays } };
+  }
+  const tokenId = operation.tokenId.trim();
+  if (!tokenId) {
+    throw managementError("team authorization token id is required", 400);
+  }
+  return {
+    type: "revoke",
+    tokenId,
+    confirmSelfRevoke: operation.confirmSelfRevoke === true
+  };
+}
+
+function authorizationMutationDigest(
+  operation: TeamAuthorizationMutationOperation
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalTeamAuthorizationMutation(operation)))
+    .digest("hex");
+}
+
+function authorizationMutationPreview(
+  principal: TeamAuthorizationManagementPrincipal,
+  operation: TeamAuthorizationMutationOperation,
+  mergedConfig: TeamAuthorizationConfig,
+  operationNow: Date
+): TeamAuthorizationMutationPreview {
+  const authenticated = authenticateTeamMember(
+    mergedConfig,
+    principal.userId,
+    principal.memberToken,
+    operationNow
+  );
+  const member = findManagedMember(mergedConfig, authenticated.userId);
+  const canonical = canonicalTeamAuthorizationMutation(operation);
+  if (canonical.type === "create") {
+    return {
+      type: "create",
+      changed: true,
+      summary: {
+        name: canonical.input.name,
+        expiresInDays: canonical.input.expiresInDays
+      }
+    };
+  }
+  if (
+    authenticated.tokenId === canonical.tokenId
+    && canonical.confirmSelfRevoke !== true
+  ) {
+    throw managementError(
+      "confirmSelfRevoke must be true to revoke the active MCP principal token",
+      400
+    );
+  }
+  const credential = member.tokens?.find(
+    (candidate) => candidate.id === canonical.tokenId
+  );
+  if (!credential) {
+    throw managementError("team authorization token was not found", 404);
+  }
+  return {
+    type: "revoke",
+    changed: !credential.revokedAt,
+    summary: { metadata: toTeamAccessTokenMetadata(credential) }
+  };
+}
+
+function signAuthorizationMutationReceipt(
+  signingKey: string,
+  payload: AuthorizationMutationReceiptPayload
+): string {
+  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", signingKey)
+    .update(encoded)
+    .digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function parseAuthorizationMutationReceipt(
+  signingKey: string,
+  receipt: string
+): AuthorizationMutationReceiptPayload {
+  if (!receipt || receipt.length > 4_096) {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  const parts = receipt.split(".");
+  if (parts.length !== 2) {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  const [encoded, providedSignature] = parts as [string, string];
+  const expectedSignature = createHmac("sha256", signingKey)
+    .update(encoded)
+    .digest();
+  let provided: Buffer;
+  try {
+    provided = Buffer.from(providedSignature, "base64url");
+  } catch {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  if (
+    provided.length !== expectedSignature.length
+    || !timingSafeEqual(provided, expectedSignature)
+  ) {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  } catch {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  if (
+    !payload
+    || typeof payload !== "object"
+    || (payload as Partial<AuthorizationMutationReceiptPayload>).version !== 1
+  ) {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  const candidate = payload as Partial<AuthorizationMutationReceiptPayload>;
+  const generation = candidate.generation;
+  if (
+    typeof candidate.scope !== "string"
+    || typeof candidate.actorUserId !== "string"
+    || typeof generation !== "string"
+    || !/^(0|[1-9][0-9]*)$/.test(generation)
+    || BigInt(generation) > POSTGRES_BIGINT_MAX
+    || typeof candidate.operationDigest !== "string"
+    || !/^[0-9a-f]{64}$/.test(candidate.operationDigest)
+    || typeof candidate.issuedAt !== "string"
+    || !Number.isFinite(Date.parse(candidate.issuedAt))
+    || typeof candidate.expiresAt !== "string"
+    || !Number.isFinite(Date.parse(candidate.expiresAt))
+    || typeof candidate.nonce !== "string"
+    || candidate.nonce.length < 1
+  ) {
+    throw managementError("authorization mutation review receipt is invalid", 400);
+  }
+  return candidate as AuthorizationMutationReceiptPayload;
+}
+
+function verifyAuthorizationMutationReceipt(
+  signingKey: string,
+  receipt: string,
+  scope: string,
+  principal: TeamAuthorizationManagementPrincipal,
+  operation: TeamAuthorizationMutationOperation,
+  lockedGeneration: string,
+  operationNow: Date
+): void {
+  const payload = parseAuthorizationMutationReceipt(signingKey, receipt);
+  if (payload.scope !== scope) {
+    throw managementError("authorization mutation review scope does not match", 400);
+  }
+  if (payload.actorUserId !== principal.userId.trim()) {
+    throw managementError(
+      "authorization mutation review belongs to another principal",
+      403
+    );
+  }
+  if (payload.operationDigest !== authorizationMutationDigest(operation)) {
+    throw managementError(
+      "authorization mutation does not match its reviewed operation",
+      400
+    );
+  }
+  if (Date.parse(payload.expiresAt) <= operationNow.getTime()) {
+    throw managementError("authorization mutation review receipt has expired", 400);
+  }
+  if (payload.generation !== lockedGeneration) {
+    throw managementError("authorization mutation review generation is stale", 409);
+  }
+}
+
 function applySharedManagementOperation(
   identity: SharedManagementIdentity,
   operation: TeamAuthorizationManagementOperation,
@@ -1064,6 +1317,9 @@ function createSharedTeamAuthorizationFileManager(
   const generateSecret =
     options.generateSecret
     ?? (() => `layo_pat_${randomBytes(32).toString("base64url")}`);
+  const reviewSigningKey = options.reviewSigningKey === undefined
+    ? undefined
+    : validateReviewSigningKey(options.reviewSigningKey);
 
   const loadSharedSnapshot = async (): Promise<{
     baseSnapshot: string;
@@ -1171,6 +1427,23 @@ function createSharedTeamAuthorizationFileManager(
         async (locked) => {
           const state = parseManagedTokenState(locked.serializedState);
           const operationNow = now();
+          if (operation.type !== "list" && operation.reviewReceipt !== undefined) {
+            if (!reviewSigningKey || !("principal" in identity)) {
+              throw managementError(
+                "reviewed authorization mutation is unavailable",
+                503
+              );
+            }
+            verifyAuthorizationMutationReceipt(
+              reviewSigningKey,
+              operation.reviewReceipt,
+              sharedScope,
+              identity.principal,
+              operation,
+              locked.generation,
+              operationNow
+            );
+          }
           const { mergedConfig, recovered } = sharedConfigForOperation(
             baseConfig,
             state,
@@ -1219,6 +1492,102 @@ function createSharedTeamAuthorizationFileManager(
     await publishCommittedSnapshot(baseSnapshot, committed);
     return committed.result.applied.result;
   };
+
+  const reviewTokenMutation = reviewSigningKey
+    ? async (
+        principal: TeamAuthorizationManagementPrincipal,
+        operation: TeamAuthorizationMutationOperation
+      ): Promise<TeamAuthorizationMutationReview> => {
+        const baseSnapshot = await readFile(filePath, "utf8");
+        const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+        const baseFingerprint =
+          canonicalTeamAuthorizationBaseFingerprint(baseSnapshot);
+        try {
+          const reviewed = await transact(
+            sharedScope,
+            baseFingerprint,
+            { mutating: false },
+            async (locked) => {
+              const state = parseManagedTokenState(locked.serializedState);
+              const operationNow = now();
+              const { mergedConfig, recovered } = sharedConfigForOperation(
+                baseConfig,
+                state,
+                { principal },
+                operationNow
+              );
+              const preview = authorizationMutationPreview(
+                principal,
+                operation,
+                mergedConfig,
+                operationNow
+              );
+              if (await readFile(filePath, "utf8") !== baseSnapshot) {
+                throw managementError(
+                  "team authorization file changed during mutation review",
+                  409
+                );
+              }
+              const changed = recovered || preview.changed;
+              const expectedGeneration = locked.generation;
+              let result: TeamAuthorizationMutationReview =
+                preview.type === "create"
+                  ? {
+                      type: "create",
+                      changed,
+                      expectedGeneration,
+                      summary: preview.summary
+                    }
+                  : {
+                      type: "revoke",
+                      changed,
+                      expectedGeneration,
+                      summary: preview.summary
+                    };
+              if (changed) {
+                const issuedAt = validManagementNow(operationNow);
+                const receiptExpiresAt = new Date(
+                  Date.parse(issuedAt) + AUTHORIZATION_MUTATION_REVIEW_TTL_MS
+                ).toISOString();
+                const payload: AuthorizationMutationReceiptPayload = {
+                  version: 1,
+                  scope: sharedScope,
+                  actorUserId: principal.userId.trim(),
+                  generation: expectedGeneration,
+                  operationDigest: authorizationMutationDigest(operation),
+                  issuedAt,
+                  expiresAt: receiptExpiresAt,
+                  nonce: randomUUID()
+                };
+                result = {
+                  ...result,
+                  receipt: signAuthorizationMutationReceipt(
+                    reviewSigningKey,
+                    payload
+                  ),
+                  receiptExpiresAt
+                };
+              }
+              return {
+                baseFingerprint,
+                serializedState: locked.serializedState,
+                result,
+                changed: false
+              };
+            }
+          );
+          return reviewed.result;
+        } catch (error) {
+          if (
+            error instanceof Error
+            && error.message === `authorization scope ${sharedScope} does not exist`
+          ) {
+            throw new Error(missingSharedScopeInstruction(filePath, sharedScope));
+          }
+          throw sharedManagementError(error);
+        }
+      }
+    : undefined;
 
   const listSharedAuditEvents = listAuditEvents
     ? async (
@@ -1282,6 +1651,7 @@ function createSharedTeamAuthorizationFileManager(
   return {
     manageTokens: (principal, operation) =>
       executeOperation({ principal }, operation),
+    ...(reviewTokenMutation ? { reviewTokenMutation } : {}),
     ...(listSharedAuditEvents
       ? { listAuditEvents: listSharedAuditEvents }
       : {}),

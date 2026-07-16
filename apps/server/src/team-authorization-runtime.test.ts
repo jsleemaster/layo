@@ -61,6 +61,7 @@ function dependencies(overrides: Partial<TeamAuthorizationRuntimeDependencies> =
   };
   const manager = {
     manageTokens: vi.fn(),
+    reviewTokenMutation: vi.fn(),
     listTokens: vi.fn(),
     createToken: vi.fn(),
     revokeToken: vi.fn(),
@@ -199,6 +200,49 @@ test("shared close rejects new work, drains in-flight authentication, and closes
   expect(fixture.store.close).toHaveBeenCalledOnce();
   await runtime.settled();
   expect(fixture.store.close).toHaveBeenCalledOnce();
+});
+
+test("shared runtime wires and lifecycle-wraps the reviewed mutation signing key", async () => {
+  const fixture = dependencies();
+  fixture.manager.reviewTokenMutation.mockResolvedValue({
+    type: "create",
+    expectedGeneration: "1",
+    changed: true,
+    summary: { name: "Deploy", expiresInDays: 30 },
+    receipt: "opaque-receipt",
+    receiptExpiresAt: "2026-07-16T01:05:00.000Z"
+  });
+  const signingKey = "runtime-review-signing-key-with-at-least-32-bytes";
+  const runtime = await createTeamAuthorizationRuntime(
+    {
+      LAYO_LIBRARY_REGISTRY_MEMBERS_FILE: "/run/layo/members.json",
+      LAYO_AUTHORIZATION_DATABASE_URL: "postgres://authorization",
+      LAYO_AUTHORIZATION_SHARED_SCOPE: "team-alpha",
+      LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY: signingKey
+    },
+    fixture.values
+  );
+
+  expect(fixture.values.createFileManager).toHaveBeenCalledWith(
+    "/run/layo/members.json",
+    baseConfig,
+    expect.objectContaining({
+      stateStore: fixture.store,
+      sharedScope: "team-alpha",
+      reviewSigningKey: signingKey
+    })
+  );
+  await expect(runtime.teamAuthorizationManager!.reviewTokenMutation!(
+    { userId: "owner-user", memberToken: "owner-token" },
+    { type: "create", input: { name: "Deploy", expiresInDays: 30 } }
+  )).resolves.toMatchObject({ receipt: "opaque-receipt" });
+  expect(fixture.manager.reviewTokenMutation).toHaveBeenCalledOnce();
+
+  await runtime.close();
+  await expect(runtime.teamAuthorizationManager!.reviewTokenMutation!(
+    { userId: "owner-user", memberToken: "owner-token" },
+    { type: "create", input: { name: "Deploy", expiresInDays: 30 } }
+  )).rejects.toMatchObject({ statusCode: 503 });
 });
 
 test("shared close rejects new work and drains an in-flight audit read", async () => {
