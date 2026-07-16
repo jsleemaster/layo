@@ -256,25 +256,60 @@ function validateAuditEventInput(
   ) {
     throw new Error("authorization audit metadata must be an object");
   }
-  const inspectMetadata = (
-    current: object,
-    ancestors: WeakSet<object>
-  ): void => {
-    if (ancestors.has(current)) {
-      throw new Error("authorization audit metadata must not contain cycles");
-    }
-    ancestors.add(current);
-    for (const [key, value] of Object.entries(current)) {
-      if (/(token|secret|hash|credential|database.?url)/i.test(key)) {
-        throw new Error("authorization audit metadata contains a forbidden field");
-      }
-      if (value && typeof value === "object") {
-        inspectMetadata(value, ancestors);
-      }
-    }
-    ancestors.delete(current);
+  const allowedMetadataFields: Record<
+    TeamAuthorizationAuditAction,
+    readonly string[]
+  > = {
+    token_created: ["expiresAt", "baseReconciled"],
+    token_revoked: ["revokedAt", "baseReconciled"],
+    scope_bootstrapped: ["mode"],
+    scope_restored: ["artifactGeneration"],
+    base_reconciled: ["reason"]
   };
-  inspectMetadata(input.metadata, new WeakSet<object>());
+  for (const [key, value] of Object.entries(input.metadata)) {
+    if (!allowedMetadataFields[input.action].includes(key)) {
+      throw new Error(
+        `authorization audit metadata field ${key} is not allowed for ${input.action}`
+      );
+    }
+    if (
+      (key === "expiresAt" || key === "revokedAt")
+      && (
+        typeof value !== "string"
+        || !Number.isFinite(Date.parse(value))
+        || new Date(value).toISOString() !== value
+      )
+    ) {
+      throw new Error(`authorization audit metadata ${key} must be an ISO timestamp`);
+    }
+    if (key === "baseReconciled" && value !== true) {
+      throw new Error("authorization audit metadata baseReconciled must be true");
+    }
+    if (
+      key === "mode"
+      && value !== "empty"
+      && value !== "from_sidecar"
+    ) {
+      throw new Error("authorization audit metadata mode is invalid");
+    }
+    if (
+      key === "artifactGeneration"
+      && (
+        typeof value !== "string"
+        || !/^(0|[1-9][0-9]*)$/.test(value)
+        || BigInt(value) > POSTGRES_BIGINT_MAX
+      )
+    ) {
+      throw new Error("authorization audit metadata artifactGeneration is invalid");
+    }
+    if (
+      key === "reason"
+      && value !== "credential_recovery"
+      && value !== "operator_reconcile"
+    ) {
+      throw new Error("authorization audit metadata reason is invalid");
+    }
+  }
   const metadata = JSON.stringify(input.metadata);
   if (Buffer.byteLength(metadata, "utf8") > 16_384) {
     throw new Error("authorization audit metadata is too large");
@@ -805,6 +840,12 @@ export async function createPostgresTeamAuthorizationStateStore(
           }
           await client.query("COMMIT");
           return { ...snapshot, result: transaction.result };
+        }
+
+        if (!transaction.auditEvent) {
+          throw new Error(
+            "authorization audit event is required for every changed transaction"
+          );
         }
 
         const updated = await client.query<AuthorizationStateRow>(
