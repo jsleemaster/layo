@@ -76,7 +76,8 @@ function parseArguments(argv: string[]): ParsedArguments {
     "--output",
     "--input",
     "--current-fingerprint",
-    "--expected-generation"
+    "--expected-generation",
+    "--actor-user-id"
   ]);
   const switchOptions = new Set([
     "--empty",
@@ -233,8 +234,13 @@ async function runBootstrap(
   arguments_: ParsedArguments,
   store: TeamAuthorizationStateStore
 ): Promise<void> {
-  rejectOptions(arguments_, ["--scope", "--base"], ["--empty", "--from-sidecar"]);
+  rejectOptions(
+    arguments_,
+    ["--scope", "--base", "--actor-user-id"],
+    ["--empty", "--from-sidecar"]
+  );
   const scope = requiredValue(arguments_, "--scope");
+  const actorUserId = requiredValue(arguments_, "--actor-user-id");
   const basePath = requiredValue(arguments_, "--base");
   const empty = arguments_.switches.has("--empty");
   const fromSidecar = arguments_.switches.has("--from-sidecar");
@@ -250,13 +256,22 @@ async function runBootstrap(
       )
     : EMPTY_MANAGED_STATE;
   const requested: TeamAuthorizationStateSnapshot = {
-    generation: "0",
+    generation: "1",
     baseFingerprint: canonicalTeamAuthorizationBaseFingerprint(baseInput),
     serializedState
   };
 
   await requireAbsentScope(store, scope);
-  const result = await store.initializeAbsent(scope, requested);
+  const result = await store.initializeAbsent(
+    scope,
+    requested,
+    {
+      action: "scope_bootstrapped",
+      actorUserId,
+      source: "operator",
+      metadata: { mode: empty ? "empty" : "from_sidecar" }
+    }
+  );
   if (!result.initialized && !snapshotsMatch(result.snapshot, requested)) {
     throw new Error(
       `authorization scope ${scope} was initialized with conflicting state`
@@ -325,11 +340,12 @@ async function runRestore(
 ): Promise<void> {
   rejectOptions(
     arguments_,
-    ["--scope", "--input"],
+    ["--scope", "--input", "--actor-user-id"],
     ["--confirm-absent-scope-restore"]
   );
   const scope = requiredValue(arguments_, "--scope");
   const inputPath = requiredValue(arguments_, "--input");
+  const actorUserId = requiredValue(arguments_, "--actor-user-id");
   if (!arguments_.switches.has("--confirm-absent-scope-restore")) {
     throw new Error(
       "restore requires --confirm-absent-scope-restore"
@@ -341,11 +357,24 @@ async function runRestore(
   }
 
   await requireAbsentScope(store, scope);
-  const result = await store.initializeAbsent(scope, {
-    generation: artifact.generation,
-    baseFingerprint: artifact.baseFingerprint,
-    serializedState: JSON.stringify(artifact.state)
-  });
+  const restoredGeneration = BigInt(artifact.generation) + 1n;
+  if (restoredGeneration > 9_223_372_036_854_775_807n) {
+    throw new Error("authorization restore generation exceeds PostgreSQL bigint");
+  }
+  const result = await store.initializeAbsent(
+    scope,
+    {
+      generation: restoredGeneration.toString(),
+      baseFingerprint: artifact.baseFingerprint,
+      serializedState: JSON.stringify(artifact.state)
+    },
+    {
+      action: "scope_restored",
+      actorUserId,
+      source: "operator",
+      metadata: { artifactGeneration: artifact.generation }
+    }
+  );
   if (!result.initialized) {
     throw new Error(`authorization scope ${scope} already exists`);
   }
@@ -471,7 +500,8 @@ async function runReconcileBase(
       "--scope",
       "--base",
       "--current-fingerprint",
-      "--expected-generation"
+      "--expected-generation",
+      "--actor-user-id"
     ],
     []
   );
@@ -483,7 +513,8 @@ async function runReconcileBase(
       "--current-fingerprint"
     ),
     expectedGeneration: requiredValue(arguments_, "--expected-generation"),
-    candidateBasePath: requiredValue(arguments_, "--base")
+    candidateBasePath: requiredValue(arguments_, "--base"),
+    actorUserId: requiredValue(arguments_, "--actor-user-id")
   });
 }
 
