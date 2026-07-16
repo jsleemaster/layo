@@ -117,6 +117,58 @@ maintainer-operated telemetry/archive endpoint.
 - [ ] Add Korean owner activity UI with identity/session generation invalidation.
 - [ ] Run direct Playwright CLI owner/editor and pagination interactions.
 
+## Deployment failure-learning evidence (2026-07-16)
+
+The reported Vercel deployment
+`dpl_6qaTjzmQHPus1bM4Ga1jXjAMBj45` failed at web typecheck because
+`App.tsx` imported `pathHasOnlyClosedSubpaths` from `./path-editor` even
+though the public implementation lives in `@layo/renderer`. Current code
+already used the correct contract; the deployment artifact test now prevents
+that import from moving back to the local editor module.
+
+The comprehensive live check exposed two additional deployment failures that a
+Vercel `READY` state did not detect:
+
+- Production `/health` returned 500 because Node 24 could not resolve the
+  extensionless `packages/renderer/dist/boolean-path` export.
+- Collection and nested same-origin APIs returned Vercel platform 404 because
+  `api/[...path].ts` did not expose multi-segment raw function routes.
+- The first working bridge leaked Vercel's wildcard capture as `?path=...`
+  into Fastify requests.
+- The account audit E2E initially expected owner denial immediately after an
+  identity import, but identity replacement correctly clears the member token.
+  The test now reapplies the editor token before asserting the owner-only 403.
+
+Durable fixes are the Node-loadable renderer ESM export, the
+`check:serverless-runtime` gate in PR and production workflows, the explicit
+`api/bridge.ts` function, tested route reconstruction, complete web API
+rewrites, and live smoke coverage for both `/health` and `/projects`.
+The production workflow now pins Vercel CLI `56.2.1`; the requested local
+global upgrade was attempted but the local command runtime exited 134 before
+installation, so no local upgrade success is claimed.
+
+Evidence:
+
+- Original Vercel log: `TS2305` missing
+  `pathHasOnlyClosedSubpaths` export from `./path-editor`.
+- Runtime RED: production `/health` 500 with `ERR_MODULE_NOT_FOUND` for
+  `packages/renderer/dist/boolean-path`; production editor `/projects` 404.
+- Contract RED Full Verification: `29465058726` for the stale CLI pin,
+  `29465408735` for incomplete API rewrites, `29465735606` for the
+  previously unwired live smoke, `29465895114` for the missing Node-loadable
+  renderer contract, and `29466525097` for wildcard query leakage.
+- UI failure-learning RED: `29408434747` for the editor identity/token
+  lifecycle expectation.
+- GREEN Full Verification: `29466650565` passed every gate including the
+  serverless import check and full Playwright CLI E2E on
+  `b6fc10d1e621d36ac7012e36f6778a03389d47dc`.
+- Direct protected-preview Playwright check on
+  `dpl_DKcJ6oeaDgd45sy3RXhLLj8EAcii`: editor rendered; `/health` 200
+  `{"ok":true}`; `/projects` 200 `{"projects":[]}`; nested routes reached
+  Fastify with no `x-vercel-error`; `/account/*` reached Fastify and
+  returned the expected unconfigured file-authorization 503; no wildcard
+  capture query remained.
+
 ## Task 4: Operator export and retention
 
 **Files:**
