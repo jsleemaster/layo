@@ -34,10 +34,9 @@ function fakeStore(overrides: Partial<AuthorizationAuditOperatorStore> = {}): Au
 }
 
 describe("authorization audit operator export", () => {
-  test("durably replaces a private versioned artifact before marking exact ids archived", async () => {
+  test("durably creates a private versioned artifact before marking exact ids archived", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-audit-export-"));
-    const outputPath = path.join(root, "audit-first.json");
-    const unusedRetryOutputPath = path.join(root, "audit-retry.json");
+    const outputPath = path.join(root, "audit.json");
     const order: string[] = [];
     const store = fakeStore({
       markAuditEventsArchived: vi.fn(async (_scope, eventIds) => {
@@ -78,9 +77,10 @@ describe("authorization audit operator export", () => {
     expect(await readdir(root)).toEqual(["audit.json"]);
   });
 
-  test("re-exports stable ids after a crash window between durable replace and archive commit", async () => {
+  test("re-exports stable ids to a new batch after the archive commit fails", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-audit-retry-"));
-    const firstOutputPath = path.join(root, "audit.json");
+    const firstOutputPath = path.join(root, "audit-first.json");
+    const retryOutputPath = path.join(root, "audit-retry.json");
     let archiveAttempts = 0;
     const store = fakeStore({
       markAuditEventsArchived: vi.fn(async () => {
@@ -94,24 +94,28 @@ describe("authorization audit operator export", () => {
     await expect(exportAuthorizationAuditEvents({
       store,
       scope: "team-a",
-      firstOutputPath,
+      outputPath: firstOutputPath,
       limit: 100,
       now: () => new Date("2026-07-16T01:00:00.000Z")
     })).rejects.toThrow("injected archive commit failure");
-    const first = await readFile(firstOutputPath, "utf8");
+    const first = JSON.parse(await readFile(firstOutputPath, "utf8"));
 
     await expect(exportAuthorizationAuditEvents({
       store,
       scope: "team-a",
-      firstOutputPath,
+      outputPath: retryOutputPath,
       limit: 100,
       now: () => new Date("2026-07-16T01:01:00.000Z")
     })).resolves.toMatchObject({ exportedCount: 1 });
     const second = JSON.parse(await readFile(retryOutputPath, "utf8"));
 
-    expect(JSON.parse(first).events[0].id).toBe("9007199254740993");
+    expect(first.events[0].id).toBe("9007199254740993");
     expect(second.events[0].id).toBe("9007199254740993");
     expect(archiveAttempts).toBe(2);
+    expect((await readdir(root)).sort()).toEqual([
+      "audit-first.json",
+      "audit-retry.json"
+    ]);
   });
 });
 
