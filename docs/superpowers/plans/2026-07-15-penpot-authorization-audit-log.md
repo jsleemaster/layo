@@ -93,12 +93,12 @@ maintainer-operated telemetry/archive endpoint.
 - Modify: shared manager/provider tests
 - Modify: HTTP/MCP token administration integration tests
 
-- [ ] Thread typed actor, source, and optional request id through create/revoke,
+- [x] Thread typed actor, source, and optional request id through create/revoke,
       bootstrap, restore, and base reconciliation.
-- [ ] Create and revoke events expose token id/name but no credential material.
-- [ ] Reconciliation records counts/reason codes, not member-file contents.
-- [ ] Rejected/no-op operations remain silent.
-- [ ] Preserve one-time plaintext token delivery even if post-commit cache
+- [x] Create and revoke events expose token id/name but no credential material.
+- [x] Reconciliation records counts/reason codes, not member-file contents.
+- [x] Rejected/no-op operations remain silent.
+- [x] Preserve one-time plaintext token delivery even if post-commit cache
       publication fails.
 
 ## Task 3: Owner cursor consumption
@@ -110,12 +110,12 @@ maintainer-operated telemetry/archive endpoint.
 - Modify: Korean team settings UI
 - Add focused unit/integration/e2e tests
 
-- [ ] Add owner-only HTTP and MCP list operations with `afterId` and bounded
+- [x] Add owner-only HTTP and MCP list operations with `afterId` and bounded
       `limit`.
-- [ ] Re-authenticate through the request-time provider for every read.
-- [ ] Prove editor/viewer/cross-scope denial and outage/malformed-row fail-close.
-- [ ] Add Korean owner activity UI with identity/session generation invalidation.
-- [ ] Run direct Playwright CLI owner/editor and pagination interactions.
+- [x] Re-authenticate through the request-time provider for every read.
+- [x] Prove editor/viewer/cross-scope denial and outage/malformed-row fail-close.
+- [x] Add Korean owner activity UI with identity/session generation invalidation.
+- [x] Run direct Playwright CLI owner/editor and pagination interactions.
 
 ## Deployment failure-learning evidence (2026-07-16)
 
@@ -139,13 +139,16 @@ Vercel `READY` state did not detect:
   identity import, but identity replacement correctly clears the member token.
   The test now reapplies the editor token before asserting the owner-only 403.
 
-Durable fixes are the Node-loadable renderer ESM export, the
-`check:serverless-runtime` gate in PR and production workflows, the explicit
-`api/bridge.ts` function, tested route reconstruction, complete web API
-rewrites, and live smoke coverage for both `/health` and `/projects`.
-The production workflow now pins Vercel CLI `56.2.1`; the requested local
-global upgrade was attempted but the local command runtime exited 134 before
-installation, so no local upgrade success is claimed.
+Durable fixes are the Node-loadable renderer ESM export and the
+`check:serverless-runtime` gate in PR and production workflows. A first bridge
+repair made every route functional, but independent review found that exposing
+unauthenticated filesystem APIs through shared serverless `/tmp` storage could
+mix visitors and lose documents. Layo therefore deliberately diverges: Vercel
+serves the static shell plus `/health` only, and team data APIs require a
+separately operated authenticated durable server. The production workflow pins
+Vercel CLI `56.2.1`; the requested local global upgrade was attempted but the
+local command runtime exited 134 before installation, so no local upgrade
+success is claimed.
 
 Evidence:
 
@@ -162,12 +165,11 @@ Evidence:
 - GREEN Full Verification: `29466650565` passed every gate including the
   serverless import check and full Playwright CLI E2E on
   `b6fc10d1e621d36ac7012e36f6778a03389d47dc`.
-- Direct protected-preview Playwright check on
-  `dpl_DKcJ6oeaDgd45sy3RXhLLj8EAcii`: editor rendered; `/health` 200
-  `{"ok":true}`; `/projects` 200 `{"projects":[]}`; nested routes reached
-  Fastify with no `x-vercel-error`; `/account/*` reached Fastify and
-  returned the expected unconfigured file-authorization 503; no wildcard
-  capture query remained.
+- Direct protected-preview Playwright on the earlier bridge preview proved the
+  renderer/runtime repair. Independent review then rejected that deployment
+  topology. The current branch preview is Vercel-auth protected; unauthenticated
+  Playwright reaches the Vercel login, while the deployment contract and live
+  smoke now require only the Layo shell and health function.
 
 ## Task 4: Operator export and retention
 
@@ -176,25 +178,50 @@ Evidence:
 - Create focused PostgreSQL audit archive workflow
 - Add operation tests and runbook
 
-- [ ] Export an ordered private versioned artifact through atomic replace/fsync.
-- [ ] Mark exactly the exported ids archived only after durable file replacement.
-- [ ] Prove retry is at-least-once with stable-id dedup after injected commit
+- [x] Export an ordered private versioned artifact through atomic replace/fsync.
+- [x] Mark exactly the exported ids archived only after durable file replacement.
+- [x] Prove retry is at-least-once with stable-id dedup after injected commit
       failure.
-- [ ] Add dry-run/apply retention that never deletes unarchived rows.
-- [ ] Add PostgreSQL CI proof for append, export, archive mark, retry, and
+- [x] Add dry-run/apply retention that never deletes unarchived rows.
+- [x] Add PostgreSQL CI proof for append, export, archive mark, retry, and
       retention.
-- [ ] Document migration/runtime/export roles, TLS, backup, and recovery.
+- [x] Document migration/runtime/export roles, TLS, backup, and recovery.
+
+
+**Task 4 evidence (2026-07-16):**
+
+- Operator contract RED Full Verification `29467393628` failed on the missing
+  module; the first implementation run exposed a test callback type error before
+  the contract passed.
+- Authorization Audit Archive Drill `29468338620` first proved durable replace,
+  injected archive-commit failure, stable-id retry, exact archive marking, and
+  retention. Final audited-bootstrap head drill `29468592227` passed.
+- Authorization Backup Drill `29468592256`, Storage Restore Drill
+  `29468592239`, and Storage Backup Retention `29468592273` passed.
+- Runbook: `docs/deployment/authorization-audit.md`.
+- Product delta: `docs/product/penpot-authorization-audit-delta.md`.
+
+**Independent review findings (2026-07-16):**
+
+- P1 unsafe shared Vercel `/tmp` APIs: converted to the health-only deployment
+  RED `29467813326`; bridge and wildcard resolver removed.
+- P1 stale owner snapshot during audit read: generation/fingerprint are now
+  revalidated under `FOR SHARE` in the same transaction as the audit query.
+- P1 changed transaction without audit: storage now rejects it before update;
+  bootstrap/restore/reconcile use explicit audited paths.
+- P2 metadata denylist gaps: replaced by action-specific key/value allowlists.
+- P2 cursor bigint overflow: rejected before PostgreSQL query.
 
 ## Task 5: Evidence, review, and merge
 
-- [ ] Update README, environment template, maturity benchmark, PLAN_STATUS, and a
+- [x] Update README, environment template, maturity benchmark, PLAN_STATUS, and a
       focused product delta.
 - [ ] Run focused tests, Full Verification, authorization audit archive drill,
       authorization backup drill, filesystem restore, and retention on one head.
-- [ ] Request independent review for transaction atomicity, secret leakage,
+- [x] Request independent review for transaction atomicity, secret leakage,
       cursor isolation, SQL injection, bigint overflow, exporter crash windows,
       concurrent exporters, retention safety, and shutdown.
-- [ ] Convert every finding into a deterministic RED until review is clean.
+- [x] Convert every finding into a deterministic RED until review is clean.
 - [ ] Update PR body, squash merge exact reviewed head, and run post-merge
       cleanup without deleting dirty/user-owned worktrees.
 
