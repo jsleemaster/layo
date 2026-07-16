@@ -1,4 +1,4 @@
-import { open, rename, rm } from "node:fs/promises";
+import { link, open, rm } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TeamAuthorizationAuditEvent } from "./team-authorization-postgres.js";
@@ -79,7 +79,17 @@ async function writePrivateFileAtomically(
     await temporary.sync();
     await temporary.close();
     temporary = undefined;
-    await rename(temporaryPath, outputPath);
+    try {
+      await link(temporaryPath, outputPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(
+          "authorization audit output already exists; use a unique immutable batch path"
+        );
+      }
+      throw error;
+    }
+    await rm(temporaryPath);
     const directoryHandle = await open(directory, "r");
     try {
       await directoryHandle.sync();
@@ -148,6 +158,7 @@ interface AuthorizationAuditRetentionOptions {
   keepNewest: number;
   limit: number;
   apply: boolean;
+  reviewedCandidateIds?: string[];
 }
 
 export async function applyAuthorizationAuditRetention(
@@ -175,8 +186,22 @@ export async function applyAuthorizationAuditRetention(
       }
     )
   );
-  if (!options.apply || candidateIds.length === 0) {
+  if (!options.apply) {
     return { candidateIds, deletedCount: 0, applied: false };
+  }
+  const reviewedCandidateIds = validateEventIds(
+    options.reviewedCandidateIds ?? []
+  );
+  if (
+    reviewedCandidateIds.length !== candidateIds.length
+    || reviewedCandidateIds.some((id, index) => id !== candidateIds[index])
+  ) {
+    throw new Error(
+      "authorization audit retention candidates changed after review"
+    );
+  }
+  if (candidateIds.length === 0) {
+    return { candidateIds, deletedCount: 0, applied: true };
   }
   const deletedCount = await options.store.deleteArchivedAuditEvents(
     options.scope,
