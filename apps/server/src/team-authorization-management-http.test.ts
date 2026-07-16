@@ -129,7 +129,7 @@ describe("team access token HTTP administration", () => {
           audit?: { source?: string; requestId?: string };
         }).audit
       );
-      expect(auditContexts).toHaveLength(5);
+      expect(auditContexts).toHaveLength(7);
       expect(auditContexts.every((audit) => audit?.source === "http")).toBe(true);
       const requestIds = auditContexts.map((audit) => audit?.requestId);
       expect(requestIds.every((requestId) => typeof requestId === "string" && requestId.length > 0))
