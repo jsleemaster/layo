@@ -112,7 +112,7 @@ test("rejects deployments whose project collection is not routed to the API", as
       url: "https://layo.example",
       fetcher
     }),
-    /\\/projects/
+    (error) => error instanceof Error && error.message.includes("/projects")
   );
 });
 
