@@ -290,4 +290,79 @@ describe("agent-reviewed account token mutation", () => {
       .rejects.toMatchObject({ statusCode: 409 });
     expect(generateSecret).toHaveBeenCalledOnce();
   });
+
+  test("requires reviewed self-revoke acknowledgement and gives no receipt for an already revoked token", async () => {
+    const { manager, state, principal } = await fixture();
+    const created = await manager.manageTokens(principal, {
+      type: "create",
+      input: { name: "Self token", expiresInDays: null }
+    });
+    if (created.type !== "create") {
+      throw new Error("expected token creation");
+    }
+    const namedPrincipal = {
+      userId: "owner-user",
+      memberToken: created.created.token,
+      audit: { source: "mcp" as const }
+    };
+
+    await expect(manager.reviewTokenMutation!(namedPrincipal, {
+      type: "revoke",
+      tokenId: created.created.metadata.id
+    })).rejects.toThrow(/confirmSelfRevoke/);
+
+    const review = await manager.reviewTokenMutation!(namedPrincipal, {
+      type: "revoke",
+      tokenId: created.created.metadata.id,
+      confirmSelfRevoke: true
+    });
+    expect(review).toMatchObject({
+      type: "revoke",
+      expectedGeneration: "8",
+      changed: true,
+      receipt: expect.any(String)
+    });
+
+    await expect(manager.manageTokens(namedPrincipal, {
+      type: "revoke",
+      tokenId: created.created.metadata.id,
+      confirmSelfRevoke: false,
+      reviewReceipt: review.receipt!
+    })).rejects.toMatchObject({ statusCode: 400 });
+
+    await expect(manager.manageTokens(namedPrincipal, {
+      type: "revoke",
+      tokenId: created.created.metadata.id,
+      confirmSelfRevoke: true,
+      reviewReceipt: review.receipt!
+    })).resolves.toMatchObject({
+      type: "revoke",
+      metadata: {
+        id: "reviewed-token",
+        revokedAt: "2026-07-16T01:00:00.000Z"
+      }
+    });
+    expect(state.current().generation).toBe("9");
+
+    const noOp = await manager.reviewTokenMutation!(principal, {
+      type: "revoke",
+      tokenId: created.created.metadata.id
+    });
+    expect(noOp).toEqual({
+      type: "revoke",
+      expectedGeneration: "9",
+      changed: false,
+      summary: {
+        metadata: {
+          id: "reviewed-token",
+          name: "Self token",
+          createdAt: "2026-07-16T01:00:00.000Z",
+          revokedAt: "2026-07-16T01:00:00.000Z"
+        }
+      }
+    });
+    expect(noOp).not.toHaveProperty("receipt");
+    expect(state.current().generation).toBe("9");
+  });
+
 });
