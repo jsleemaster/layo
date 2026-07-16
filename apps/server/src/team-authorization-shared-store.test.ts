@@ -13,6 +13,7 @@ import {
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION,
   type TeamAuthorizationStateSnapshot,
   type TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
@@ -135,7 +136,11 @@ async function initializeScope(
     baseFingerprint: canonicalTeamAuthorizationBaseFingerprint(base),
     serializedState: emptyState
   };
-  const initialized = await store.initializeAbsent(scope, snapshot);
+  const initialized = await store.initializeAbsent(
+    scope,
+    snapshot,
+    TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION
+  );
   expect(initialized.initialized).toBe(true);
   return initialized.snapshot;
 }
@@ -166,7 +171,8 @@ function pauseFirstMutation(
   };
   return {
     read: (scope) => store.read(scope),
-    initializeAbsent: (scope, snapshot) => store.initializeAbsent(scope, snapshot),
+    initializeAbsent: (scope, snapshot, initialization) =>
+      store.initializeAbsent(scope, snapshot, initialization),
     transact: (scope, fingerprint, options, operation) => {
       if (!store.transact) {
         throw new Error("test store does not support transact");
