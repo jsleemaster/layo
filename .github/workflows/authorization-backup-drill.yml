@@ -77,7 +77,7 @@ jobs:
           pnpm --filter @layo/server authorization:export --scope "$scope" --output "$first_export"
 
           # Purpose: simulate loss of exactly one operator-selected authorization scope.
-          SCOPE="$scope" pnpm --filter @layo/server exec node --input-type=module -e 'import pg from "pg"; const pool = new pg.Pool({ connectionString: process.env.LAYO_AUTHORIZATION_DATABASE_URL }); try { const result = await pool.query("DELETE FROM layo_team_authorization_state WHERE scope = $1", [process.env.SCOPE]); if (result.rowCount !== 1) throw new Error("expected exactly one deleted authorization scope"); } finally { await pool.end(); }'
+          SCOPE="$scope" pnpm --filter @layo/server exec node --input-type=module -e 'import pg from "pg"; const pool = new pg.Pool({ connectionString: process.env.LAYO_AUTHORIZATION_DATABASE_URL }); const client = await pool.connect(); try { await client.query("BEGIN"); await client.query("DELETE FROM layo_authorization_audit_events WHERE scope = $1", [process.env.SCOPE]); const result = await client.query("DELETE FROM layo_team_authorization_state WHERE scope = $1", [process.env.SCOPE]); if (result.rowCount !== 1) throw new Error("expected exactly one deleted authorization scope"); await client.query("COMMIT"); } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); await pool.end(); }'
 
           pnpm --filter @layo/server authorization:restore --actor-user-id ci-operator --scope "$scope" --input "$first_export" --confirm-absent-scope-restore
           pnpm --filter @layo/server authorization:export --scope "$scope" --output "$restored_export"
