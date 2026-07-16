@@ -1351,10 +1351,7 @@ function validateTeamAccessTokenName(value: unknown): string {
   }
   if (
     Buffer.byteLength(name, "utf8") > 512
-    || Array.from(name).some((character) => {
-      const codePoint = character.codePointAt(0)!;
-      return codePoint <= 31 || codePoint === 127;
-    })
+    || /[\p{Cc}\p{Cf}]/u.test(name)
   ) {
     throw managementError(
       "team authorization token name must be an audit-safe label of at most 512 bytes",
@@ -2341,7 +2338,7 @@ function parseTeamMemberTokenCredential(input: unknown): TeamMemberTokenCredenti
   }
   return {
     id: candidate.id.trim(),
-    name: candidate.name.trim(),
+    name: validateTeamAccessTokenName(candidate.name),
     token,
     tokenHash,
     ...(tokenHashes?.length ? { tokenHashes } : {}),
