@@ -8,6 +8,7 @@ const AUTHORIZATION_STATE_SCHEMA_VERSION = 1;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
 const MAX_SERIALIZED_STATE_BYTES = 1_048_576;
 const MAX_SCOPE_BYTES = 512;
+const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 const EMPTY_SERIALIZED_STATE = "{\"version\":2,\"members\":[]}";
 const MIGRATION_URLS = [
   new URL("../migrations/0001-team-authorization-state.sql", import.meta.url),
@@ -81,6 +82,16 @@ export interface TeamAuthorizationStateStore {
     scope: string,
     options: { afterId: string; limit: number }
   ): Promise<TeamAuthorizationAuditEvent[]>;
+  listUnarchivedAuditEvents?(
+    scope: string,
+    options: { limit: number }
+  ): Promise<TeamAuthorizationAuditEvent[]>;
+  markAuditEventsArchived?(scope: string, eventIds: string[]): Promise<void>;
+  listArchivedAuditRetentionCandidates?(
+    scope: string,
+    options: { archivedBefore: string; keepNewest: number; limit: number }
+  ): Promise<string[]>;
+  deleteArchivedAuditEvents?(scope: string, eventIds: string[]): Promise<number>;
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -162,10 +173,44 @@ function validateFingerprint(fingerprint: string): string {
 }
 
 function validateGeneration(generation: unknown): string {
-  if (typeof generation !== "string" || !/^(0|[1-9][0-9]*)$/.test(generation)) {
-    throw new Error("authorization generation must be an exact nonnegative decimal string");
+  if (
+    typeof generation !== "string"
+    || !/^(0|[1-9][0-9]*)$/.test(generation)
+    || BigInt(generation) > POSTGRES_BIGINT_MAX
+  ) {
+    throw new Error(
+      "authorization generation must be an exact PostgreSQL bigint decimal string"
+    );
   }
   return generation;
+}
+
+function validatePositiveAuditIds(eventIds: string[]): string[] {
+  if (eventIds.length < 1 || eventIds.length > 500) {
+    throw new Error("authorization audit event id batch must contain between 1 and 500 ids");
+  }
+  const normalized = eventIds.map((id) => {
+    const value = validateGeneration(id);
+    if (value === "0") {
+      throw new Error("authorization audit event id must be positive");
+    }
+    return value;
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("authorization audit event ids must be unique");
+  }
+  return normalized;
+}
+
+function validateIsoTimestamp(value: string, field: string): string {
+  if (
+    !value
+    || !Number.isFinite(Date.parse(value))
+    || new Date(value).toISOString() !== value
+  ) {
+    throw new Error(`authorization audit ${field} must be an ISO timestamp`);
+  }
+  return value;
 }
 
 function validateAuditText(
@@ -878,6 +923,186 @@ export async function createPostgresTeamAuthorizationStateStore(
         [scope, afterId, options.limit]
       );
       return result.rows.map(auditEventFromRow);
+    },
+
+    async listUnarchivedAuditEvents(
+      scopeInput: string,
+      options: { limit: number }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const result = await pool.query<AuthorizationAuditRow>(
+        `SELECT
+           id::text AS id,
+           scope,
+           generation::text AS generation,
+           action,
+           actor_user_id,
+           subject_token_id,
+           subject_token_name,
+           source,
+           request_id,
+           metadata,
+           created_at,
+           archived_at
+         FROM layo_authorization_audit_events
+         WHERE scope = $1
+           AND archived_at IS NULL
+         ORDER BY id ASC
+         LIMIT $2`,
+        [scope, options.limit]
+      );
+      return result.rows.map(auditEventFromRow);
+    },
+
+    async markAuditEventsArchived(scopeInput: string, eventIdsInput: string[]) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const eventIds = validatePositiveAuditIds(eventIdsInput);
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        const selected = await client.query<{ id: string }>(
+          `SELECT id::text AS id
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND id = ANY($2::bigint[])
+           FOR UPDATE`,
+          [scope, eventIds]
+        );
+        const selectedIds = new Set(selected.rows.map((row) => row.id));
+        if (
+          selectedIds.size !== eventIds.length
+          || eventIds.some((id) => !selectedIds.has(id))
+        ) {
+          throw new Error("authorization audit archive ids do not match one scope");
+        }
+        await client.query(
+          `UPDATE layo_authorization_audit_events
+           SET archived_at = COALESCE(archived_at, clock_timestamp())
+           WHERE scope = $1
+             AND id = ANY($2::bigint[])`,
+          [scope, eventIds]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
+      }
+    },
+
+    async listArchivedAuditRetentionCandidates(
+      scopeInput: string,
+      options: { archivedBefore: string; keepNewest: number; limit: number }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const archivedBefore = validateIsoTimestamp(
+        options.archivedBefore,
+        "archivedBefore"
+      );
+      if (!Number.isSafeInteger(options.keepNewest) || options.keepNewest < 0) {
+        throw new Error("authorization audit keepNewest must be a nonnegative integer");
+      }
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const result = await pool.query<{ id: string }>(
+        `SELECT event.id::text AS id
+         FROM layo_authorization_audit_events AS event
+         WHERE event.scope = $1
+           AND event.archived_at IS NOT NULL
+           AND event.archived_at < $2::timestamptz
+           AND event.id NOT IN (
+             SELECT retained.id
+             FROM layo_authorization_audit_events AS retained
+             WHERE retained.scope = $1
+               AND retained.archived_at IS NOT NULL
+             ORDER BY retained.id DESC
+             LIMIT $3
+           )
+         ORDER BY event.id ASC
+         LIMIT $4`,
+        [scope, archivedBefore, options.keepNewest, options.limit]
+      );
+      return result.rows.map((row) => {
+        const id = validateGeneration(row.id);
+        if (id === "0") {
+          throw new Error("authorization audit retention id must be positive");
+        }
+        return id;
+      });
+    },
+
+    async deleteArchivedAuditEvents(scopeInput: string, eventIdsInput: string[]) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const eventIds = validatePositiveAuditIds(eventIdsInput);
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        const selected = await client.query<{ id: string }>(
+          `SELECT id::text AS id
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND archived_at IS NOT NULL
+             AND id = ANY($2::bigint[])
+           FOR UPDATE`,
+          [scope, eventIds]
+        );
+        const selectedIds = new Set(selected.rows.map((row) => row.id));
+        if (
+          selectedIds.size !== eventIds.length
+          || eventIds.some((id) => !selectedIds.has(id))
+        ) {
+          throw new Error(
+            "authorization audit retention ids must all be archived in one scope"
+          );
+        }
+        const deleted = await client.query<{ id: string }>(
+          `DELETE FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND archived_at IS NOT NULL
+             AND id = ANY($2::bigint[])
+           RETURNING id::text AS id`,
+          [scope, eventIds]
+        );
+        if (deleted.rowCount !== eventIds.length) {
+          throw new Error("authorization audit retention delete count changed");
+        }
+        await client.query("COMMIT");
+        return deleted.rowCount;
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
+      }
     },
 
     async mutate<T>(scopeInput: string, expectedFingerprintInput: string, operation: (
