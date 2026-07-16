@@ -34,4 +34,4 @@ Layo remains local-first. Static Vercel hosting exposes only the web shell and a
 - Storage Restore Drill: `29468592239`.
 - Storage Backup Retention: `29468592273`.
 
-The exact final one-head Full Verification and review/merge evidence remain in the active plan until PR #312 is ready.
+Exact implementation head `8fcf77eb391f8249ab8d4efbc3a4bd65bed944a0` passed Full Verification `29471094368`, Authorization Backup `29471094371`, Authorization Audit Archive `29471094405`, Storage Restore `29471094381`, and Storage Backup Retention `29471094391`. Independent exact-head re-review was clean. PR #312 merge and post-merge cleanup remain recorded in the active plan.
