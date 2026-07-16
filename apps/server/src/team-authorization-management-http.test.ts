@@ -63,7 +63,7 @@ describe("team access token HTTP administration", () => {
         error: "team authorization token name is required"
       });
 
-      for (const name of ["x".repeat(513), "line\\nbreak"]) {
+      for (const name of ["x".repeat(513), "line\nbreak"]) {
         const unsafeName = await server.inject({
           method: "POST",
           url: "/account/tokens",
