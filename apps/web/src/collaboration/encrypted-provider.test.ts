@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createCollaborativeDesignDocument,
+  decryptYjsUpdate,
   createSharedKeyEncryptionConfig,
   deriveSharedKey,
   encryptYjsUpdate,
@@ -164,6 +165,86 @@ describe("encrypted collaboration provider", () => {
     provider.destroy();
   });
 
+  test("serializes overlapping encrypted messages in websocket delivery order", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const firstRemote = new Y.Doc();
+    firstRemote.getMap("design").set("documentJson", { name: "First" });
+    const firstUpdate = Y.encodeStateAsUpdate(firstRemote);
+    const secondRemote = new Y.Doc();
+    Y.applyUpdate(secondRemote, firstUpdate);
+    secondRemote.getMap("design").set("documentJson", { name: "Second" });
+    const secondUpdate = Y.encodeStateAsUpdate(secondRemote);
+    let releaseFirst!: () => void;
+    const pendingFirst = new Promise<Uint8Array>((resolve) => {
+      releaseFirst = () => resolve(firstUpdate);
+    });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>()
+      .mockImplementationOnce(async () => pendingFirst)
+      .mockImplementationOnce(async () => secondUpdate);
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    const firstDelivery = socket.emitMessage(frame);
+    const secondDelivery = socket.emitMessage(frame);
+    await waitFor(() => decryptUpdate.mock.calls.length === 1);
+    releaseFirst();
+    await Promise.all([firstDelivery, secondDelivery]);
+
+    expect(decryptUpdate).toHaveBeenCalledTimes(2);
+    expect(getDocumentName(ydoc)).toBe("Second");
+    provider.destroy();
+  });
+
+  test("continues the inbound queue after one encrypted message fails", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const remote = new Y.Doc();
+    remote.getMap("design").set("documentJson", { name: "Recovered" });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>()
+      .mockRejectedValueOnce(new Error("invalid encrypted frame"))
+      .mockResolvedValueOnce(Y.encodeStateAsUpdate(remote));
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const statuses: string[] = [];
+    provider.onStatus((status) => statuses.push(status));
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    await Promise.all([socket.emitMessage(frame), socket.emitMessage(frame)]);
+
+    expect(statuses).toContain("error");
+    expect(decryptUpdate).toHaveBeenCalledTimes(2);
+    expect(getDocumentName(ydoc)).toBe("Recovered");
+    provider.destroy();
+  });
+
+  test("does not apply or answer an encrypted message after destroy", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const remote = new Y.Doc();
+    remote.getMap("design").set("documentJson", { name: "Too Late" });
+    const update = Y.encodeStateAsUpdate(remote);
+    let releaseDecrypt!: () => void;
+    const pendingDecrypt = new Promise<Uint8Array>((resolve) => {
+      releaseDecrypt = () => resolve(update);
+    });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>(async () => pendingDecrypt);
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    const delivery = socket.emitMessage(frame);
+    await waitFor(() => decryptUpdate.mock.calls.length === 1);
+    const sentBeforeDestroy = socket.sent.length;
+    provider.destroy();
+    releaseDecrypt();
+    await delivery;
+
+    expect(getDocumentName(ydoc)).toBeUndefined();
+    expect(socket.sent).toHaveLength(sentBeforeDestroy);
+  });
+
   test("applies encrypted document snapshots over competing local seed documents", async () => {
     MockWebSocket.instances = [];
     const local = new Y.Doc();
@@ -231,6 +312,7 @@ function createTestProvider(input: {
   encryption?: SharedKeyEncryptionConfig;
   passphrase?: string;
   resetSockets?: boolean;
+  decryptUpdate?: typeof decryptYjsUpdate;
 }) {
   if (input.resetSockets ?? true) {
     MockWebSocket.instances = [];
@@ -258,7 +340,7 @@ function createTestProvider(input: {
     passphrase: input.passphrase ?? "shared-passphrase",
     encryption: input.encryption ?? testEncryptionConfig(),
     WebSocketCtor: MockWebSocket as unknown as typeof WebSocket
-  });
+  }, input.decryptUpdate ? { decryptUpdate: input.decryptUpdate } : {});
 }
 
 function setClientId(ydoc: Y.Doc, clientId: number) {
@@ -304,6 +386,15 @@ function testEncryptionConfig(): SharedKeyEncryptionConfig {
     salt: "fixed-test-salt",
     iterations: 1000
   });
+}
+
+async function placeholderEncryptedFrame(
+  config: SharedKeyEncryptionConfig
+): Promise<Uint8Array> {
+  const key = await deriveSharedKey("shared-passphrase", config);
+  return encodeEncryptedSyncFrame(
+    await encryptYjsUpdate(new Uint8Array([1]), key)
+  );
 }
 
 async function waitForSocket(index = 0): Promise<MockWebSocket> {
