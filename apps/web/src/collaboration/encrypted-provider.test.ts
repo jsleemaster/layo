@@ -1,6 +1,7 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createCollaborativeDesignDocument,
+  decryptYjsUpdate,
   createSharedKeyEncryptionConfig,
   deriveSharedKey,
   encryptYjsUpdate,
@@ -14,27 +15,30 @@ import {
   encodeEncryptedSyncQueryFrame
 } from "./encrypted-provider";
 
+type MockSocketEvent = Event | MessageEvent | CloseEvent;
+type MockSocketListener = (event: MockSocketEvent) => void | Promise<void>;
+
 class MockWebSocket {
   static readonly OPEN = 1;
   static instances: MockWebSocket[] = [];
 
-  readonly listeners = new Map<string, Set<(event: Event | MessageEvent | CloseEvent) => void>>();
+  readonly listeners = new Map<string, Set<MockSocketListener>>();
   readonly sent: Uint8Array[] = [];
   binaryType: BinaryType = "arraybuffer";
   readyState = MockWebSocket.OPEN;
 
   constructor(readonly url: string) {
     MockWebSocket.instances.push(this);
-    queueMicrotask(() => this.emit("open", new Event("open")));
+    queueMicrotask(() => void this.emit("open", new Event("open")));
   }
 
-  addEventListener(type: string, listener: (event: Event | MessageEvent | CloseEvent) => void) {
+  addEventListener(type: string, listener: MockSocketListener) {
     const listeners = this.listeners.get(type) ?? new Set();
     listeners.add(listener);
     this.listeners.set(type, listeners);
   }
 
-  removeEventListener(type: string, listener: (event: Event | MessageEvent | CloseEvent) => void) {
+  removeEventListener(type: string, listener: MockSocketListener) {
     this.listeners.get(type)?.delete(listener);
   }
 
@@ -44,16 +48,16 @@ class MockWebSocket {
 
   close() {
     this.readyState = 3;
-    this.emit("close", { type: "close" } as CloseEvent);
+    void this.emit("close", { type: "close" } as CloseEvent);
   }
 
-  emitMessage(data: Uint8Array) {
-    this.emit("message", new MessageEvent("message", { data }));
+  async emitMessage(data: Uint8Array): Promise<void> {
+    await this.emit("message", new MessageEvent("message", { data }));
   }
 
-  emit(type: string, event: Event | MessageEvent | CloseEvent) {
+  async emit(type: string, event: MockSocketEvent): Promise<void> {
     for (const listener of this.listeners.get(type) ?? []) {
-      listener(event);
+      await listener(event);
     }
   }
 }
@@ -161,6 +165,86 @@ describe("encrypted collaboration provider", () => {
     provider.destroy();
   });
 
+  test("serializes overlapping encrypted messages in websocket delivery order", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const firstRemote = new Y.Doc();
+    firstRemote.getMap("design").set("documentJson", { name: "First" });
+    const firstUpdate = Y.encodeStateAsUpdate(firstRemote);
+    const secondRemote = new Y.Doc();
+    Y.applyUpdate(secondRemote, firstUpdate);
+    secondRemote.getMap("design").set("documentJson", { name: "Second" });
+    const secondUpdate = Y.encodeStateAsUpdate(secondRemote);
+    let releaseFirst!: () => void;
+    const pendingFirst = new Promise<Uint8Array>((resolve) => {
+      releaseFirst = () => resolve(firstUpdate);
+    });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>()
+      .mockImplementationOnce(async () => pendingFirst)
+      .mockImplementationOnce(async () => secondUpdate);
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    const firstDelivery = socket.emitMessage(frame);
+    const secondDelivery = socket.emitMessage(frame);
+    await waitFor(() => decryptUpdate.mock.calls.length === 1);
+    releaseFirst();
+    await Promise.all([firstDelivery, secondDelivery]);
+
+    expect(decryptUpdate).toHaveBeenCalledTimes(2);
+    expect(getDocumentName(ydoc)).toBe("Second");
+    provider.destroy();
+  });
+
+  test("continues the inbound queue after one encrypted message fails", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const remote = new Y.Doc();
+    remote.getMap("design").set("documentJson", { name: "Recovered" });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>()
+      .mockRejectedValueOnce(new Error("invalid encrypted frame"))
+      .mockResolvedValueOnce(Y.encodeStateAsUpdate(remote));
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const statuses: string[] = [];
+    provider.onStatus((status) => statuses.push(status));
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    await Promise.all([socket.emitMessage(frame), socket.emitMessage(frame)]);
+
+    expect(statuses).toContain("error");
+    expect(decryptUpdate).toHaveBeenCalledTimes(2);
+    expect(getDocumentName(ydoc)).toBe("Recovered");
+    provider.destroy();
+  });
+
+  test("does not apply or answer an encrypted message after destroy", async () => {
+    const config = testEncryptionConfig();
+    const ydoc = new Y.Doc();
+    const remote = new Y.Doc();
+    remote.getMap("design").set("documentJson", { name: "Too Late" });
+    const update = Y.encodeStateAsUpdate(remote);
+    let releaseDecrypt!: () => void;
+    const pendingDecrypt = new Promise<Uint8Array>((resolve) => {
+      releaseDecrypt = () => resolve(update);
+    });
+    const decryptUpdate = vi.fn<typeof decryptYjsUpdate>(async () => pendingDecrypt);
+    const provider = createTestProvider({ ydoc, encryption: config, decryptUpdate });
+    const socket = await waitForSocket();
+    const frame = await placeholderEncryptedFrame(config);
+
+    const delivery = socket.emitMessage(frame);
+    await waitFor(() => decryptUpdate.mock.calls.length === 1);
+    const sentBeforeDestroy = socket.sent.length;
+    provider.destroy();
+    releaseDecrypt();
+    await delivery;
+
+    expect(getDocumentName(ydoc)).toBeUndefined();
+    expect(socket.sent).toHaveLength(sentBeforeDestroy);
+  });
+
   test("applies encrypted document snapshots over competing local seed documents", async () => {
     MockWebSocket.instances = [];
     const local = new Y.Doc();
@@ -228,6 +312,7 @@ function createTestProvider(input: {
   encryption?: SharedKeyEncryptionConfig;
   passphrase?: string;
   resetSockets?: boolean;
+  decryptUpdate?: typeof decryptYjsUpdate;
 }) {
   if (input.resetSockets ?? true) {
     MockWebSocket.instances = [];
@@ -255,7 +340,7 @@ function createTestProvider(input: {
     passphrase: input.passphrase ?? "shared-passphrase",
     encryption: input.encryption ?? testEncryptionConfig(),
     WebSocketCtor: MockWebSocket as unknown as typeof WebSocket
-  });
+  }, input.decryptUpdate ? { decryptUpdate: input.decryptUpdate } : {});
 }
 
 function setClientId(ydoc: Y.Doc, clientId: number) {
@@ -303,6 +388,15 @@ function testEncryptionConfig(): SharedKeyEncryptionConfig {
   });
 }
 
+async function placeholderEncryptedFrame(
+  config: SharedKeyEncryptionConfig
+): Promise<Uint8Array> {
+  const key = await deriveSharedKey("shared-passphrase", config);
+  return encodeEncryptedSyncFrame(
+    await encryptYjsUpdate(new Uint8Array([1]), key)
+  );
+}
+
 async function waitForSocket(index = 0): Promise<MockWebSocket> {
   await waitFor(() => MockWebSocket.instances.length > index);
   return MockWebSocket.instances[index];
@@ -321,17 +415,23 @@ async function forwardEncryptedFramesUntil(
 ): Promise<void> {
   let nextIndex = startIndex;
   let forwarded = 0;
-  await waitFor(() => {
+  const startedAt = Date.now();
+  while (!assertion()) {
     const nextFrames = source.sent.slice(nextIndex);
     nextIndex = source.sent.length;
     for (const frame of nextFrames) {
       if (frame[0] === 10) {
         forwarded += 1;
-        target.emitMessage(frame);
+        await target.emitMessage(frame);
       }
     }
-    return assertion();
-  }, 10_000, () => `sourceFrames=${source.sent.length}, targetFrames=${target.sent.length}, forwarded=${forwarded}`);
+    if (Date.now() - startedAt > 10_000) {
+      throw new Error(
+        `timed out waiting for condition (sourceFrames=${source.sent.length}, targetFrames=${target.sent.length}, forwarded=${forwarded})`
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 async function forwardEncryptedFramesBetweenUntil(
@@ -345,13 +445,14 @@ async function forwardEncryptedFramesBetweenUntil(
   let secondIndex = secondStartIndex;
   let firstForwarded = 0;
   let secondForwarded = 0;
-  await waitFor(() => {
+  const startedAt = Date.now();
+  while (!assertion()) {
     const nextFirstFrames = first.sent.slice(firstIndex);
     firstIndex = first.sent.length;
     for (const frame of nextFirstFrames) {
       if (frame[0] === 10) {
         firstForwarded += 1;
-        second.emitMessage(frame);
+        await second.emitMessage(frame);
       }
     }
 
@@ -360,14 +461,17 @@ async function forwardEncryptedFramesBetweenUntil(
     for (const frame of nextSecondFrames) {
       if (frame[0] === 10) {
         secondForwarded += 1;
-        first.emitMessage(frame);
+        await first.emitMessage(frame);
       }
     }
 
-    return assertion();
-  }, 10_000, () =>
-    `firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded}`
-  );
+    if (Date.now() - startedAt > 10_000) {
+      throw new Error(
+        `timed out waiting for condition (firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded})`
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 async function flushEncryptedRelay(first: MockWebSocket, second: MockWebSocket): Promise<void> {
@@ -376,7 +480,8 @@ async function flushEncryptedRelay(first: MockWebSocket, second: MockWebSocket):
   let idleTicks = 0;
   let firstForwarded = 0;
   let secondForwarded = 0;
-  await waitFor(() => {
+  const startedAt = Date.now();
+  while (idleTicks < 2) {
     let forwardedThisTick = 0;
 
     const nextFirstFrames = first.sent.slice(firstIndex);
@@ -385,7 +490,7 @@ async function flushEncryptedRelay(first: MockWebSocket, second: MockWebSocket):
       if (frame[0] === 10) {
         forwardedThisTick += 1;
         firstForwarded += 1;
-        second.emitMessage(frame);
+        await second.emitMessage(frame);
       }
     }
 
@@ -395,15 +500,18 @@ async function flushEncryptedRelay(first: MockWebSocket, second: MockWebSocket):
       if (frame[0] === 10) {
         forwardedThisTick += 1;
         secondForwarded += 1;
-        first.emitMessage(frame);
+        await first.emitMessage(frame);
       }
     }
 
     idleTicks = forwardedThisTick === 0 ? idleTicks + 1 : 0;
-    return idleTicks >= 2;
-  }, 10_000, () =>
-    `firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded}`
-  );
+    if (Date.now() - startedAt > 10_000) {
+      throw new Error(
+        `timed out flushing relay (firstFrames=${first.sent.length}, secondFrames=${second.sent.length}, firstForwarded=${firstForwarded}, secondForwarded=${secondForwarded})`
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 async function waitFor(assertion: () => boolean, timeoutMs = 10_000, describeTimeout?: () => string): Promise<void> {

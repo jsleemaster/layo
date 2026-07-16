@@ -45,8 +45,16 @@ interface EncryptedYjsSyncMessage {
   message: string;
 }
 
-export function createEncryptedProvider(input: EncryptedProviderInput): CollaborationProvider {
+interface EncryptedProviderDependencies {
+  decryptUpdate?: typeof decryptYjsUpdate;
+}
+
+export function createEncryptedProvider(
+  input: EncryptedProviderInput,
+  dependencies: EncryptedProviderDependencies = {}
+): CollaborationProvider {
   const statusListeners = new Set<(status: CollabConnectionStatus) => void>();
+  const decryptUpdate = dependencies.decryptUpdate ?? decryptYjsUpdate;
   const presenceListeners = new Set<() => void>();
   const awareness = new Awareness(input.ydoc);
   awareness.setLocalState(input.initialPresence);
@@ -56,6 +64,7 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
   let key: CryptoKey | null = null;
   let destroyed = false;
   let pendingFullStateSync = false;
+  let incomingMessageQueue = Promise.resolve();
 
   const emitStatus = (status: CollabConnectionStatus) => {
     for (const listener of statusListeners) {
@@ -68,6 +77,9 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
     }
   };
   const sendFrame = (frame: Uint8Array) => {
+    if (destroyed) {
+      return;
+    }
     if (socket?.readyState === WebSocketCtor.OPEN) {
       socket.send(frame);
       return;
@@ -82,7 +94,11 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
       pendingFullStateSync = true;
       return;
     }
-    sendFrame(encodeEncryptedSyncFrame(await encryptYjsUpdate(payload, key)));
+    const encrypted = await encryptYjsUpdate(payload, key);
+    if (destroyed) {
+      return;
+    }
+    sendFrame(encodeEncryptedSyncFrame(encrypted));
   };
   const sendEncryptedSyncMessage = async (message: Uint8Array) => {
     await sendEncryptedPayload(encodeYjsSyncMessage(message));
@@ -128,8 +144,19 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
       socket.send(outboundQueue.shift() as Uint8Array);
     }
   };
-  const onSocketMessage = (event: MessageEvent) => {
-    void handleIncomingMessage(toUint8Array(event.data)).catch(() => emitStatus("error"));
+  const onSocketMessage = (event: MessageEvent): Promise<void> => {
+    const bytes = toUint8Array(event.data);
+    incomingMessageQueue = incomingMessageQueue
+      .then(() => {
+        if (destroyed) {
+          return;
+        }
+        return handleIncomingMessage(bytes);
+      })
+      .catch(() => {
+        emitStatus("error");
+      });
+    return incomingMessageQueue;
   };
   const onSocketClose = () => emitStatus("offline");
   const onSocketError = () => emitStatus("error");
@@ -160,7 +187,10 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
         return;
       }
       const encrypted = JSON.parse(new TextDecoder().decode(frame.payload)) as EncryptedYjsUpdate;
-      const update = await decryptYjsUpdate(encrypted, key);
+      const update = await decryptUpdate(encrypted, key);
+      if (destroyed) {
+        return;
+      }
       if (applyDocumentSnapshot(input.ydoc, update)) {
         return;
       }
