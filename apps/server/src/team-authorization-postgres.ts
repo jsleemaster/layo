@@ -49,12 +49,20 @@ export interface TeamAuthorizationAuditEvent
   archivedAt?: string;
 }
 
+export const TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION = Object.freeze({
+  testOnlyUnaudited: true as const
+});
+
+export type TeamAuthorizationInitialization =
+  | TeamAuthorizationAuditEventInput
+  | typeof TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION;
+
 export interface TeamAuthorizationStateStore {
   read(scope: string): Promise<TeamAuthorizationStateSnapshot>;
   initializeAbsent(
     scope: string,
     snapshot: TeamAuthorizationStateSnapshot,
-    auditEvent?: TeamAuthorizationAuditEventInput
+    initialization: TeamAuthorizationInitialization
   ): Promise<{
     initialized: boolean;
     snapshot: TeamAuthorizationStateSnapshot;
@@ -754,14 +762,18 @@ export async function createPostgresTeamAuthorizationStateStore(
       const generation = validateGeneration(snapshotInput.generation);
       const baseFingerprint = validateFingerprint(snapshotInput.baseFingerprint);
       const state = parseSerializedState(snapshotInput.serializedState);
-      const auditEvent = auditEventInput
-        ? validateAuditEventInput(auditEventInput)
-        : undefined;
-      if (!auditEvent && process.env.NODE_ENV !== "test") {
+      if (!auditEventInput) {
+        throw new Error("authorization scope initialization audit event is required");
+      }
+      const testOnlyUnaudited = "testOnlyUnaudited" in auditEventInput;
+      if (testOnlyUnaudited && process.env.NODE_ENV !== "test") {
         throw new Error(
-          "authorization scope initialization audit event is required outside tests"
+          "test-only unaudited authorization initialization is unavailable"
         );
       }
+      const auditEvent = testOnlyUnaudited
+        ? undefined
+        : validateAuditEventInput(auditEventInput);
       if (auditEvent && generation === "0") {
         throw new Error(
           "audited authorization scope initialization requires a positive generation"
@@ -1294,7 +1306,7 @@ export async function createPostgresTeamAuthorizationStateStore(
       try {
         await client.query("BEGIN");
         await setLocalStatementTimeout(client, statementTimeoutMs);
-        await client.query(
+        const initialized = await client.query(
           `INSERT INTO layo_team_authorization_state
             (scope, generation, base_fingerprint, state, schema_version)
            VALUES ($1, 0, $2, $3::jsonb, $4)
@@ -1326,6 +1338,11 @@ export async function createPostgresTeamAuthorizationStateStore(
         const baseFingerprint = validateFingerprint(mutation.baseFingerprint);
         const state = parseSerializedState(mutation.serializedState);
         if (mutation.changed === false) {
+          if (initialized.rowCount === 1) {
+            throw new Error(
+              "unchanged authorization mutation cannot initialize an absent scope"
+            );
+          }
           if (
             baseFingerprint !== snapshot.baseFingerprint
             || state.serializedState !== snapshot.serializedState
