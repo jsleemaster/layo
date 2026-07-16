@@ -56,6 +56,7 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
   let key: CryptoKey | null = null;
   let destroyed = false;
   let pendingFullStateSync = false;
+  let incomingMessageQueue = Promise.resolve();
 
   const emitStatus = (status: CollabConnectionStatus) => {
     for (const listener of statusListeners) {
@@ -128,8 +129,14 @@ export function createEncryptedProvider(input: EncryptedProviderInput): Collabor
       socket.send(outboundQueue.shift() as Uint8Array);
     }
   };
-  const onSocketMessage = (event: MessageEvent) => {
-    void handleIncomingMessage(toUint8Array(event.data)).catch(() => emitStatus("error"));
+  const onSocketMessage = (event: MessageEvent): Promise<void> => {
+    const bytes = toUint8Array(event.data);
+    incomingMessageQueue = incomingMessageQueue
+      .then(() => handleIncomingMessage(bytes))
+      .catch(() => {
+        emitStatus("error");
+      });
+    return incomingMessageQueue;
   };
   const onSocketClose = () => emitStatus("offline");
   const onSocketError = () => emitStatus("error");
