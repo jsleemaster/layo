@@ -7,47 +7,7 @@
   "rewrites": [
     {
       "source": "/health",
-      "destination": "/api/bridge?__layo_path=/health"
-    },
-    {
-      "source": "/projects",
-      "destination": "/api/bridge?__layo_path=/projects"
-    },
-    {
-      "source": "/projects/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/projects/:__layo_splat*"
-    },
-    {
-      "source": "/files/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/files/:__layo_splat*"
-    },
-    {
-      "source": "/assets",
-      "destination": "/api/bridge?__layo_path=/assets"
-    },
-    {
-      "source": "/assets/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/assets/:__layo_splat*"
-    },
-    {
-      "source": "/migrations/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/migrations/:__layo_splat*"
-    },
-    {
-      "source": "/libraries",
-      "destination": "/api/bridge?__layo_path=/libraries"
-    },
-    {
-      "source": "/libraries/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/libraries/:__layo_splat*"
-    },
-    {
-      "source": "/comments/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/comments/:__layo_splat*"
-    },
-    {
-      "source": "/account/:__layo_splat*",
-      "destination": "/api/bridge?__layo_path=/account/:__layo_splat*"
+      "destination": "/api/health"
     }
   ]
 }
