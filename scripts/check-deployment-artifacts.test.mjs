@@ -162,13 +162,15 @@ test("vercel static deployment exposes health without shared ephemeral document 
 
   assert.equal(config.framework, "vite");
   assert.equal(config.outputDirectory, "apps/web/dist");
-  assert.match(config.buildCommand, /pnpm --filter @layo\\/web build/);
+  assert.equal(config.buildCommand.includes("pnpm --filter @layo/web build"), true);
   assert.deepEqual(config.rewrites, [
     { source: "/health", destination: "/api/health" }
   ]);
 
-  assert.match(healthFunction, /ok:\\s*true/);
-  assert.doesNotMatch(healthFunction, /FileStorage|createHttpServer|\\/tmp\\/layo/);
+  assert.equal(healthFunction.includes("ok: true"), true);
+  assert.equal(healthFunction.includes("FileStorage"), false);
+  assert.equal(healthFunction.includes("createHttpServer"), false);
+  assert.equal(healthFunction.includes("/tmp/layo"), false);
   await assert.rejects(stat("api/bridge.ts"), { code: "ENOENT" });
 });
 test("web shell includes a stable Layo deployment marker", async () => {
