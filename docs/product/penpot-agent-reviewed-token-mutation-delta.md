@@ -98,3 +98,18 @@ operations, and broader agent-reviewed administrative mutations remain open.
 Deployment remains deferred because required Vercel/GitHub Actions secrets are
 absent and the current Free-plan request limit must recover. This is not a gate
 for the local-first product slice; no production claim is made.
+
+## Final Evidence
+
+Feature head `5c785e0b606e1f31d3b0346e4f607e86de2c1db1` passed Full
+Verification `29481572997`, including Core and Playwright CLI e2e. Storage
+Restore `29481572958`, Storage Backup Retention `29481573088`, and
+Authorization Backup `29481573008` also passed. Independent exact-head
+re-review confirmed the duplicate-deployment and forged-receipt findings were
+resolved with no new P0-P2.
+
+PR #314 squash-merged as
+`a89a814438ed9429e877f3518e8aeb18c97f8cc5`, and its remote branch was
+deleted. Local status/current-branch/worktree commands still exit 134, so no
+local branch or worktree was deleted. Production remains deferred pending
+Vercel quota recovery and the four required GitHub Actions secrets.
