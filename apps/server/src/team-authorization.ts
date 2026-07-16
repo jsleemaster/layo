@@ -165,6 +165,23 @@ export type TeamAuthorizationManagementOperation =
   | { type: "list" }
   | (TeamAuthorizationMutationOperation & { reviewReceipt?: string });
 
+type TeamAuthorizationMutationPreview =
+  | {
+      type: "create";
+      changed: boolean;
+      summary: {
+        name: string;
+        expiresInDays: TeamAccessTokenExpiryDays;
+      };
+    }
+  | {
+      type: "revoke";
+      changed: boolean;
+      summary: {
+        metadata: TeamAccessTokenMetadata;
+      };
+    };
+
 export type TeamAuthorizationMutationReview =
   | {
       type: "create";
@@ -769,7 +786,7 @@ function authorizationMutationPreview(
   operation: TeamAuthorizationMutationOperation,
   mergedConfig: TeamAuthorizationConfig,
   operationNow: Date
-): Omit<TeamAuthorizationMutationReview, "expectedGeneration"> {
+): TeamAuthorizationMutationPreview {
   const authenticated = authenticateTeamMember(
     mergedConfig,
     principal.userId,
@@ -1513,11 +1530,20 @@ function createSharedTeamAuthorizationFileManager(
               }
               const changed = recovered || preview.changed;
               const expectedGeneration = locked.generation;
-              let result: TeamAuthorizationMutationReview = {
-                ...preview,
-                changed,
-                expectedGeneration
-              };
+              let result: TeamAuthorizationMutationReview =
+                preview.type === "create"
+                  ? {
+                      type: "create",
+                      changed,
+                      expectedGeneration,
+                      summary: preview.summary
+                    }
+                  : {
+                      type: "revoke",
+                      changed,
+                      expectedGeneration,
+                      summary: preview.summary
+                    };
               if (changed) {
                 const issuedAt = validManagementNow(operationNow);
                 const receiptExpiresAt = new Date(
