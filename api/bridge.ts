@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createHttpServer } from "../apps/server/src/http.js";
 import { FileStorage } from "../apps/server/src/storage.js";
+import { resolveVercelBridgeRequestUrl } from "../apps/server/src/vercel-bridge-url.js";
 
 type LayoServer = Awaited<ReturnType<typeof createHttpServer>>;
 
@@ -20,20 +21,8 @@ async function getServer(): Promise<LayoServer> {
   return serverPromise;
 }
 
-export function resolveRoutedRequestUrl(originalUrl: string | undefined) {
-  const parsed = new URL(originalUrl ?? "/api/bridge", "http://127.0.0.1");
-  const routedPath = parsed.searchParams.get("__layo_path");
-  if (!routedPath || !routedPath.startsWith("/") || routedPath.startsWith("//")) {
-    return null;
-  }
-
-  parsed.searchParams.delete("__layo_path");
-  const query = parsed.searchParams.toString();
-  return query ? `${routedPath}?${query}` : routedPath;
-}
-
 export default async function handler(request: IncomingMessage, response: ServerResponse) {
-  const routedPath = resolveRoutedRequestUrl(request.url);
+  const routedPath = resolveVercelBridgeRequestUrl(request.url);
   if (!routedPath) {
     response.statusCode = 404;
     response.end("Not found");
