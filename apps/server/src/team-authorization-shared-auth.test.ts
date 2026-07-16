@@ -271,7 +271,7 @@ describePostgres("shared request-time revocation", () => {
         generation: "0",
         baseFingerprint: canonicalTeamAuthorizationBaseFingerprint(base),
         serializedState: emptyState
-      });
+      }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
       let now = new Date("2026-07-15T15:05:00.000Z");
       const writer = createTeamAuthorizationFileManager(
         basePath,
