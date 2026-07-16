@@ -3,7 +3,8 @@ import { beforeAll, describe, expect, test } from "vitest";
 import { Pool } from "pg";
 import {
   createPostgresTeamAuthorizationStateStore,
-  migratePostgresTeamAuthorizationState
+  migratePostgresTeamAuthorizationState,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION
 } from "./team-authorization-postgres";
 
 const connectionString = process.env.LAYO_TEST_POSTGRES_URL;
@@ -28,7 +29,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     let firstMutationEntered!: () => void;
     const firstMutationStarted = new Promise<void>((resolve) => {
@@ -138,7 +139,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       await expect(store.transact!(
@@ -185,7 +186,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       await expect(store.transact!(
@@ -222,7 +223,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       await expect(store.transact!(
@@ -250,7 +251,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       await expect(store.transact!(
@@ -284,7 +285,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       await expect(store.listAuditEvents!(scope, {
@@ -346,7 +347,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
         generation: "0",
         baseFingerprint: "0".repeat(64),
         serializedState: '{"version":2,"members":[]}'
-      });
+      }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
       try {
         await expect(store.transact!(
           scope,
@@ -377,7 +378,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
     await database.query(
       `CREATE FUNCTION ${functionName}()
        RETURNS trigger
@@ -433,7 +434,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       generation: "9007199254740993",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
     await database.query(
       `SELECT setval(
         pg_get_serial_sequence('layo_authorization_audit_events', 'id'),
@@ -472,6 +473,46 @@ describePostgres("PostgreSQL authorization audit log", () => {
       ]);
     } finally {
       await Promise.all([store.close(), database.end()]);
+    }
+  });
+
+  test("rejects Unicode controls at the audit persistence boundary", async () => {
+    const scope = `audit-control-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: undefined,
+          auditEvent: {
+            action: "token_revoked",
+            actorUserId: "owner-user",
+            subjectTokenId: "legacy-token",
+            subjectTokenName: "legacy\u202e",
+            source: "http",
+            metadata: {}
+          }
+        })
+      )).rejects.toThrow(/subjectTokenName is invalid/i);
+      await expect(store.read(scope)).resolves.toMatchObject({ generation: "0" });
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "0",
+        limit: 10
+      })).resolves.toEqual([]);
+    } finally {
+      await store.close();
     }
   });
 
