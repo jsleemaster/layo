@@ -98,6 +98,7 @@ export interface TeamAuthorizationStateStore {
     options: { archivedBefore: string; keepNewest: number; limit: number }
   ): Promise<string[]>;
   deleteArchivedAuditEvents?(scope: string, eventIds: string[]): Promise<number>;
+  /** @deprecated Use transact with explicit audit attribution for product mutations. */
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -1346,6 +1347,28 @@ export async function createPostgresTeamAuthorizationStateStore(
           throw new Error(`authorization scope ${scope} was not updated`);
         }
         const committed = snapshotFromRow(updated.rows[0]!);
+        const compatibilityAudit = await client.query(
+          `INSERT INTO layo_authorization_audit_events
+            (
+              scope,
+              generation,
+              action,
+              actor_user_id,
+              source,
+              metadata
+            )
+           VALUES ($1, $2::bigint, 'base_reconciled', $3, 'operator', $4::jsonb)
+           RETURNING id`,
+          [
+            scope,
+            committed.generation,
+            "state-store-compatibility",
+            JSON.stringify({ reason: "operator_reconcile" })
+          ]
+        );
+        if (compatibilityAudit.rowCount !== 1) {
+          throw new Error("authorization compatibility audit event was not appended");
+        }
         await client.query("COMMIT");
         return { ...committed, result: mutation.result };
       } catch (error) {
