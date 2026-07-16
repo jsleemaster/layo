@@ -53,7 +53,7 @@ pnpm --filter @layo/server authorization:audit:export \
   --limit 500
 ```
 
-The command writes a mode `0600` temporary file, fsyncs it, atomically replaces the destination, fsyncs the parent directory, and only then marks the exact exported ids archived. If the process fails after file replacement and before the database commit, rerun the command. Events may be exported again; stable decimal event ids are the deduplication key. Concurrent exporters can duplicate delivery but cannot mark an unselected id or delete a row.
+The command writes and fsyncs a mode `0600` temporary file, hard-links it to a previously nonexistent destination, removes the temporary name, fsyncs the parent directory, and only then marks the exact exported ids archived. It refuses to overwrite an existing artifact. If the process fails after durable artifact creation and before the database commit, rerun with a new unique output path. Events may be exported again; stable decimal event ids are the deduplication key. Concurrent exporters can duplicate delivery but cannot replace an earlier batch, mark an unselected id, or delete a row.
 
 Store exported artifacts with the authorization database backup. Verify file ownership, private permissions, expected scope, first/last event ids, and absence of credential fields before transfer.
 
@@ -80,7 +80,7 @@ pnpm --filter @layo/server authorization:audit:retain \
   --apply
 ```
 
-Deletion locks and revalidates every selected id in one scope. Any unarchived, missing, duplicate, cross-scope, or changed candidate aborts the transaction. Retention never selects or deletes unarchived events.
+`--candidate-ids` must exactly match the reviewed dry-run list; if policy candidates drift, apply aborts before deletion. Deletion locks and revalidates every selected id in one scope. Any unarchived, missing, duplicate, cross-scope, or changed candidate aborts the transaction. Retention never selects or deletes unarchived events.
 
 ## Recovery Checks
 
