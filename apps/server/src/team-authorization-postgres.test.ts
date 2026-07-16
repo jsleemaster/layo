@@ -175,6 +175,28 @@ describePostgres("PostgreSQL team authorization state store", () => {
     }
   });
 
+  test("rejects an unchanged legacy mutation from initializing an absent scope", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const scope = `unchanged-absent-${randomUUID()}`;
+
+    try {
+      await expect(store.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: snapshot.baseFingerprint,
+        serializedState: snapshot.serializedState,
+        result: "unchanged",
+        changed: false
+      }))).rejects.toThrow(/cannot initialize an absent scope/i);
+      await expect(store.read(scope)).rejects.toThrow(
+        `authorization scope ${scope} does not exist`
+      );
+    } finally {
+      await store.close();
+    }
+  });
+
   test("rolls back a failed first mutation to an absent scope", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
