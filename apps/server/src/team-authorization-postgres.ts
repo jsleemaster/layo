@@ -80,7 +80,12 @@ export interface TeamAuthorizationStateStore {
   }>;
   listAuditEvents?(
     scope: string,
-    options: { afterId: string; limit: number }
+    options: {
+      afterId: string;
+      limit: number;
+      expectedGeneration?: string;
+      expectedBaseFingerprint?: string;
+    }
   ): Promise<TeamAuthorizationAuditEvent[]>;
   listUnarchivedAuditEvents?(
     scope: string,
@@ -930,7 +935,12 @@ export async function createPostgresTeamAuthorizationStateStore(
 
     async listAuditEvents(
       scopeInput: string,
-      options: { afterId: string; limit: number }
+      options: {
+        afterId: string;
+        limit: number;
+        expectedGeneration?: string;
+        expectedBaseFingerprint?: string;
+      }
     ) {
       assertOpen();
       const scope = validateScope(scopeInput);
@@ -942,28 +952,78 @@ export async function createPostgresTeamAuthorizationStateStore(
       ) {
         throw new Error("authorization audit limit must be between 1 and 500");
       }
-      const result = await pool.query<AuthorizationAuditRow>(
-        `SELECT
-           id::text AS id,
-           scope,
-           generation::text AS generation,
-           action,
-           actor_user_id,
-           subject_token_id,
-           subject_token_name,
-           source,
-           request_id,
-           metadata,
-           created_at,
-           archived_at
-         FROM layo_authorization_audit_events
-         WHERE scope = $1
-           AND id > $2::bigint
-         ORDER BY id ASC
-         LIMIT $3`,
-        [scope, afterId, options.limit]
-      );
-      return result.rows.map(auditEventFromRow);
+      const hasExpectedGeneration = options.expectedGeneration !== undefined;
+      const hasExpectedFingerprint = options.expectedBaseFingerprint !== undefined;
+      if (hasExpectedGeneration !== hasExpectedFingerprint) {
+        throw new Error(
+          "authorization audit snapshot requires generation and base fingerprint"
+        );
+      }
+      const expectedGeneration = hasExpectedGeneration
+        ? validateGeneration(options.expectedGeneration)
+        : undefined;
+      const expectedBaseFingerprint = hasExpectedFingerprint
+        ? validateFingerprint(options.expectedBaseFingerprint!)
+        : undefined;
+      const client = hasExpectedGeneration ? await pool.connect() : undefined;
+      let released = false;
+      try {
+        if (client) {
+          await client.query("BEGIN");
+          await setLocalStatementTimeout(client, statementTimeoutMs);
+          const locked = await client.query<AuthorizationStateRow>(
+            `SELECT generation::text AS generation, base_fingerprint, state
+             FROM layo_team_authorization_state
+             WHERE scope = $1
+             FOR SHARE`,
+            [scope]
+          );
+          if (
+            locked.rowCount !== 1
+            || locked.rows[0]!.generation !== expectedGeneration
+            || locked.rows[0]!.base_fingerprint !== expectedBaseFingerprint
+          ) {
+            throw new Error("authorization audit authorization snapshot changed");
+          }
+        }
+        const executor = client ?? pool;
+        const result = await executor.query<AuthorizationAuditRow>(
+          `SELECT
+             id::text AS id,
+             scope,
+             generation::text AS generation,
+             action,
+             actor_user_id,
+             subject_token_id,
+             subject_token_name,
+             source,
+             request_id,
+             metadata,
+             created_at,
+             archived_at
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND id > $2::bigint
+           ORDER BY id ASC
+           LIMIT $3`,
+          [scope, afterId, options.limit]
+        );
+        if (client) {
+          await client.query("COMMIT");
+        }
+        return result.rows.map(auditEventFromRow);
+      } catch (error) {
+        if (client) {
+          const releaseError = await rollbackTransaction(client);
+          client.release(releaseError);
+          released = true;
+        }
+        throw error;
+      } finally {
+        if (client && !released) {
+          client.release();
+        }
+      }
     },
 
     async listUnarchivedAuditEvents(
