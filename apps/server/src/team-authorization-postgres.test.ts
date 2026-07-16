@@ -438,6 +438,15 @@ describePostgres("PostgreSQL team authorization state store", () => {
         `GRANT SELECT, INSERT, UPDATE
            ON ${schemaSql}.layo_team_authorization_state TO ${roleSql}`
       );
+      await admin.query(
+        `GRANT SELECT, INSERT, UPDATE
+           ON ${schemaSql}.layo_authorization_audit_events TO ${roleSql}`
+      );
+      await admin.query(
+        `GRANT USAGE, SELECT
+           ON SEQUENCE ${schemaSql}.layo_authorization_audit_events_id_seq
+           TO ${roleSql}`
+      );
 
       runtimeStore = await createPostgresTeamAuthorizationStateStore({
         connectionString: runtimeConnection
