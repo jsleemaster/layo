@@ -159,6 +159,7 @@ test("deployment docs keep web hosting and relay hosting separate", async () => 
 test("vercel deployment routes same-origin API requests to the Layo server function", async () => {
   const config = JSON.parse(await readText("vercel.json"));
   const apiFunction = await readText("api/bridge.ts");
+  const bridgeResolver = await readText("apps/server/src/vercel-bridge-url.ts");
 
   assert.equal(config.framework, "vite");
   assert.equal(config.outputDirectory, "apps/web/dist");
@@ -180,7 +181,7 @@ test("vercel deployment routes same-origin API requests to the Layo server funct
   assert.match(apiFunction, /createHttpServer/);
   assert.match(apiFunction, /new FileStorage/);
   assert.match(apiFunction, /\/tmp\/layo/);
-  assert.equal(apiFunction.includes("__layo_path"), true);
+  assert.equal(bridgeResolver.includes("__layo_path"), true);
   assert.equal(apiFunction.includes("request.url = routedPath"), true);
 });
 
