@@ -212,4 +212,87 @@ describePostgres("PostgreSQL authorization audit log", () => {
     }
   });
 
+  test("rejects a changed transaction without an audit event", async () => {
+    const scope = `audit-required-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: "must-not-commit"
+        })
+      )).rejects.toThrow(/audit event is required/i);
+      await expect(store.read(scope)).resolves.toMatchObject({ generation: "0" });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("rejects non-allowlisted metadata even when its key avoids the credential denylist", async () => {
+    const scope = `audit-allowlist-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: "must-not-commit",
+          auditEvent: {
+            action: "token_created",
+            actorUserId: "owner-a",
+            source: "http",
+            metadata: { payload: "plaintext-secret" }
+          }
+        })
+      )).rejects.toThrow(/metadata field payload is not allowed/i);
+      await expect(store.read(scope)).resolves.toMatchObject({ generation: "0" });
+    } finally {
+      await store.close();
+    }
+  });
+
+  test("rejects cursors above PostgreSQL bigint before issuing an audit query", async () => {
+    const scope = `audit-cursor-${randomUUID()}`;
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+
+    try {
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "9223372036854775808",
+        limit: 10
+      })).rejects.toThrow(/PostgreSQL bigint/i);
+    } finally {
+      await store.close();
+    }
+  });
+
 });
