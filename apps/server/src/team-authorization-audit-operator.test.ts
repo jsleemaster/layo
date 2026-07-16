@@ -36,7 +36,8 @@ function fakeStore(overrides: Partial<AuthorizationAuditOperatorStore> = {}): Au
 describe("authorization audit operator export", () => {
   test("durably replaces a private versioned artifact before marking exact ids archived", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-audit-export-"));
-    const outputPath = path.join(root, "audit.json");
+    const outputPath = path.join(root, "audit-first.json");
+    const unusedRetryOutputPath = path.join(root, "audit-retry.json");
     const order: string[] = [];
     const store = fakeStore({
       markAuditEventsArchived: vi.fn(async (_scope, eventIds) => {
@@ -79,7 +80,7 @@ describe("authorization audit operator export", () => {
 
   test("re-exports stable ids after a crash window between durable replace and archive commit", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-audit-retry-"));
-    const outputPath = path.join(root, "audit.json");
+    const firstOutputPath = path.join(root, "audit.json");
     let archiveAttempts = 0;
     const store = fakeStore({
       markAuditEventsArchived: vi.fn(async () => {
@@ -93,25 +94,44 @@ describe("authorization audit operator export", () => {
     await expect(exportAuthorizationAuditEvents({
       store,
       scope: "team-a",
-      outputPath,
+      firstOutputPath,
       limit: 100,
       now: () => new Date("2026-07-16T01:00:00.000Z")
     })).rejects.toThrow("injected archive commit failure");
-    const first = await readFile(outputPath, "utf8");
+    const first = await readFile(firstOutputPath, "utf8");
 
     await expect(exportAuthorizationAuditEvents({
       store,
       scope: "team-a",
-      outputPath,
+      firstOutputPath,
       limit: 100,
       now: () => new Date("2026-07-16T01:01:00.000Z")
     })).resolves.toMatchObject({ exportedCount: 1 });
-    const second = JSON.parse(await readFile(outputPath, "utf8"));
+    const second = JSON.parse(await readFile(retryOutputPath, "utf8"));
 
     expect(JSON.parse(first).events[0].id).toBe("9007199254740993");
     expect(second.events[0].id).toBe("9007199254740993");
     expect(archiveAttempts).toBe(2);
   });
+});
+
+test("refuses to overwrite an existing audit artifact", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "layo-audit-existing-"));
+  const outputPath = path.join(root, "audit.json");
+  const store = fakeStore();
+
+  await exportAuthorizationAuditEvents({
+    store,
+    scope: "team-a",
+    outputPath,
+    limit: 100
+  });
+  await expect(exportAuthorizationAuditEvents({
+    store,
+    scope: "team-a",
+    outputPath,
+    limit: 100
+  })).rejects.toThrow(/already exists|immutable batch/i);
 });
 
 describe("authorization audit retention", () => {
@@ -149,7 +169,8 @@ describe("authorization audit retention", () => {
       archivedBefore: "2026-06-16T00:00:00.000Z",
       keepNewest: 10,
       limit: 100,
-      apply: true
+      apply: true,
+      reviewedCandidateIds: ["8", "9"]
     })).resolves.toEqual({ candidateIds: ["8", "9"], deletedCount: 2, applied: true });
   });
 });
