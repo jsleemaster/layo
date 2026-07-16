@@ -429,4 +429,4 @@ export function flattenRendererNodes(document: RendererDocument): RendererNode[]
   return nodes;
 }
 
-export * from "./boolean-path";
+export * from "./boolean-path.js";
