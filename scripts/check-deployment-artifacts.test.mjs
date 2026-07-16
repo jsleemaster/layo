@@ -55,6 +55,7 @@ test("renderer build emits a Node-loadable ESM entry for serverless functions", 
   const rendererEntry = await readText("packages/renderer/src/index.ts");
   const packageJson = JSON.parse(await readText("package.json"));
   const fullVerification = await readText(".github/workflows/full-verification.yml");
+  const productionWorkflow = await readText(".github/workflows/vercel-production.yml");
 
   assert.equal(rendererEntry.includes('export * from "./boolean-path.js";'), true);
   assert.equal(
@@ -62,6 +63,7 @@ test("renderer build emits a Node-loadable ESM entry for serverless functions", 
     'node -e \'import("./packages/renderer/dist/index.js").then((renderer) => { if (typeof renderer.evaluateBooleanPath !== "function") process.exit(1); })\''
   );
   assert.equal(fullVerification.includes("pnpm run check:serverless-runtime"), true);
+  assert.equal(productionWorkflow.includes("pnpm run check:serverless-runtime"), true);
 });
 
 test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
