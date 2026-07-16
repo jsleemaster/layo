@@ -21,7 +21,8 @@ const emptyState = "{\"version\":2,\"members\":[]}";
 interface InitializableStore extends TeamAuthorizationStateStore {
   initializeAbsent(
     scope: string,
-    snapshot: TeamAuthorizationStateSnapshot
+    snapshot: TeamAuthorizationStateSnapshot,
+    initialization: Parameters<TeamAuthorizationStateStore["initializeAbsent"]>[2]
   ): Promise<{ initialized: boolean; snapshot: TeamAuthorizationStateSnapshot }>;
 }
 
@@ -110,8 +111,8 @@ function barrierStoreFactory(expectedAbsentReaders: number) {
           throw error;
         }
       },
-      initializeAbsent: (scope, snapshot) =>
-        store.initializeAbsent(scope, snapshot),
+      initializeAbsent: (scope, snapshot, initialization) =>
+        store.initializeAbsent(scope, snapshot, initialization),
       mutate: (scope, fingerprint, operation) =>
         store.mutate(scope, fingerprint, operation),
       close: () => store.close()
