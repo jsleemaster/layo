@@ -262,6 +262,16 @@ function validateAuditEventInput(
   ) {
     throw new Error("authorization audit metadata must be an object");
   }
+  let metadata: string;
+  try {
+    metadata = JSON.stringify(input.metadata);
+  } catch {
+    throw new Error("authorization audit metadata must be serializable");
+  }
+  if (Buffer.byteLength(metadata, "utf8") > 16_384) {
+    throw new Error("authorization audit metadata is too large");
+  }
+
   const allowedMetadataFields: Record<
     TeamAuthorizationAuditAction,
     readonly string[]
@@ -315,10 +325,6 @@ function validateAuditEventInput(
     ) {
       throw new Error("authorization audit metadata reason is invalid");
     }
-  }
-  const metadata = JSON.stringify(input.metadata);
-  if (Buffer.byteLength(metadata, "utf8") > 16_384) {
-    throw new Error("authorization audit metadata is too large");
   }
   return {
     action: input.action,
