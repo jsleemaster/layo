@@ -210,10 +210,6 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
       const secondStore = await createPostgresTeamAuthorizationStateStore({
         connectionString: connectionString!
       });
-      await Promise.all([
-        migratePostgresTeamAuthorizationState(firstStore),
-        migratePostgresTeamAuthorizationState(secondStore)
-      ]);
       const base = await readFile(firstBasePath, "utf8");
       await initializeScope(firstStore, scope, base);
       let generatedIds = 0;
@@ -266,12 +262,10 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         ]);
 
         const fulfilled = outcomes.filter(
-          (outcome): outcome is PromiseFulfilledResult<unknown> =>
-            outcome.status === "fulfilled"
+          (outcome) => outcome.status === "fulfilled"
         );
         const rejected = outcomes.filter(
-          (outcome): outcome is PromiseRejectedResult =>
-            outcome.status === "rejected"
+          (outcome) => outcome.status === "rejected"
         );
         expect(fulfilled).toHaveLength(1);
         expect(rejected).toHaveLength(1);
