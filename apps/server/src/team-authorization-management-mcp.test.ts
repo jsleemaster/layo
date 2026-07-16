@@ -173,8 +173,10 @@ describe("team access token MCP administration", () => {
       changed: true,
       summary: {
         name: "Deploy automation",
-        expiresAt: "2026-08-15T01:00:00.000Z"
-      }
+        expiresInDays: 30
+      },
+      receipt: "opaque-reviewed-receipt",
+      receiptExpiresAt: "2026-07-16T01:05:00.000Z"
     }));
     const manageTokens = vi.fn(async () => ({
       type: "create" as const,
@@ -213,8 +215,10 @@ describe("team access token MCP administration", () => {
         changed: true,
         summary: {
           name: "Deploy automation",
-          expiresAt: "2026-08-15T01:00:00.000Z"
-        }
+          expiresInDays: 30
+        },
+        receipt: "opaque-reviewed-receipt",
+        receiptExpiresAt: "2026-07-16T01:05:00.000Z"
       }
     });
     expect(reviewTokenMutation).toHaveBeenCalledWith(
@@ -237,7 +241,7 @@ describe("team access token MCP administration", () => {
         name: "Deploy automation",
         expiresInDays: 30,
         dryRun: false,
-        expectedGeneration: "9007199254740993"
+        reviewReceipt: "opaque-reviewed-receipt"
       }
     }));
     expect(committed).toEqual({
@@ -258,7 +262,7 @@ describe("team access token MCP administration", () => {
       {
         type: "create",
         input: { name: "Deploy automation", expiresInDays: 30 },
-        expectedGeneration: "9007199254740993"
+        reviewReceipt: "opaque-reviewed-receipt"
       }
     );
   });
