@@ -28,9 +28,20 @@ export async function checkLiveDeployment({ url, fetcher = fetch } = {}) {
     throw new Error(`Expected ${healthUrl.href} to return { ok: true } or { status: "ok" }`);
   }
 
+  const projectsUrl = new URL("/projects", baseUrl);
+  const projectsResponse = await fetcher(projectsUrl.href);
+  if (!projectsResponse.ok) {
+    throw new Error(`Expected ${projectsUrl.href} to return 200, got ${projectsResponse.status}`);
+  }
+  const projects = await readJson(projectsResponse, projectsUrl.href, "project collection");
+  if (!Array.isArray(projects?.projects)) {
+    throw new Error(`Expected ${projectsUrl.href} to return { projects: [] }`);
+  }
+
   return {
     url: baseUrl.href,
     healthUrl: healthUrl.href,
+    projectsUrl: projectsUrl.href,
     marker: "vite-editor"
   };
 }
@@ -47,11 +58,15 @@ function normalizeDeploymentUrl(value) {
 }
 
 async function readHealthJson(response, url) {
+  return readJson(response, url, "health payload");
+}
+
+async function readJson(response, url, description) {
   try {
     return await response.json();
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Expected ${url} to return JSON health payload: ${detail}`);
+    throw new Error(`Expected ${url} to return JSON ${description}: ${detail}`);
   }
 }
 
