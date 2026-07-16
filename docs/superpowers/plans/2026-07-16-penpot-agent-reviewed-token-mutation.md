@@ -77,7 +77,7 @@ Run: `LAYO_TEST_POSTGRES_URL=postgres://... pnpm --filter @layo/server test -- t
 - [x] Obtain independent code review and resolve every actionable thread.
 - [x] Merge only after exact-head checks pass.
 - [x] Run post-merge cleanup checks and retain explicit exit-134 exceptions.
-- [x] Move the plan to Completed and merge the MD cleanup PR.
+- [x] Prepare the completed-plan payload in MD cleanup PR #315; GitHub merge state is authoritative for publication.
 
 ## Completion Evidence
 
