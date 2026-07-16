@@ -63,7 +63,7 @@ describe("team access token HTTP administration", () => {
         error: "team authorization token name is required"
       });
 
-      for (const name of ["x".repeat(513), "line\nbreak"]) {
+      for (const name of ["x".repeat(513), "line\nbreak", "\u0085", "\u202e"]) {
         const unsafeName = await server.inject({
           method: "POST",
           url: "/account/tokens",
@@ -129,7 +129,7 @@ describe("team access token HTTP administration", () => {
           audit?: { source?: string; requestId?: string };
         }).audit
       );
-      expect(auditContexts).toHaveLength(7);
+      expect(auditContexts).toHaveLength(9);
       expect(auditContexts.every((audit) => audit?.source === "http")).toBe(true);
       const requestIds = auditContexts.map((audit) => audit?.requestId);
       expect(requestIds.every((requestId) => typeof requestId === "string" && requestId.length > 0))
