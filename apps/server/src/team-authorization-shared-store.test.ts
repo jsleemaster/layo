@@ -323,6 +323,13 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
           statusCode: 403,
           message: "owner role is required to read authorization audit history"
         });
+        await expect(secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: "9223372036854775808", limit: 1 }
+        )).rejects.toMatchObject({
+          statusCode: 400,
+          message: "authorization audit afterId must be an exact decimal string"
+        });
         const secondPage = await secondManager.listAuditEvents?.(
           { userId: "owner-user", memberToken: "owner-base-secret" },
           { afterId: firstPage!.nextAfterId!, limit: 1 }
