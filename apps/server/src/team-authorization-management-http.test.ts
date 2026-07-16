@@ -216,6 +216,28 @@ describe("team access token HTTP administration", () => {
     }
   });
 
+  test.each(["legacy\u0085", "legacy\u202e"])(
+    "rejects an existing token label unsafe for audit before administration",
+    async (name) => {
+      const root = await mkdtemp(path.join(tmpdir(), "layo-token-http-unsafe-"));
+      roots.push(root);
+      const configPath = path.join(root, "members.json");
+      await writeFile(configPath, JSON.stringify([{
+        userId: "owner-user",
+        role: "owner",
+        teamIds: ["team-alpha"],
+        tokens: [{
+          id: "legacy-token",
+          name,
+          token: "legacy-secret"
+        }]
+      }]), "utf8");
+
+      await expect(watchTeamAuthorizationConfigFile(configPath))
+        .rejects.toThrow(/audit-safe label/i);
+    }
+  );
+
   test.each([
     {
       label: "list",
