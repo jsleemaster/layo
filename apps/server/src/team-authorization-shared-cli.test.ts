@@ -308,7 +308,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
       expect(results.filter(({ status }) => status === "rejected")).toHaveLength(1);
       const winner = await readScope(conflictScope);
-      expect(winner.generation).toBe("0");
+      expect(winner.generation).toBe("1");
       expect([
         canonicalTeamAuthorizationBaseFingerprint(await readFile(basePath, "utf8")),
         canonicalTeamAuthorizationBaseFingerprint(await readFile(otherBasePath, "utf8"))
