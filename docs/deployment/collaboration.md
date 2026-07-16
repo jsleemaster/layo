@@ -50,9 +50,24 @@ vercel build --yes
 vercel deploy --prebuilt --prod
 ```
 
+## Deployment request budget
+
+`vercel.json` sets `git.deploymentEnabled` to `false`. Vercel Git integration
+therefore does not deploy branch or `main` pushes. This deliberately removes
+per-commit previews and prevents a merge from producing both a Vercel Git
+deployment and a GitHub Actions deployment. Production has one owner: the
+workflow below.
+
+The incident `api-deployments-free-per-day` (more than 100 deployments) is a
+request quota failure, not an application build failure. Wait for the rolling
+limit to recover or change the Vercel plan; repeated retries only consume more
+requests. An ignored build step is not a mitigation because Vercel counts
+canceled deployments against deployment quotas. Related remote repository edits
+must be batched into one commit when possible.
+
 ## GitHub Actions production deployment
 
-Production Vercel deployment is owned by `.github/workflows/vercel-production.yml`.
+Production Vercel deployment is owned exclusively by `.github/workflows/vercel-production.yml`.
 The workflow runs on `main` pushes and manual dispatch, then:
 
 1. Fails before install if `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
@@ -60,7 +75,7 @@ The workflow runs on `main` pushes and manual dispatch, then:
    repository secrets.
 2. Installs dependencies with pinned pnpm.
 3. Runs deployment artifact, Penpot maturity, and design-rule gates.
-4. Installs pinned `vercel@50.9.6`.
+4. Installs pinned `vercel@56.2.1`.
 5. Runs `vercel pull --yes --environment=production`,
    `vercel build --prod`, and `vercel deploy --prebuilt --prod`.
 6. Captures the URL returned by `vercel deploy`.

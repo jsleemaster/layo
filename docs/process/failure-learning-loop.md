@@ -23,9 +23,12 @@ free to recur.
    especially missed empty, hover, focus, active, selected, disabled, drag, or
    browser-visible states.
 7. Update project docs or rules when the miss changes future agent workflow.
-8. Put the failure mode, regression test, live verification, and docs or memory
+8. When an external platform failure is caused by request count or duplicated
+   ownership, add a regression at the trigger boundary. Confirm from current
+   vendor documentation whether canceled or ignored work still consumes quota.
+9. Put the failure mode, regression test, live verification, and docs or memory
    update in the PR body.
-9. When external review is requested, re-fetch reviews and unresolved threads
+10. When external review is requested, re-fetch reviews and unresolved threads
    immediately before merge. Do not merge while the requested review is still
    pending; after a bounded wait, record why review was unavailable instead of
    assuming silence means approval.

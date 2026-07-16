@@ -63,6 +63,16 @@ Playwright 200/201 because the historical stdio e2e still expected direct
 filesystem MCP mutation. That exact case now verifies refusal, unchanged base
 bytes, and absent sidecar. Browser HTTP/UI mutation remains covered separately.
 
+Independent exact-head review found two additional misses. A forged receipt
+regression now rewrites the signed payload while reusing its original HMAC and
+proves rejection before state, audit, ID, or secret mutation. The supplied
+Vercel deployment failure was `api-deployments-free-per-day`: Vercel Git still
+owned automatic `main` deployment while GitHub Actions also deployed `main`.
+Full `29481371220` was the corrected RED for that duplicated ownership.
+`vercel.json` now disables all Git deployments; the tested production workflow
+is the sole deployment owner. This deliberately gives up per-commit Vercel
+previews to bound Free-plan request consumption.
+
 ## Security And Operations
 
 The signing key must contain at least 32 UTF-8 bytes and be identical across
@@ -86,4 +96,5 @@ This advances:
 General account recovery, hosted identity/SSO, multi-region database
 operations, and broader agent-reviewed administrative mutations remain open.
 Deployment remains deferred because required Vercel/GitHub Actions secrets are
-absent; it is not a gate for this local-first product slice.
+absent and the current Free-plan request limit must recover. This is not a gate
+for the local-first product slice; no production claim is made.

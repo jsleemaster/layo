@@ -65,6 +65,14 @@ The app supports these core workflows:
   `git branch --show-current`, `git worktree list`, and remote branch checks before
   reporting completion. Do not delete dirty worktrees or branches with unmerged
   or user-owned changes; report them as retained cleanup exceptions instead.
+- Treat `.github/workflows/vercel-production.yml` as the only automatic Vercel
+  deployment owner. `vercel.json` disables Vercel Git deployments so branch and
+  `main` pushes cannot duplicate Actions deployments or exhaust request quotas.
+  Do not use an ignored build step as a quota fix; canceled deployments still
+  count toward Vercel deployment limits.
+- When a broken local runtime requires remote GitHub API edits, batch related
+  files into one Git tree commit. Do not create one deployment-connected commit
+  per file; preserve reviewable history and bounded external operations.
 - Use `docs/product/penpot-maturity-benchmark.md` as the current product
   maturity target. Before major editor, collaboration, design-system,
   import/export, dev-handoff, plugin, or deployment work, compare against the
