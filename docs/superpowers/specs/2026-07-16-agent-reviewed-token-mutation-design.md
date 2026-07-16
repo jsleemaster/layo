@@ -12,65 +12,89 @@ Layo **adapts** Penpot's account-level access-token lifecycle at Penpot
 - https://github.com/penpot/penpot/commit/c50ec233aefed813497266f264f0ee4896387d9b
 
 Penpot exposes descriptive names, bounded expiry choices, one-time secret copy,
-metadata listing, and deletion. Penpot MCP can read and write the focused design
-context, but its documented account token flow is human-operated. Layo preserves
-that human workflow and adapts its deterministic agent-control advantage by
-requiring an explicit review boundary before MCP token mutations.
+metadata listing, and deletion. Its documented account token flow is
+human-operated. Layo preserves that workflow and adapts its deterministic agent
+control by requiring an authenticated review receipt before MCP token mutation.
 
 ## Decision
 
 The existing `create_account_token` and `revoke_account_token` MCP tools gain
-`dryRun`, defaulting to `true`. A preview:
+`dryRun`, defaulting to `true`. Shared authorization can issue reviewed
+mutations when the operator configures
+`LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY` with at least 32 UTF-8 bytes.
 
-- authenticates and authorizes the same principal as commit,
-- validates the exact mutation input,
-- returns no plaintext secret or hash,
-- returns the current exact PostgreSQL authorization `expectedGeneration`,
-- describes the projected create or revoke effect and whether it changes state,
-- performs no state write and appends no audit event.
+A preview:
 
-A commit requires `dryRun: false` and the preview's
-`expectedGeneration`. The shared PostgreSQL manager compares that generation
-inside the same locked transaction that re-authenticates and applies the
-mutation. A mismatch returns a conflict before random token material is
-generated or state is changed.
+- re-authenticates the principal against the locked shared snapshot,
+- validates the exact canonical mutation,
+- returns no plaintext token, token hash, or token identifier generated for a
+  future create,
+- describes the relative token lifetime instead of predicting a commit-time
+  absolute expiry,
+- returns the exact PostgreSQL authorization generation and a short-lived,
+  HMAC-SHA-256 authenticated receipt only when `changed: true`,
+- performs no authorization-state write and appends no audit event.
 
-The filesystem manager deliberately does not advertise reviewed mutation. It
-cannot prove a shared monotonic generation, so MCP preview/commit is unavailable
-until shared PostgreSQL authorization is configured. Existing HTTP and Korean
-human UI mutations remain direct and unchanged.
+The receipt binds version, shared scope, authenticated user id, canonical
+operation digest, generation, issued/expiry times, and a random nonce. The
+client treats it as opaque. Commit supplies the same mutation and receipt.
+Inside the PostgreSQL row-locked transaction Layo verifies signature, scope,
+principal, operation digest, expiry, and exact generation before invoking token
+ID or secret generators.
+
+Every receipted operation changes authorization state and therefore advances
+the generation. The first successful commit makes replay stale. A no-op revoke
+preview returns `changed: false` with no receipt, so it cannot be committed or
+produce duplicate audit history.
+
+Filesystem authorization deliberately does not advertise reviewed mutation. It
+has no shared monotonic generation. Existing HTTP and Korean human UI mutations
+remain direct and unchanged.
 
 ## Contract
 
-A review response is secret-free and includes:
+A review response includes:
 
 - `type`: `create` or `revoke`;
-- `expectedGeneration`: exact decimal string;
-- `changed`: whether committing the reviewed input would change state;
-- `summary`: stable mutation metadata suitable for agent review.
+- `expectedGeneration`: exact decimal PostgreSQL bigint string;
+- `changed`: whether the operation would change state;
+- `summary`: stable, secret-free mutation metadata;
+- `receipt` and `receiptExpiresAt` only when `changed: true`.
 
+Create summary contains the canonical name and `expiresInDays`, not an
+absolute token expiry. Revoke summary contains the current target metadata.
 The commit response remains the existing create/revoke result. Create returns a
-plaintext token once only after successful generation-checked commit. Revoke
-retains the existing self-revocation confirmation guard.
+plaintext token once only after a successful receipt-checked commit.
 
 ## Failure Handling
 
-- Missing `expectedGeneration` on commit: validation error.
-- Malformed or out-of-range generation: validation error.
-- Generation changed after preview: conflict with no write, no secret
-  generation, and no audit event.
-- Preview against filesystem authorization: unavailable.
-- Unauthorized principal: the same authentication/role error as direct
-  management, without revealing generation or target metadata.
-- Already revoked target: preview reports `changed: false`; commit remains
-  idempotent and does not append a duplicate audit event.
+- Missing receipt on commit: validation error.
+- Invalid signature, cross-principal use, input tampering, scope mismatch, or
+  expiry: validation or authorization error with no write.
+- Generation changed after preview or receipt replay: conflict before token
+  material generation.
+- Preview without shared PostgreSQL authorization and signing key: unavailable.
+- Unauthorized principal: existing authentication error without generation or
+  target disclosure.
+- Already revoked target: `changed: false`, no receipt, no commit, and no
+  duplicate audit event.
 
 ## Verification
 
-TDD evidence must cover preview no-write/no-secret behavior, stale-generation
-conflict, exact-generation commit, self-revocation confirmation, unavailable
-filesystem mode, MCP annotations and schemas, and preservation of HTTP/browser
-flows. Full verification and direct Playwright CLI account-token interaction are
+TDD evidence must include:
+
+- secret-free no-write/no-audit preview;
+- mutation-input tampering and cross-principal rejection;
+- advancing-clock create proof;
+- stale generation and replay rejection before token material generation;
+- already-revoked no-receipt behavior;
+- self-revocation confirmation in preview and commit;
+- two real PostgreSQL connections committing one receipt concurrently, with
+  exactly one winner, one generation increment, and one audit event;
+- MCP default dry-run, explicit commit, filesystem unavailability, and unchanged
+  HTTP/browser flows.
+
+Full verification and direct Playwright CLI account-token interaction are
 required before merge.
 
 ## Maturity Mapping
