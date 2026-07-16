@@ -682,6 +682,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             throw new Error("reviewReceipt must be omitted during dry-run review");
           }
           if (!manager.reviewTokenMutation) {
+            await manager.manageTokens(attributedPrincipal, { type: "list" });
             throw new Error(
               "reviewed account token mutation requires shared PostgreSQL authorization and LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY"
             );
@@ -760,6 +761,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             throw new Error("reviewReceipt must be omitted during dry-run review");
           }
           if (!manager.reviewTokenMutation) {
+            await manager.manageTokens(attributedPrincipal, { type: "list" });
             throw new Error(
               "reviewed account token mutation requires shared PostgreSQL authorization and LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY"
             );
