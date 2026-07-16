@@ -5,9 +5,49 @@
   "buildCommand": "pnpm --filter @layo/web build",
   "outputDirectory": "apps/web/dist",
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/projects/:path*", "destination": "/api/projects/:path*" },
-    { "source": "/files/:path*", "destination": "/api/files/:path*" },
-    { "source": "/assets/:path*", "destination": "/api/assets/:path*" }
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/projects",
+      "destination": "/api/projects"
+    },
+    {
+      "source": "/projects/:path*",
+      "destination": "/api/projects/:path*"
+    },
+    {
+      "source": "/files/:path*",
+      "destination": "/api/files/:path*"
+    },
+    {
+      "source": "/assets",
+      "destination": "/api/assets"
+    },
+    {
+      "source": "/assets/:path*",
+      "destination": "/api/assets/:path*"
+    },
+    {
+      "source": "/migrations/:path*",
+      "destination": "/api/migrations/:path*"
+    },
+    {
+      "source": "/libraries",
+      "destination": "/api/libraries"
+    },
+    {
+      "source": "/libraries/:path*",
+      "destination": "/api/libraries/:path*"
+    },
+    {
+      "source": "/comments/:path*",
+      "destination": "/api/comments/:path*"
+    },
+    {
+      "source": "/account/:path*",
+      "destination": "/api/account/:path*"
+    }
   ]
 }
