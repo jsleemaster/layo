@@ -2,59 +2,79 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add secret-free MCP token mutation previews and exact-generation commits so agents cannot silently mutate stale shared authorization state.
+**Goal:** Add authenticated MCP token mutation reviews and receipt-bound exact-generation commits.
 
-**Architecture:** Extend only the optional shared PostgreSQL authorization manager with a read-only review operation and exact-generation commit precondition. Keep HTTP/browser direct management compatible, and adapt the existing MCP create/revoke tools to default to dry-run review.
+**Architecture:** The shared PostgreSQL manager issues a short-lived HMAC receipt that binds principal, canonical operation, scope, and generation. Commit verifies it inside the locked state transaction before generating token material; changed commits advance generation so replay becomes stale. Filesystem MCP review remains unavailable and direct HTTP/browser management stays compatible.
 
-**Tech Stack:** TypeScript, Fastify/MCP SDK, Zod, PostgreSQL transactional state store, Vitest, Playwright CLI.
+**Tech Stack:** TypeScript, Node crypto, Fastify/MCP SDK, Zod, PostgreSQL transactional state store, Vitest, Playwright CLI.
 
 ---
 
-### Task 1: Establish the reviewed-mutation contract
+### Task 1: Define receipt-bound manager behavior
 
 **Files:**
 - Modify: `apps/server/src/team-authorization.ts`
-- Test: `apps/server/src/team-authorization-shared-store.test.ts`
+- Modify: `apps/server/src/team-authorization-runtime.ts`
+- Test: `apps/server/src/team-authorization-reviewed-mutation.test.ts`
+- Test: `apps/server/src/team-authorization-runtime.test.ts`
 
-- [ ] Write focused tests for secret-free no-write preview, exact generation, unauthorized access, stale conflict, and exact-generation commit.
-- [ ] Run the focused test and record the expected RED caused by the absent review contract.
-- [ ] Add review result types, optional manager method, and exact-generation validation.
-- [ ] Re-run the focused test to GREEN and commit.
+- [x] Write the initial manager RED.
+- [x] Run Full Verification `29478548306`; expect typecheck to fail only because `reviewTokenMutation` and `expectedGeneration` are absent.
+- [ ] Replace the bare-generation RED with receipt binding, tamper, cross-principal, advancing-clock, replay, no-op revoke, and self-revoke cases.
+- [ ] Re-run RED; expect the authenticated receipt contract to be absent.
+- [ ] Add `TeamAuthorizationMutationReview`, optional `reviewTokenMutation`, receipt-bearing mutation input, signing-key runtime wiring, canonical digest, and locked verification.
+- [ ] Run focused manager/runtime tests to GREEN.
 
-### Task 2: Adapt MCP create and revoke tools
+Run: `pnpm --filter @layo/server test -- team-authorization-reviewed-mutation.test.ts team-authorization-runtime.test.ts`
+
+### Task 2: Prove PostgreSQL atomicity
+
+**Files:**
+- Modify: `apps/server/src/team-authorization-shared-store.test.ts`
+
+- [ ] Add two-connection concurrent commit coverage for one receipt.
+- [ ] Verify RED catches missing locked receipt validation.
+- [ ] Verify GREEN yields one successful commit, one conflict before ID/secret generation, one generation increment, and exactly one audit event.
+- [ ] Add changed-false revoke proof with no receipt and no duplicate audit.
+
+Run: `LAYO_TEST_POSTGRES_URL=postgres://... pnpm --filter @layo/server test -- team-authorization-shared-store.test.ts`
+
+### Task 3: Adapt MCP create and revoke tools
 
 **Files:**
 - Modify: `apps/server/src/mcp.ts`
-- Test: `apps/server/src/team-authorization-management-mcp.test.ts`
+- Modify: `apps/server/src/team-authorization-management-mcp.test.ts`
+- Verify: `apps/server/src/team-authorization-management-http.test.ts`
 
-- [ ] Write focused MCP tests proving `dryRun` defaults to preview, commit requires an exact generation, stale conflicts surface, and secrets appear only after commit.
-- [ ] Run the focused test and record the expected RED.
-- [ ] Route preview through the shared review method and commit through generation-checked management.
-- [ ] Keep annotations conservative and make unavailable filesystem review explicit.
-- [ ] Re-run focused MCP and HTTP compatibility tests to GREEN and commit.
+- [x] Write the initial MCP default-review RED.
+- [ ] Update it for opaque receipt, explicit commit, tampering, missing receipt, filesystem unavailability, and secret-only-after-commit.
+- [ ] Route `dryRun: true` through review and `dryRun: false` through receipt-checked management.
+- [ ] Cover create and revoke, including self-revocation confirmation in both phases.
+- [ ] Run focused MCP and HTTP compatibility tests to GREEN.
 
-### Task 3: Verify product behavior
+### Task 4: Verify product behavior
 
 **Files:**
-- Test: `apps/web/e2e/account-token-administration.spec.ts`
+- Verify: `apps/web/e2e/account-token-administration.spec.ts`
 - Modify only if a regression is found.
 
-- [ ] Run server authorization tests, typecheck, and build.
-- [ ] Run the existing account-token Playwright CLI spec.
-- [ ] Start the live editor and directly create, list, and revoke a token through the Korean UI; record the visible result.
-- [ ] If any case fails, make that exact failure the next RED and repeat.
+- [ ] Run authorization tests, typecheck, build, and full Core tests.
+- [ ] Run the account-token Playwright CLI spec.
+- [ ] Start the live editor and directly create, list, and revoke a token through the Korean UI; record visible results.
+- [ ] Turn every verification failure into the next exact RED.
 
-### Task 4: Document and review
+### Task 5: Document, review, and merge
 
 **Files:**
 - Create: `docs/product/penpot-agent-reviewed-token-mutation-delta.md`
 - Modify: `docs/product/penpot-maturity-benchmark.md`
 - Modify: `docs/superpowers/PLAN_STATUS.md`
-- Modify: `docs/superpowers/plans/2026-07-16-penpot-agent-reviewed-token-mutation.md`
+- Modify: this plan
 
-- [ ] Record Penpot commit `c50ec233aefed813497266f264f0ee4896387d9b`, adapt decision, RED/GREEN evidence, and remaining gaps.
-- [ ] Run Full Verification plus applicable authorization backup/audit workflows on the exact head.
+- [ ] Record Penpot commit, adapt decision, RED/GREEN evidence, signing-key operation, and residual risks.
+- [ ] Update PR body with the exact gap, failure mode, regression coverage, live Playwright proof, deliberate divergence, memory-note decision, and remaining risks.
+- [ ] Run Full Verification and applicable authorization backup/audit workflows on the exact head.
 - [ ] Obtain independent code review and resolve every actionable thread.
-- [ ] Open and merge the PR only after exact-head checks pass.
-- [ ] Run the required post-merge cleanup checks; retain explicit exit-134 exceptions.
+- [ ] Merge only after exact-head checks pass.
+- [ ] Run post-merge cleanup checks and retain explicit exit-134 exceptions.
 - [ ] Move the plan to Completed and merge the MD cleanup PR.
