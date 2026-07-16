@@ -150,9 +150,16 @@ test("vercel deployment routes same-origin API requests to the Layo server funct
   assert.match(config.buildCommand, /pnpm --filter @layo\/web build/);
   assert.deepEqual(config.rewrites, [
     { source: "/health", destination: "/api/health" },
+    { source: "/projects", destination: "/api/projects" },
     { source: "/projects/:path*", destination: "/api/projects/:path*" },
     { source: "/files/:path*", destination: "/api/files/:path*" },
-    { source: "/assets/:path*", destination: "/api/assets/:path*" }
+    { source: "/assets", destination: "/api/assets" },
+    { source: "/assets/:path*", destination: "/api/assets/:path*" },
+    { source: "/migrations/:path*", destination: "/api/migrations/:path*" },
+    { source: "/libraries", destination: "/api/libraries" },
+    { source: "/libraries/:path*", destination: "/api/libraries/:path*" },
+    { source: "/comments/:path*", destination: "/api/comments/:path*" },
+    { source: "/account/:path*", destination: "/api/account/:path*" }
   ]);
 
   assert.match(apiFunction, /createHttpServer/);
