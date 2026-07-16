@@ -735,7 +735,10 @@ function applySharedManagementOperation(
     }
     if (
       Buffer.byteLength(name, "utf8") > 512
-      || /[\\u0000-\\u001f\\u007f]/.test(name)
+      || Array.from(name).some((character) => {
+        const codePoint = character.codePointAt(0)!;
+        return codePoint <= 31 || codePoint === 127;
+      })
     ) {
       throw managementError(
         "team authorization token name must be an audit-safe label of at most 512 bytes",
