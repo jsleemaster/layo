@@ -15,6 +15,7 @@ import {
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION,
   type TeamAuthorizationStateSnapshot,
   type TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
