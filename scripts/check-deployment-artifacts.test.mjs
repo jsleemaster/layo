@@ -167,15 +167,15 @@ test("vercel deployment routes same-origin API requests to the Layo server funct
   assert.deepEqual(config.rewrites, [
     { source: "/health", destination: "/api/bridge?__layo_path=/health" },
     { source: "/projects", destination: "/api/bridge?__layo_path=/projects" },
-    { source: "/projects/:path*", destination: "/api/bridge?__layo_path=/projects/:path*" },
-    { source: "/files/:path*", destination: "/api/bridge?__layo_path=/files/:path*" },
+    { source: "/projects/:__layo_splat*", destination: "/api/bridge?__layo_path=/projects/:__layo_splat*" },
+    { source: "/files/:__layo_splat*", destination: "/api/bridge?__layo_path=/files/:__layo_splat*" },
     { source: "/assets", destination: "/api/bridge?__layo_path=/assets" },
-    { source: "/assets/:path*", destination: "/api/bridge?__layo_path=/assets/:path*" },
-    { source: "/migrations/:path*", destination: "/api/bridge?__layo_path=/migrations/:path*" },
+    { source: "/assets/:__layo_splat*", destination: "/api/bridge?__layo_path=/assets/:__layo_splat*" },
+    { source: "/migrations/:__layo_splat*", destination: "/api/bridge?__layo_path=/migrations/:__layo_splat*" },
     { source: "/libraries", destination: "/api/bridge?__layo_path=/libraries" },
-    { source: "/libraries/:path*", destination: "/api/bridge?__layo_path=/libraries/:path*" },
-    { source: "/comments/:path*", destination: "/api/bridge?__layo_path=/comments/:path*" },
-    { source: "/account/:path*", destination: "/api/bridge?__layo_path=/account/:path*" }
+    { source: "/libraries/:__layo_splat*", destination: "/api/bridge?__layo_path=/libraries/:__layo_splat*" },
+    { source: "/comments/:__layo_splat*", destination: "/api/bridge?__layo_path=/comments/:__layo_splat*" },
+    { source: "/account/:__layo_splat*", destination: "/api/bridge?__layo_path=/account/:__layo_splat*" }
   ]);
 
   assert.match(apiFunction, /createHttpServer/);
