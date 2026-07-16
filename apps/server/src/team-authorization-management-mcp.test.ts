@@ -82,7 +82,14 @@ describe("team access token MCP administration", () => {
         })
       ]
     });
-    expect(manageTokens).not.toHaveBeenCalled();
+    expect(manageTokens).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      { type: "list" }
+    );
   });
 
   test("defaults account token mutations to review and requires its exact generation to commit", async () => {
@@ -314,37 +321,28 @@ describe("team access token MCP administration", () => {
     expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(JSON.parse(changed));
   });
 
-  test("requires explicit acknowledgement before revoking the active named principal token", async () => {
+  test("keeps active self-revocation unavailable on filesystem MCP without a review signer", async () => {
     const setup = await connectFileBackedMcp();
 
     const result = await setup.client.callTool({
       name: "revoke_account_token",
-      arguments: { tokenId: "principal-token" }
+      arguments: {
+        tokenId: "principal-token",
+        confirmSelfRevoke: true
+      }
     });
 
     expect(result).toMatchObject({
       isError: true,
-      content: [expect.objectContaining({ text: expect.stringMatching(/confirmSelfRevoke/) })]
+      content: [
+        expect.objectContaining({
+          text: expect.stringMatching(/shared PostgreSQL authorization.*REVIEW_SIGNING_KEY/)
+        })
+      ]
     });
     expect(JSON.parse(await readFile(setup.configPath, "utf8"))).toEqual(
       JSON.parse(membersFile())
     );
-  });
-
-  test("revokes the active named principal only with acknowledgement and returns no secret", async () => {
-    const setup = await connectFileBackedMcp();
-
-    const result = parseToolJson(await setup.client.callTool({
-      name: "revoke_account_token",
-      arguments: { tokenId: "principal-token", confirmSelfRevoke: true }
-    }));
-
-    expect(result.metadata).toMatchObject({
-      id: "principal-token",
-      revokedAt: "2026-07-14T12:00:00.000Z"
-    });
-    expect(JSON.stringify(result)).not.toContain("principal-secret");
-    expect(JSON.stringify(result)).not.toContain("tokenHash");
   });
 });
 
