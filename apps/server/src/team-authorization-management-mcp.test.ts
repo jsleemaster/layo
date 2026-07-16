@@ -166,6 +166,103 @@ describe("team access token MCP administration", () => {
     expect(other.tokens).toEqual([otherToken]);
   });
 
+  test("defaults account token mutations to review and requires its exact generation to commit", async () => {
+    const reviewTokenMutation = vi.fn(async () => ({
+      type: "create" as const,
+      expectedGeneration: "9007199254740993",
+      changed: true,
+      summary: {
+        name: "Deploy automation",
+        expiresAt: "2026-08-15T01:00:00.000Z"
+      }
+    }));
+    const manageTokens = vi.fn(async () => ({
+      type: "create" as const,
+      created: {
+        token: "layo_pat_committed_secret",
+        metadata: {
+          id: "committed-token",
+          name: "Deploy automation",
+          createdAt: "2026-07-16T01:00:00.000Z",
+          expiresAt: "2026-08-15T01:00:00.000Z"
+        }
+      }
+    }));
+    const manager = {
+      ...noOpManager(),
+      reviewTokenMutation,
+      manageTokens
+    } as unknown as TeamAuthorizationFileManager;
+    const client = await connect({
+      libraryRegistryAuth: authorization(),
+      libraryRegistryPrincipal: {
+        userId: "owner-user",
+        memberToken: "owner-member-token"
+      },
+      teamAuthorizationManager: manager
+    });
+
+    const reviewed = parseToolJson(await client.callTool({
+      name: "create_account_token",
+      arguments: { name: "Deploy automation", expiresInDays: 30 }
+    }));
+    expect(reviewed).toEqual({
+      review: {
+        type: "create",
+        expectedGeneration: "9007199254740993",
+        changed: true,
+        summary: {
+          name: "Deploy automation",
+          expiresAt: "2026-08-15T01:00:00.000Z"
+        }
+      }
+    });
+    expect(reviewTokenMutation).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      {
+        type: "create",
+        input: { name: "Deploy automation", expiresInDays: 30 }
+      }
+    );
+    expect(manageTokens).not.toHaveBeenCalled();
+    expect(JSON.stringify(reviewed)).not.toContain("layo_pat_");
+
+    const committed = parseToolJson(await client.callTool({
+      name: "create_account_token",
+      arguments: {
+        name: "Deploy automation",
+        expiresInDays: 30,
+        dryRun: false,
+        expectedGeneration: "9007199254740993"
+      }
+    }));
+    expect(committed).toEqual({
+      token: "layo_pat_committed_secret",
+      metadata: {
+        id: "committed-token",
+        name: "Deploy automation",
+        createdAt: "2026-07-16T01:00:00.000Z",
+        expiresAt: "2026-08-15T01:00:00.000Z"
+      }
+    });
+    expect(manageTokens).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      {
+        type: "create",
+        input: { name: "Deploy automation", expiresInDays: 30 },
+        expectedGeneration: "9007199254740993"
+      }
+    );
+  });
+
   test("passes an exact owner cursor and MCP attribution to audit history", async () => {
     const listAuditEvents = vi.fn(async () => ({
       events: [{
