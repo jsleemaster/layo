@@ -1254,7 +1254,12 @@ function createSharedTeamAuthorizationFileManager(
 
           const rows = await listAuditEvents(
             sharedScope,
-            { afterId, limit: limit + 1 }
+            {
+              afterId,
+              limit: limit + 1,
+              expectedGeneration: committed.generation,
+              expectedBaseFingerprint: committed.baseFingerprint
+            }
           );
           const events = rows.slice(0, limit);
           await publishCommittedSnapshot(baseSnapshot, committed);
