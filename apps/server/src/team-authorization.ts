@@ -443,13 +443,7 @@ export function createTeamAuthorizationFileManager(
       }
 
       if (operation.type === "create") {
-        const name =
-          typeof operation.input?.name === "string"
-            ? operation.input.name.trim()
-            : "";
-        if (!name) {
-          throw managementError("team authorization token name is required", 400);
-        }
+        const name = validateTeamAccessTokenName(operation.input?.name);
         const expiresInDays = operation.input?.expiresInDays;
         if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
           throw managementError("invalid team authorization token expiration", 400);
@@ -726,25 +720,7 @@ function applySharedManagementOperation(
   }
 
   if (operation.type === "create") {
-    const name =
-      typeof operation.input?.name === "string"
-        ? operation.input.name.trim()
-        : "";
-    if (!name) {
-      throw managementError("team authorization token name is required", 400);
-    }
-    if (
-      Buffer.byteLength(name, "utf8") > 512
-      || Array.from(name).some((character) => {
-        const codePoint = character.codePointAt(0)!;
-        return codePoint <= 31 || codePoint === 127;
-      })
-    ) {
-      throw managementError(
-        "team authorization token name must be an audit-safe label of at most 512 bytes",
-        400
-      );
-    }
+    const name = validateTeamAccessTokenName(operation.input?.name);
     const expiresInDays = operation.input?.expiresInDays;
     if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
       throw managementError("invalid team authorization token expiration", 400);
@@ -1366,6 +1342,26 @@ function toTeamAccessTokenMetadata(
     ...(credential.expiresAt ? { expiresAt: credential.expiresAt } : {}),
     ...(credential.revokedAt ? { revokedAt: credential.revokedAt } : {})
   };
+}
+
+function validateTeamAccessTokenName(value: unknown): string {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (!name) {
+    throw managementError("team authorization token name is required", 400);
+  }
+  if (
+    Buffer.byteLength(name, "utf8") > 512
+    || Array.from(name).some((character) => {
+      const codePoint = character.codePointAt(0)!;
+      return codePoint <= 31 || codePoint === 127;
+    })
+  ) {
+    throw managementError(
+      "team authorization token name must be an audit-safe label of at most 512 bytes",
+      400
+    );
+  }
+  return name;
 }
 
 function validManagementNow(value: Date): string {
