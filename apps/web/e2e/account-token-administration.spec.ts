@@ -238,6 +238,8 @@ test("shows owner authorization activity, paginates exact ids, and clears it for
   await page.getByRole("button", { name: "설정 가져오기" }).click();
 
   await expect(page.getByTestId("account-token-member")).toContainText("review-user");
+  await page.getByTestId("member-token").fill(ACTIVE_SECRET);
+  await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
   await expect(page.getByTestId("authorization-audit-status")).toContainText(
     "owner role is required"
   );
