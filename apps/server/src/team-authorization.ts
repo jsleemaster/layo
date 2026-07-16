@@ -584,7 +584,10 @@ function validateAuditListOptions(
   options: TeamAuthorizationAuditListOptions
 ): TeamAuthorizationAuditListOptions {
   const afterId = options.afterId.trim();
-  if (!/^(0|[1-9][0-9]*)$/.test(afterId)) {
+  if (
+    !/^(0|[1-9][0-9]*)$/.test(afterId)
+    || BigInt(afterId) > MAX_POSTGRES_BIGINT
+  ) {
     throw managementError(
       "authorization audit afterId must be an exact decimal string",
       400
@@ -729,6 +732,15 @@ function applySharedManagementOperation(
         : "";
     if (!name) {
       throw managementError("team authorization token name is required", 400);
+    }
+    if (
+      Buffer.byteLength(name, "utf8") > 512
+      || /[\\u0000-\\u001f\\u007f]/.test(name)
+    ) {
+      throw managementError(
+        "team authorization token name must be an audit-safe label of at most 512 bytes",
+        400
+      );
     }
     const expiresInDays = operation.input?.expiresInDays;
     if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
@@ -1261,6 +1273,12 @@ function createSharedTeamAuthorizationFileManager(
               expectedBaseFingerprint: committed.baseFingerprint
             }
           );
+          if (await readFile(filePath, "utf8") !== baseSnapshot) {
+            throw managementError(
+              "team authorization base changed during audit read",
+              409
+            );
+          }
           const events = rows.slice(0, limit);
           await publishCommittedSnapshot(baseSnapshot, committed);
           return {
