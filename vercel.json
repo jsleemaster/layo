@@ -7,47 +7,47 @@
   "rewrites": [
     {
       "source": "/health",
-      "destination": "/api/health"
+      "destination": "/api/bridge?__layo_path=/health"
     },
     {
       "source": "/projects",
-      "destination": "/api/projects"
+      "destination": "/api/bridge?__layo_path=/projects"
     },
     {
       "source": "/projects/:path*",
-      "destination": "/api/projects/:path*"
+      "destination": "/api/bridge?__layo_path=/projects/:path*"
     },
     {
       "source": "/files/:path*",
-      "destination": "/api/files/:path*"
+      "destination": "/api/bridge?__layo_path=/files/:path*"
     },
     {
       "source": "/assets",
-      "destination": "/api/assets"
+      "destination": "/api/bridge?__layo_path=/assets"
     },
     {
       "source": "/assets/:path*",
-      "destination": "/api/assets/:path*"
+      "destination": "/api/bridge?__layo_path=/assets/:path*"
     },
     {
       "source": "/migrations/:path*",
-      "destination": "/api/migrations/:path*"
+      "destination": "/api/bridge?__layo_path=/migrations/:path*"
     },
     {
       "source": "/libraries",
-      "destination": "/api/libraries"
+      "destination": "/api/bridge?__layo_path=/libraries"
     },
     {
       "source": "/libraries/:path*",
-      "destination": "/api/libraries/:path*"
+      "destination": "/api/bridge?__layo_path=/libraries/:path*"
     },
     {
       "source": "/comments/:path*",
-      "destination": "/api/comments/:path*"
+      "destination": "/api/bridge?__layo_path=/comments/:path*"
     },
     {
       "source": "/account/:path*",
-      "destination": "/api/account/:path*"
+      "destination": "/api/bridge?__layo_path=/account/:path*"
     }
   ]
 }
