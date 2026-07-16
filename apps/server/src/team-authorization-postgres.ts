@@ -757,6 +757,11 @@ export async function createPostgresTeamAuthorizationStateStore(
       const auditEvent = auditEventInput
         ? validateAuditEventInput(auditEventInput)
         : undefined;
+      if (!auditEvent && process.env.NODE_ENV !== "test") {
+        throw new Error(
+          "authorization scope initialization audit event is required outside tests"
+        );
+      }
       if (auditEvent && generation === "0") {
         throw new Error(
           "audited authorization scope initialization requires a positive generation"
