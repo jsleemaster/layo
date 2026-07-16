@@ -42,14 +42,8 @@ function memoryStore(initial: TeamAuthorizationStateSnapshot): {
 } {
   let snapshot = initial;
   const transactionOptions: Array<{ mutating: boolean }> = [];
-  const store: TeamAuthorizationStateStore = {
-    async read() {
-      return snapshot;
-    },
-    async initializeAbsent() {
-      return { initialized: false, snapshot };
-    },
-    async transact<T>(_scope, expectedBaseFingerprint, options, operation) {
+  const transact: NonNullable<TeamAuthorizationStateStore["transact"]> =
+    async (_scope, expectedBaseFingerprint, options, operation) => {
       transactionOptions.push(options);
       if (snapshot.baseFingerprint !== expectedBaseFingerprint) {
         throw new Error("authorization base fingerprint does not match shared state");
@@ -64,8 +58,9 @@ function memoryStore(initial: TeamAuthorizationStateSnapshot): {
         serializedState: result.serializedState
       };
       return { ...snapshot, result: result.result };
-    },
-    async mutate<T>(_scope, expectedBaseFingerprint, operation) {
+    };
+  const mutate: TeamAuthorizationStateStore["mutate"] =
+    async (_scope, expectedBaseFingerprint, operation) => {
       if (snapshot.baseFingerprint !== expectedBaseFingerprint) {
         throw new Error("authorization base fingerprint does not match shared state");
       }
@@ -78,7 +73,16 @@ function memoryStore(initial: TeamAuthorizationStateSnapshot): {
         };
       }
       return { ...snapshot, result: result.result };
+    };
+  const store: TeamAuthorizationStateStore = {
+    async read() {
+      return snapshot;
     },
+    async initializeAbsent() {
+      return { initialized: false, snapshot };
+    },
+    transact,
+    mutate,
     async close() {}
   };
   return {
