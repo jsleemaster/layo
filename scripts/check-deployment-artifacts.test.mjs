@@ -47,8 +47,8 @@ test("web deployment build keeps closed-path capability on the renderer public c
     return app.slice(blockStart, blockEnd + suffix.length);
   };
 
-  assert.match(importBlock("@layo/renderer"), /\\bpathHasOnlyClosedSubpaths\\b/);
-  assert.doesNotMatch(importBlock("./path-editor"), /\\bpathHasOnlyClosedSubpaths\\b/);
+  assert.equal(importBlock("@layo/renderer").includes("pathHasOnlyClosedSubpaths"), true);
+  assert.equal(importBlock("./path-editor").includes("pathHasOnlyClosedSubpaths"), false);
 });
 
 test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
