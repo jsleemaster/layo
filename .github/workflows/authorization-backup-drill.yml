@@ -73,14 +73,14 @@ jobs:
           printf '%s\n' '[{"userId":"ci-owner","role":"owner","teamIds":["ci-team"],"tokens":[{"id":"ci-root","name":"CI root","tokenHash":"0000000000000000000000000000000000000000000000000000000000000000"}]}]' > "$base_file"
 
           pnpm --filter @layo/server authorization:migrate
-          pnpm --filter @layo/server authorization:bootstrap --scope "$scope" --base "$base_file" --empty
+          pnpm --filter @layo/server authorization:bootstrap --actor-user-id ci-operator --scope "$scope" --base "$base_file" --empty
           pnpm --filter @layo/server authorization:export --scope "$scope" --output "$first_export"
 
           # Purpose: simulate loss of exactly one operator-selected authorization scope.
           SCOPE="$scope" pnpm --filter @layo/server exec node --input-type=module -e 'import pg from "pg"; const pool = new pg.Pool({ connectionString: process.env.LAYO_AUTHORIZATION_DATABASE_URL }); try { const result = await pool.query("DELETE FROM layo_team_authorization_state WHERE scope = $1", [process.env.SCOPE]); if (result.rowCount !== 1) throw new Error("expected exactly one deleted authorization scope"); } finally { await pool.end(); }'
 
-          pnpm --filter @layo/server authorization:restore --scope "$scope" --input "$first_export" --confirm-absent-scope-restore
+          pnpm --filter @layo/server authorization:restore --actor-user-id ci-operator --scope "$scope" --input "$first_export" --confirm-absent-scope-restore
           pnpm --filter @layo/server authorization:export --scope "$scope" --output "$restored_export"
-          cmp "$first_export" "$restored_export"
+          FIRST_EXPORT="$first_export" RESTORED_EXPORT="$restored_export" node --input-type=module -e 'import { readFile } from "node:fs/promises"; const before = JSON.parse(await readFile(process.env.FIRST_EXPORT, "utf8")); const after = JSON.parse(await readFile(process.env.RESTORED_EXPORT, "utf8")); if (before.scope !== after.scope || before.baseFingerprint !== after.baseFingerprint || JSON.stringify(before.state) !== JSON.stringify(after.state)) throw new Error("restored authorization state does not match backup"); if (BigInt(after.generation) !== BigInt(before.generation) + 1n) throw new Error("restore generation did not advance");'
 
           FIRST_EXPORT="$first_export" DATABASE_URL="$LAYO_AUTHORIZATION_DATABASE_URL" node --input-type=module -e 'import { readFile, stat } from "node:fs/promises"; const path = process.env.FIRST_EXPORT; const raw = await readFile(path, "utf8"); const artifact = JSON.parse(raw); if (raw.includes(process.env.DATABASE_URL)) throw new Error("database URL leaked into authorization export"); if (/"token"\s*:/.test(raw)) throw new Error("plaintext token field leaked into authorization export"); if (artifact.version !== 1 || artifact.scope !== "ci-authorization-backup-drill") throw new Error("unexpected authorization export identity"); if (((await stat(path)).mode & 0o077) !== 0) throw new Error("authorization export permissions are not private");'
