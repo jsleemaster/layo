@@ -38,6 +38,7 @@ interface ParsedArguments {
 export interface TeamAuthorizationBaseReconciliationOptions {
   stateStore: TeamAuthorizationStateStore;
   sharedScope: string;
+  actorUserId?: string;
   currentBaseFingerprint: string;
   expectedGeneration: string;
   candidateBasePath: string;
@@ -414,13 +415,24 @@ export async function runTeamAuthorizationBaseReconciliation(
             "authorization candidate base changed during reconciliation"
           );
         }
+        const changed =
+          candidateFingerprint !== locked.baseFingerprint
+          || serializedState !== locked.serializedState;
         return {
           baseFingerprint: candidateFingerprint,
           serializedState,
           result: undefined,
-          changed:
-            candidateFingerprint !== locked.baseFingerprint
-            || serializedState !== locked.serializedState
+          changed,
+          ...(changed
+            ? {
+                auditEvent: {
+                  action: "base_reconciled" as const,
+                  actorUserId: options.actorUserId?.trim() || "operator",
+                  source: "operator" as const,
+                  metadata: { reason: "operator_reconcile" }
+                }
+              }
+            : {})
         };
       }
     );
