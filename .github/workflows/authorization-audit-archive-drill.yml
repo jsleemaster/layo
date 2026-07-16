@@ -60,4 +60,4 @@ jobs:
       - name: Run PostgreSQL archive and retention drill
         env:
           NODE_OPTIONS: --conditions=development
-        run: pnpm --filter @layo/server test -- team-authorization-audit-operator-postgres.test.ts
+        run: pnpm --filter @layo/server exec vitest run src/team-authorization-audit-operator-postgres.test.ts
