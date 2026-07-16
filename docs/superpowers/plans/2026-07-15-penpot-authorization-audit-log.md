@@ -1,7 +1,7 @@
 # Penpot Authorization Audit Log Plan
 
 Date: 2026-07-15
-Status: ready for merge
+Status: completed
 Penpot reference: `develop` commit `167aa7410f95bce91b9a80059624a3e3d9307f1e`
 Prior merge: PR #310 / `9a710fc6bbd9b81d6ef68d8d5f4421aae28803a9`
 Cleanup record: PR #311 / `2f3b90a21db1ba8dfc62576d1d06493a6dd300be`
@@ -239,7 +239,7 @@ Evidence:
       cursor isolation, SQL injection, bigint overflow, exporter crash windows,
       concurrent exporters, retention safety, and shutdown.
 - [x] Convert every finding into a deterministic RED until review is clean.
-- [ ] Update PR body, squash merge exact reviewed head, and run post-merge
+- [x] Update PR body, squash merge exact reviewed head, and run post-merge
       cleanup without deleting dirty/user-owned worktrees.
 
 **Final implementation evidence (2026-07-16):**
@@ -259,3 +259,20 @@ Evidence:
 Deployment remains non-gating. The prior local git exit-134 cleanup exceptions
 remain explicit until local status/current-branch/worktree checks actually
 succeed.
+
+## Post-merge cleanup (2026-07-16)
+
+- PR #312 squash-merged exact docs head
+  `9e433418f771d479e997dd745bb68a466a5249e3` as
+  `4677d69055873710947f773d3f5bc881d676b4b0`.
+- Final docs-head Full Verification `29471561433`, Authorization Backup
+  `29471561417`, Authorization Audit Archive `29471561453`, Storage Restore
+  `29471561445`, and Storage Backup Retention `29471561527` passed.
+- `gh pr view` confirmed `MERGED`; the remote feature branch was deleted.
+- Local `git status --short --branch`, `git branch --show-current`, and
+  `git worktree list` still exit 134 in this runtime. No local branch or
+  worktree was deleted without dirty-state evidence.
+- Production run `29472042251` stopped at the secret preflight because
+  `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and
+  `LAYO_REPOSITORY_ADMIN_TOKEN` are absent. Deployment remains explicitly
+  deferred; live production still serves the older 500 `/health` behavior.
