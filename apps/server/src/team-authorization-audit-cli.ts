@@ -36,7 +36,8 @@ function parseArguments(argv: string[]): ParsedArguments {
     "--output",
     "--limit",
     "--archived-before",
-    "--keep-newest"
+    "--keep-newest",
+    "--candidate-ids"
   ]);
   const values = new Map<string, string>();
   const switches = new Set<string>();
@@ -126,6 +127,7 @@ export async function runAuthorizationAuditCli(
     ?? (async (connectionString: string) =>
       createPostgresTeamAuthorizationStateStore({ connectionString }));
   const store = await createStore(databaseUrl);
+  let commandError: unknown;
   try {
     const auditStore = operatorStore(store);
     const scope = requiredValue(arguments_, "--scope");
@@ -143,11 +145,34 @@ export async function runAuthorizationAuditCli(
           archivedBefore: requiredValue(arguments_, "--archived-before"),
           keepNewest: integerValue(arguments_, "--keep-newest", 1000, 0),
           limit,
-          apply: arguments_.switches.has("--apply")
+          apply: arguments_.switches.has("--apply"),
+          ...(arguments_.values.has("--candidate-ids")
+            ? {
+                reviewedCandidateIds: requiredValue(
+                  arguments_,
+                  "--candidate-ids"
+                ).split(",").map((id) => id.trim())
+              }
+            : {})
         });
     (options.stdout ?? process.stdout).write(`${JSON.stringify(result)}\n`);
+  } catch (error) {
+    commandError = error;
+    throw error;
   } finally {
-    await store.close();
+    try {
+      await store.close();
+    } catch (closeError) {
+      if (commandError === undefined) {
+        throw closeError;
+      }
+      if (commandError instanceof Error && commandError.cause === undefined) {
+        Object.defineProperty(commandError, "cause", {
+          configurable: true,
+          value: closeError
+        });
+      }
+    }
   }
 }
 
