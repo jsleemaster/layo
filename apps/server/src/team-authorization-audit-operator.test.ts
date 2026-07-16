@@ -53,7 +53,9 @@ describe("authorization audit operator export", () => {
       outputPath,
       limit: 100,
       now: () => new Date("2026-07-16T01:00:00.000Z"),
-      afterDurableReplace: () => order.push("replace")
+      afterDurableReplace: () => {
+        order.push("replace");
+      }
     });
 
     expect(order).toEqual(["replace", "archive"]);
