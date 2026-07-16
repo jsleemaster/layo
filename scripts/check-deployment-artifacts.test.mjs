@@ -18,7 +18,7 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.match(workflow, /VERCEL_TOKEN/);
   assert.match(workflow, /VERCEL_ORG_ID/);
   assert.match(workflow, /VERCEL_PROJECT_ID/);
-  assert.match(workflow, /vercel@50\.9\.6/);
+  assert.match(workflow, /vercel@56\.2\.1/);
   assert.match(workflow, /vercel pull --yes --environment=production/);
   assert.match(workflow, /vercel build --prod/);
   assert.match(workflow, /vercel deploy --prebuilt --prod/);
