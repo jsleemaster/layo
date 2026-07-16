@@ -6,6 +6,7 @@ export function resolveVercelBridgeRequestUrl(originalUrl: string | undefined) {
   }
 
   parsed.searchParams.delete("__layo_path");
+  parsed.searchParams.delete("__layo_splat");
   const query = parsed.searchParams.toString();
   return query ? `${routedPath}?${query}` : routedPath;
 }
