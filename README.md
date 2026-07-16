@@ -343,11 +343,11 @@ only an absent scope and requires both the same explicit `--scope` and
 `--confirm-absent-scope-restore`; it never overwrites live state. The scheduled
 `Authorization Backup Drill` proves migration, bootstrap, private versioned
 export, deletion, explicit restore, and byte-identical re-export against
-PostgreSQL 16. Audit events use `authorization:audit:export` for private atomic export and `authorization:audit:retain` for dry-run/apply retention. See `docs/deployment/authorization-audit.md` for roles, TLS, crash retry, deduplication, backup, and recovery. Downgrade is an operator-controlled export/stop/restore or
+PostgreSQL 16. Audit events use `authorization:audit:export` for private immutable-batch export and `authorization:audit:retain` for dry-run/apply retention. See `docs/deployment/authorization-audit.md` for roles, TLS, crash retry, deduplication, backup, and recovery. Downgrade is an operator-controlled export/stop/restore or
 reconfiguration procedure. Switching back to filesystem mode does not import or
 trust a stale `.tokens.json` sidecar automatically.
 
-Plaintext from token creation is one-time response state: it is absent from the
+Token names are audit-visible operator labels, are limited to 512 UTF-8 bytes without control characters, and must not contain secrets. Plaintext from token creation is one-time response state: it is absent from the
 sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. The browser clears it on dismissal, another create, identity change,
 leaving team settings, reload, and successful self-revocation; clipboard copy is
