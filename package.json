@@ -19,7 +19,8 @@
     "test:e2e": "node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts apps/web/e2e/multi-stroke.spec.ts apps/web/e2e/stroke-paints.spec.ts apps/web/e2e/fill-paints.spec.ts apps/web/e2e/path-stroke-alignment.spec.ts apps/web/e2e/mcp-stdio.spec.ts apps/web/e2e/external-migration-penpot.spec.ts apps/web/e2e/external-migration-penpot-assets.spec.ts apps/web/e2e/external-migration-penpot-svg-raw.spec.ts apps/web/e2e/external-migration-penpot-path.spec.ts apps/web/e2e/boolean-path.spec.ts apps/web/e2e/external-migration-penpot-masked-group.spec.ts apps/web/e2e/external-migration-penpot-stroke-gradient.spec.ts apps/web/e2e/external-migration-penpot-stroke-stack.spec.ts apps/web/e2e/external-migration-penpot-stroke-image.spec.ts apps/web/e2e/external-migration-penpot-frame-stroke-image.spec.ts apps/web/e2e/layout-item-z-index.spec.ts apps/web/e2e/flex-spacing-handles.spec.ts apps/web/e2e/absolute-layout-item.spec.ts apps/web/e2e/grid-absolute-layout-item.spec.ts apps/web/e2e/flex-fill-resize.spec.ts apps/web/e2e/flex-fill-height-resize.spec.ts apps/web/e2e/flex-fill-direct-parent-resize.spec.ts apps/web/e2e/flex-fill-direct-parent-height-resize.spec.ts apps/web/e2e/flex-fill-wrap-direct-parent-resize.spec.ts apps/web/e2e/account-token-administration.spec.ts --workers=1 --reporter=line",
     "test:e2e:collab": "playwright test apps/web/e2e/collaboration.spec.ts --reporter=line",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm run check:design-rules && pnpm -r lint"
+    "lint": "pnpm run check:design-rules && pnpm -r lint",
+    "check:serverless-runtime": "node -e 'import(\"./packages/renderer/dist/index.js\").then((renderer) => { if (typeof renderer.evaluateBooleanPath !== \"function\") process.exit(1); })'"
   },
   "packageManager": "pnpm@10.13.1",
   "devDependencies": {
