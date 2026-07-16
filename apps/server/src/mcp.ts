@@ -648,7 +648,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     server.registerTool(
       "create_account_token",
       {
-        description: "Create an account access token for the authenticated team member.",
+        description:
+          "Review an account access token creation by default, then commit with dryRun false and the returned receipt.",
         annotations: {
           readOnlyHint: false,
           destructiveHint: false,
@@ -659,14 +660,52 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           name: z.string().describe("Descriptive token name"),
           expiresInDays: z
             .union([z.literal(30), z.literal(60), z.literal(90), z.literal(180), z.null()])
-            .describe("Token lifetime in days, or null for no expiry")
+            .describe("Token lifetime in days, or null for no expiry"),
+          dryRun: z.boolean().default(true).describe("Review without writing when true"),
+          reviewReceipt: z
+            .string()
+            .optional()
+            .describe("Opaque receipt returned by the matching dry-run review")
         }
       },
-      async ({ name, expiresInDays }) => {
-        const result = await manager.manageTokens(
-          { ...principal, audit: { source: "mcp" } }, {
-          type: "create",
+      async ({ name, expiresInDays, dryRun, reviewReceipt }) => {
+        const operation = {
+          type: "create" as const,
           input: { name, expiresInDays }
+        };
+        const attributedPrincipal = {
+          ...principal,
+          audit: { source: "mcp" as const }
+        };
+        if (dryRun) {
+          if (reviewReceipt !== undefined) {
+            throw new Error("reviewReceipt must be omitted during dry-run review");
+          }
+          if (!manager.reviewTokenMutation) {
+            throw new Error(
+              "reviewed account token mutation requires shared PostgreSQL authorization and LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY"
+            );
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  review: await manager.reviewTokenMutation(
+                    attributedPrincipal,
+                    operation
+                  )
+                }, null, 2)
+              }
+            ]
+          };
+        }
+        if (!reviewReceipt) {
+          throw new Error("reviewReceipt is required when dryRun is false");
+        }
+        const result = await manager.manageTokens(attributedPrincipal, {
+          ...operation,
+          reviewReceipt
         });
         if (result.type !== "create") {
           throw new Error("unexpected team authorization create result");
@@ -685,11 +724,12 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     server.registerTool(
       "revoke_account_token",
       {
-        description: "Revoke one account access token for the authenticated team member.",
+        description:
+          "Review account token revocation by default, then commit with dryRun false and the returned receipt.",
         annotations: {
           readOnlyHint: false,
           destructiveHint: true,
-          idempotentHint: true,
+          idempotentHint: false,
           openWorldHint: false
         },
         inputSchema: {
@@ -697,15 +737,53 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           confirmSelfRevoke: z
             .boolean()
             .default(false)
-            .describe("Explicitly acknowledge revoking the active named MCP principal token")
+            .describe("Explicitly acknowledge revoking the active named MCP principal token"),
+          dryRun: z.boolean().default(true).describe("Review without writing when true"),
+          reviewReceipt: z
+            .string()
+            .optional()
+            .describe("Opaque receipt returned by the matching dry-run review")
         }
       },
-      async ({ tokenId, confirmSelfRevoke }) => {
-        const result = await manager.manageTokens(
-          { ...principal, audit: { source: "mcp" } }, {
-          type: "revoke",
+      async ({ tokenId, confirmSelfRevoke, dryRun, reviewReceipt }) => {
+        const operation = {
+          type: "revoke" as const,
           tokenId,
           confirmSelfRevoke
+        };
+        const attributedPrincipal = {
+          ...principal,
+          audit: { source: "mcp" as const }
+        };
+        if (dryRun) {
+          if (reviewReceipt !== undefined) {
+            throw new Error("reviewReceipt must be omitted during dry-run review");
+          }
+          if (!manager.reviewTokenMutation) {
+            throw new Error(
+              "reviewed account token mutation requires shared PostgreSQL authorization and LAYO_AUTHORIZATION_REVIEW_SIGNING_KEY"
+            );
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  review: await manager.reviewTokenMutation(
+                    attributedPrincipal,
+                    operation
+                  )
+                }, null, 2)
+              }
+            ]
+          };
+        }
+        if (!reviewReceipt) {
+          throw new Error("reviewReceipt is required when dryRun is false");
+        }
+        const result = await manager.manageTokens(attributedPrincipal, {
+          ...operation,
+          reviewReceipt
         });
         if (result.type !== "revoke") {
           throw new Error("unexpected team authorization revoke result");
