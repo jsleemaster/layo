@@ -25,9 +25,6 @@ test("patches GitHub About only after the Vercel URL passes the live Layo smoke 
     if (String(url) === "https://preview-layo.vercel.app/health") {
       return textResponse('{"ok":true}');
     }
-    if (String(url) === "https://preview-layo.vercel.app/projects") {
-      return textResponse('{"projects":[]}');
-    }
     if (String(url) === "https://api.github.com/repos/jsleemaster/layo") {
       assert.equal(init.method, "PATCH");
       assert.equal(init.headers.Authorization, "Bearer repo-admin-token");
@@ -52,7 +49,6 @@ test("patches GitHub About only after the Vercel URL passes the live Layo smoke 
     [
       "GET https://preview-layo.vercel.app/",
       "GET https://preview-layo.vercel.app/health",
-      "GET https://preview-layo.vercel.app/projects",
       "PATCH https://api.github.com/repos/jsleemaster/layo"
     ]
   );
