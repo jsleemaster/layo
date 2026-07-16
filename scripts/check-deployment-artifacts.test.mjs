@@ -156,35 +156,21 @@ test("deployment docs keep web hosting and relay hosting separate", async () => 
   assert.match(docs, /docker compose/i);
 });
 
-test("vercel deployment routes same-origin API requests to the Layo server function", async () => {
+test("vercel static deployment exposes health without shared ephemeral document APIs", async () => {
   const config = JSON.parse(await readText("vercel.json"));
-  const apiFunction = await readText("api/bridge.ts");
-  const bridgeResolver = await readText("apps/server/src/vercel-bridge-url.ts");
+  const healthFunction = await readText("api/health.ts");
 
   assert.equal(config.framework, "vite");
   assert.equal(config.outputDirectory, "apps/web/dist");
-  assert.match(config.buildCommand, /pnpm --filter @layo\/web build/);
+  assert.match(config.buildCommand, /pnpm --filter @layo\\/web build/);
   assert.deepEqual(config.rewrites, [
-    { source: "/health", destination: "/api/bridge?__layo_path=/health" },
-    { source: "/projects", destination: "/api/bridge?__layo_path=/projects" },
-    { source: "/projects/:__layo_splat*", destination: "/api/bridge?__layo_path=/projects/:__layo_splat*" },
-    { source: "/files/:__layo_splat*", destination: "/api/bridge?__layo_path=/files/:__layo_splat*" },
-    { source: "/assets", destination: "/api/bridge?__layo_path=/assets" },
-    { source: "/assets/:__layo_splat*", destination: "/api/bridge?__layo_path=/assets/:__layo_splat*" },
-    { source: "/migrations/:__layo_splat*", destination: "/api/bridge?__layo_path=/migrations/:__layo_splat*" },
-    { source: "/libraries", destination: "/api/bridge?__layo_path=/libraries" },
-    { source: "/libraries/:__layo_splat*", destination: "/api/bridge?__layo_path=/libraries/:__layo_splat*" },
-    { source: "/comments/:__layo_splat*", destination: "/api/bridge?__layo_path=/comments/:__layo_splat*" },
-    { source: "/account/:__layo_splat*", destination: "/api/bridge?__layo_path=/account/:__layo_splat*" }
+    { source: "/health", destination: "/api/health" }
   ]);
 
-  assert.match(apiFunction, /createHttpServer/);
-  assert.match(apiFunction, /new FileStorage/);
-  assert.match(apiFunction, /\/tmp\/layo/);
-  assert.equal(bridgeResolver.includes("__layo_path"), true);
-  assert.equal(apiFunction.includes("request.url = routedPath"), true);
+  assert.match(healthFunction, /ok:\\s*true/);
+  assert.doesNotMatch(healthFunction, /FileStorage|createHttpServer|\\/tmp\\/layo/);
+  await assert.rejects(stat("api/bridge.ts"), { code: "ENOENT" });
 });
-
 test("web shell includes a stable Layo deployment marker", async () => {
   const indexHtml = await readText("apps/web/index.html");
 
