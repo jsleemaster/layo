@@ -10,6 +10,7 @@ import {
 } from "./team-authorization-audit-operator.js";
 import {
   createPostgresTeamAuthorizationStateStore,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION,
   migratePostgresTeamAuthorizationState,
   type TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
@@ -47,7 +48,7 @@ describePostgres("PostgreSQL authorization audit archive drill", () => {
       generation: "0",
       baseFingerprint: "0".repeat(64),
       serializedState: '{"version":2,"members":[]}'
-    });
+    }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
 
     try {
       for (const [index, action] of [
