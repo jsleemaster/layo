@@ -177,4 +177,23 @@ describe("authorization audit retention", () => {
       reviewedCandidateIds: ["8", "9"]
     })).resolves.toEqual({ candidateIds: ["8", "9"], deletedCount: 2, applied: true });
   });
+  test("apply aborts when candidates differ from the reviewed dry-run", async () => {
+    const deleteArchivedAuditEvents = vi.fn(async () => 2);
+    const store = fakeStore({
+      listArchivedAuditRetentionCandidates: vi.fn(async () => ["8", "10"]),
+      deleteArchivedAuditEvents
+    });
+
+    await expect(applyAuthorizationAuditRetention({
+      store,
+      scope: "team-a",
+      archivedBefore: "2026-06-16T00:00:00.000Z",
+      keepNewest: 10,
+      limit: 100,
+      apply: true,
+      reviewedCandidateIds: ["8", "9"]
+    })).rejects.toThrow(/changed after review/i);
+    expect(deleteArchivedAuditEvents).not.toHaveBeenCalled();
+  });
+
 });
