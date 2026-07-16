@@ -15,7 +15,9 @@
     "authorization:bootstrap": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts bootstrap",
     "authorization:export": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts export",
     "authorization:restore": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts restore",
-    "authorization:reconcile-base": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts reconcile-base"
+    "authorization:reconcile-base": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-shared-cli.ts reconcile-base",
+    "authorization:audit:export": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-audit-cli.ts export",
+    "authorization:audit:retain": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-audit-cli.ts retain"
   },
   "dependencies": {
     "@layo/collaboration": "workspace:*",
