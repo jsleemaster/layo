@@ -101,14 +101,15 @@ describePostgres("PostgreSQL authorization audit archive drill", () => {
       const firstIds = JSON.parse(await readFile(outputPath, "utf8"))
         .events.map((event: { id: string }) => event.id);
 
+      const retryOutputPath = path.join(root, "audit-retry.json");
       await exportAuthorizationAuditEvents({
         store: operatorStore,
         scope,
-        outputPath,
+        outputPath: retryOutputPath,
         limit: 100,
         now: () => new Date("2026-07-16T04:01:00.000Z")
       });
-      const retryIds = JSON.parse(await readFile(outputPath, "utf8"))
+      const retryIds = JSON.parse(await readFile(retryOutputPath, "utf8"))
         .events.map((event: { id: string }) => event.id);
       expect(retryIds).toEqual(firstIds);
       expect((await store.listAuditEvents!(scope, {
@@ -140,17 +141,19 @@ describePostgres("PostgreSQL authorization audit archive drill", () => {
         keepNewest: 0,
         limit: 100
       };
-      await expect(applyAuthorizationAuditRetention({
+      const preview = await applyAuthorizationAuditRetention({
         ...retention,
         apply: false
-      })).resolves.toMatchObject({
+      });
+      expect(preview).toMatchObject({
         candidateIds: firstIds,
         deletedCount: 0,
         applied: false
       });
       await expect(applyAuthorizationAuditRetention({
         ...retention,
-        apply: true
+        apply: true,
+        reviewedCandidateIds: preview.candidateIds
       })).resolves.toMatchObject({
         candidateIds: firstIds,
         deletedCount: 2,
