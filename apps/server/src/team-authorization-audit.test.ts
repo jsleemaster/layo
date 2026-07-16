@@ -161,7 +161,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
             }
           }
         })
-      )).rejects.toThrow(/forbidden field/i);
+      )).rejects.toThrow(/not allowed/i);
 
       await expect(store.read(scope)).resolves.toMatchObject({
         generation: "0"
