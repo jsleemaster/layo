@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeAll, describe, expect, test } from "vitest";
+import { Pool } from "pg";
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState
@@ -292,6 +293,177 @@ describePostgres("PostgreSQL authorization audit log", () => {
       })).rejects.toThrow(/PostgreSQL bigint/i);
     } finally {
       await store.close();
+    }
+  });
+
+  test("rolls back state and audit for callback, serialization, and oversized metadata failures", async () => {
+    const cases = [
+      {
+        name: "callback",
+        operation: async () => {
+          throw new Error("injected callback failure");
+        },
+        error: /injected callback failure/
+      },
+      {
+        name: "state-serialization",
+        operation: async (snapshot: { baseFingerprint: string }) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: "{not-json",
+          result: undefined,
+          auditEvent: {
+            action: "base_reconciled" as const,
+            actorUserId: "operator-a",
+            source: "operator" as const,
+            metadata: { reason: "operator_reconcile" }
+          }
+        }),
+        error: /valid JSON/
+      },
+      {
+        name: "metadata-size",
+        operation: async (snapshot: { baseFingerprint: string; serializedState: string }) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: undefined,
+          auditEvent: {
+            action: "token_created" as const,
+            actorUserId: "operator-a",
+            source: "operator" as const,
+            metadata: { expiresAt: "x".repeat(17_000) }
+          }
+        }),
+        error: /too large/
+      }
+    ];
+
+    for (const candidate of cases) {
+      const scope = `audit-${candidate.name}-${randomUUID()}`;
+      const store = await createPostgresTeamAuthorizationStateStore({
+        connectionString: connectionString!
+      });
+      await store.initializeAbsent(scope, {
+        generation: "0",
+        baseFingerprint: "0".repeat(64),
+        serializedState: '{"version":2,"members":[]}'
+      });
+      try {
+        await expect(store.transact!(
+          scope,
+          "0".repeat(64),
+          { mutating: true },
+          candidate.operation
+        )).rejects.toThrow(candidate.error);
+        await expect(store.read(scope)).resolves.toMatchObject({ generation: "0" });
+        await expect(store.listAuditEvents!(scope, {
+          afterId: "0",
+          limit: 10
+        })).resolves.toEqual([]);
+      } finally {
+        await store.close();
+      }
+    }
+  });
+
+  test("rolls back audit when the PostgreSQL state update fails", async () => {
+    const scope = `audit-update-failure-${randomUUID()}`;
+    const triggerName = `fail_audit_update_${randomUUID().replaceAll("-", "")}`;
+    const database = new Pool({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "0",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+    await database.query(
+      `CREATE TRIGGER ${triggerName}
+       BEFORE UPDATE ON layo_team_authorization_state
+       FOR EACH ROW
+       WHEN (NEW.scope = '${scope}')
+       EXECUTE FUNCTION suppress_redundant_updates_trigger()`
+    );
+
+    try {
+      await expect(store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: undefined,
+          auditEvent: {
+            action: "base_reconciled",
+            actorUserId: "operator-a",
+            source: "operator",
+            metadata: { reason: "operator_reconcile" }
+          }
+        })
+      )).rejects.toThrow();
+      await expect(store.read(scope)).resolves.toMatchObject({ generation: "0" });
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "0",
+        limit: 10
+      })).resolves.toEqual([]);
+    } finally {
+      await database.query(
+        `DROP TRIGGER IF EXISTS ${triggerName} ON layo_team_authorization_state`
+      );
+      await Promise.all([store.close(), database.end()]);
+    }
+  });
+
+  test("keeps audit ids and generations exact above Number.MAX_SAFE_INTEGER", async () => {
+    const scope = `audit-large-id-${randomUUID()}`;
+    const database = new Pool({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    await store.initializeAbsent(scope, {
+      generation: "9007199254740993",
+      baseFingerprint: "0".repeat(64),
+      serializedState: '{"version":2,"members":[]}'
+    });
+    await database.query(
+      `SELECT setval(
+        pg_get_serial_sequence('layo_authorization_audit_events', 'id'),
+        9007199254740993,
+        false
+      )`
+    );
+
+    try {
+      const committed = await store.transact!(
+        scope,
+        "0".repeat(64),
+        { mutating: true },
+        async (snapshot) => ({
+          baseFingerprint: snapshot.baseFingerprint,
+          serializedState: snapshot.serializedState,
+          result: undefined,
+          auditEvent: {
+            action: "base_reconciled",
+            actorUserId: "operator-a",
+            source: "operator",
+            metadata: { reason: "operator_reconcile" }
+          }
+        })
+      );
+      expect(committed.generation).toBe("9007199254740994");
+      expect(committed.auditEvent?.id).toBe("9007199254740993");
+      await expect(store.listAuditEvents!(scope, {
+        afterId: "9007199254740992",
+        limit: 10
+      })).resolves.toEqual([
+        expect.objectContaining({
+          id: "9007199254740993",
+          generation: "9007199254740994"
+        })
+      ]);
+    } finally {
+      await Promise.all([store.close(), database.end()]);
     }
   });
 
