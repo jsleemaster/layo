@@ -627,3 +627,24 @@ These are the first Penpot-comparable gaps to close:
    where feasible.
 6. Plugin/API extensibility lane that does not weaken deterministic MCP commands.
 7. Production-grade self-host and CI-owned Vercel deployment automation after the GitHub Actions Vercel production workflow has valid project secrets, a repository-admin homepage token, durable hosted storage/backups, and the live production smoke verifier passes against the Vercel deploy output URL. The current manual `jsleemasters-projects/layo` deployment is verified at `https://layo-three.vercel.app/`, but workflow-owned repeatability remains a gap.
+
+
+## Latest Verified Delta: Authorization Audit Operations
+
+PR #312 adapts Penpot's durable PostgreSQL audit append/archive model to Layo's
+team-owned authorization scope. Changed token generations require a secret-free
+event in the same transaction; owner reads bind authorization generation and
+fingerprint to the audit query transaction; bootstrap, restore, and offline
+reconciliation carry operator attribution. Export uses a private atomic file,
+stable-id at-least-once retry, exact archive marking, and retention that cannot
+delete unarchived rows.
+
+Independent review also changed the Vercel boundary: static hosting now serves
+only the web shell and `/health`. Shared filesystem APIs are not exposed through
+serverless `/tmp`; authenticated durable team storage remains separately
+operated. Evidence is
+`docs/product/penpot-authorization-audit-delta.md` and
+`docs/deployment/authorization-audit.md`. Authorization Backup Drill
+`29468592256` and Authorization Audit Archive Drill `29468592227` passed;
+the final one-head Full Verification and merge evidence remain in the active
+plan.
