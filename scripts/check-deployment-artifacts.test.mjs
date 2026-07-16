@@ -36,6 +36,15 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
 });
 
+test("web deployment build keeps closed-path capability on the renderer public contract", async () => {
+  const app = await readText("apps/web/src/App.tsx");
+  const rendererImport = app.match(/import \\{([\\s\\S]*?)\\} from "@layo\\/renderer";/)?.[1] ?? "";
+  const pathEditorImport = app.match(/import \\{([\\s\\S]*?)\\} from "\\.\\/path-editor";/)?.[1] ?? "";
+
+  assert.match(rendererImport, /\\bpathHasOnlyClosedSubpaths\\b/);
+  assert.doesNotMatch(pathEditorImport, /\\bpathHasOnlyClosedSubpaths\\b/);
+});
+
 test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
   const workflow = await readText(".github/workflows/storage-restore-drill.yml");
 
