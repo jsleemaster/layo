@@ -53,7 +53,8 @@ export interface TeamAuthorizationStateStore {
   read(scope: string): Promise<TeamAuthorizationStateSnapshot>;
   initializeAbsent(
     scope: string,
-    snapshot: TeamAuthorizationStateSnapshot
+    snapshot: TeamAuthorizationStateSnapshot,
+    auditEvent?: TeamAuthorizationAuditEventInput
   ): Promise<{
     initialized: boolean;
     snapshot: TeamAuthorizationStateSnapshot;
@@ -740,47 +741,104 @@ export async function createPostgresTeamAuthorizationStateStore(
       return snapshotFromRow(result.rows[0]!);
     },
 
-    async initializeAbsent(scopeInput, snapshotInput) {
+    async initializeAbsent(scopeInput, snapshotInput, auditEventInput) {
       assertOpen();
       const scope = validateScope(scopeInput);
       const generation = validateGeneration(snapshotInput.generation);
       const baseFingerprint = validateFingerprint(snapshotInput.baseFingerprint);
       const state = parseSerializedState(snapshotInput.serializedState);
-      // Purpose: initialize bootstrap or restore state without mutating an existing scope.
-      const inserted = await pool.query<AuthorizationStateRow>(
-        `INSERT INTO layo_team_authorization_state
-          (scope, generation, base_fingerprint, state, schema_version)
-         VALUES ($1, $2::bigint, $3, $4::jsonb, $5)
-         ON CONFLICT (scope) DO NOTHING
-         RETURNING generation::text AS generation, base_fingerprint, state`,
-        [
-          scope,
-          generation,
-          baseFingerprint,
-          state.serializedState,
-          AUTHORIZATION_STATE_SCHEMA_VERSION
-        ]
-      );
-      if (inserted.rowCount === 1) {
-        return {
-          initialized: true,
-          snapshot: snapshotFromRow(inserted.rows[0]!)
-        };
+      const auditEvent = auditEventInput
+        ? validateAuditEventInput(auditEventInput)
+        : undefined;
+      if (auditEvent && generation === "0") {
+        throw new Error(
+          "audited authorization scope initialization requires a positive generation"
+        );
       }
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        // Purpose: initialize bootstrap or restore state and its audit row atomically.
+        const inserted = await client.query<AuthorizationStateRow>(
+          `INSERT INTO layo_team_authorization_state
+            (scope, generation, base_fingerprint, state, schema_version)
+           VALUES ($1, $2::bigint, $3, $4::jsonb, $5)
+           ON CONFLICT (scope) DO NOTHING
+           RETURNING generation::text AS generation, base_fingerprint, state`,
+          [
+            scope,
+            generation,
+            baseFingerprint,
+            state.serializedState,
+            AUTHORIZATION_STATE_SCHEMA_VERSION
+          ]
+        );
+        if (inserted.rowCount === 1) {
+          if (auditEvent) {
+            const audit = await client.query(
+              `INSERT INTO layo_authorization_audit_events
+                (
+                  scope,
+                  generation,
+                  action,
+                  actor_user_id,
+                  subject_token_id,
+                  subject_token_name,
+                  source,
+                  request_id,
+                  metadata
+                )
+               VALUES ($1, $2::bigint, $3, $4, $5, $6, $7, $8, $9::jsonb)
+               RETURNING id`,
+              [
+                scope,
+                generation,
+                auditEvent.action,
+                auditEvent.actorUserId,
+                auditEvent.subjectTokenId ?? null,
+                auditEvent.subjectTokenName ?? null,
+                auditEvent.source,
+                auditEvent.requestId ?? null,
+                JSON.stringify(auditEvent.metadata)
+              ]
+            );
+            if (audit.rowCount !== 1) {
+              throw new Error("authorization initialization audit event was not appended");
+            }
+          }
+          await client.query("COMMIT");
+          return {
+            initialized: true,
+            snapshot: snapshotFromRow(inserted.rows[0]!)
+          };
+        }
 
-      const existing = await pool.query<AuthorizationStateRow>(
-        `SELECT generation::text AS generation, base_fingerprint, state
-         FROM layo_team_authorization_state
-         WHERE scope = $1`,
-        [scope]
-      );
-      if (existing.rowCount !== 1) {
-        throw new Error(`authorization scope ${scope} initialization conflicted`);
+        const existing = await client.query<AuthorizationStateRow>(
+          `SELECT generation::text AS generation, base_fingerprint, state
+           FROM layo_team_authorization_state
+           WHERE scope = $1`,
+          [scope]
+        );
+        if (existing.rowCount !== 1) {
+          throw new Error(`authorization scope ${scope} initialization conflicted`);
+        }
+        await client.query("COMMIT");
+        return {
+          initialized: false,
+          snapshot: snapshotFromRow(existing.rows[0]!)
+        };
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
       }
-      return {
-        initialized: false,
-        snapshot: snapshotFromRow(existing.rows[0]!)
-      };
     },
 
     async transact<T>(
