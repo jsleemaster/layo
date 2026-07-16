@@ -216,6 +216,39 @@ describe("agent-reviewed account token mutation", () => {
     expect(generateSecret).not.toHaveBeenCalled();
   });
 
+  test("rejects a forged payload that reuses a valid receipt signature", async () => {
+    const {
+      manager,
+      state,
+      generateId,
+      generateSecret,
+      principal
+    } = await fixture();
+    const review = await manager.reviewTokenMutation!(principal, {
+      type: "create",
+      input: { name: "Deploy automation", expiresInDays: 30 }
+    });
+    const before = state.current();
+    const [encoded, signature] = review.receipt!.split(".");
+    const payload = JSON.parse(
+      Buffer.from(encoded!, "base64url").toString("utf8")
+    ) as Record<string, unknown>;
+    const forged = `${Buffer.from(JSON.stringify({
+      ...payload,
+      generation: "8"
+    }), "utf8").toString("base64url")}.${signature}`;
+
+    await expect(manager.manageTokens(principal, {
+      type: "create",
+      input: { name: "Deploy automation", expiresInDays: 30 },
+      reviewReceipt: forged
+    })).rejects.toMatchObject({ statusCode: 400 });
+
+    expect(state.current()).toEqual(before);
+    expect(generateId).not.toHaveBeenCalled();
+    expect(generateSecret).not.toHaveBeenCalled();
+  });
+
   test("rejects stale and expired receipts before generating token material", async () => {
     const {
       manager,
