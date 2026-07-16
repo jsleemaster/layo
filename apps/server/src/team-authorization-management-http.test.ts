@@ -63,6 +63,17 @@ describe("team access token HTTP administration", () => {
         error: "team authorization token name is required"
       });
 
+      for (const name of ["x".repeat(513), "line\\nbreak"]) {
+        const unsafeName = await server.inject({
+          method: "POST",
+          url: "/account/tokens",
+          headers: credentials("owner-user", "legacy-owner-token"),
+          payload: { name, expiresInDays: 30 }
+        });
+        expect(unsafeName.statusCode).toBe(400);
+        expect(unsafeName.json().error).toContain("audit-safe label");
+      }
+
       const created = await server.inject({
         method: "POST",
         url: "/account/tokens",
