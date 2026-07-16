@@ -397,7 +397,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       const artifact = {
         version: 1,
         scope: restoreScope,
-        generation: "43",
+        generation: "42",
         baseFingerprint: "b".repeat(64),
         state: { version: 2, members: [] }
       };
