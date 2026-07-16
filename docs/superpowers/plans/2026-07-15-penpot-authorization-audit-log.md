@@ -36,10 +36,10 @@ maintainer-operated telemetry/archive endpoint.
 5. HTTP and MCP owner reads use request-time authorization and cursor pagination.
    Editors/viewers, cross-scope principals, database outage, malformed rows, and
    unsafe values fail closed without leaking event metadata.
-6. Operator export writes one private versioned NDJSON/JSON artifact atomically,
-   marks only the exported rows archived, and is at-least-once across a crash
-   between durable file replacement and database commit. Stable event ids are
-   the deduplication key.
+6. Operator export creates one private immutable versioned NDJSON/JSON artifact,
+   refuses an existing destination, marks only the exported rows archived, and
+   is at-least-once across a crash between durable artifact creation and database
+   commit. Retries use a new path; stable event ids are the deduplication key.
 7. Filesystem authorization remains database-free and exposes no fake durable
    audit history.
 8. Retention never deletes unarchived rows. Archived deletion requires explicit
@@ -64,9 +64,9 @@ maintainer-operated telemetry/archive endpoint.
 - [x] Extend migration versioning without granting privileges in application SQL.
 - [x] RED: two clients mutate one scope and produce state generations 1/2 plus
       audit ids in commit order.
-- [ ] RED: callback failure, no-op, serialization failure, oversized metadata,
+- [x] RED: callback failure, no-op, serialization failure, oversized metadata,
       plaintext-like forbidden fields, and state update failure append nothing.
-- [ ] RED: event id/generation above JavaScript safe integer remains exact.
+- [x] RED: event id/generation above JavaScript safe integer remains exact.
 - [x] Implement one transaction for state update plus audit append.
 
 **Task 1 evidence (2026-07-15):**
@@ -82,9 +82,9 @@ maintainer-operated telemetry/archive endpoint.
 - Repaired head `52dc85fb220df11ad534ae0cac18f312bffb0043`
   rejects secret-related keys at every metadata depth, rejects cycles and
   no-op audit append, and passed Full Verification `29401692453`.
-- Oversized metadata, exact event ids above JavaScript safe integer, injected
-  state-update failure, and broader migration privilege proof remain open Task
-  1 gates and are intentionally not checked.
+- Edge coverage now proves callback/serialization/oversized-metadata rollback,
+  injected PostgreSQL state-update rollback, exact bigint ids/generations above
+  JavaScript safe integer, and runtime-role audit table/sequence privileges.
 
 ## Task 2: Mutation attribution
 
@@ -178,8 +178,8 @@ Evidence:
 - Create focused PostgreSQL audit archive workflow
 - Add operation tests and runbook
 
-- [x] Export an ordered private versioned artifact through atomic replace/fsync.
-- [x] Mark exactly the exported ids archived only after durable file replacement.
+- [x] Export an ordered private immutable versioned artifact without overwriting an existing path.
+- [x] Mark exactly the exported ids archived only after durable artifact creation.
 - [x] Prove retry is at-least-once with stable-id dedup after injected commit
       failure.
 - [x] Add dry-run/apply retention that never deletes unarchived rows.
@@ -193,7 +193,7 @@ Evidence:
 - Operator contract RED Full Verification `29467393628` failed on the missing
   module; the first implementation run exposed a test callback type error before
   the contract passed.
-- Authorization Audit Archive Drill `29468338620` first proved durable replace,
+- Authorization Audit Archive Drill `29468338620` first proved durable creation,
   injected archive-commit failure, stable-id retry, exact archive marking, and
   retention. Final audited-bootstrap head drill `29468592227` passed.
 - Authorization Backup Drill `29468592256`, Storage Restore Drill
@@ -211,6 +211,23 @@ Evidence:
   bootstrap/restore/reconcile use explicit audited paths.
 - P2 metadata denylist gaps: replaced by action-specific key/value allowlists.
 - P2 cursor bigint overflow: rejected before PostgreSQL query.
+
+
+**Second independent review findings (2026-07-16):**
+
+- P1 archive overwrite risk: export now creates an immutable batch and refuses an
+  existing destination; crash retries require a new unique path.
+- P1 post-query base-file race: the manager rereads the base after the snapshot-
+  bound database query and fails closed; a focused regression mutates the file
+  during the read.
+- P1 retention review drift: apply requires candidate ids exactly matching the
+  reviewed dry-run result and aborts before deletion on drift.
+- P2 low-level unaudited mutation paths: legacy mutate appends an explicit
+  compatibility reconciliation event, and unaudited initialization is rejected
+  outside the test environment.
+- P2 oversized cursor mapping, command/close double failure, and unsafe token
+  labels: focused regressions pin 400 mapping, preserve the primary error, and
+  reject audit-visible labels over 512 UTF-8 bytes or containing controls.
 
 ## Task 5: Evidence, review, and merge
 
