@@ -4,6 +4,9 @@ import { open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { withFileProcessMutationLock } from "./file-process-lock.js";
 import type {
+  TeamAuthorizationAuditEvent,
+  TeamAuthorizationAuditEventInput,
+  TeamAuthorizationAuditSource,
   TeamAuthorizationStateSnapshot,
   TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
@@ -148,6 +151,10 @@ export interface CreatedTeamAccessToken {
 export interface TeamAuthorizationManagementPrincipal {
   userId: string;
   memberToken: string;
+  audit?: {
+    source: TeamAuthorizationAuditSource;
+    requestId?: string;
+  };
 }
 
 export type TeamAuthorizationManagementOperation =
@@ -159,6 +166,16 @@ export type TeamAuthorizationManagementResult =
   | { type: "list"; tokens: TeamAccessTokenMetadata[]; activeTokenId?: string }
   | { type: "create"; created: CreatedTeamAccessToken }
   | { type: "revoke"; metadata: TeamAccessTokenMetadata };
+
+export interface TeamAuthorizationAuditListOptions {
+  afterId: string;
+  limit: number;
+}
+
+export interface TeamAuthorizationAuditPage {
+  events: TeamAuthorizationAuditEvent[];
+  nextAfterId?: string;
+}
 
 export interface TeamAuthorizationFileManager {
   manageTokens: (
@@ -176,6 +193,10 @@ export interface TeamAuthorizationFileManager {
     userId: string,
     tokenId: string
   ) => Promise<TeamAccessTokenMetadata>;
+  listAuditEvents?: (
+    principal: TeamAuthorizationManagementPrincipal,
+    options: TeamAuthorizationAuditListOptions
+  ) => Promise<TeamAuthorizationAuditPage>;
 }
 
 export interface TeamAuthorizationFileManagerOptions {
@@ -422,13 +443,7 @@ export function createTeamAuthorizationFileManager(
       }
 
       if (operation.type === "create") {
-        const name =
-          typeof operation.input?.name === "string"
-            ? operation.input.name.trim()
-            : "";
-        if (!name) {
-          throw managementError("team authorization token name is required", 400);
-        }
+        const name = validateTeamAccessTokenName(operation.input?.name);
         const expiresInDays = operation.input?.expiresInDays;
         if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
           throw managementError("invalid team authorization token expiration", 400);
@@ -543,6 +558,7 @@ type SharedManagementIdentity =
 interface SharedOperationResult {
   result: TeamAuthorizationManagementResult;
   changed: boolean;
+  actorUserId: string;
 }
 
 function sharedManagementError(error: unknown): Error {
@@ -556,6 +572,32 @@ function sharedManagementError(error: unknown): Error {
     return managementError(error.message, 409);
   }
   return error instanceof Error ? error : new Error(String(error));
+}
+
+function validateAuditListOptions(
+  options: TeamAuthorizationAuditListOptions
+): TeamAuthorizationAuditListOptions {
+  const afterId = options.afterId.trim();
+  if (
+    !/^(0|[1-9][0-9]*)$/.test(afterId)
+    || BigInt(afterId) > MAX_POSTGRES_BIGINT
+  ) {
+    throw managementError(
+      "authorization audit afterId must be an exact decimal string",
+      400
+    );
+  }
+  if (
+    !Number.isSafeInteger(options.limit)
+    || options.limit < 1
+    || options.limit > 100
+  ) {
+    throw managementError(
+      "authorization audit limit must be between 1 and 100",
+      400
+    );
+  }
+  return { afterId, limit: options.limit };
 }
 
 function missingSharedScopeInstruction(
@@ -666,6 +708,7 @@ function applySharedManagementOperation(
   if (operation.type === "list") {
     return {
       changed: false,
+      actorUserId: userId,
       result: {
         type: "list",
         tokens: (member.tokens ?? []).map(toTeamAccessTokenMetadata),
@@ -677,13 +720,7 @@ function applySharedManagementOperation(
   }
 
   if (operation.type === "create") {
-    const name =
-      typeof operation.input?.name === "string"
-        ? operation.input.name.trim()
-        : "";
-    if (!name) {
-      throw managementError("team authorization token name is required", 400);
-    }
+    const name = validateTeamAccessTokenName(operation.input?.name);
     const expiresInDays = operation.input?.expiresInDays;
     if (!isTeamAccessTokenExpiryDays(expiresInDays)) {
       throw managementError("invalid team authorization token expiration", 400);
@@ -719,6 +756,7 @@ function applySharedManagementOperation(
     ).tokens.push(credential);
     return {
       changed: true,
+      actorUserId: userId,
       result: {
         type: "create",
         created: {
@@ -751,6 +789,7 @@ function applySharedManagementOperation(
   if (credential.revokedAt) {
     return {
       changed: false,
+      actorUserId: userId,
       result: {
         type: "revoke",
         metadata: toTeamAccessTokenMetadata(credential)
@@ -769,10 +808,62 @@ function applySharedManagementOperation(
   credential.revokedAt = revokedAt;
   return {
     changed: true,
+    actorUserId: userId,
     result: {
       type: "revoke",
       metadata: toTeamAccessTokenMetadata(credential)
     }
+  };
+}
+
+function sharedManagementAuditEvent(
+  identity: SharedManagementIdentity,
+  applied: SharedOperationResult,
+  recovered: boolean
+): TeamAuthorizationAuditEventInput | undefined {
+  if (!applied.changed && !recovered) {
+    return undefined;
+  }
+
+  const audit = "principal" in identity ? identity.principal.audit : undefined;
+  const attribution = {
+    actorUserId: applied.actorUserId,
+    source: audit?.source ?? "operator" as TeamAuthorizationAuditSource,
+    ...(audit?.requestId ? { requestId: audit.requestId } : {})
+  };
+
+  if (applied.changed && applied.result.type === "create") {
+    const metadata = applied.result.created.metadata;
+    return {
+      action: "token_created",
+      ...attribution,
+      subjectTokenId: metadata.id,
+      subjectTokenName: metadata.name,
+      metadata: {
+        ...(metadata.expiresAt ? { expiresAt: metadata.expiresAt } : {}),
+        ...(recovered ? { baseReconciled: true } : {})
+      }
+    };
+  }
+
+  if (applied.changed && applied.result.type === "revoke") {
+    const metadata = applied.result.metadata;
+    return {
+      action: "token_revoked",
+      ...attribution,
+      subjectTokenId: metadata.id,
+      subjectTokenName: metadata.name,
+      metadata: {
+        ...(metadata.revokedAt ? { revokedAt: metadata.revokedAt } : {}),
+        ...(recovered ? { baseReconciled: true } : {})
+      }
+    };
+  }
+
+  return {
+    action: "base_reconciled",
+    ...attribution,
+    metadata: { reason: "credential_recovery" }
   };
 }
 
@@ -962,6 +1053,7 @@ function createSharedTeamAuthorizationFileManager(
   options: TeamAuthorizationFileManagerOptions
 ): TeamAuthorizationFileManager {
   const transact = stateStore.transact?.bind(stateStore);
+  const listAuditEvents = stateStore.listAuditEvents?.bind(stateStore);
   if (!transact) {
     throw new Error(
       "shared team authorization stateStore must support transact"
@@ -1102,13 +1194,15 @@ function createSharedTeamAuthorizationFileManager(
               409
             );
           }
+          const auditEvent = sharedManagementAuditEvent(identity, applied, recovered);
           return {
             baseFingerprint,
             serializedState: changed
               ? serializeManagedTokenState(state)
               : locked.serializedState,
             result: { applied },
-            changed
+            changed,
+            ...(auditEvent ? { auditEvent } : {})
           };
         }
       );
@@ -1126,9 +1220,71 @@ function createSharedTeamAuthorizationFileManager(
     return committed.result.applied.result;
   };
 
+  const listSharedAuditEvents = listAuditEvents
+    ? async (
+        principal: TeamAuthorizationManagementPrincipal,
+        input: TeamAuthorizationAuditListOptions
+      ): Promise<TeamAuthorizationAuditPage> => {
+        try {
+          const { afterId, limit } = validateAuditListOptions(input);
+          const { baseSnapshot, committed } = await loadSharedSnapshot();
+          const baseConfig = parseRequiredTeamAuthorizationConfig(baseSnapshot);
+          const { mergedConfig } = sharedConfigFromSnapshot(baseConfig, committed);
+          const authenticated = authenticateTeamMember(
+            mergedConfig,
+            principal.userId,
+            principal.memberToken,
+            now()
+          );
+          if (authenticated.role !== "owner") {
+            throw managementError(
+              "owner role is required to read authorization audit history",
+              403
+            );
+          }
+
+          const rows = await listAuditEvents(
+            sharedScope,
+            {
+              afterId,
+              limit: limit + 1,
+              expectedGeneration: committed.generation,
+              expectedBaseFingerprint: committed.baseFingerprint
+            }
+          );
+          if (await readFile(filePath, "utf8") !== baseSnapshot) {
+            throw managementError(
+              "team authorization base changed during audit read",
+              409
+            );
+          }
+          const events = rows.slice(0, limit);
+          await publishCommittedSnapshot(baseSnapshot, committed);
+          return {
+            events,
+            ...(rows.length > limit && events.length > 0
+              ? { nextAfterId: events[events.length - 1]!.id }
+              : {})
+          };
+        } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
+            throw error;
+          }
+          throw managementError(
+            "authorization audit history is unavailable",
+            503
+          );
+        }
+      }
+    : undefined;
+
   return {
     manageTokens: (principal, operation) =>
       executeOperation({ principal }, operation),
+    ...(listSharedAuditEvents
+      ? { listAuditEvents: listSharedAuditEvents }
+      : {}),
     listTokens: async (userId) => {
       const result = await executeOperation(
         { userId },
@@ -1186,6 +1342,23 @@ function toTeamAccessTokenMetadata(
     ...(credential.expiresAt ? { expiresAt: credential.expiresAt } : {}),
     ...(credential.revokedAt ? { revokedAt: credential.revokedAt } : {})
   };
+}
+
+function validateTeamAccessTokenName(value: unknown): string {
+  const name = typeof value === "string" ? value.trim() : "";
+  if (!name) {
+    throw managementError("team authorization token name is required", 400);
+  }
+  if (
+    Buffer.byteLength(name, "utf8") > 512
+    || /[\p{Cc}\p{Cf}]/u.test(name)
+  ) {
+    throw managementError(
+      "team authorization token name must be an audit-safe label of at most 512 bytes",
+      400
+    );
+  }
+  return name;
 }
 
 function validManagementNow(value: Date): string {
@@ -2165,7 +2338,7 @@ function parseTeamMemberTokenCredential(input: unknown): TeamMemberTokenCredenti
   }
   return {
     id: candidate.id.trim(),
-    name: candidate.name.trim(),
+    name: validateTeamAccessTokenName(candidate.name),
     token,
     tokenHash,
     ...(tokenHashes?.length ? { tokenHashes } : {}),

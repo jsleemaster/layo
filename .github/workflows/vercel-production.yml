@@ -62,13 +62,16 @@ jobs:
         run: pnpm run check:design-rules
 
       - name: Install Vercel CLI
-        run: npm install -g vercel@50.9.6
+        run: npm install -g vercel@56.2.1
 
       - name: Pull Vercel production environment
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build Vercel production output
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Verify serverless runtime imports
+        run: pnpm run check:serverless-runtime
 
       - name: Deploy prebuilt production output
         id: deploy-production

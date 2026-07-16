@@ -29,6 +29,39 @@ export interface RevokedAccountToken {
   metadata: AccountTokenMetadata;
 }
 
+export type AuthorizationAuditAction =
+  | "token_created"
+  | "token_revoked"
+  | "scope_bootstrapped"
+  | "scope_restored"
+  | "base_reconciled";
+
+export type AuthorizationAuditSource = "http" | "mcp" | "operator";
+
+export interface AuthorizationAuditEvent {
+  id: string;
+  scope: string;
+  generation: string;
+  action: AuthorizationAuditAction;
+  actorUserId: string;
+  subjectTokenId?: string;
+  subjectTokenName?: string;
+  source: AuthorizationAuditSource;
+  requestId?: string;
+  createdAt: string;
+  archivedAt?: string;
+}
+
+export interface AuthorizationAuditPage {
+  events: AuthorizationAuditEvent[];
+  nextAfterId?: string;
+}
+
+export interface AuthorizationAuditCursor {
+  afterId: string;
+  limit: number;
+}
+
 export async function listAccountTokens(
   userId: string,
   memberToken: string,
@@ -64,6 +97,61 @@ export async function listAccountTokens(
   return {
     tokens,
     ...(activeTokenId ? { activeTokenId } : {})
+  };
+}
+
+export async function listAuthorizationAudit(
+  userId: string,
+  memberToken: string,
+  cursor: AuthorizationAuditCursor,
+  fetcher: typeof fetch = fetch
+): Promise<AuthorizationAuditPage> {
+  if (
+    !exactDecimalString(cursor.afterId)
+    || !Number.isSafeInteger(cursor.limit)
+    || cursor.limit < 1
+    || cursor.limit > 100
+  ) {
+    throw new Error("권한 감사 활동 커서가 올바르지 않습니다");
+  }
+  const query = new URLSearchParams();
+  query.set("afterId", cursor.afterId);
+  query.set("limit", String(cursor.limit));
+  const payload = await requestJson(
+    apiUrl(`/account/authorization-audit?${query.toString()}`),
+    {
+      method: "GET",
+      headers: authorizationHeaders(userId, memberToken),
+      cache: "no-store"
+    },
+    "권한 감사 활동을 불러오지 못했습니다",
+    fetcher
+  );
+  const candidate = objectPayload(payload);
+  if (!candidate || !Array.isArray(candidate.events)) {
+    throw malformedResponse("권한 감사 활동");
+  }
+
+  let previousId = cursor.afterId;
+  const events = candidate.events.map((event) => {
+    const parsed = parseAuthorizationAuditEvent(event);
+    if (BigInt(parsed.id) <= BigInt(previousId)) {
+      throw malformedResponse("권한 감사 활동");
+    }
+    previousId = parsed.id;
+    return parsed;
+  });
+  const nextAfterId = optionalExactDecimalString(candidate.nextAfterId);
+  if (
+    (candidate.nextAfterId !== undefined && !nextAfterId)
+    || (nextAfterId !== undefined
+      && (events.length === 0 || nextAfterId !== events[events.length - 1]!.id))
+  ) {
+    throw malformedResponse("권한 감사 활동");
+  }
+  return {
+    events,
+    ...(nextAfterId ? { nextAfterId } : {})
   };
 }
 
@@ -174,6 +262,83 @@ function responseError(
     ?? "요청 실패";
   const status = [response.status, response.statusText].filter(Boolean).join(" ");
   return new Error(`${failureMessage} (${status}): ${detail}`);
+}
+
+function parseAuthorizationAuditEvent(payload: unknown): AuthorizationAuditEvent {
+  const candidate = objectPayload(payload);
+  const id = exactDecimalString(candidate?.id);
+  const generation = exactDecimalString(candidate?.generation);
+  const scope = nonBlankString(candidate?.scope);
+  const actorUserId = nonBlankString(candidate?.actorUserId);
+  const createdAt = nonBlankString(candidate?.createdAt);
+  const action = candidate?.action;
+  const source = candidate?.source;
+  if (
+    !candidate
+    || !id
+    || !generation
+    || !scope
+    || !actorUserId
+    || !createdAt
+    || !isAuthorizationAuditAction(action)
+    || !isAuthorizationAuditSource(source)
+    || !objectPayload(candidate.metadata)
+  ) {
+    throw malformedResponse("권한 감사 활동");
+  }
+  const subjectTokenId = parseOptionalAuditString(candidate, "subjectTokenId");
+  const subjectTokenName = parseOptionalAuditString(candidate, "subjectTokenName");
+  const requestId = parseOptionalAuditString(candidate, "requestId");
+  const archivedAt = parseOptionalAuditString(candidate, "archivedAt");
+  return {
+    id,
+    scope,
+    generation,
+    action,
+    actorUserId,
+    ...(subjectTokenId ? { subjectTokenId } : {}),
+    ...(subjectTokenName ? { subjectTokenName } : {}),
+    source,
+    ...(requestId ? { requestId } : {}),
+    createdAt,
+    ...(archivedAt ? { archivedAt } : {})
+  };
+}
+
+function parseOptionalAuditString(
+  payload: Record<string, unknown>,
+  field: "subjectTokenId" | "subjectTokenName" | "requestId" | "archivedAt"
+): string | undefined {
+  if (payload[field] === undefined || payload[field] === null) {
+    return undefined;
+  }
+  const value = nonBlankString(payload[field]);
+  if (!value) {
+    throw malformedResponse("권한 감사 활동");
+  }
+  return value;
+}
+
+function isAuthorizationAuditAction(value: unknown): value is AuthorizationAuditAction {
+  return value === "token_created"
+    || value === "token_revoked"
+    || value === "scope_bootstrapped"
+    || value === "scope_restored"
+    || value === "base_reconciled";
+}
+
+function isAuthorizationAuditSource(value: unknown): value is AuthorizationAuditSource {
+  return value === "http" || value === "mcp" || value === "operator";
+}
+
+function exactDecimalString(value: unknown): string | undefined {
+  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value)
+    ? value
+    : undefined;
+}
+
+function optionalExactDecimalString(value: unknown): string | undefined {
+  return value === undefined ? undefined : exactDecimalString(value);
 }
 
 function parseMetadata(payload: unknown, context: string): AccountTokenMetadata {

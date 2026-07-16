@@ -13,6 +13,7 @@ import {
 import {
   createPostgresTeamAuthorizationStateStore,
   migratePostgresTeamAuthorizationState,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION,
   type TeamAuthorizationStateSnapshot,
   type TeamAuthorizationStateStore
 } from "./team-authorization-postgres.js";
@@ -135,7 +136,11 @@ async function initializeScope(
     baseFingerprint: canonicalTeamAuthorizationBaseFingerprint(base),
     serializedState: emptyState
   };
-  const initialized = await store.initializeAbsent(scope, snapshot);
+  const initialized = await store.initializeAbsent(
+    scope,
+    snapshot,
+    TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION
+  );
   expect(initialized.initialized).toBe(true);
   return initialized.snapshot;
 }
@@ -166,7 +171,8 @@ function pauseFirstMutation(
   };
   return {
     read: (scope) => store.read(scope),
-    initializeAbsent: (scope, snapshot) => store.initializeAbsent(scope, snapshot),
+    initializeAbsent: (scope, snapshot, initialization) =>
+      store.initializeAbsent(scope, snapshot, initialization),
     transact: (scope, fingerprint, options, operation) => {
       if (!store.transact) {
         throw new Error("test store does not support transact");
@@ -238,7 +244,11 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
 
       try {
         const firstCreate = firstManager.manageTokens(
-          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            userId: "owner-user",
+            memberToken: "owner-base-secret",
+            audit: { source: "http", requestId: "request-host-a" }
+          },
           {
             type: "create",
             input: { name: "Host A", expiresInDays: null }
@@ -247,7 +257,11 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         await callbackEntered.promise;
 
         const secondCreate = secondManager.manageTokens(
-          { userId: "owner-user", memberToken: "owner-base-secret" },
+          {
+            userId: "owner-user",
+            memberToken: "owner-base-secret",
+            audit: { source: "mcp" }
+          },
           {
             type: "create",
             input: { name: "Host B", expiresInDays: null }
@@ -272,6 +286,64 @@ describePostgres("shared PostgreSQL team authorization manager", () => {
         expect(committed.serializedState).not.toContain("layo_pat_host_a");
         expect(committed.serializedState).not.toContain("layo_pat_host_b");
         expect(committed.serializedState).not.toMatch(/"token"\s*:/);
+
+        const events = await secondStore.listAuditEvents?.(
+          scope,
+          { afterId: "0", limit: 10 }
+        );
+        expect(events).toEqual([
+          expect.objectContaining({
+            scope,
+            generation: "1",
+            action: "token_created",
+            actorUserId: "owner-user",
+            subjectTokenId: "host-a-token",
+            subjectTokenName: "Host A",
+            source: "http",
+            requestId: "request-host-a",
+            metadata: {}
+          }),
+          expect.objectContaining({
+            scope,
+            generation: "2",
+            action: "token_created",
+            actorUserId: "owner-user",
+            subjectTokenId: "host-b-token",
+            subjectTokenName: "Host B",
+            source: "mcp",
+            metadata: {}
+          })
+        ]);
+        const firstPage = await secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: "0", limit: 1 }
+        );
+        expect(firstPage).toEqual({
+          events: [events![0]],
+          nextAfterId: events![0]!.id
+        });
+        await expect(secondManager.listAuditEvents?.(
+          { userId: "unmanaged-user", memberToken: "unmanaged-base-secret" },
+          { afterId: "0", limit: 1 }
+        )).rejects.toMatchObject({
+          statusCode: 403,
+          message: "owner role is required to read authorization audit history"
+        });
+        await expect(secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: "9223372036854775808", limit: 1 }
+        )).rejects.toMatchObject({
+          statusCode: 400,
+          message: "authorization audit afterId must be an exact decimal string"
+        });
+        const secondPage = await secondManager.listAuditEvents?.(
+          { userId: "owner-user", memberToken: "owner-base-secret" },
+          { afterId: firstPage!.nextAfterId!, limit: 1 }
+        );
+        expect(secondPage).toEqual({ events: [events![1]] });
+
+        expect(JSON.stringify(events)).not.toContain("layo_pat_host");
+        expect(JSON.stringify(events)).not.toContain("tokenHash");
       } finally {
         mayCommit.resolve();
         await Promise.all([

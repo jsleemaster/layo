@@ -67,6 +67,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       : undefined);
 
   type LibraryRequest = {
+    id: string;
     headers: {
       authorization?: string | string[];
       "x-layo-user-id"?: string | string[];
@@ -138,11 +139,29 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return options.teamAuthorizationManager;
   };
 
+  const requireTeamAuthorizationAuditManager = () => {
+    const manager = requireTeamAuthorizationManager();
+    if (!manager.listAuditEvents) {
+      throw Object.assign(
+        new Error("authorization audit history requires shared PostgreSQL authorization"),
+        { code: "EUNAVAILABLE", statusCode: 503 }
+      );
+    }
+    return {
+      manager,
+      listAuditEvents: manager.listAuditEvents.bind(manager)
+    };
+  };
+
   const accountTokenPrincipal = (request: LibraryRequest) => ({
     userId: Array.isArray(request.headers["x-layo-user-id"])
       ? request.headers["x-layo-user-id"][0] ?? ""
       : request.headers["x-layo-user-id"] ?? "",
-    memberToken: bearerToken(request.headers.authorization) ?? ""
+    memberToken: bearerToken(request.headers.authorization) ?? "",
+    audit: {
+      source: "http" as const,
+      requestId: request.id
+    }
   });
 
   const accountTokenMetadataResponse = (
@@ -203,6 +222,21 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return {
       metadata: accountTokenMetadataResponse(result.metadata)
     };
+  });
+
+  server.get<{
+    Querystring: { afterId?: string; limit?: string };
+  }>("/account/authorization-audit", async (request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const { listAuditEvents } = requireTeamAuthorizationAuditManager();
+    const afterId = request.query.afterId ?? "0";
+    const limit = request.query.limit === undefined
+      ? 50
+      : Number(request.query.limit);
+    return listAuditEvents(
+      accountTokenPrincipal(request),
+      { afterId, limit }
+    );
   });
 
   server.options("*", async (_request, reply) => {

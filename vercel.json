@@ -5,9 +5,9 @@
   "buildCommand": "pnpm --filter @layo/web build",
   "outputDirectory": "apps/web/dist",
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/projects/:path*", "destination": "/api/projects/:path*" },
-    { "source": "/files/:path*", "destination": "/api/files/:path*" },
-    { "source": "/assets/:path*", "destination": "/api/assets/:path*" }
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
   ]
 }

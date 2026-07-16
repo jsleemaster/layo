@@ -45,6 +45,7 @@ describe("team access token HTTP administration", () => {
       generateId: () => "token-deploy",
       generateSecret: () => "layo_pat_http_secret"
     });
+    const manageTokens = vi.spyOn(manager, "manageTokens");
     const server = createHttpServer(new FileStorage(path.join(root, "storage")), {
       libraryRegistryAuth: source.config,
       teamAuthorizationManager: manager
@@ -61,6 +62,17 @@ describe("team access token HTTP administration", () => {
       expect(invalid.json()).toMatchObject({
         error: "team authorization token name is required"
       });
+
+      for (const name of ["x".repeat(513), "line\nbreak", "\u0085", "\u202e"]) {
+        const unsafeName = await server.inject({
+          method: "POST",
+          url: "/account/tokens",
+          headers: credentials("owner-user", "legacy-owner-token"),
+          payload: { name, expiresInDays: 30 }
+        });
+        expect(unsafeName.statusCode).toBe(400);
+        expect(unsafeName.json().error).toContain("audit-safe label");
+      }
 
       const created = await server.inject({
         method: "POST",
@@ -111,6 +123,18 @@ describe("team access token HTTP administration", () => {
           revokedAt: "2026-07-14T12:00:00.000Z"
         }
       });
+
+      const auditContexts = manageTokens.mock.calls.map(([principal]) =>
+        (principal as typeof principal & {
+          audit?: { source?: string; requestId?: string };
+        }).audit
+      );
+      expect(auditContexts).toHaveLength(9);
+      expect(auditContexts.every((audit) => audit?.source === "http")).toBe(true);
+      const requestIds = auditContexts.map((audit) => audit?.requestId);
+      expect(requestIds.every((requestId) => typeof requestId === "string" && requestId.length > 0))
+        .toBe(true);
+      expect(new Set(requestIds)).toHaveLength(requestIds.length);
     } finally {
       source.close();
       await server.close();
@@ -192,6 +216,28 @@ describe("team access token HTTP administration", () => {
     }
   });
 
+  test.each(["legacy\u0085", "legacy\u202e"])(
+    "rejects an existing token label unsafe for audit before administration",
+    async (name) => {
+      const root = await mkdtemp(path.join(tmpdir(), "layo-token-http-unsafe-"));
+      roots.push(root);
+      const configPath = path.join(root, "members.json");
+      await writeFile(configPath, JSON.stringify([{
+        userId: "owner-user",
+        role: "owner",
+        teamIds: ["team-alpha"],
+        tokens: [{
+          id: "legacy-token",
+          name,
+          token: "legacy-secret"
+        }]
+      }]), "utf8");
+
+      await expect(watchTeamAuthorizationConfigFile(configPath))
+        .rejects.toThrow(/audit-safe label/i);
+    }
+  );
+
   test.each([
     {
       label: "list",
@@ -234,6 +280,67 @@ describe("team access token HTTP administration", () => {
     } finally {
       fixture.source.close();
       await fixture.server.close();
+    }
+  });
+
+  test("passes an exact owner cursor and HTTP request attribution to audit history", async () => {
+    const listAuditEvents = vi.fn(async () => ({
+      events: [{
+        id: "9007199254740994",
+        scope: "team-alpha",
+        generation: "9007199254740993",
+        action: "token_created" as const,
+        actorUserId: "owner-user",
+        subjectTokenId: "token-deploy",
+        subjectTokenName: "Deploy automation",
+        source: "http" as const,
+        requestId: "original-request",
+        metadata: {},
+        createdAt: "2026-07-15T12:00:00.000Z"
+      }],
+      nextAfterId: "9007199254740994"
+    }));
+    const manager = {
+      manageTokens: vi.fn(),
+      listTokens: vi.fn(),
+      createToken: vi.fn(),
+      revokeToken: vi.fn(),
+      listAuditEvents
+    } as unknown as TeamAuthorizationFileManager;
+    const server = createHttpServer(new FileStorage(), {
+      libraryRegistryAuth: { members: [] },
+      teamAuthorizationManager: manager
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/account/authorization-audit?afterId=9007199254740993&limit=25",
+        headers: credentials("owner-user", "legacy-owner-token")
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(listAuditEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "owner-user",
+          memberToken: "legacy-owner-token",
+          audit: {
+            source: "http",
+            requestId: expect.any(String)
+          }
+        }),
+        { afterId: "9007199254740993", limit: 25 }
+      );
+      expect(response.json()).toEqual({
+        events: [expect.objectContaining({
+          id: "9007199254740994",
+          generation: "9007199254740993"
+        })],
+        nextAfterId: "9007199254740994"
+      });
+    } finally {
+      await server.close();
     }
   });
 

@@ -3,7 +3,8 @@ import { Pool } from "pg";
 import { describe, expect, test, vi } from "vitest";
 import {
   createPostgresTeamAuthorizationStateStore,
-  migratePostgresTeamAuthorizationState
+  migratePostgresTeamAuthorizationState,
+  TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION
 } from "./team-authorization-postgres.js";
 
 const connectionString = process.env.LAYO_TEST_POSTGRES_URL;
@@ -175,6 +176,28 @@ describePostgres("PostgreSQL team authorization state store", () => {
     }
   });
 
+  test("rejects an unchanged legacy mutation from initializing an absent scope", async () => {
+    await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
+    const store = await createPostgresTeamAuthorizationStateStore({
+      connectionString: connectionString!
+    });
+    const scope = `unchanged-absent-${randomUUID()}`;
+
+    try {
+      await expect(store.mutate(scope, fingerprint, async (snapshot) => ({
+        baseFingerprint: snapshot.baseFingerprint,
+        serializedState: snapshot.serializedState,
+        result: "unchanged",
+        changed: false
+      }))).rejects.toThrow(/cannot initialize an absent scope/i);
+      await expect(store.read(scope)).rejects.toThrow(
+        `authorization scope ${scope} does not exist`
+      );
+    } finally {
+      await store.close();
+    }
+  });
+
   test("rolls back a failed first mutation to an absent scope", async () => {
     await migratePostgresTeamAuthorizationState({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
@@ -274,7 +297,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
         generation: "0",
         baseFingerprint: fingerprint,
         serializedState: emptyState
-      });
+      }, TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION);
       await expect(store.mutate(scope, fingerprint, async (snapshot) => ({
         baseFingerprint: snapshot.baseFingerprint,
         serializedState: snapshot.serializedState,
@@ -392,7 +415,7 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await migratePostgresTeamAuthorizationState({ connectionString: scopedConnection });
       await admin.query(
         `INSERT INTO ${schemaSql}.layo_authorization_schema_migrations (version)
-         VALUES (2)`
+         VALUES (3)`
       );
 
       await expect(migratePostgresTeamAuthorizationState({
@@ -437,6 +460,15 @@ describePostgres("PostgreSQL team authorization state store", () => {
       await admin.query(
         `GRANT SELECT, INSERT, UPDATE
            ON ${schemaSql}.layo_team_authorization_state TO ${roleSql}`
+      );
+      await admin.query(
+        `GRANT SELECT, INSERT, UPDATE
+           ON ${schemaSql}.layo_authorization_audit_events TO ${roleSql}`
+      );
+      await admin.query(
+        `GRANT USAGE, SELECT
+           ON SEQUENCE ${schemaSql}.layo_authorization_audit_events_id_seq
+           TO ${roleSql}`
       );
 
       runtimeStore = await createPostgresTeamAuthorizationStateStore({

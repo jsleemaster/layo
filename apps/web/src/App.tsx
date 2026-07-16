@@ -52,8 +52,10 @@ import { apiUrl } from "./api-base";
 import {
   createAccountToken,
   listAccountTokens,
+  listAuthorizationAudit,
   revokeAccountToken,
-  type AccountTokenMetadata
+  type AccountTokenMetadata,
+  type AuthorizationAuditEvent
 } from "./account-token-api";
 import { isCurrentAccountTokenOperation as isAccountTokenOperationCurrent } from "./account-token-operation";
 import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
@@ -2611,6 +2613,22 @@ function CanvasImageBody({
       ) : null}
     </>
   );
+}
+
+function authorizationAuditActionLabel(
+  action: AuthorizationAuditEvent["action"]
+): string {
+  if (action === "token_created") return "토큰 생성";
+  if (action === "token_revoked") return "토큰 해지";
+  if (action === "scope_bootstrapped") return "공유 범위 초기화";
+  if (action === "scope_restored") return "공유 범위 복구";
+  return "기준 권한 조정";
+}
+
+function authorizationAuditSourceLabel(
+  source: AuthorizationAuditEvent["source"]
+): string {
+  return source === "operator" ? "운영자" : source.toUpperCase();
 }
 
 function collaborationStatusLabel(status: string): string {
@@ -9445,6 +9463,13 @@ export function App() {
   const [accountTokenCreatePending, setAccountTokenCreatePending] = useState(false);
   const [accountTokenRefreshPending, setAccountTokenRefreshPending] = useState(false);
   const [accountTokenRevokingId, setAccountTokenRevokingId] = useState<string | null>(null);
+  const [authorizationAuditEvents, setAuthorizationAuditEvents] =
+    useState<AuthorizationAuditEvent[]>([]);
+  const [authorizationAuditNextAfterId, setAuthorizationAuditNextAfterId] =
+    useState<string | undefined>();
+  const [authorizationAuditStatus, setAuthorizationAuditStatus] =
+    useState("멤버 토큰을 적용하면 권한 활동을 확인할 수 있습니다");
+  const [authorizationAuditPending, setAuthorizationAuditPending] = useState(false);
   const [manifestText, setManifestText] = useState("");
   const [manifestUrl, setManifestUrl] = useState("");
   const [manifestStatus, setManifestStatus] = useState("");
@@ -9519,6 +9544,7 @@ export function App() {
     useState<ComponentVariantSourceReorderSession | null>(null);
   const [frameSpacingDragSession, setFrameSpacingDragSession] = useState<FrameSpacingDragSession | null>(null);
   const accountTokenOperationGenerationRef = useRef(0);
+  const authorizationAuditOperationGenerationRef = useRef(0);
   const accountTokenIdentityRef = useRef("");
   const accountTokenSessionRef = useRef<CollabDocumentSession | null>(null);
   const memberTokenInputRef = useRef<HTMLInputElement | null>(null);
@@ -9921,6 +9947,7 @@ export function App() {
 
   useEffect(() => {
     const operation = beginAccountTokenOperation();
+    const auditOperation = beginAuthorizationAuditOperation();
     setCreatedAccountTokenSecret(null);
     setAccountTokenSecretStatus("");
     setSelfRevokeTokenId(null);
@@ -9928,6 +9955,9 @@ export function App() {
     setAccountTokenCreatePending(false);
     setAccountTokenRefreshPending(false);
     setAccountTokenRevokingId(null);
+    setAuthorizationAuditEvents([]);
+    setAuthorizationAuditNextAfterId(undefined);
+    setAuthorizationAuditPending(false);
 
     if (teamPanelMode !== "manifest") {
       return undefined;
@@ -9938,6 +9968,7 @@ export function App() {
       if (!accountTokenRecovery) {
         setAccountTokenStatus("멤버 토큰을 적용하면 계정 토큰을 관리할 수 있습니다");
       }
+      setAuthorizationAuditStatus("멤버 토큰을 적용하면 권한 활동을 확인할 수 있습니다");
       return undefined;
     }
 
@@ -9960,6 +9991,35 @@ export function App() {
       .finally(() => {
         if (isCurrentAccountTokenOperation(operation)) {
           setAccountTokenRefreshPending(false);
+        }
+      });
+
+    setAuthorizationAuditPending(true);
+    setAuthorizationAuditStatus("권한 활동 불러오는 중");
+    void listAuthorizationAudit(
+      collabSession.team.currentUserId,
+      activeMemberToken,
+      { afterId: "0", limit: 25 }
+    )
+      .then((result) => {
+        if (!isCurrentAuthorizationAuditOperation(auditOperation)) return;
+        setAuthorizationAuditEvents(result.events);
+        setAuthorizationAuditNextAfterId(result.nextAfterId);
+        setAuthorizationAuditStatus(
+          result.events.length > 0 ? `권한 활동 ${result.events.length}개` : "권한 활동 없음"
+        );
+      })
+      .catch((error) => {
+        if (!isCurrentAuthorizationAuditOperation(auditOperation)) return;
+        setAuthorizationAuditEvents([]);
+        setAuthorizationAuditNextAfterId(undefined);
+        setAuthorizationAuditStatus(
+          error instanceof Error ? error.message : "권한 활동을 불러오지 못했습니다"
+        );
+      })
+      .finally(() => {
+        if (isCurrentAuthorizationAuditOperation(auditOperation)) {
+          setAuthorizationAuditPending(false);
         }
       });
 
@@ -15262,6 +15322,59 @@ export function App() {
       session: accountTokenSessionRef.current
     });
 
+  const beginAuthorizationAuditOperation = () => ({
+    generation: ++authorizationAuditOperationGenerationRef.current,
+    identity: accountTokenIdentityRef.current,
+    session: collabSession
+  });
+
+  const isCurrentAuthorizationAuditOperation = (operation: {
+    generation: number;
+    identity: string;
+    session: CollabDocumentSession | null;
+  }) =>
+    isAccountTokenOperationCurrent(operation, {
+      generation: authorizationAuditOperationGenerationRef.current,
+      identity: accountTokenIdentityRef.current,
+      session: accountTokenSessionRef.current
+    });
+
+  const loadAuthorizationAudit = async (afterId = "0", append = false) => {
+    if (!collabSession || !activeMemberToken || authorizationAuditPending) return;
+    const operation = beginAuthorizationAuditOperation();
+    setAuthorizationAuditPending(true);
+    setAuthorizationAuditStatus(append ? "다음 권한 활동 불러오는 중" : "권한 활동 불러오는 중");
+    try {
+      const result = await listAuthorizationAudit(
+        collabSession.team.currentUserId,
+        activeMemberToken,
+        { afterId, limit: 25 }
+      );
+      if (!isCurrentAuthorizationAuditOperation(operation)) return;
+      setAuthorizationAuditEvents((current) => {
+        const next = append ? [...current, ...result.events] : result.events;
+        return Array.from(new Map(next.map((event) => [event.id, event])).values());
+      });
+      setAuthorizationAuditNextAfterId(result.nextAfterId);
+      setAuthorizationAuditStatus(
+        result.events.length > 0 ? "권한 활동을 불러왔습니다" : append ? "추가 권한 활동 없음" : "권한 활동 없음"
+      );
+    } catch (error) {
+      if (!isCurrentAuthorizationAuditOperation(operation)) return;
+      if (!append) {
+        setAuthorizationAuditEvents([]);
+        setAuthorizationAuditNextAfterId(undefined);
+      }
+      setAuthorizationAuditStatus(
+        error instanceof Error ? error.message : "권한 활동을 불러오지 못했습니다"
+      );
+    } finally {
+      if (isCurrentAuthorizationAuditOperation(operation)) {
+        setAuthorizationAuditPending(false);
+      }
+    }
+  };
+
   const refreshAccountTokens = async (successStatus?: string) => {
     if (!collabSession || !activeMemberToken || accountTokenRefreshPending) return;
     const operation = beginAccountTokenOperation();
@@ -17140,6 +17253,53 @@ export function App() {
                   <div className="team-status" data-testid="account-token-status" aria-live="polite">
                     {accountTokenStatus}
                   </div>
+                  <section className="authorization-audit" data-testid="authorization-audit" aria-label="권한 활동">
+                    <div className="account-token-heading">
+                      <strong>권한 활동</strong>
+                      <button
+                        type="button"
+                        data-testid="authorization-audit-refresh"
+                        onClick={() => void loadAuthorizationAudit()}
+                        disabled={!collabSession || !activeMemberToken || authorizationAuditPending}
+                      >
+                        새로고침
+                      </button>
+                    </div>
+                    <ul className="authorization-audit-list" data-testid="authorization-audit-list">
+                      {authorizationAuditEvents.map((event) => (
+                        <li key={event.id} className="authorization-audit-row" data-testid={`authorization-audit-row-${event.id}`}>
+                          <span className="authorization-audit-summary">
+                            <strong>{authorizationAuditActionLabel(event.action)}</strong>
+                            <span>
+                              {event.subjectTokenName ?? event.subjectTokenId ?? "공유 권한"}
+                              {" · "}
+                              {event.actorUserId}
+                            </span>
+                            <span>
+                              {authorizationAuditSourceLabel(event.source)}
+                              {" · "}
+                              {event.createdAt}
+                              {" · 세대 "}
+                              {event.generation}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {authorizationAuditNextAfterId ? (
+                      <button
+                        type="button"
+                        data-testid="authorization-audit-more"
+                        onClick={() => void loadAuthorizationAudit(authorizationAuditNextAfterId, true)}
+                        disabled={authorizationAuditPending}
+                      >
+                        더 보기
+                      </button>
+                    ) : null}
+                    <div className="team-status" data-testid="authorization-audit-status" aria-live="polite">
+                      {authorizationAuditStatus}
+                    </div>
+                  </section>
                 </section>
               ) : null}
               {teamPanelMode === "manifest" ? (

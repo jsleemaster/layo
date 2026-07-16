@@ -21,7 +21,8 @@ const emptyState = "{\"version\":2,\"members\":[]}";
 interface InitializableStore extends TeamAuthorizationStateStore {
   initializeAbsent(
     scope: string,
-    snapshot: TeamAuthorizationStateSnapshot
+    snapshot: TeamAuthorizationStateSnapshot,
+    initialization: Parameters<TeamAuthorizationStateStore["initializeAbsent"]>[2]
   ): Promise<{ initialized: boolean; snapshot: TeamAuthorizationStateSnapshot }>;
 }
 
@@ -110,8 +111,8 @@ function barrierStoreFactory(expectedAbsentReaders: number) {
           throw error;
         }
       },
-      initializeAbsent: (scope, snapshot) =>
-        store.initializeAbsent(scope, snapshot),
+      initializeAbsent: (scope, snapshot, initialization) =>
+        store.initializeAbsent(scope, snapshot, initialization),
       mutate: (scope, fingerprint, operation) =>
         store.mutate(scope, fingerprint, operation),
       close: () => store.close()
@@ -136,7 +137,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
     ], { env: cliEnv() })).rejects.toThrow("--scope is required");
 
     await expect(runTeamAuthorizationSharedCli([
-      "bootstrap", "--scope", `required-base-${randomUUID()}`, "--empty"
+      "bootstrap", "--actor-user-id", "operator-test", "--scope", `required-base-${randomUUID()}`, "--empty"
     ], { env: cliEnv() })).rejects.toThrow("--base is required");
   });
 
@@ -189,7 +190,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
     )).rejects.toBe(commandError);
   });
 
-  test("bootstraps empty state at generation zero with a canonical whole-base fingerprint", async () => {
+  test("bootstraps empty state at generation one with a canonical whole-base fingerprint", async () => {
     await withFiles(async (_root, basePath) => {
       const scope = `empty-${randomUUID()}`;
       const firstBase = JSON.stringify(baseMembers(), null, 2);
@@ -206,11 +207,11 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       await writeFile(basePath, firstBase, "utf8");
 
       await runTeamAuthorizationSharedCli([
-        "bootstrap", "--scope", scope, "--base", basePath, "--empty"
+        "bootstrap", "--actor-user-id", "operator-test", "--scope", scope, "--base", basePath, "--empty"
       ], { env: cliEnv() });
 
       expect(await readScope(scope)).toEqual({
-        generation: "0",
+        generation: "1",
         baseFingerprint: canonicalTeamAuthorizationBaseFingerprint(reorderedBase),
         serializedState: emptyState
       });
@@ -218,7 +219,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
         canonicalTeamAuthorizationBaseFingerprint(reorderedBase)
       );
       await expect(runTeamAuthorizationSharedCli([
-        "bootstrap", "--scope", scope, "--base", basePath, "--empty"
+        "bootstrap", "--actor-user-id", "operator-test", "--scope", scope, "--base", basePath, "--empty"
       ], { env: cliEnv() })).rejects.toThrow(/already exists/i);
     });
   });
@@ -246,7 +247,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       );
 
       await runTeamAuthorizationSharedCli([
-        "bootstrap", "--scope", scope, "--base", basePath, "--from-sidecar"
+        "bootstrap", "--actor-user-id", "operator-test", "--scope", scope, "--base", basePath, "--from-sidecar"
       ], { env: cliEnv() });
 
       const snapshot = await readScope(scope);
@@ -259,7 +260,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
           tokens: Array<{ tokenHash?: string; token?: string }>;
         }>;
       };
-      expect(snapshot.generation).toBe("0");
+      expect(snapshot.generation).toBe("1");
       expect(state.version).toBe(2);
       expect(state.members[0]).toMatchObject({
         userId: "owner-user",
@@ -278,14 +279,14 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       const identicalFactory = barrierStoreFactory(2);
       await expect(Promise.all([
         runTeamAuthorizationSharedCli([
-          "bootstrap", "--scope", identicalScope, "--base", basePath, "--empty"
+          "bootstrap", "--actor-user-id", "operator-test", "--scope", identicalScope, "--base", basePath, "--empty"
         ], { env: cliEnv(), createStore: identicalFactory }),
         runTeamAuthorizationSharedCli([
-          "bootstrap", "--scope", identicalScope, "--base", basePath, "--empty"
+          "bootstrap", "--actor-user-id", "operator-test", "--scope", identicalScope, "--base", basePath, "--empty"
         ], { env: cliEnv(), createStore: identicalFactory })
       ])).resolves.toEqual([undefined, undefined]);
       await expect(readScope(identicalScope)).resolves.toMatchObject({
-        generation: "0",
+        generation: "1",
         serializedState: emptyState
       });
 
@@ -299,16 +300,16 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       const conflictFactory = barrierStoreFactory(2);
       const results = await Promise.allSettled([
         runTeamAuthorizationSharedCli([
-          "bootstrap", "--scope", conflictScope, "--base", basePath, "--empty"
+          "bootstrap", "--actor-user-id", "operator-test", "--scope", conflictScope, "--base", basePath, "--empty"
         ], { env: cliEnv(), createStore: conflictFactory }),
         runTeamAuthorizationSharedCli([
-          "bootstrap", "--scope", conflictScope, "--base", otherBasePath, "--empty"
+          "bootstrap", "--actor-user-id", "operator-test", "--scope", conflictScope, "--base", otherBasePath, "--empty"
         ], { env: cliEnv(), createStore: conflictFactory })
       ]);
       expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
       expect(results.filter(({ status }) => status === "rejected")).toHaveLength(1);
       const winner = await readScope(conflictScope);
-      expect(winner.generation).toBe("0");
+      expect(winner.generation).toBe("1");
       expect([
         canonicalTeamAuthorizationBaseFingerprint(await readFile(basePath, "utf8")),
         canonicalTeamAuthorizationBaseFingerprint(await readFile(otherBasePath, "utf8"))
@@ -335,7 +336,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
         const scope = `${name}-${randomUUID()}`;
         await writeFile(`${basePath}.tokens.json`, sidecar, "utf8");
         await expect(runTeamAuthorizationSharedCli([
-          "bootstrap", "--scope", scope, "--base", basePath, "--from-sidecar"
+          "bootstrap", "--actor-user-id", "operator-test", "--scope", scope, "--base", basePath, "--from-sidecar"
         ], { env: cliEnv() })).rejects.toThrow();
         const store = await createPostgresTeamAuthorizationStateStore({
           connectionString: connectionString!
@@ -354,7 +355,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       const exportScope = `export-${randomUUID()}`;
       await writeFile(basePath, JSON.stringify(baseMembers()), "utf8");
       await runTeamAuthorizationSharedCli([
-        "bootstrap", "--scope", exportScope, "--base", basePath, "--empty"
+        "bootstrap", "--actor-user-id", "operator-test", "--scope", exportScope, "--base", basePath, "--empty"
       ], { env: cliEnv() });
 
       let stdout = "";
@@ -366,7 +367,7 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       expect(exported).toEqual({
         version: 1,
         scope: exportScope,
-        generation: "0",
+        generation: "1",
         baseFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
         state: { version: 2, members: [] }
       });
@@ -403,16 +404,17 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       };
       await writeFile(artifactPath, JSON.stringify(artifact), "utf8");
       await expect(runTeamAuthorizationSharedCli([
-        "restore", "--scope", restoreScope, "--input", artifactPath
+        "restore", "--actor-user-id", "operator-test", "--scope", restoreScope, "--input", artifactPath
       ], { env: cliEnv() })).rejects.toThrow(/confirm-absent-scope-restore/i);
       await runTeamAuthorizationSharedCli([
         "restore",
+        "--actor-user-id", "operator-test",
         "--scope", restoreScope,
         "--input", artifactPath,
         "--confirm-absent-scope-restore"
       ], { env: cliEnv() });
       await expect(readScope(restoreScope)).resolves.toEqual({
-        generation: "42",
+        generation: "43",
         baseFingerprint: "b".repeat(64),
         serializedState: emptyState
       });
@@ -424,12 +426,13 @@ describePostgres("shared authorization bootstrap/export/restore CLI", () => {
       }), "utf8");
       await expect(runTeamAuthorizationSharedCli([
         "restore",
+        "--actor-user-id", "operator-test",
         "--scope", restoreScope,
         "--input", artifactPath,
         "--confirm-absent-scope-restore"
       ], { env: cliEnv() })).rejects.toThrow(/already exists/i);
       await expect(readScope(restoreScope)).resolves.toEqual({
-        generation: "42",
+        generation: "43",
         baseFingerprint: "b".repeat(64),
         serializedState: emptyState
       });

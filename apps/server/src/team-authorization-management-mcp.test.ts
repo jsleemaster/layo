@@ -70,6 +70,7 @@ describe("team access token MCP administration", () => {
       generateId: () => "owner-created",
       generateSecret: () => "layo_pat_mcp_secret"
     });
+    const manageTokens = vi.spyOn(manager, "manageTokens");
     const client = await connect({
       libraryRegistryAuth: source.config,
       libraryRegistryPrincipal: {
@@ -126,6 +127,13 @@ describe("team access token MCP administration", () => {
     expect(JSON.stringify(revoked)).not.toContain("layo_pat_mcp_secret");
     expect(JSON.stringify(revoked)).not.toContain("tokenHash");
 
+    expect(manageTokens).toHaveBeenCalledTimes(3);
+    for (const [principal] of manageTokens.mock.calls) {
+      expect(principal).toMatchObject({ audit: { source: "mcp" } });
+      expect((principal as typeof principal & { audit?: { requestId?: string } }).audit)
+        .not.toHaveProperty("requestId");
+    }
+
     expect(await readFile(configPath, "utf8")).toBe(baseSnapshot);
     const persistedText = await readFile(`${configPath}.tokens.json`, "utf8");
     const persisted = JSON.parse(persistedText) as {
@@ -156,6 +164,67 @@ describe("team access token MCP administration", () => {
       (member: { userId: string }) => member.userId === "other-user"
     );
     expect(other.tokens).toEqual([otherToken]);
+  });
+
+  test("passes an exact owner cursor and MCP attribution to audit history", async () => {
+    const listAuditEvents = vi.fn(async () => ({
+      events: [{
+        id: "9007199254740994",
+        scope: "team-alpha",
+        generation: "9007199254740993",
+        action: "token_revoked" as const,
+        actorUserId: "owner-user",
+        subjectTokenId: "target-token",
+        subjectTokenName: "Deploy automation",
+        source: "mcp" as const,
+        metadata: {},
+        createdAt: "2026-07-15T12:00:00.000Z"
+      }],
+      nextAfterId: "9007199254740994"
+    }));
+    const manager = {
+      ...noOpManager(),
+      listAuditEvents
+    } as TeamAuthorizationFileManager;
+    const client = await connect({
+      libraryRegistryAuth: authorization(),
+      libraryRegistryPrincipal: {
+        userId: "owner-user",
+        memberToken: "owner-member-token"
+      },
+      teamAuthorizationManager: manager
+    });
+
+    const tool = (await client.listTools()).tools.find(
+      (candidate) => candidate.name === "list_authorization_audit"
+    );
+    expect(tool?.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    });
+
+    const result = parseToolJson(await client.callTool({
+      name: "list_authorization_audit",
+      arguments: { afterId: "9007199254740993", limit: 25 }
+    }));
+
+    expect(listAuditEvents).toHaveBeenCalledWith(
+      {
+        userId: "owner-user",
+        memberToken: "owner-member-token",
+        audit: { source: "mcp" }
+      },
+      { afterId: "9007199254740993", limit: 25 }
+    );
+    expect(result).toEqual({
+      events: [expect.objectContaining({
+        id: "9007199254740994",
+        generation: "9007199254740993"
+      })],
+      nextAfterId: "9007199254740994"
+    });
   });
 
   test.each([

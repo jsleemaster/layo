@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   createAccountToken,
   listAccountTokens,
+  listAuthorizationAudit,
   revokeAccountToken
 } from "./account-token-api";
 
@@ -203,6 +204,96 @@ describe("account token browser API", () => {
     await expect(call(mockFetch(payload) as typeof fetch)).rejects.toThrow(
       /서버 응답.*올바르지/
     );
+  });
+
+  test("lists authorization audit with an exact bigint cursor and whitelisted fields", async () => {
+    const fetcher = mockFetch({
+      events: [{
+        id: "9007199254740994",
+        scope: "team-alpha",
+        generation: "9007199254740993",
+        action: "token_created",
+        actorUserId: "owner-user",
+        subjectTokenId: "created-token",
+        subjectTokenName: "Deploy",
+        source: "http",
+        requestId: "request-1",
+        metadata: { ignoredByUi: "value" },
+        createdAt: "2026-07-15T12:00:00.000Z",
+        archivedAt: "2026-07-16T12:00:00.000Z",
+        token: "must-not-escape",
+        tokenHash: "must-not-escape"
+      }],
+      nextAfterId: "9007199254740994",
+      arbitrary: "must-not-escape"
+    });
+
+    const result = await listAuthorizationAudit(
+      "owner-user",
+      "active-member-token",
+      { afterId: "9007199254740993", limit: 25 },
+      fetcher as typeof fetch
+    );
+
+    expect(result).toEqual({
+      events: [{
+        id: "9007199254740994",
+        scope: "team-alpha",
+        generation: "9007199254740993",
+        action: "token_created",
+        actorUserId: "owner-user",
+        subjectTokenId: "created-token",
+        subjectTokenName: "Deploy",
+        source: "http",
+        requestId: "request-1",
+        createdAt: "2026-07-15T12:00:00.000Z",
+        archivedAt: "2026-07-16T12:00:00.000Z"
+      }],
+      nextAfterId: "9007199254740994"
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /\/account\/authorization-audit\?afterId=9007199254740993&limit=25$/
+      ),
+      {
+        method: "GET",
+        headers: {
+          Authorization: "Bearer active-member-token",
+          "X-Layo-User-Id": "owner-user"
+        },
+        cache: "no-store"
+      }
+    );
+  });
+
+  test.each([
+    {
+      payload: {
+        events: [{
+          id: 9007199254740994,
+          scope: "team-alpha",
+          generation: "1",
+          action: "token_created",
+          actorUserId: "owner-user",
+          source: "http",
+          metadata: {},
+          createdAt: "2026-07-15T12:00:00.000Z"
+        }]
+      }
+    },
+    {
+      payload: {
+        events: [],
+        nextAfterId: "1"
+      }
+    }
+  ])("rejects malformed authorization audit pages", async ({ payload }) => {
+    await expect(listAuthorizationAudit(
+      "owner-user",
+      "member-token",
+      { afterId: "0", limit: 25 },
+      mockFetch(payload) as typeof fetch
+    )).rejects.toThrow(/감사 활동.*올바르지/);
   });
 
   test("includes server status and JSON error details in Korean failures", async () => {

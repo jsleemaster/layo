@@ -18,7 +18,7 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.match(workflow, /VERCEL_TOKEN/);
   assert.match(workflow, /VERCEL_ORG_ID/);
   assert.match(workflow, /VERCEL_PROJECT_ID/);
-  assert.match(workflow, /vercel@50\.9\.6/);
+  assert.match(workflow, /vercel@56\.2\.1/);
   assert.match(workflow, /vercel pull --yes --environment=production/);
   assert.match(workflow, /vercel build --prod/);
   assert.match(workflow, /vercel deploy --prebuilt --prod/);
@@ -34,6 +34,36 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
   assert.doesNotMatch(workflow, /homepage: process\.env\.LAYO_DEPLOYMENT_URL/);
   assert.doesNotMatch(workflow, /pnpm run check:live-deployment -- --url https:\/\/layo\.vercel\.app/);
   assert.doesNotMatch(workflow, /github\.io|actions\/deploy-pages|pages:/i);
+});
+
+test("web deployment build keeps closed-path capability on the renderer public contract", async () => {
+  const app = await readText("apps/web/src/App.tsx");
+  const importBlock = (source) => {
+    const suffix = `} from "${source}";`;
+    const blockEnd = app.indexOf(suffix);
+    assert.notEqual(blockEnd, -1, `missing import from ${source}`);
+    const blockStart = app.lastIndexOf("import {", blockEnd);
+    assert.notEqual(blockStart, -1, `missing import start for ${source}`);
+    return app.slice(blockStart, blockEnd + suffix.length);
+  };
+
+  assert.equal(importBlock("@layo/renderer").includes("pathHasOnlyClosedSubpaths"), true);
+  assert.equal(importBlock("./path-editor").includes("pathHasOnlyClosedSubpaths"), false);
+});
+
+test("renderer build emits a Node-loadable ESM entry for serverless functions", async () => {
+  const rendererEntry = await readText("packages/renderer/src/index.ts");
+  const packageJson = JSON.parse(await readText("package.json"));
+  const fullVerification = await readText(".github/workflows/full-verification.yml");
+  const productionWorkflow = await readText(".github/workflows/vercel-production.yml");
+
+  assert.equal(rendererEntry.includes('export * from "./boolean-path.js";'), true);
+  assert.equal(
+    packageJson.scripts["check:serverless-runtime"],
+    'node -e \'import("./packages/renderer/dist/index.js").then((renderer) => { if (typeof renderer.evaluateBooleanPath !== "function") process.exit(1); })\''
+  );
+  assert.equal(fullVerification.includes("pnpm run check:serverless-runtime"), true);
+  assert.equal(productionWorkflow.includes("pnpm run check:serverless-runtime"), true);
 });
 
 test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
@@ -126,26 +156,23 @@ test("deployment docs keep web hosting and relay hosting separate", async () => 
   assert.match(docs, /docker compose/i);
 });
 
-test("vercel deployment routes same-origin API requests to the Layo server function", async () => {
+test("vercel static deployment exposes health without shared ephemeral document APIs", async () => {
   const config = JSON.parse(await readText("vercel.json"));
-  const apiFunction = await readText("api/[...path].ts");
+  const healthFunction = await readText("api/health.ts");
 
   assert.equal(config.framework, "vite");
   assert.equal(config.outputDirectory, "apps/web/dist");
-  assert.match(config.buildCommand, /pnpm --filter @layo\/web build/);
+  assert.equal(config.buildCommand.includes("pnpm --filter @layo/web build"), true);
   assert.deepEqual(config.rewrites, [
-    { source: "/health", destination: "/api/health" },
-    { source: "/projects/:path*", destination: "/api/projects/:path*" },
-    { source: "/files/:path*", destination: "/api/files/:path*" },
-    { source: "/assets/:path*", destination: "/api/assets/:path*" }
+    { source: "/health", destination: "/api/health" }
   ]);
 
-  assert.match(apiFunction, /createHttpServer/);
-  assert.match(apiFunction, /new FileStorage/);
-  assert.match(apiFunction, /\/tmp\/layo/);
-  assert.match(apiFunction, /originalUrl\.slice\(4\)/);
+  assert.equal(healthFunction.includes("ok: true"), true);
+  assert.equal(healthFunction.includes("FileStorage"), false);
+  assert.equal(healthFunction.includes("createHttpServer"), false);
+  assert.equal(healthFunction.includes("/tmp/layo"), false);
+  await assert.rejects(stat("api/bridge.ts"), { code: "ENOENT" });
 });
-
 test("web shell includes a stable Layo deployment marker", async () => {
   const indexHtml = await readText("apps/web/index.html");
 

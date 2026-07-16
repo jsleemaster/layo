@@ -2963,6 +2963,51 @@ button:disabled {
   background: var(--editor-color-surface);
 }
 
+.authorization-audit {
+  display: grid;
+  gap: var(--editor-space-xs);
+  min-width: 0;
+  padding-top: var(--editor-space-sm);
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.authorization-audit-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.authorization-audit-row {
+  min-width: 0;
+  padding: var(--editor-space-xs) 0;
+  border-top: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+}
+
+.authorization-audit-summary {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+}
+
+.authorization-audit-summary strong {
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-control-size);
+  line-height: var(--editor-text-control-line);
+}
+
+.authorization-audit-summary span {
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+  overflow-wrap: anywhere;
+}
+
+.authorization-audit > button {
+  min-height: var(--editor-space-xl);
+}
+
 .team-status,
 .project-status,
 .presence-member {

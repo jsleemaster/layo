@@ -63,7 +63,8 @@ function dependencies(overrides: Partial<TeamAuthorizationRuntimeDependencies> =
     manageTokens: vi.fn(),
     listTokens: vi.fn(),
     createToken: vi.fn(),
-    revokeToken: vi.fn()
+    revokeToken: vi.fn(),
+    listAuditEvents: vi.fn()
   };
   const values: TeamAuthorizationRuntimeDependencies = {
     watchConfigFile: vi.fn(async () => source),
@@ -197,6 +198,38 @@ test("shared close rejects new work, drains in-flight authentication, and closes
   expect(fixture.source.settled).toHaveBeenCalledOnce();
   expect(fixture.store.close).toHaveBeenCalledOnce();
   await runtime.settled();
+  expect(fixture.store.close).toHaveBeenCalledOnce();
+});
+
+test("shared close rejects new work and drains an in-flight audit read", async () => {
+  const audit = deferred<{ events: []; nextAfterId?: string }>();
+  const fixture = dependencies();
+  fixture.manager.listAuditEvents.mockReturnValue(audit.promise);
+  const runtime = await createTeamAuthorizationRuntime(
+    {
+      LAYO_LIBRARY_REGISTRY_MEMBERS_FILE: "/run/layo/members.json",
+      LAYO_AUTHORIZATION_DATABASE_URL: "postgres://authorization",
+      LAYO_AUTHORIZATION_SHARED_SCOPE: "team-alpha"
+    },
+    fixture.values
+  );
+  const manager = runtime.teamAuthorizationManager!;
+  const principal = { userId: "owner-user", memberToken: "owner-token" };
+  const inFlight = manager.listAuditEvents!(
+    principal,
+    { afterId: "0", limit: 50 }
+  );
+  const close = runtime.close();
+
+  await expect(manager.listAuditEvents!(
+    principal,
+    { afterId: "0", limit: 50 }
+  )).rejects.toMatchObject({ statusCode: 503 });
+  expect(fixture.store.close).not.toHaveBeenCalled();
+
+  audit.resolve({ events: [] });
+  await expect(inFlight).resolves.toEqual({ events: [] });
+  await close;
   expect(fixture.store.close).toHaveBeenCalledOnce();
 });
 

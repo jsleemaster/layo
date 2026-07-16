@@ -35,7 +35,10 @@ test("passes when the production URL serves the Layo Vite editor and health endp
       fetcher
     })
   );
-  assert.deepEqual(calls, ["https://layo.example/", "https://layo.example/health"]);
+  assert.deepEqual(calls, [
+    "https://layo.example/",
+    "https://layo.example/health"
+  ]);
 });
 
 test("requires an explicit production URL instead of defaulting to a stale host", async () => {

@@ -78,6 +78,9 @@ jobs:
       - name: Web build
         run: pnpm --filter @layo/web build
 
+      - name: Verify serverless runtime imports
+        run: pnpm run check:serverless-runtime
+
       - name: Core tests
         env:
           NODE_OPTIONS: --conditions=development

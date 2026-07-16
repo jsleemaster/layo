@@ -3,15 +3,17 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { Pool, type PoolClient } from "pg";
 
-const REQUIRED_SCHEMA_VERSION = 1;
+const REQUIRED_DATABASE_SCHEMA_VERSION = 2;
+const AUTHORIZATION_STATE_SCHEMA_VERSION = 1;
 const DEFAULT_STATEMENT_TIMEOUT_MS = 5_000;
 const MAX_SERIALIZED_STATE_BYTES = 1_048_576;
 const MAX_SCOPE_BYTES = 512;
+const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n;
 const EMPTY_SERIALIZED_STATE = "{\"version\":2,\"members\":[]}";
-const MIGRATION_URL = new URL(
-  "../migrations/0001-team-authorization-state.sql",
-  import.meta.url
-);
+const MIGRATION_URLS = [
+  new URL("../migrations/0001-team-authorization-state.sql", import.meta.url),
+  new URL("../migrations/0002-team-authorization-audit.sql", import.meta.url)
+];
 
 export interface TeamAuthorizationStateSnapshot {
   generation: string;
@@ -19,11 +21,48 @@ export interface TeamAuthorizationStateSnapshot {
   serializedState: string;
 }
 
+export type TeamAuthorizationAuditAction =
+  | "token_created"
+  | "token_revoked"
+  | "scope_bootstrapped"
+  | "scope_restored"
+  | "base_reconciled";
+
+export type TeamAuthorizationAuditSource = "http" | "mcp" | "operator";
+
+export interface TeamAuthorizationAuditEventInput {
+  action: TeamAuthorizationAuditAction;
+  actorUserId: string;
+  subjectTokenId?: string;
+  subjectTokenName?: string;
+  source: TeamAuthorizationAuditSource;
+  requestId?: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface TeamAuthorizationAuditEvent
+  extends TeamAuthorizationAuditEventInput {
+  id: string;
+  scope: string;
+  generation: string;
+  createdAt: string;
+  archivedAt?: string;
+}
+
+export const TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION = Object.freeze({
+  testOnlyUnaudited: true as const
+});
+
+export type TeamAuthorizationInitialization =
+  | TeamAuthorizationAuditEventInput
+  | typeof TEST_ONLY_UNAUDITED_AUTHORIZATION_INITIALIZATION;
+
 export interface TeamAuthorizationStateStore {
   read(scope: string): Promise<TeamAuthorizationStateSnapshot>;
   initializeAbsent(
     scope: string,
-    snapshot: TeamAuthorizationStateSnapshot
+    snapshot: TeamAuthorizationStateSnapshot,
+    initialization: TeamAuthorizationInitialization
   ): Promise<{
     initialized: boolean;
     snapshot: TeamAuthorizationStateSnapshot;
@@ -39,13 +78,35 @@ export interface TeamAuthorizationStateStore {
       serializedState: string;
       result: T;
       changed?: boolean;
+      auditEvent?: TeamAuthorizationAuditEventInput;
     }>
   ): Promise<{
     generation: string;
     baseFingerprint: string;
     serializedState: string;
     result: T;
+    auditEvent?: TeamAuthorizationAuditEvent;
   }>;
+  listAuditEvents?(
+    scope: string,
+    options: {
+      afterId: string;
+      limit: number;
+      expectedGeneration?: string;
+      expectedBaseFingerprint?: string;
+    }
+  ): Promise<TeamAuthorizationAuditEvent[]>;
+  listUnarchivedAuditEvents?(
+    scope: string,
+    options: { limit: number }
+  ): Promise<TeamAuthorizationAuditEvent[]>;
+  markAuditEventsArchived?(scope: string, eventIds: string[]): Promise<void>;
+  listArchivedAuditRetentionCandidates?(
+    scope: string,
+    options: { archivedBefore: string; keepNewest: number; limit: number }
+  ): Promise<string[]>;
+  deleteArchivedAuditEvents?(scope: string, eventIds: string[]): Promise<number>;
+  /** @deprecated Use transact with explicit audit attribution for product mutations. */
   mutate<T>(
     scope: string,
     expectedBaseFingerprint: string,
@@ -75,6 +136,21 @@ interface AuthorizationStateRow {
   generation: string;
   base_fingerprint: string;
   state: unknown;
+}
+
+interface AuthorizationAuditRow {
+  id: string;
+  scope: string;
+  generation: string;
+  action: TeamAuthorizationAuditAction;
+  actor_user_id: string;
+  subject_token_id: string | null;
+  subject_token_name: string | null;
+  source: TeamAuthorizationAuditSource;
+  request_id: string | null;
+  metadata: unknown;
+  created_at: Date | string;
+  archived_at: Date | string | null;
 }
 
 function validateConnectionString(connectionString: string): string {
@@ -112,10 +188,209 @@ function validateFingerprint(fingerprint: string): string {
 }
 
 function validateGeneration(generation: unknown): string {
-  if (typeof generation !== "string" || !/^(0|[1-9][0-9]*)$/.test(generation)) {
-    throw new Error("authorization generation must be an exact nonnegative decimal string");
+  if (
+    typeof generation !== "string"
+    || !/^(0|[1-9][0-9]*)$/.test(generation)
+    || BigInt(generation) > POSTGRES_BIGINT_MAX
+  ) {
+    throw new Error(
+      "authorization generation must be an exact PostgreSQL bigint decimal string"
+    );
   }
   return generation;
+}
+
+function validatePositiveAuditIds(eventIds: string[]): string[] {
+  if (eventIds.length < 1 || eventIds.length > 500) {
+    throw new Error("authorization audit event id batch must contain between 1 and 500 ids");
+  }
+  const normalized = eventIds.map((id) => {
+    const value = validateGeneration(id);
+    if (value === "0") {
+      throw new Error("authorization audit event id must be positive");
+    }
+    return value;
+  });
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error("authorization audit event ids must be unique");
+  }
+  return normalized;
+}
+
+function validateIsoTimestamp(value: string, field: string): string {
+  if (
+    !value
+    || !Number.isFinite(Date.parse(value))
+    || new Date(value).toISOString() !== value
+  ) {
+    throw new Error(`authorization audit ${field} must be an ISO timestamp`);
+  }
+  return value;
+}
+
+function validateAuditText(
+  value: unknown,
+  field: string,
+  optional = false
+): string | undefined {
+  if (value === undefined && optional) {
+    return undefined;
+  }
+  if (
+    typeof value !== "string"
+    || value !== value.trim()
+    || Buffer.byteLength(value, "utf8") < 1
+    || Buffer.byteLength(value, "utf8") > 512
+    || /[\p{Cc}\p{Cf}]/u.test(value)
+  ) {
+    throw new Error(`authorization audit ${field} is invalid`);
+  }
+  return value;
+}
+
+function validateAuditEventInput(
+  input: TeamAuthorizationAuditEventInput
+): TeamAuthorizationAuditEventInput {
+  const actions: TeamAuthorizationAuditAction[] = [
+    "token_created",
+    "token_revoked",
+    "scope_bootstrapped",
+    "scope_restored",
+    "base_reconciled"
+  ];
+  const sources: TeamAuthorizationAuditSource[] = ["http", "mcp", "operator"];
+  if (!actions.includes(input.action)) {
+    throw new Error("authorization audit action is invalid");
+  }
+  if (!sources.includes(input.source)) {
+    throw new Error("authorization audit source is invalid");
+  }
+  if (
+    !input.metadata
+    || typeof input.metadata !== "object"
+    || Array.isArray(input.metadata)
+  ) {
+    throw new Error("authorization audit metadata must be an object");
+  }
+  let metadata: string;
+  try {
+    metadata = JSON.stringify(input.metadata);
+  } catch {
+    throw new Error("authorization audit metadata must be serializable");
+  }
+  if (Buffer.byteLength(metadata, "utf8") > 16_384) {
+    throw new Error("authorization audit metadata is too large");
+  }
+
+  const allowedMetadataFields: Record<
+    TeamAuthorizationAuditAction,
+    readonly string[]
+  > = {
+    token_created: ["expiresAt", "baseReconciled"],
+    token_revoked: ["revokedAt", "baseReconciled"],
+    scope_bootstrapped: ["mode"],
+    scope_restored: ["artifactGeneration"],
+    base_reconciled: ["reason"]
+  };
+  for (const [key, value] of Object.entries(input.metadata)) {
+    if (!allowedMetadataFields[input.action].includes(key)) {
+      throw new Error(
+        `authorization audit metadata field ${key} is not allowed for ${input.action}`
+      );
+    }
+    if (
+      (key === "expiresAt" || key === "revokedAt")
+      && (
+        typeof value !== "string"
+        || !Number.isFinite(Date.parse(value))
+        || new Date(value).toISOString() !== value
+      )
+    ) {
+      throw new Error(`authorization audit metadata ${key} must be an ISO timestamp`);
+    }
+    if (key === "baseReconciled" && value !== true) {
+      throw new Error("authorization audit metadata baseReconciled must be true");
+    }
+    if (
+      key === "mode"
+      && value !== "empty"
+      && value !== "from_sidecar"
+    ) {
+      throw new Error("authorization audit metadata mode is invalid");
+    }
+    if (
+      key === "artifactGeneration"
+      && (
+        typeof value !== "string"
+        || !/^(0|[1-9][0-9]*)$/.test(value)
+        || BigInt(value) > POSTGRES_BIGINT_MAX
+      )
+    ) {
+      throw new Error("authorization audit metadata artifactGeneration is invalid");
+    }
+    if (
+      key === "reason"
+      && value !== "credential_recovery"
+      && value !== "operator_reconcile"
+    ) {
+      throw new Error("authorization audit metadata reason is invalid");
+    }
+  }
+  return {
+    action: input.action,
+    actorUserId: validateAuditText(input.actorUserId, "actorUserId")!,
+    subjectTokenId: validateAuditText(
+      input.subjectTokenId,
+      "subjectTokenId",
+      true
+    ),
+    subjectTokenName: validateAuditText(
+      input.subjectTokenName,
+      "subjectTokenName",
+      true
+    ),
+    source: input.source,
+    requestId: validateAuditText(input.requestId, "requestId", true),
+    metadata: JSON.parse(metadata) as Record<string, unknown>
+  };
+}
+
+function timestampToIso(value: Date | string, field: string): string {
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    throw new Error(`authorization audit ${field} is invalid`);
+  }
+  return timestamp.toISOString();
+}
+
+function auditEventFromRow(row: AuthorizationAuditRow): TeamAuthorizationAuditEvent {
+  const id = validateGeneration(row.id);
+  if (id === "0") {
+    throw new Error("authorization audit id must be positive");
+  }
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, unknown>
+      : undefined;
+  if (!metadata) {
+    throw new Error("authorization audit metadata is invalid");
+  }
+  return {
+    id,
+    scope: validateScope(row.scope),
+    generation: validateGeneration(row.generation),
+    action: row.action,
+    actorUserId: row.actor_user_id,
+    subjectTokenId: row.subject_token_id ?? undefined,
+    subjectTokenName: row.subject_token_name ?? undefined,
+    source: row.source,
+    requestId: row.request_id ?? undefined,
+    metadata,
+    createdAt: timestampToIso(row.created_at, "createdAt"),
+    archivedAt: row.archived_at
+      ? timestampToIso(row.archived_at, "archivedAt")
+      : undefined
+  };
 }
 
 function orderedKeys(value: Record<string, unknown>): string[] {
@@ -396,13 +671,21 @@ export async function migratePostgresTeamAuthorizationState(
     if (!Number.isSafeInteger(currentVersion) || currentVersion < 0) {
       throw new Error("authorization schema version is invalid");
     }
-    if (currentVersion > REQUIRED_SCHEMA_VERSION) {
+    if (currentVersion > REQUIRED_DATABASE_SCHEMA_VERSION) {
       throw new Error(
-        `authorization schema version ${currentVersion} is newer than supported version ${REQUIRED_SCHEMA_VERSION}`
+        `authorization schema version ${currentVersion} is newer than supported version ${REQUIRED_DATABASE_SCHEMA_VERSION}`
       );
     }
-    if (currentVersion < REQUIRED_SCHEMA_VERSION) {
-      const migration = await readFile(MIGRATION_URL, "utf8");
+    for (
+      let version = currentVersion + 1;
+      version <= REQUIRED_DATABASE_SCHEMA_VERSION;
+      version += 1
+    ) {
+      const migrationUrl = MIGRATION_URLS[version - 1];
+      if (!migrationUrl) {
+        throw new Error(`authorization migration ${version} is missing`);
+      }
+      const migration = await readFile(migrationUrl, "utf8");
       await client.query(migration);
     }
     await client.query("COMMIT");
@@ -432,9 +715,9 @@ export async function createPostgresTeamAuthorizationStateStore(
     );
     const value = schema.rows[0]?.version;
     const version = value === null || value === undefined ? 0 : Number(value);
-    if (version !== REQUIRED_SCHEMA_VERSION) {
+    if (version !== REQUIRED_DATABASE_SCHEMA_VERSION) {
       throw new Error(
-        `authorization schema version ${String(value ?? "missing")} does not match required version ${REQUIRED_SCHEMA_VERSION}; run authorization:migrate`
+        `authorization schema version ${String(value ?? "missing")} does not match required version ${REQUIRED_DATABASE_SCHEMA_VERSION}; run authorization:migrate`
       );
     }
   } catch (error) {
@@ -474,47 +757,113 @@ export async function createPostgresTeamAuthorizationStateStore(
       return snapshotFromRow(result.rows[0]!);
     },
 
-    async initializeAbsent(scopeInput, snapshotInput) {
+    async initializeAbsent(scopeInput, snapshotInput, auditEventInput) {
       assertOpen();
       const scope = validateScope(scopeInput);
       const generation = validateGeneration(snapshotInput.generation);
       const baseFingerprint = validateFingerprint(snapshotInput.baseFingerprint);
       const state = parseSerializedState(snapshotInput.serializedState);
-      // Purpose: initialize bootstrap or restore state without mutating an existing scope.
-      const inserted = await pool.query<AuthorizationStateRow>(
-        `INSERT INTO layo_team_authorization_state
-          (scope, generation, base_fingerprint, state, schema_version)
-         VALUES ($1, $2::bigint, $3, $4::jsonb, $5)
-         ON CONFLICT (scope) DO NOTHING
-         RETURNING generation::text AS generation, base_fingerprint, state`,
-        [
-          scope,
-          generation,
-          baseFingerprint,
-          state.serializedState,
-          REQUIRED_SCHEMA_VERSION
-        ]
-      );
-      if (inserted.rowCount === 1) {
-        return {
-          initialized: true,
-          snapshot: snapshotFromRow(inserted.rows[0]!)
-        };
+      if (!auditEventInput) {
+        throw new Error("authorization scope initialization audit event is required");
       }
+      const testOnlyUnaudited = "testOnlyUnaudited" in auditEventInput;
+      if (testOnlyUnaudited && process.env.NODE_ENV !== "test") {
+        throw new Error(
+          "test-only unaudited authorization initialization is unavailable"
+        );
+      }
+      const auditEvent = testOnlyUnaudited
+        ? undefined
+        : validateAuditEventInput(auditEventInput);
+      if (auditEvent && generation === "0") {
+        throw new Error(
+          "audited authorization scope initialization requires a positive generation"
+        );
+      }
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        // Purpose: initialize bootstrap or restore state and its audit row atomically.
+        const inserted = await client.query<AuthorizationStateRow>(
+          `INSERT INTO layo_team_authorization_state
+            (scope, generation, base_fingerprint, state, schema_version)
+           VALUES ($1, $2::bigint, $3, $4::jsonb, $5)
+           ON CONFLICT (scope) DO NOTHING
+           RETURNING generation::text AS generation, base_fingerprint, state`,
+          [
+            scope,
+            generation,
+            baseFingerprint,
+            state.serializedState,
+            AUTHORIZATION_STATE_SCHEMA_VERSION
+          ]
+        );
+        if (inserted.rowCount === 1) {
+          if (auditEvent) {
+            const audit = await client.query(
+              `INSERT INTO layo_authorization_audit_events
+                (
+                  scope,
+                  generation,
+                  action,
+                  actor_user_id,
+                  subject_token_id,
+                  subject_token_name,
+                  source,
+                  request_id,
+                  metadata
+                )
+               VALUES ($1, $2::bigint, $3, $4, $5, $6, $7, $8, $9::jsonb)
+               RETURNING id`,
+              [
+                scope,
+                generation,
+                auditEvent.action,
+                auditEvent.actorUserId,
+                auditEvent.subjectTokenId ?? null,
+                auditEvent.subjectTokenName ?? null,
+                auditEvent.source,
+                auditEvent.requestId ?? null,
+                JSON.stringify(auditEvent.metadata)
+              ]
+            );
+            if (audit.rowCount !== 1) {
+              throw new Error("authorization initialization audit event was not appended");
+            }
+          }
+          await client.query("COMMIT");
+          return {
+            initialized: true,
+            snapshot: snapshotFromRow(inserted.rows[0]!)
+          };
+        }
 
-      const existing = await pool.query<AuthorizationStateRow>(
-        `SELECT generation::text AS generation, base_fingerprint, state
-         FROM layo_team_authorization_state
-         WHERE scope = $1`,
-        [scope]
-      );
-      if (existing.rowCount !== 1) {
-        throw new Error(`authorization scope ${scope} initialization conflicted`);
+        const existing = await client.query<AuthorizationStateRow>(
+          `SELECT generation::text AS generation, base_fingerprint, state
+           FROM layo_team_authorization_state
+           WHERE scope = $1`,
+          [scope]
+        );
+        if (existing.rowCount !== 1) {
+          throw new Error(`authorization scope ${scope} initialization conflicted`);
+        }
+        await client.query("COMMIT");
+        return {
+          initialized: false,
+          snapshot: snapshotFromRow(existing.rows[0]!)
+        };
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
       }
-      return {
-        initialized: false,
-        snapshot: snapshotFromRow(existing.rows[0]!)
-      };
     },
 
     async transact<T>(
@@ -528,6 +877,7 @@ export async function createPostgresTeamAuthorizationStateStore(
         serializedState: string;
         result: T;
         changed?: boolean;
+        auditEvent?: TeamAuthorizationAuditEventInput;
       }>
     ) {
       assertOpen();
@@ -563,6 +913,11 @@ export async function createPostgresTeamAuthorizationStateStore(
         const commitsMutation =
           transactionOptions.mutating && transaction.changed !== false;
         if (!commitsMutation) {
+          if (transaction.auditEvent) {
+            throw new Error(
+              "non-mutating authorization transaction must not append an audit event"
+            );
+          }
           if (
             baseFingerprint !== snapshot.baseFingerprint
             || state.serializedState !== snapshot.serializedState
@@ -575,6 +930,12 @@ export async function createPostgresTeamAuthorizationStateStore(
           return { ...snapshot, result: transaction.result };
         }
 
+        if (!transaction.auditEvent) {
+          throw new Error(
+            "authorization audit event is required for every changed transaction"
+          );
+        }
+
         const updated = await client.query<AuthorizationStateRow>(
           `UPDATE layo_team_authorization_state
            SET generation = generation + 1,
@@ -584,14 +945,338 @@ export async function createPostgresTeamAuthorizationStateStore(
                updated_at = now()
            WHERE scope = $1
            RETURNING generation::text AS generation, base_fingerprint, state`,
-          [scope, baseFingerprint, state.serializedState, REQUIRED_SCHEMA_VERSION]
+          [scope, baseFingerprint, state.serializedState , AUTHORIZATION_STATE_SCHEMA_VERSION]
         );
         if (updated.rowCount !== 1) {
           throw new Error(`authorization scope ${scope} was not updated`);
         }
         const committed = snapshotFromRow(updated.rows[0]!);
+        let auditEvent: TeamAuthorizationAuditEvent | undefined;
+        if (transaction.auditEvent) {
+          const input = validateAuditEventInput(transaction.auditEvent);
+          const insertedAudit = await client.query<AuthorizationAuditRow>(
+            `INSERT INTO layo_authorization_audit_events
+              (
+                scope,
+                generation,
+                action,
+                actor_user_id,
+                subject_token_id,
+                subject_token_name,
+                source,
+                request_id,
+                metadata
+              )
+             VALUES ($1, $2::bigint, $3, $4, $5, $6, $7, $8, $9::jsonb)
+             RETURNING
+               id::text AS id,
+               scope,
+               generation::text AS generation,
+               action,
+               actor_user_id,
+               subject_token_id,
+               subject_token_name,
+               source,
+               request_id,
+               metadata,
+               created_at,
+               archived_at`,
+            [
+              scope,
+              committed.generation,
+              input.action,
+              input.actorUserId,
+              input.subjectTokenId ?? null,
+              input.subjectTokenName ?? null,
+              input.source,
+              input.requestId ?? null,
+              JSON.stringify(input.metadata)
+            ]
+          );
+          if (insertedAudit.rowCount !== 1) {
+            throw new Error("authorization audit event was not appended");
+          }
+          auditEvent = auditEventFromRow(insertedAudit.rows[0]!);
+        }
         await client.query("COMMIT");
-        return { ...committed, result: transaction.result };
+        return {
+          ...committed,
+          result: transaction.result,
+          auditEvent
+        };
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
+      }
+    },
+
+    async listAuditEvents(
+      scopeInput: string,
+      options: {
+        afterId: string;
+        limit: number;
+        expectedGeneration?: string;
+        expectedBaseFingerprint?: string;
+      }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const afterId = validateGeneration(options.afterId);
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const hasExpectedGeneration = options.expectedGeneration !== undefined;
+      const hasExpectedFingerprint = options.expectedBaseFingerprint !== undefined;
+      if (hasExpectedGeneration !== hasExpectedFingerprint) {
+        throw new Error(
+          "authorization audit snapshot requires generation and base fingerprint"
+        );
+      }
+      const expectedGeneration = hasExpectedGeneration
+        ? validateGeneration(options.expectedGeneration)
+        : undefined;
+      const expectedBaseFingerprint = hasExpectedFingerprint
+        ? validateFingerprint(options.expectedBaseFingerprint!)
+        : undefined;
+      const client = hasExpectedGeneration ? await pool.connect() : undefined;
+      let released = false;
+      try {
+        if (client) {
+          await client.query("BEGIN");
+          await setLocalStatementTimeout(client, statementTimeoutMs);
+          const locked = await client.query<AuthorizationStateRow>(
+            `SELECT generation::text AS generation, base_fingerprint, state
+             FROM layo_team_authorization_state
+             WHERE scope = $1
+             FOR SHARE`,
+            [scope]
+          );
+          if (
+            locked.rowCount !== 1
+            || locked.rows[0]!.generation !== expectedGeneration
+            || locked.rows[0]!.base_fingerprint !== expectedBaseFingerprint
+          ) {
+            throw new Error("authorization audit authorization snapshot changed");
+          }
+        }
+        const executor = client ?? pool;
+        const result = await executor.query<AuthorizationAuditRow>(
+          `SELECT
+             id::text AS id,
+             scope,
+             generation::text AS generation,
+             action,
+             actor_user_id,
+             subject_token_id,
+             subject_token_name,
+             source,
+             request_id,
+             metadata,
+             created_at,
+             archived_at
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND id > $2::bigint
+           ORDER BY id ASC
+           LIMIT $3`,
+          [scope, afterId, options.limit]
+        );
+        if (client) {
+          await client.query("COMMIT");
+        }
+        return result.rows.map(auditEventFromRow);
+      } catch (error) {
+        if (client) {
+          const releaseError = await rollbackTransaction(client);
+          client.release(releaseError);
+          released = true;
+        }
+        throw error;
+      } finally {
+        if (client && !released) {
+          client.release();
+        }
+      }
+    },
+
+    async listUnarchivedAuditEvents(
+      scopeInput: string,
+      options: { limit: number }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const result = await pool.query<AuthorizationAuditRow>(
+        `SELECT
+           id::text AS id,
+           scope,
+           generation::text AS generation,
+           action,
+           actor_user_id,
+           subject_token_id,
+           subject_token_name,
+           source,
+           request_id,
+           metadata,
+           created_at,
+           archived_at
+         FROM layo_authorization_audit_events
+         WHERE scope = $1
+           AND archived_at IS NULL
+         ORDER BY id ASC
+         LIMIT $2`,
+        [scope, options.limit]
+      );
+      return result.rows.map(auditEventFromRow);
+    },
+
+    async markAuditEventsArchived(scopeInput: string, eventIdsInput: string[]) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const eventIds = validatePositiveAuditIds(eventIdsInput);
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        const selected = await client.query<{ id: string }>(
+          `SELECT id::text AS id
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND id = ANY($2::bigint[])
+           FOR UPDATE`,
+          [scope, eventIds]
+        );
+        const selectedIds = new Set(selected.rows.map((row) => row.id));
+        if (
+          selectedIds.size !== eventIds.length
+          || eventIds.some((id) => !selectedIds.has(id))
+        ) {
+          throw new Error("authorization audit archive ids do not match one scope");
+        }
+        await client.query(
+          `UPDATE layo_authorization_audit_events
+           SET archived_at = COALESCE(archived_at, clock_timestamp())
+           WHERE scope = $1
+             AND id = ANY($2::bigint[])`,
+          [scope, eventIds]
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        const releaseError = await rollbackTransaction(client);
+        client.release(releaseError);
+        released = true;
+        throw error;
+      } finally {
+        if (!released) {
+          client.release();
+        }
+      }
+    },
+
+    async listArchivedAuditRetentionCandidates(
+      scopeInput: string,
+      options: { archivedBefore: string; keepNewest: number; limit: number }
+    ) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const archivedBefore = validateIsoTimestamp(
+        options.archivedBefore,
+        "archivedBefore"
+      );
+      if (!Number.isSafeInteger(options.keepNewest) || options.keepNewest < 0) {
+        throw new Error("authorization audit keepNewest must be a nonnegative integer");
+      }
+      if (
+        !Number.isSafeInteger(options.limit)
+        || options.limit < 1
+        || options.limit > 500
+      ) {
+        throw new Error("authorization audit limit must be between 1 and 500");
+      }
+      const result = await pool.query<{ id: string }>(
+        `SELECT event.id::text AS id
+         FROM layo_authorization_audit_events AS event
+         WHERE event.scope = $1
+           AND event.archived_at IS NOT NULL
+           AND event.archived_at < $2::timestamptz
+           AND event.id NOT IN (
+             SELECT retained.id
+             FROM layo_authorization_audit_events AS retained
+             WHERE retained.scope = $1
+               AND retained.archived_at IS NOT NULL
+             ORDER BY retained.id DESC
+             LIMIT $3
+           )
+         ORDER BY event.id ASC
+         LIMIT $4`,
+        [scope, archivedBefore, options.keepNewest, options.limit]
+      );
+      return result.rows.map((row) => {
+        const id = validateGeneration(row.id);
+        if (id === "0") {
+          throw new Error("authorization audit retention id must be positive");
+        }
+        return id;
+      });
+    },
+
+    async deleteArchivedAuditEvents(scopeInput: string, eventIdsInput: string[]) {
+      assertOpen();
+      const scope = validateScope(scopeInput);
+      const eventIds = validatePositiveAuditIds(eventIdsInput);
+      const client = await pool.connect();
+      let released = false;
+      try {
+        await client.query("BEGIN");
+        await setLocalStatementTimeout(client, statementTimeoutMs);
+        const selected = await client.query<{ id: string }>(
+          `SELECT id::text AS id
+           FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND archived_at IS NOT NULL
+             AND id = ANY($2::bigint[])
+           FOR UPDATE`,
+          [scope, eventIds]
+        );
+        const selectedIds = new Set(selected.rows.map((row) => row.id));
+        if (
+          selectedIds.size !== eventIds.length
+          || eventIds.some((id) => !selectedIds.has(id))
+        ) {
+          throw new Error(
+            "authorization audit retention ids must all be archived in one scope"
+          );
+        }
+        const deleted = await client.query<{ id: string }>(
+          `DELETE FROM layo_authorization_audit_events
+           WHERE scope = $1
+             AND archived_at IS NOT NULL
+             AND id = ANY($2::bigint[])
+           RETURNING id::text AS id`,
+          [scope, eventIds]
+        );
+        if (deleted.rowCount !== eventIds.length) {
+          throw new Error("authorization audit retention delete count changed");
+        }
+        await client.query("COMMIT");
+        return deleted.rowCount;
       } catch (error) {
         const releaseError = await rollbackTransaction(client);
         client.release(releaseError);
@@ -622,7 +1307,7 @@ export async function createPostgresTeamAuthorizationStateStore(
       try {
         await client.query("BEGIN");
         await setLocalStatementTimeout(client, statementTimeoutMs);
-        await client.query(
+        const initialized = await client.query(
           `INSERT INTO layo_team_authorization_state
             (scope, generation, base_fingerprint, state, schema_version)
            VALUES ($1, 0, $2, $3::jsonb, $4)
@@ -631,7 +1316,7 @@ export async function createPostgresTeamAuthorizationStateStore(
             scope,
             expectedBaseFingerprint,
             initial.serializedState,
-            REQUIRED_SCHEMA_VERSION
+            AUTHORIZATION_STATE_SCHEMA_VERSION
           ]
         );
 
@@ -654,6 +1339,11 @@ export async function createPostgresTeamAuthorizationStateStore(
         const baseFingerprint = validateFingerprint(mutation.baseFingerprint);
         const state = parseSerializedState(mutation.serializedState);
         if (mutation.changed === false) {
+          if (initialized.rowCount === 1) {
+            throw new Error(
+              "unchanged authorization mutation cannot initialize an absent scope"
+            );
+          }
           if (
             baseFingerprint !== snapshot.baseFingerprint
             || state.serializedState !== snapshot.serializedState
@@ -674,12 +1364,34 @@ export async function createPostgresTeamAuthorizationStateStore(
                updated_at = now()
            WHERE scope = $1
            RETURNING generation::text AS generation, base_fingerprint, state`,
-          [scope, baseFingerprint, state.serializedState, REQUIRED_SCHEMA_VERSION]
+          [scope, baseFingerprint, state.serializedState , AUTHORIZATION_STATE_SCHEMA_VERSION]
         );
         if (updated.rowCount !== 1) {
           throw new Error(`authorization scope ${scope} was not updated`);
         }
         const committed = snapshotFromRow(updated.rows[0]!);
+        const compatibilityAudit = await client.query(
+          `INSERT INTO layo_authorization_audit_events
+            (
+              scope,
+              generation,
+              action,
+              actor_user_id,
+              source,
+              metadata
+            )
+           VALUES ($1, $2::bigint, 'base_reconciled', $3, 'operator', $4::jsonb)
+           RETURNING id`,
+          [
+            scope,
+            committed.generation,
+            "state-store-compatibility",
+            JSON.stringify({ reason: "operator_reconcile" })
+          ]
+        );
+        if (compatibilityAudit.rowCount !== 1) {
+          throw new Error("authorization compatibility audit event was not appended");
+        }
         await client.query("COMMIT");
         return { ...committed, result: mutation.result };
       } catch (error) {

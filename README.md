@@ -330,7 +330,7 @@ Run `pnpm --filter @layo/server authorization:migrate` before starting shared
 mode. Use a migration role that can create/alter the authorization tables and
 write the migration ledger; use a separate runtime role limited to reading the
 ledger and selecting, inserting, and updating
-`layo_team_authorization_state`. The PostgreSQL client enforces a 5-second
+`layo_team_authorization_state` and appending authorization audit rows. Use a separate operator role for audit export/archive and retention; only that role may delete archived rows. The PostgreSQL client enforces a 5-second
 statement timeout. Connection reachability, certificate trust, TLS mode,
 credentials, rotation, pooling limits, monitoring, and database backup remain
 operator responsibilities encoded outside the repository, normally in the
@@ -338,16 +338,16 @@ connection URL or platform configuration. Never commit the URL.
 
 Treat the scope as a durable deployment identifier, not a per-process or
 per-release value. Before destructive maintenance or downgrade, export it with
-`authorization:export --scope <scope> --output <private-file>`. Restore accepts
+`authorization:export --scope <scope> --output <private-file>`. Bootstrap, restore, and offline reconciliation require `--actor-user-id <operator>`. Restore accepts
 only an absent scope and requires both the same explicit `--scope` and
 `--confirm-absent-scope-restore`; it never overwrites live state. The scheduled
 `Authorization Backup Drill` proves migration, bootstrap, private versioned
 export, deletion, explicit restore, and byte-identical re-export against
-PostgreSQL 16. Downgrade is an operator-controlled export/stop/restore or
+PostgreSQL 16. Audit events use `authorization:audit:export` for private immutable-batch export and `authorization:audit:retain` for dry-run/apply retention. See `docs/deployment/authorization-audit.md` for roles, TLS, crash retry, deduplication, backup, and recovery. Downgrade is an operator-controlled export/stop/restore or
 reconfiguration procedure. Switching back to filesystem mode does not import or
 trust a stale `.tokens.json` sidecar automatically.
 
-Plaintext from token creation is one-time response state: it is absent from the
+Token names are audit-visible operator labels, are limited to 512 UTF-8 bytes without control characters, and must not contain secrets. Plaintext from token creation is one-time response state: it is absent from the
 sidecar, list/revoke responses, localStorage, IndexedDB, and exported team
 manifests. The browser clears it on dismissal, another create, identity change,
 leaving team settings, reload, and successful self-revocation; clipboard copy is
