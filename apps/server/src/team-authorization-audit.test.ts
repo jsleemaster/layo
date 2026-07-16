@@ -368,6 +368,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
   test("rolls back audit when the PostgreSQL state update fails", async () => {
     const scope = `audit-update-failure-${randomUUID()}`;
     const triggerName = `fail_audit_update_${randomUUID().replaceAll("-", "")}`;
+    const functionName = `${triggerName}_fn`;
     const database = new Pool({ connectionString: connectionString! });
     const store = await createPostgresTeamAuthorizationStateStore({
       connectionString: connectionString!
@@ -378,11 +379,17 @@ describePostgres("PostgreSQL authorization audit log", () => {
       serializedState: '{"version":2,"members":[]}'
     });
     await database.query(
+      `CREATE FUNCTION ${functionName}()
+       RETURNS trigger
+       LANGUAGE plpgsql
+       AS 'BEGIN RAISE EXCEPTION ''injected state update failure''; END'`
+    );
+    await database.query(
       `CREATE TRIGGER ${triggerName}
        BEFORE UPDATE ON layo_team_authorization_state
        FOR EACH ROW
        WHEN (NEW.scope = '${scope}')
-       EXECUTE FUNCTION suppress_redundant_updates_trigger()`
+       EXECUTE FUNCTION ${functionName}()`
     );
 
     try {
@@ -411,6 +418,7 @@ describePostgres("PostgreSQL authorization audit log", () => {
       await database.query(
         `DROP TRIGGER IF EXISTS ${triggerName} ON layo_team_authorization_state`
       );
+      await database.query(`DROP FUNCTION IF EXISTS ${functionName}()`);
       await Promise.all([store.close(), database.end()]);
     }
   });
