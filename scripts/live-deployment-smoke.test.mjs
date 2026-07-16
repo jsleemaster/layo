@@ -26,6 +26,9 @@ test("passes when the production URL serves the Layo Vite editor and health endp
     if (String(url) === "https://layo.example/health") {
       return textResponse('{"ok":true}', { contentType: "application/json" });
     }
+    if (String(url) === "https://layo.example/projects") {
+      return textResponse('{"projects":[]}', { contentType: "application/json" });
+    }
     return textResponse("not found", { status: 404 });
   };
 
@@ -35,7 +38,11 @@ test("passes when the production URL serves the Layo Vite editor and health endp
       fetcher
     })
   );
-  assert.deepEqual(calls, ["https://layo.example/", "https://layo.example/health"]);
+  assert.deepEqual(calls, [
+    "https://layo.example/",
+    "https://layo.example/health",
+    "https://layo.example/projects"
+  ]);
 });
 
 test("requires an explicit production URL instead of defaulting to a stale host", async () => {
@@ -86,6 +93,26 @@ test("rejects deployments without a same-origin health endpoint", async () => {
       fetcher
     }),
     /\/health/
+  );
+});
+
+test("rejects deployments whose project collection is not routed to the API", async () => {
+  const fetcher = async (url) => {
+    if (String(url) === "https://layo.example/") {
+      return textResponse('<!doctype html><meta name="layo-app" content="vite-editor" /><div id="root"></div>');
+    }
+    if (String(url) === "https://layo.example/health") {
+      return textResponse('{"ok":true}', { contentType: "application/json" });
+    }
+    return textResponse("not found", { status: 404 });
+  };
+
+  await assert.rejects(
+    checkLiveDeployment({
+      url: "https://layo.example",
+      fetcher
+    }),
+    /\\/projects/
   );
 });
 
