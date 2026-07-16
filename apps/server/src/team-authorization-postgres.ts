@@ -241,6 +241,7 @@ function validateAuditText(
     || value !== value.trim()
     || Buffer.byteLength(value, "utf8") < 1
     || Buffer.byteLength(value, "utf8") > 512
+    || /[\p{Cc}\p{Cf}]/u.test(value)
   ) {
     throw new Error(`authorization audit ${field} is invalid`);
   }
