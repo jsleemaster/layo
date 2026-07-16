@@ -38,11 +38,17 @@ test("vercel production workflow deploys prebuilt output and verifies the live L
 
 test("web deployment build keeps closed-path capability on the renderer public contract", async () => {
   const app = await readText("apps/web/src/App.tsx");
-  const rendererImport = app.match(/import \\{([\\s\\S]*?)\\} from "@layo\\/renderer";/)?.[1] ?? "";
-  const pathEditorImport = app.match(/import \\{([\\s\\S]*?)\\} from "\\.\\/path-editor";/)?.[1] ?? "";
+  const importBlock = (source) => {
+    const suffix = `} from "${source}";`;
+    const blockEnd = app.indexOf(suffix);
+    assert.notEqual(blockEnd, -1, `missing import from ${source}`);
+    const blockStart = app.lastIndexOf("import {", blockEnd);
+    assert.notEqual(blockStart, -1, `missing import start for ${source}`);
+    return app.slice(blockStart, blockEnd + suffix.length);
+  };
 
-  assert.match(rendererImport, /\\bpathHasOnlyClosedSubpaths\\b/);
-  assert.doesNotMatch(pathEditorImport, /\\bpathHasOnlyClosedSubpaths\\b/);
+  assert.match(importBlock("@layo/renderer"), /\\bpathHasOnlyClosedSubpaths\\b/);
+  assert.doesNotMatch(importBlock("./path-editor"), /\\bpathHasOnlyClosedSubpaths\\b/);
 });
 
 test("storage restore drill workflow verifies backup restorability without hosted secrets", async () => {
