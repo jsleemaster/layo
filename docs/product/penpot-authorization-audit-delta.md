@@ -15,8 +15,8 @@ Decision: **adapt**
 
 - Scope, generation, and event ids remain exact decimal strings.
 - HTTP and MCP reads revalidate the authenticated state snapshot inside the audit query transaction.
-- Operator export writes a private local artifact instead of sending events to a maintainer telemetry service.
-- Retention is explicit dry-run/apply and cannot delete unarchived rows.
+- Operator export creates a private immutable local batch instead of sending events to a maintainer telemetry service; retries use a new path and stable event ids.
+- Retention is explicit dry-run/apply, requires the exact reviewed candidate ids, and cannot delete unarchived rows.
 - Browser activity history is Korean-first and owner-only.
 - Bootstrap, restore, and offline reconciliation carry operator attribution.
 
