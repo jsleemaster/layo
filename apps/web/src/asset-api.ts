@@ -8,6 +8,12 @@ export interface UploadedAsset {
   url: string;
 }
 
+export interface AssetCleanupResult {
+  assetId: string;
+  deleted: boolean;
+  reason: "unreferenced" | "referenced" | "missing";
+}
+
 export async function uploadImageAsset(
   file: File,
   fetcher: typeof fetch = fetch
@@ -33,6 +39,17 @@ export async function uploadImageAsset(
 
   const payload = (await response.json()) as { asset: UploadedAsset };
   return payload.asset;
+}
+
+export async function deleteImageAssetIfUnreferenced(
+  assetId: string,
+  fetcher: typeof fetch = fetch
+): Promise<AssetCleanupResult> {
+  const response = await fetcher(apiUrl(`/assets/${assetId}`), { method: "DELETE" });
+  if (!response.ok) {
+    throw new Error(`이미지 정리 실패: ${response.status} ${response.statusText}`.trim());
+  }
+  return ((await response.json()) as { result: AssetCleanupResult }).result;
 }
 
 function readFileAsBase64(file: File): Promise<string> {

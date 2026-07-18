@@ -26,6 +26,31 @@ test("HTTP startup closes authorization resources when server construction fails
   expect(runtime.close).toHaveBeenCalledOnce();
 });
 
+test("HTTP startup passes the configured storage root to server construction", async () => {
+  const runtime = {
+    shared: false,
+    close: vi.fn(async () => undefined),
+    settled: vi.fn(async () => undefined)
+  } as TeamAuthorizationRuntime;
+  const server = {
+    addHook: vi.fn(),
+    listen: vi.fn(async () => undefined),
+    close: vi.fn(async () => undefined)
+  };
+  const createServer = vi.fn(() => server);
+
+  const started = await startHttpServer(
+    { HOST: "127.0.0.1", PORT: "4317", LAYO_STORAGE_DIR: "/tmp/layo-isolated" },
+    {
+      createAuthorizationRuntime: vi.fn(async () => runtime),
+      createServer
+    }
+  );
+
+  expect(createServer).toHaveBeenCalledWith(runtime, "/tmp/layo-isolated");
+  await started.shutdown();
+});
+
 test("HTTP listen failure closes the server and authorization runtime", async () => {
   const runtime = {
     shared: false,

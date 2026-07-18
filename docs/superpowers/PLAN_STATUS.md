@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-16
+Last audited: 2026-07-18
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,7 +29,18 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None. The next maturity goal must come from the current Penpot benchmark's highest-priority open gap.
+`2026-07-16-penpot-file-version-visual-preview.md` is active. It adapts
+Penpot's saved-version view-only workspace by rendering the complete persisted
+snapshot on Layo's canvas without replacing or mutating the live editor state.
+The exact RED requires a named read-only banner, visually distinct saved canvas
+pixels, inert mutation entry points, safe Exit, and recovery-safe Restore. The
+review follow-up also requires complete Yjs document fields, local-only
+collaborative Undo/Redo, one ordered persistence queue per file, marker-owned E2E
+storage across HTTP/browser/MCP, reference-safe cancelled-upload cleanup,
+base-aware complete-snapshot merge with explicit reorder and insertion-placement
+conflicts, per-ID Yjs collections, a Restore mutation barrier, storage-root
+asset-reference exclusion, stale project/version response rejection, and
+compensation for an already-started stale current-project persistence.
 
 ## Completed Plans
 

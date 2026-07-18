@@ -220,6 +220,32 @@ describe("HTTP server", () => {
     expect(missing.statusCode).toBe(404);
   });
 
+  test("replaces a validated complete editor snapshot without changing file identity", async () => {
+    const server = await createServerWithDocument();
+    const current = await server.inject({ method: "GET", url: "/files/sample-file" });
+    const document = current.json().file;
+    document.pages[0].children[0].transform.x = 321;
+
+    const replaced = await server.inject({
+      method: "PUT",
+      url: "/files/sample-file",
+      payload: { document }
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json().file.pages[0].children[0].transform.x).toBe(321);
+
+    const mismatched = await server.inject({
+      method: "PUT",
+      url: "/files/sample-file",
+      payload: { document: { ...document, id: "other-file" } }
+    });
+    expect(mismatched.statusCode).toBe(400);
+
+    const persisted = await server.inject({ method: "GET", url: "/files/sample-file" });
+    expect(persisted.json().file.id).toBe("sample-file");
+    expect(persisted.json().file.pages[0].children[0].transform.x).toBe(321);
+  });
+
   test("answers browser CORS preflight for JSON project mutations", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const server = createHttpServer(new FileStorage(tempRoot));
@@ -562,6 +588,88 @@ describe("HTTP server", () => {
     expect(served.statusCode).toBe(200);
     expect(served.headers["content-type"]).toContain("image/png");
     expect(served.rawPayload.length).toBe(asset.byteLength);
+  });
+
+  test("deletes only image assets that are not referenced by a document", async () => {
+    const server = await createServerWithDocument();
+    const uploadAsset = async (name: string) => {
+      const uploaded = await server.inject({
+        method: "POST",
+        url: "/assets",
+        payload: {
+          name,
+          mimeType: "image/png",
+          dataBase64:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        }
+      });
+      expect(uploaded.statusCode).toBe(200);
+      return uploaded.json().asset as { assetId: string; url: string };
+    };
+
+    const unusedAsset = await uploadAsset("unused.png");
+    const deleted = await server.inject({ method: "DELETE", url: unusedAsset.url });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({
+      result: { assetId: unusedAsset.assetId, deleted: true, reason: "unreferenced" }
+    });
+    expect((await server.inject({ method: "GET", url: unusedAsset.url })).statusCode).toBe(404);
+
+    const referencedAsset = await uploadAsset("referenced.png");
+    const created = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/nodes",
+      payload: {
+        parentId: "page-1",
+        node: {
+          id: "asset-cleanup-image",
+          kind: "image",
+          name: "참조 이미지",
+          transform: { x: 40, y: 40, rotation: 0 },
+          size: { width: 120, height: 80 },
+          style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+          content: {
+            type: "image",
+            asset_id: referencedAsset.assetId,
+            natural_width: 1,
+            natural_height: 1,
+            fit_mode: "fit"
+          },
+          children: []
+        }
+      }
+    });
+    expect(created.statusCode).toBe(200);
+
+    const retained = await server.inject({ method: "DELETE", url: referencedAsset.url });
+    expect(retained.statusCode).toBe(200);
+    expect(retained.json()).toEqual({
+      result: { assetId: referencedAsset.assetId, deleted: false, reason: "referenced" }
+    });
+    expect((await server.inject({ method: "GET", url: referencedAsset.url })).statusCode).toBe(200);
+
+    const savedVersion = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/versions",
+      payload: { message: "이미지 복구 기준" }
+    });
+    expect(savedVersion.statusCode).toBe(200);
+    const currentFile = (await server.inject({ method: "GET", url: "/files/sample-file" })).json().file;
+    currentFile.pages[0].children = currentFile.pages[0].children.filter(
+      (node: { id: string }) => node.id !== "asset-cleanup-image"
+    );
+    const detached = await server.inject({
+      method: "PUT",
+      url: "/files/sample-file",
+      payload: { document: currentFile }
+    });
+    expect(detached.statusCode).toBe(200);
+
+    const retainedForHistory = await server.inject({ method: "DELETE", url: referencedAsset.url });
+    expect(retainedForHistory.json()).toEqual({
+      result: { assetId: referencedAsset.assetId, deleted: false, reason: "referenced" }
+    });
+    expect((await server.inject({ method: "GET", url: referencedAsset.url })).statusCode).toBe(200);
   });
 
   test("stores and serves svg image assets", async () => {

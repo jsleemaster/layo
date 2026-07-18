@@ -408,6 +408,7 @@ export interface DesignStyle {
 export interface RendererDocument {
   id: string;
   name: string;
+  version?: number;
   tokens?: DesignToken[];
   token_sets?: DesignTokenSet[];
   token_themes?: DesignTokenTheme[];

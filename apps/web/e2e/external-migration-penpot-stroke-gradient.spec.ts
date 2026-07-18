@@ -1,11 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 const fileId = "11111111-1111-1111-1111-111111111111";

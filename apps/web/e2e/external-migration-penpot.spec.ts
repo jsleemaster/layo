@@ -1,15 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
 import {
   createPenpotComponentLibrarySwapArchive,
   penpotLibrarySwapIds
 } from "./fixtures/penpot-component-library-swap";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 async function openFilePanel(page: Page) {

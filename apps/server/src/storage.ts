@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
@@ -52,6 +53,7 @@ export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+z
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
+const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
 
@@ -297,6 +299,24 @@ async function withStoragePathMutationLock<T>(
       }
     }
   }
+}
+
+async function withAssetReferenceMutationLock<T>(
+  storagePath: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const normalizedPath = path.resolve(storagePath);
+  const activePaths = assetReferenceMutationContext.getStore();
+  if (activePaths?.has(normalizedPath)) {
+    return operation();
+  }
+
+  return withStoragePathMutationLock(storagePath, () =>
+    assetReferenceMutationContext.run(
+      new Set([...(activePaths ?? []), normalizedPath]),
+      operation
+    )
+  );
 }
 
 export interface LayoutSpacing {
@@ -937,6 +957,12 @@ export interface StoredAssetData extends StoredAsset {
   data: Buffer;
 }
 
+export interface DeleteAssetResult {
+  assetId: string;
+  deleted: boolean;
+  reason: "unreferenced" | "referenced" | "missing";
+}
+
 export interface FileArchiveManifest {
   schemaVersion: 1;
   format: "layo.file.archive";
@@ -1389,6 +1415,20 @@ export class FileStorage {
   private assetMetadataPathFor(assetId: string) {
     assertSafeStorageId(assetId);
     return path.join(this.assetsDir, `${assetId}.json`);
+  }
+
+  private assetReferenceMutationPath() {
+    return path.join(this.filesDir, ".asset-references");
+  }
+
+  private async withFileMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
+    );
   }
 
   private async adoptPriorDefaultStoreIfNeeded() {
@@ -1923,10 +1963,41 @@ export class FileStorage {
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
-    return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => this.writeFileWithoutMutationLock(fileId, document)
+    return this.withFileMutationLock(fileId, () =>
+      this.writeFileWithoutMutationLock(fileId, document)
     );
+  }
+
+  async replaceFileSnapshot(
+    fileId: string,
+    document: DesignFile,
+    baseDocument?: DesignFile
+  ): Promise<DesignFile> {
+    if (!document || typeof document !== "object" || !Array.isArray(document.pages)) {
+      throw inputValidationError("document snapshot is required");
+    }
+    if (document.id !== fileId) {
+      throw inputValidationError("document snapshot id must match the target file");
+    }
+    if (baseDocument && baseDocument.id !== fileId) {
+      throw inputValidationError("base document snapshot id must match the target file");
+    }
+
+    return this.withFileMutationLock(fileId, async () => {
+      const current = await this.readFile(fileId);
+      const snapshot = baseDocument
+        ? mergeConcurrentDocumentSnapshots(baseDocument, document, current)
+        : structuredClone(document);
+      const validation = validateDesignFile(snapshot);
+      if (!validation.ok) {
+        throw inputValidationError(
+          `document snapshot is invalid: ${validation.issues.map((issue) => issue.message).join("; ")}`
+        );
+      }
+      await this.writeFileWithoutMutationLock(fileId, snapshot);
+      await this.recordFileEditForAutoVersion(fileId, snapshot);
+      return snapshot;
+    });
   }
 
   private async mutateFile<T>(
@@ -1934,7 +2005,7 @@ export class FileStorage {
     mutation: (document: DesignFile) => Promise<T> | T,
     recordAutoVersion = true
   ): Promise<T> {
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const document = await this.readFile(fileId);
       const result = await mutation(document);
       await this.writeFileWithoutMutationLock(fileId, document);
@@ -2841,9 +2912,8 @@ export class FileStorage {
   ): Promise<ImportedLibraryRegistryItem> {
     return withStoragePathMutationLock(
       this.librarySubscriptionsPath(),
-      () => withStoragePathMutationLock(
-        this.filePathFor(fileId),
-        () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      () => this.withFileMutationLock(fileId, () =>
+        this.updateLibraryRegistryItemLocked(fileId, libraryId)
       )
     );
   }
@@ -3063,8 +3133,10 @@ export class FileStorage {
     fileId: string,
     input: SaveFileVersionInput = {}
   ): Promise<StoredFileVersionSummary> {
-    const document = await this.readFile(fileId);
-    return this.writeFileVersion(fileId, document, input);
+    return this.withFileMutationLock(fileId, async () => {
+      const document = await this.readFile(fileId);
+      return this.writeFileVersion(fileId, document, input);
+    });
   }
 
   async readFileVersion(fileId: string, versionId: string): Promise<StoredFileVersion> {
@@ -3114,7 +3186,7 @@ export class FileStorage {
 
   async restoreFileVersion(fileId: string, versionId: string): Promise<RestoreFileVersionResult> {
     const restoredVersion = await this.readFileVersion(fileId, versionId);
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const currentDocument = await this.readFile(fileId);
       const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
         message: "복원 전 자동 저장",
@@ -3582,6 +3654,47 @@ export class FileStorage {
     return { ...asset, data };
   }
 
+  private async isAssetReferenced(assetId: string): Promise<boolean> {
+    const files = await this.listFiles();
+    for (const file of files) {
+      const document = await this.readFile(file.id);
+      if (collectImageAssetIds(document).includes(assetId)) {
+        return true;
+      }
+      const versions = await this.listFileVersions(file.id);
+      for (const version of versions) {
+        const snapshot = await this.readFileVersion(file.id, version.versionId);
+        if (collectImageAssetIds(snapshot.document).includes(assetId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async deleteAssetIfUnreferenced(assetId: string): Promise<DeleteAssetResult> {
+    assertSafeStorageId(assetId);
+    await this.adoptPriorDefaultStoreIfNeeded();
+    return withAssetReferenceMutationLock(
+      this.assetReferenceMutationPath(),
+      () => withStoragePathMutationLock(this.assetMetadataPathFor(assetId), async () => {
+        const assetPath = this.assetPathFor(assetId);
+        const metadataPath = this.assetMetadataPathFor(assetId);
+        if (!(await pathExists(assetPath)) && !(await pathExists(metadataPath))) {
+          return { assetId, deleted: false, reason: "missing" };
+        }
+        if (await this.isAssetReferenced(assetId)) {
+          return { assetId, deleted: false, reason: "referenced" };
+        }
+
+        await rm(assetPath, { force: true });
+        await rm(metadataPath, { force: true });
+        await syncDirectory(this.assetsDir);
+        return { assetId, deleted: true, reason: "unreferenced" };
+      })
+    );
+  }
+
   async listComponents(fileId: string): Promise<ComponentDefinition[]> {
     const document = await this.readFile(fileId);
     return document.components ?? [];
@@ -3827,7 +3940,7 @@ export class FileStorage {
       return createAgentBatchResult(fileId, before, preview, input, false, changedNodeIds);
     }
 
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const before = await this.readFile(fileId);
       if (input.collaboration) {
         const collaborativeResult = await applyAgentCommandsToCollaboration({
@@ -4537,6 +4650,196 @@ function inputValidationError(message: string) {
   error.code = INPUT_VALIDATION_ERROR_CODE;
   error.statusCode = 400;
   return error;
+}
+
+const SNAPSHOT_MISSING = Symbol("snapshot-missing");
+
+function mergeConcurrentDocumentSnapshots(
+  base: DesignFile,
+  local: DesignFile,
+  current: DesignFile
+): DesignFile {
+  if (!base || typeof base !== "object" || !Array.isArray(base.pages)) {
+    throw inputValidationError("base document snapshot is required");
+  }
+  const merged = mergeConcurrentSnapshotValue(base, local, current, "document");
+  if (!isSnapshotRecord(merged)) {
+    throw inputValidationError("document snapshot merge produced an invalid document");
+  }
+  return structuredClone(merged) as unknown as DesignFile;
+}
+
+function mergeConcurrentSnapshotValue(
+  base: unknown | typeof SNAPSHOT_MISSING,
+  local: unknown | typeof SNAPSHOT_MISSING,
+  current: unknown | typeof SNAPSHOT_MISSING,
+  valuePath: string
+): unknown | typeof SNAPSHOT_MISSING {
+  if (snapshotValuesEqual(local, base)) {
+    return cloneSnapshotValue(current);
+  }
+  if (snapshotValuesEqual(current, base) || snapshotValuesEqual(local, current)) {
+    return cloneSnapshotValue(local);
+  }
+
+  if (Array.isArray(base) && Array.isArray(local) && Array.isArray(current)) {
+    if (isStableIdSnapshotArray(base, local, current)) {
+      return mergeStableIdSnapshotArray(
+        base as Array<Record<string, unknown>>,
+        local as Array<Record<string, unknown>>,
+        current as Array<Record<string, unknown>>,
+        valuePath
+      );
+    }
+    throw inputValidationError(`document snapshot conflict at ${valuePath}`);
+  }
+
+  if (isSnapshotRecord(base) && isSnapshotRecord(local) && isSnapshotRecord(current)) {
+    const merged: Record<string, unknown> = {};
+    const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(current)]);
+    for (const key of keys) {
+      const nextValue = mergeConcurrentSnapshotValue(
+        Object.hasOwn(base, key) ? base[key] : SNAPSHOT_MISSING,
+        Object.hasOwn(local, key) ? local[key] : SNAPSHOT_MISSING,
+        Object.hasOwn(current, key) ? current[key] : SNAPSHOT_MISSING,
+        `${valuePath}.${key}`
+      );
+      if (nextValue !== SNAPSHOT_MISSING) {
+        merged[key] = nextValue;
+      }
+    }
+    return merged;
+  }
+
+  throw inputValidationError(`document snapshot conflict at ${valuePath}`);
+}
+
+function mergeStableIdSnapshotArray(
+  base: Array<Record<string, unknown>>,
+  local: Array<Record<string, unknown>>,
+  current: Array<Record<string, unknown>>,
+  valuePath: string
+): unknown[] {
+  const baseById = new Map(base.map((item) => [String(item.id), item]));
+  const localById = new Map(local.map((item) => [String(item.id), item]));
+  const currentById = new Map(current.map((item) => [String(item.id), item]));
+  const mergedById = new Map<string, unknown>();
+  const allIds = new Set([...baseById.keys(), ...localById.keys(), ...currentById.keys()]);
+
+  for (const itemId of allIds) {
+    const merged = mergeConcurrentSnapshotValue(
+      baseById.get(itemId) ?? SNAPSHOT_MISSING,
+      localById.get(itemId) ?? SNAPSHOT_MISSING,
+      currentById.get(itemId) ?? SNAPSHOT_MISSING,
+      `${valuePath}[${itemId}]`
+    );
+    if (merged !== SNAPSHOT_MISSING) {
+      mergedById.set(itemId, merged);
+    }
+  }
+
+  const baseOrder = base.map((item) => String(item.id));
+  const localOrder = local.map((item) => String(item.id));
+  const currentOrder = current.map((item) => String(item.id));
+  const commonBaseIds = new Set(
+    baseOrder.filter((itemId) => localById.has(itemId) && currentById.has(itemId) && mergedById.has(itemId))
+  );
+  const baseCommonOrder = baseOrder.filter((itemId) => commonBaseIds.has(itemId));
+  const localCommonOrder = localOrder.filter((itemId) => commonBaseIds.has(itemId));
+  const currentCommonOrder = currentOrder.filter((itemId) => commonBaseIds.has(itemId));
+  const localReordered = !snapshotValuesEqual(localCommonOrder, baseCommonOrder);
+  const currentReordered = !snapshotValuesEqual(currentCommonOrder, baseCommonOrder);
+  if (
+    localReordered &&
+    currentReordered &&
+    !snapshotValuesEqual(localCommonOrder, currentCommonOrder)
+  ) {
+    throw inputValidationError(`document snapshot conflict at ${valuePath}`);
+  }
+
+  let mergedOrder: string[];
+  if (snapshotValuesEqual(localOrder, baseOrder)) {
+    mergedOrder = [...currentOrder];
+  } else if (snapshotValuesEqual(currentOrder, baseOrder)) {
+    mergedOrder = [...localOrder];
+  } else if (snapshotValuesEqual(localOrder, currentOrder)) {
+    mergedOrder = [...localOrder];
+  } else {
+    const primaryOrder = localReordered ? localOrder : currentOrder;
+    const secondaryOrder = localReordered ? currentOrder : localOrder;
+    mergedOrder = [...primaryOrder];
+    for (const itemId of secondaryOrder) {
+      if (mergedOrder.includes(itemId)) {
+        continue;
+      }
+      const secondaryIndex = secondaryOrder.indexOf(itemId);
+      const previousNeighbor = secondaryOrder
+        .slice(0, secondaryIndex)
+        .reverse()
+        .find((candidateId) => mergedOrder.includes(candidateId));
+      if (previousNeighbor) {
+        mergedOrder.splice(mergedOrder.indexOf(previousNeighbor) + 1, 0, itemId);
+        continue;
+      }
+      const nextNeighbor = secondaryOrder
+        .slice(secondaryIndex + 1)
+        .find((candidateId) => mergedOrder.includes(candidateId));
+      mergedOrder.splice(nextNeighbor ? mergedOrder.indexOf(nextNeighbor) : mergedOrder.length, 0, itemId);
+    }
+  }
+
+  const finalOrder = [
+    ...mergedOrder.filter((itemId) => mergedById.has(itemId)),
+    ...Array.from(mergedById.keys()).filter((itemId) => !mergedOrder.includes(itemId)).sort()
+  ];
+  assertConcurrentInsertionOrderPreserved(baseById, localOrder, finalOrder, mergedById, valuePath);
+  assertConcurrentInsertionOrderPreserved(baseById, currentOrder, finalOrder, mergedById, valuePath);
+  return finalOrder.map((itemId) => cloneSnapshotValue(mergedById.get(itemId)));
+}
+
+function assertConcurrentInsertionOrderPreserved(
+  baseById: ReadonlyMap<string, Record<string, unknown>>,
+  sideOrder: string[],
+  mergedOrder: string[],
+  mergedById: ReadonlyMap<string, unknown>,
+  valuePath: string
+): void {
+  const mergedIndexById = new Map(mergedOrder.map((itemId, index) => [itemId, index]));
+  const survivingSideOrder = sideOrder.filter((itemId) => mergedById.has(itemId));
+  for (let index = 0; index < survivingSideOrder.length - 1; index += 1) {
+    const firstId = survivingSideOrder[index]!;
+    const secondId = survivingSideOrder[index + 1]!;
+    if (baseById.has(firstId) && baseById.has(secondId)) {
+      continue;
+    }
+    if (mergedIndexById.get(firstId)! > mergedIndexById.get(secondId)!) {
+      throw inputValidationError(`document snapshot conflict at ${valuePath}`);
+    }
+  }
+}
+
+function isStableIdSnapshotArray(
+  ...values: unknown[][]
+): boolean {
+  const items = values.flat();
+  return items.every(
+    (item) => isSnapshotRecord(item) && typeof item.id === "string"
+  );
+}
+
+function isSnapshotRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function snapshotValuesEqual(first: unknown, second: unknown): boolean {
+  if (first === SNAPSHOT_MISSING || second === SNAPSHOT_MISSING) {
+    return first === second;
+  }
+  return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function cloneSnapshotValue<T>(value: T): T {
+  return value === SNAPSHOT_MISSING ? value : structuredClone(value);
 }
 
 function parseCodeComponentMapping(input: unknown): CodeComponentMapping {
@@ -5440,6 +5743,14 @@ function collectImageAssetIds(document: DesignFile): string[] {
   for (const root of document.pages.flatMap((page) => page.children)) {
     collectImageAssetIdsFromNode(root, assetIds);
   }
+  for (const component of document.components ?? []) {
+    collectImageAssetIdsFromNode(component.source_node, assetIds);
+    for (const variant of component.variants) {
+      if (variant.source_node) {
+        collectImageAssetIdsFromNode(variant.source_node, assetIds);
+      }
+    }
+  }
   return [...assetIds].sort();
 }
 
@@ -5447,6 +5758,11 @@ function collectComponentImageAssetIds(components: ComponentDefinition[]): strin
   const assetIds = new Set<string>();
   for (const component of components) {
     collectImageAssetIdsFromNode(component.source_node, assetIds);
+    for (const variant of component.variants) {
+      if (variant.source_node) {
+        collectImageAssetIdsFromNode(variant.source_node, assetIds);
+      }
+    }
   }
   return [...assetIds].sort();
 }

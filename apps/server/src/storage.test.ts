@@ -76,6 +76,184 @@ describe("FileStorage", () => {
     expect(projects).toEqual([]);
   });
 
+  test("merges independent stale document snapshots without losing either browser edit", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const base = await storage.readFile("sample-file");
+    const remoteSnapshot = structuredClone(base);
+    const remoteText = findNode(remoteSnapshot, "text-1");
+    if (!remoteText || remoteText.content.type !== "text") {
+      throw new Error("missing remote text node");
+    }
+    remoteText.content.value = "Remote edit";
+    const localSnapshot = structuredClone(base);
+    const localText = findNode(localSnapshot, "text-1");
+    if (!localText) {
+      throw new Error("missing local text node");
+    }
+    localText.transform.x = 240;
+
+    await storage.replaceFileSnapshot("sample-file", remoteSnapshot);
+    await Reflect.apply(storage.replaceFileSnapshot, storage, [
+      "sample-file",
+      localSnapshot,
+      base
+    ]);
+
+    const merged = await storage.readFile("sample-file");
+    expect(findNode(merged, "text-1")).toMatchObject({
+      transform: { x: 240 },
+      content: { type: "text", value: "Remote edit" }
+    });
+  });
+
+  test("rejects divergent concurrent reorders instead of silently dropping one", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const seeded = await storage.readFile("sample-file");
+    seeded.tokens = [
+      { id: "token-a", name: "A", type: "color", value: "#111111" },
+      { id: "token-b", name: "B", type: "color", value: "#222222" },
+      { id: "token-c", name: "C", type: "color", value: "#333333" }
+    ];
+    await storage.writeFile("sample-file", seeded);
+    const base = await storage.readFile("sample-file");
+    const remoteSnapshot = structuredClone(base);
+    remoteSnapshot.tokens = [base.tokens![1]!, base.tokens![0]!, base.tokens![2]!];
+    const localSnapshot = structuredClone(base);
+    localSnapshot.tokens = [base.tokens![0]!, base.tokens![2]!, base.tokens![1]!];
+
+    await storage.replaceFileSnapshot("sample-file", remoteSnapshot);
+
+    await expect(
+      storage.replaceFileSnapshot("sample-file", localSnapshot, base)
+    ).rejects.toThrow("document snapshot conflict at document.tokens");
+    expect((await storage.readFile("sample-file")).tokens?.map((token) => token.id)).toEqual([
+      "token-b",
+      "token-a",
+      "token-c"
+    ]);
+  });
+
+  test("rejects a concurrent insertion whose placement conflicts with a stale reorder", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const seeded = await storage.readFile("sample-file");
+    seeded.tokens = [
+      { id: "token-a", name: "A", type: "color", value: "#111111" },
+      { id: "token-b", name: "B", type: "color", value: "#222222" },
+      { id: "token-c", name: "C", type: "color", value: "#333333" }
+    ];
+    await storage.writeFile("sample-file", seeded);
+    const base = await storage.readFile("sample-file");
+    const remoteSnapshot = structuredClone(base);
+    remoteSnapshot.tokens = [
+      base.tokens![0]!,
+      { id: "token-x", name: "X", type: "color", value: "#444444" },
+      base.tokens![1]!,
+      base.tokens![2]!
+    ];
+    const localSnapshot = structuredClone(base);
+    localSnapshot.tokens = [base.tokens![1]!, base.tokens![0]!, base.tokens![2]!];
+
+    await storage.replaceFileSnapshot("sample-file", remoteSnapshot);
+
+    await expect(
+      storage.replaceFileSnapshot("sample-file", localSnapshot, base)
+    ).rejects.toThrow("document snapshot conflict at document.tokens");
+    expect((await storage.readFile("sample-file")).tokens?.map((token) => token.id)).toEqual([
+      "token-a",
+      "token-x",
+      "token-b",
+      "token-c"
+    ]);
+  });
+
+  test("keeps assets referenced only by a component variant source node", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const asset = await storage.createAsset({
+      name: "variant.png",
+      mimeType: "image/png",
+      dataBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    });
+    const document = await storage.readFile("sample-file");
+    const sourceNode = findNode(document, "text-1");
+    if (!sourceNode) {
+      throw new Error("missing component source node");
+    }
+    document.components = [
+      {
+        id: "component-variant-image",
+        name: "Variant image",
+        source_node: structuredClone(sourceNode),
+        variants: [
+          {
+            id: "variant-image",
+            name: "Image",
+            properties: [],
+            source_node: imageNodeForAsset(asset.assetId, "variant-image-source")
+          }
+        ]
+      }
+    ];
+    await storage.writeFile("sample-file", document);
+
+    await expect(storage.deleteAssetIfUnreferenced(asset.assetId)).resolves.toEqual({
+      assetId: asset.assetId,
+      deleted: false,
+      reason: "referenced"
+    });
+    await expect(storage.readAsset(asset.assetId)).resolves.toMatchObject({ assetId: asset.assetId });
+  });
+
+  test("serializes asset cleanup with an in-flight document reference mutation", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const asset = await storage.createAsset({
+      name: "concurrent.png",
+      mimeType: "image/png",
+      dataBase64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    });
+    let releaseMutation!: () => void;
+    const mutationRelease = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    let markMutationStarted!: () => void;
+    const mutationStarted = new Promise<void>((resolve) => {
+      markMutationStarted = resolve;
+    });
+    const internalStorage = storage as unknown as {
+      mutateFile<T>(
+        fileId: string,
+        mutation: (document: Awaited<ReturnType<FileStorage["readFile"]>>) => Promise<T>
+      ): Promise<T>;
+    };
+    const mutation = internalStorage.mutateFile("sample-file", async (document) => {
+      markMutationStarted();
+      await mutationRelease;
+      document.pages[0]?.children.push(imageNodeForAsset(asset.assetId, "concurrent-image"));
+    });
+    await mutationStarted;
+
+    const cleanup = storage.deleteAssetIfUnreferenced(asset.assetId);
+    const earlyResult = await Promise.race([
+      cleanup.then(() => "completed" as const),
+      new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 75))
+    ]);
+    releaseMutation();
+    await mutation;
+    const cleanupResult = await cleanup;
+
+    expect(earlyResult).toBe("blocked");
+    expect(cleanupResult).toEqual({
+      assetId: asset.assetId,
+      deleted: false,
+      reason: "referenced"
+    });
+    await expect(storage.readAsset(asset.assetId)).resolves.toMatchObject({ assetId: asset.assetId });
+  });
+
   test("removes the legacy sample project and its orphaned document even when modified", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
@@ -4826,4 +5004,23 @@ function findImageNode(document: Awaited<ReturnType<FileStorage["readFile"]>>, n
     stack.push(...node.children);
   }
   return null;
+}
+
+function imageNodeForAsset(assetId: string, nodeId: string) {
+  return {
+    id: nodeId,
+    kind: "image" as const,
+    name: "Image",
+    transform: { x: 120, y: 140, rotation: 0 },
+    size: { width: 160, height: 120 },
+    style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+    content: {
+      type: "image" as const,
+      asset_id: assetId,
+      natural_width: 1,
+      natural_height: 1,
+      fit_mode: "fit" as const
+    },
+    children: []
+  };
 }

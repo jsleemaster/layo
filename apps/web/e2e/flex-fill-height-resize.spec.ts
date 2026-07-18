@@ -1,9 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
-import { rm } from "node:fs/promises";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 async function openFilePanel(page: Page) {

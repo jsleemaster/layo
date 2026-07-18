@@ -1,17 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 import { Buffer } from "node:buffer";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createZipArchive } from "../../server/src/file-archive";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  const removalOptions = {
-    recursive: true,
-    force: true,
-    maxRetries: 5,
-    retryDelay: 50
-  } as const;
-  await rm(".layo", removalOptions);
-  await rm("apps/server/.layo", removalOptions);
+  await resetE2eStorage();
 });
 
 async function openFilePanel(page: Page) {
@@ -790,6 +784,8 @@ test("team panel replaces an expired member token without recreating the team", 
   await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
   await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
   await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await expect(page.getByTestId("member-token")).toHaveCount(0);
+  await page.getByRole("tab", { name: "팀 설정" }).click();
 
   await page.getByTestId("member-token").fill("expired-member-token");
   await page.getByRole("button", { name: "멤버 토큰 적용" }).click();
@@ -2818,11 +2814,6 @@ test("filters projects and keeps recently opened projects first", async ({ page 
 });
 
 test("duplicates and deletes a saved project from the project panel", async ({ page }) => {
-  await rm(".layo/projects", { recursive: true, force: true });
-  await rm(".layo/files", { recursive: true, force: true });
-  await rm("apps/server/.layo/projects", { recursive: true, force: true });
-  await rm("apps/server/.layo/files", { recursive: true, force: true });
-
   await openEmptyEditor(page);
   await page.getByRole("button", { name: "새 프로젝트 만들기" }).click();
   await expect(page.getByTestId("project-status")).toContainText("새 프로젝트 저장됨");
@@ -3872,16 +3863,265 @@ test("file version history saves and restores a document snapshot", async ({ pag
   expect(versionsPayload.versions.map((version: { source: string }) => version.source)).toContain("restore");
 });
 
-test("file version history previews saved version differences before restore", async ({ page }) => {
+test("file version save includes a rectangle created immediately before the checkpoint", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: "사각형 3" })).toBeVisible();
+
+  await page.getByTestId("file-version-message").fill("도형 생성 포함");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("도형 생성 포함 저장됨");
+
+  const versionsResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/versions`);
+  const versions = (await versionsResponse.json()).versions as Array<{ versionId: string; message: string }>;
+  const savedVersion = versions.find((version) => version.message === "도형 생성 포함");
+  expect(savedVersion).toBeTruthy();
+  const versionResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/versions/${savedVersion!.versionId}`
+  );
+  const savedNodes = (await versionResponse.json()).version.document.pages
+    .flatMap((pageItem: { children: Array<{ id: string; children: unknown[] }> }) => pageItem.children);
+  expect(JSON.stringify(savedNodes)).toContain('"id":"rectangle-3"');
+});
+
+test("file version save waits for an earlier delayed document write", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  let releaseTextWrite: (() => void) | undefined;
+  const textWriteRelease = new Promise<void>((resolve) => {
+    releaseTextWrite = resolve;
+  });
+  let markTextWriteStarted: (() => void) | undefined;
+  const textWriteStarted = new Promise<void>((resolve) => {
+    markTextWriteStarted = resolve;
+  });
+  let versionSaveStarted = false;
+
+  await page.route(`**/files/${documentId}/agent/commands`, async (route) => {
+    const body = route.request().postDataJSON() as {
+      commands?: Array<{ type?: string }>;
+    };
+    if (body.commands?.some((command) => command.type === "update_text")) {
+      markTextWriteStarted?.();
+      await textWriteRelease;
+    }
+    await route.continue();
+  });
+  await page.route(`**/files/${documentId}/versions`, async (route) => {
+    if (route.request().method() === "POST") {
+      versionSaveStarted = true;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("저장 큐 기준");
+  await textWriteStarted;
+  await page.getByTestId("file-version-message").fill("지연 편집 포함");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await page.waitForTimeout(200);
+  expect(versionSaveStarted).toBe(false);
+
+  releaseTextWrite?.();
+  await expect(page.getByTestId("file-version-status")).toContainText("지연 편집 포함 저장됨");
+
+  const versionsResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/versions`);
+  expect(versionsResponse.ok()).toBeTruthy();
+  const versions = (await versionsResponse.json()).versions as Array<{ versionId: string; message: string }>;
+  const savedVersion = versions.find((version) => version.message === "지연 편집 포함");
+  expect(savedVersion).toBeTruthy();
+  const versionResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/versions/${savedVersion!.versionId}`
+  );
+  expect(versionResponse.ok()).toBeTruthy();
+  const savedHeadline = (await versionResponse.json()).version.document.pages[0].children[0].children[0];
+  expect(savedHeadline.content.value).toBe("저장 큐 기준");
+});
+
+test("file version restore wins after an earlier delayed document write", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByTestId("file-version-message").fill("복원 기준");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("복원 기준 저장됨");
+
+  let releaseTextWrite: (() => void) | undefined;
+  const textWriteRelease = new Promise<void>((resolve) => {
+    releaseTextWrite = resolve;
+  });
+  let markTextWriteStarted: (() => void) | undefined;
+  const textWriteStarted = new Promise<void>((resolve) => {
+    markTextWriteStarted = resolve;
+  });
+  let restoreStarted = false;
+
+  await page.route(`**/files/${documentId}/agent/commands`, async (route) => {
+    const body = route.request().postDataJSON() as {
+      commands?: Array<{ type?: string }>;
+    };
+    if (body.commands?.some((command) => command.type === "update_text")) {
+      markTextWriteStarted?.();
+      await textWriteRelease;
+    }
+    await route.continue();
+  });
+  await page.route(`**/files/${documentId}/versions/*/restore`, async (route) => {
+    restoreStarted = true;
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-text").fill("복원보다 먼저 끝날 편집");
+  await textWriteStarted;
+  await page.getByRole("button", { name: "복원 기준 복원" }).click();
+  await page.waitForTimeout(200);
+  expect(restoreStarted).toBe(false);
+
+  releaseTextWrite?.();
+  await expect(page.getByTestId("file-version-status")).toContainText("복원 기준 복원됨");
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      return (await response.json()).file.pages[0].children[0].children[0].content.value;
+    })
+    .toBe("Layo");
+});
+
+test("a delayed version save cannot replace the version list after switching projects", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "버전 지연 A");
+  const secondProjectId = await createNamedProject(page, "버전 지연 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("버전 지연 A 불러옴");
+
+  let releaseVersionSave!: () => void;
+  const versionSaveRelease = new Promise<void>((resolve) => {
+    releaseVersionSave = resolve;
+  });
+  let markVersionSaveStarted!: () => void;
+  const versionSaveStarted = new Promise<void>((resolve) => {
+    markVersionSaveStarted = resolve;
+  });
+  await page.route(`**/files/${firstDocumentId}/versions`, async (route) => {
+    if (route.request().method() === "POST") {
+      markVersionSaveStarted();
+      await versionSaveRelease;
+    }
+    await route.continue();
+  });
+
+  await page.getByTestId("file-version-message").fill("A 전용 버전");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await versionSaveStarted;
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("버전 지연 B 불러옴");
+  releaseVersionSave();
+
+  await page.waitForTimeout(350);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(secondProjectId);
+  await expect(page.getByTestId("file-version-list")).not.toContainText("A 전용 버전");
+});
+
+test("a delayed project document response cannot replace the last selected project", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "문서 지연 A");
+  const secondProjectId = await createNamedProject(page, "문서 지연 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  let releaseFirstDocument!: () => void;
+  const firstDocumentRelease = new Promise<void>((resolve) => {
+    releaseFirstDocument = resolve;
+  });
+  let markFirstDocumentStarted!: () => void;
+  const firstDocumentStarted = new Promise<void>((resolve) => {
+    markFirstDocumentStarted = resolve;
+  });
+  await page.route(`**/files/${firstDocumentId}`, async (route) => {
+    if (route.request().method() === "GET") {
+      markFirstDocumentStarted();
+      await firstDocumentRelease;
+    }
+    await route.continue();
+  });
+
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await firstDocumentStarted;
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("문서 지연 B 불러옴");
+  releaseFirstDocument();
+
+  await page.waitForTimeout(350);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(secondProjectId);
+  await expect(page.getByTestId("project-name")).toHaveValue("문서 지연 B");
+  await expect(page.getByTestId("project-status")).toContainText("문서 지연 B 불러옴");
+});
+
+test("a rejected stale project document request cannot replace the active status", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "실패 지연 A");
+  const secondProjectId = await createNamedProject(page, "실패 지연 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  let rejectFirstDocument!: () => void;
+  const rejectFirstDocumentRequest = new Promise<void>((resolve) => {
+    rejectFirstDocument = resolve;
+  });
+  let markFirstDocumentStarted!: () => void;
+  const firstDocumentStarted = new Promise<void>((resolve) => {
+    markFirstDocumentStarted = resolve;
+  });
+  await page.route(`**/files/${firstDocumentId}`, async (route) => {
+    if (route.request().method() === "GET") {
+      markFirstDocumentStarted();
+      await rejectFirstDocumentRequest;
+      await route.abort("failed");
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await firstDocumentStarted;
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("실패 지연 B 불러옴");
+  rejectFirstDocument();
+
+  await page.waitForTimeout(350);
+  await expect(page.getByTestId("project-switcher")).toHaveValue(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("실패 지연 B 불러옴");
+});
+
+test("file version history previews the saved canvas in read-only mode", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const savedColorResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
+    { data: { dryRun: false, commands: [{ type: "set_fill", nodeId: "frame-1", fill: "#16a34a" }] } }
+  );
+  expect(savedColorResponse.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 })).count).toBeGreaterThan(1_000);
 
   await page.getByTestId("file-version-message").fill("검토 전");
   await page.getByRole("button", { name: "현재 버전 저장" }).click();
   await expect(page.getByTestId("file-version-list")).toContainText("검토 전");
 
-  await page.getByRole("button", { name: "헤드라인" }).click();
-  await page.getByTestId("inspector-text").fill("변경된 헤드라인");
-  await expect(page.getByTestId("inspector-text")).toHaveValue("변경된 헤드라인");
+  const currentColorResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
+    { data: { dryRun: false, commands: [{ type: "set_fill", nodeId: "frame-1", fill: "#2563eb" }] } }
+  );
+  expect(currentColorResponse.ok()).toBeTruthy();
+  await page.reload();
+  await openFilePanel(page);
 
   await expect
     .poll(async () => {
@@ -3889,25 +4129,260 @@ test("file version history previews saved version differences before restore", a
       if (!changedResponse.ok()) {
         return "request failed";
       }
-      return (await changedResponse.json()).file.pages[0].children[0].children[0].content.value;
+      return (await changedResponse.json()).file.pages[0].children[0].style.fill;
     })
-    .toBe("변경된 헤드라인");
+    .toBe("#2563eb");
 
-  await page.getByRole("button", { name: "검토 전 미리보기" }).click();
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 37, g: 99, b: 235 })).count).toBeGreaterThan(1_000);
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).click();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  const resizeHandleBox = await page.getByTestId("resize-handle-bottom-right").boundingBox();
+  if (!resizeHandleBox) {
+    throw new Error("preview cancellation test could not find the active resize handle");
+  }
+  await page.mouse.move(
+    resizeHandleBox.x + resizeHandleBox.width / 2,
+    resizeHandleBox.y + resizeHandleBox.height / 2
+  );
+  await page.mouse.down();
+  await page.getByRole("button", { name: "검토 전 미리보기" }).evaluate((button: HTMLButtonElement) =>
+    button.click()
+  );
+  await page.mouse.move(resizeHandleBox.x + 80, resizeHandleBox.y + 60);
+  await page.mouse.up();
+
   const preview = page.getByTestId("file-version-preview");
   await expect(preview).toContainText("검토 전");
   await expect(preview).toContainText("현재 파일과 비교");
   await expect(preview).toContainText("변경 1");
-  await expect(preview).toContainText("text-1");
+  await expect(preview).toContainText("frame-1");
 
-  await page.getByRole("button", { name: "미리보기 닫기" }).click();
+  const previewBanner = page.getByTestId("file-version-preview-banner");
+  await expect(previewBanner).toContainText("검토 전");
+  await expect(previewBanner).toContainText("읽기 전용");
+  await expect(page.getByTestId("floating-toolbar")).toHaveAttribute("inert", "");
+  await expect(page.locator(".inspector")).toHaveAttribute("inert", "");
+  await expect(page.getByTestId("resize-handle-bottom-right")).toHaveCount(0);
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 })).count).toBeGreaterThan(1_000);
+
+  await page.keyboard.press("Delete");
+  const unchangedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(unchangedResponse.ok()).toBeTruthy();
+  const unchangedFile = (await unchangedResponse.json()).file;
+  const unchangedHeadline = unchangedFile.pages[0].children[0].children[0];
+  expect(unchangedFile.pages[0].children[0].style.fill).toBe("#2563eb");
+  expect(unchangedHeadline.transform).toMatchObject({
+    x: 32,
+    y: 40
+  });
+  expect(unchangedHeadline.size).toMatchObject({
+    width: 260,
+    height: 48
+  });
+
+  const zoomBefore = await floatingToolbarZoom(page, "%").textContent();
+  await page.getByTestId("stage-frame").hover();
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, 120);
+  await page.keyboard.up("Control");
+  await expect.poll(async () => floatingToolbarZoom(page, "%").textContent()).not.toBe(zoomBefore);
+
+  await previewBanner.getByRole("button", { name: "미리보기 종료" }).click();
   await expect(preview).toBeHidden();
+  await expect(previewBanner).toBeHidden();
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 37, g: 99, b: 235 })).count).toBeGreaterThan(1_000);
 
   await page.getByRole("button", { name: "검토 전 미리보기" }).click();
-  await page.getByRole("button", { name: "이 버전 복원" }).click();
+  await page.getByTestId("file-version-preview-banner").getByRole("button", { name: "이 버전 복원" }).click();
   await expect(page.getByTestId("file-version-status")).toContainText("검토 전 복원됨");
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 })).count).toBeGreaterThan(1_000);
+
+  const restoredResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(restoredResponse.ok()).toBeTruthy();
+  expect((await restoredResponse.json()).file.pages[0].children[0].style.fill).toBe("#16a34a");
+
   await page.getByRole("button", { name: "헤드라인" }).click();
-  await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
+  await page.getByTestId("inspector-text").fill("복원 후 편집");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("복원 후 편집");
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 })).count).toBeGreaterThan(1_000);
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      if (!response.ok()) {
+        return null;
+      }
+      const file = (await response.json()).file;
+      return {
+        fill: file.pages[0].children[0].style.fill,
+        text: file.pages[0].children[0].children[0].content.value
+      };
+    })
+    .toEqual({ fill: "#16a34a", text: "복원 후 편집" });
+});
+
+test("file version preview ignores a stale response from an older request", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const setFrameFill = async (fill: string) => {
+    const response = await page.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
+      { data: { dryRun: false, commands: [{ type: "set_fill", nodeId: "frame-1", fill }] } }
+    );
+    expect(response.ok()).toBeTruthy();
+    await page.reload();
+    await openFilePanel(page);
+  };
+  const saveNamedVersion = async (message: string) => {
+    await page.getByTestId("file-version-message").fill(message);
+    await page.getByRole("button", { name: "현재 버전 저장" }).click();
+    await expect(page.getByTestId("file-version-status")).toContainText(`${message} 저장됨`);
+  };
+
+  await setFrameFill("#dc2626");
+  await saveNamedVersion("느린 버전");
+  await setFrameFill("#16a34a");
+  await saveNamedVersion("최신 버전");
+  await setFrameFill("#2563eb");
+
+  const versionsResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/versions`);
+  expect(versionsResponse.ok()).toBeTruthy();
+  const versions = (await versionsResponse.json()).versions as Array<{ versionId: string; message: string }>;
+  const slowVersion = versions.find((version) => version.message === "느린 버전");
+  expect(slowVersion).toBeTruthy();
+
+  await page.route(`**/files/${documentId}/versions/${slowVersion!.versionId}`, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "느린 버전 미리보기" }).click();
+  await page.getByRole("button", { name: "최신 버전 미리보기" }).click();
+
+  const banner = page.getByTestId("file-version-preview-banner");
+  await expect(banner).toContainText("최신 버전");
+  await expect.poll(async () => (await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 })).count).toBeGreaterThan(1_000);
+  await page.waitForTimeout(500);
+  await expect(banner).toContainText("최신 버전");
+});
+
+test("file version preview cancels an image upload before it mutates the document", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByTestId("file-version-message").fill("업로드 전");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("업로드 전 저장됨");
+
+  let releaseUpload: (() => void) | undefined;
+  const uploadRelease = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let markUploadStarted: (() => void) | undefined;
+  const uploadStarted = new Promise<void>((resolve) => {
+    markUploadStarted = resolve;
+  });
+  await page.route("**/assets", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markUploadStarted?.();
+    await uploadRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+  const dropTransfer = await createImageDataTransfer(page, "delayed-preview-image.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: dropTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await uploadStarted;
+
+  await page.getByRole("button", { name: "업로드 전 미리보기" }).click();
+  await expect(page.getByTestId("file-version-preview-banner")).toContainText("업로드 전");
+  const uploadResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  releaseUpload?.();
+  const uploadedAsset = (await (await uploadResponsePromise).json()).asset as { assetId: string };
+
+  const fileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(fileResponse.ok()).toBeTruthy();
+  const file = (await fileResponse.json()).file;
+  expect(flattenNodeKinds(file.pages[0].children).filter((kind) => kind === "image")).toHaveLength(0);
+  await expect
+    .poll(async () =>
+      (await page.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
+    )
+    .toBe(404);
+});
+
+test("file version restore cancels an image upload that started before the restore barrier", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByTestId("file-version-message").fill("복원 장벽");
+  await page.getByRole("button", { name: "현재 버전 저장" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("복원 장벽 저장됨");
+
+  let releaseUpload!: () => void;
+  const uploadRelease = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let markUploadStarted!: () => void;
+  const uploadStarted = new Promise<void>((resolve) => {
+    markUploadStarted = resolve;
+  });
+  await page.route("**/assets", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markUploadStarted();
+    await uploadRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame was not visible");
+  }
+  const dropTransfer = await createImageDataTransfer(page, "delayed-restore-image.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: dropTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await uploadStarted;
+
+  await page.getByRole("button", { name: "복원 장벽 복원" }).click();
+  await expect(page.getByTestId("file-version-status")).toContainText("복원 장벽 복원됨");
+  const uploadResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  releaseUpload();
+  const uploadedAsset = (await (await uploadResponsePromise).json()).asset as { assetId: string };
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const file = (await response.json()).file;
+      return flattenNodeKinds(file.pages[0].children).filter((kind) => kind === "image").length;
+    })
+    .toBe(0);
+  await expect
+    .poll(async () =>
+      (await page.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
+    )
+    .toBe(404);
 });
 
 test("file version history pins and unpins recovery checkpoints", async ({ page }) => {
@@ -5245,6 +5720,39 @@ test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ 
 
   await page.keyboard.press("Control+Z");
   await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
+});
+
+test("keyboard history persists and remains the base for later collaborative edits", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  const originalX = Number(await page.getByTestId("inspector-x").inputValue());
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByTestId("inspector-x")).toHaveValue(String(originalX + 1));
+  await page.keyboard.press("Control+z");
+  await expect(page.getByTestId("inspector-x")).toHaveValue(String(originalX));
+  await page.keyboard.press("Control+Shift+z");
+  await expect(page.getByTestId("inspector-x")).toHaveValue(String(originalX + 1));
+
+  await page.getByTestId("inspector-text").fill("히스토리 수렴");
+  await expect(page.getByTestId("inspector-x")).toHaveValue(String(originalX + 1));
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const headline = (await response.json()).file.pages[0].children[0].children[0];
+      return { x: headline.transform.x, text: headline.content.value };
+    })
+    .toEqual({ x: originalX + 1, text: "히스토리 수렴" });
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue(String(originalX + 1));
+  await expect(page.getByTestId("inspector-text")).toHaveValue("히스토리 수렴");
 });
 
 test("Figma-like object clipboard copies and pastes selected layers", async ({ page }) => {

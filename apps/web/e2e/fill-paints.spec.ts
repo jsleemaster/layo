@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { resetE2eStorage } from "./test-storage";
 
 const pixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
@@ -7,8 +8,7 @@ const pixelPng = Buffer.from(
 );
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 test("Inspector preserves ordered fill paints through lifecycle, artifacts, undo, and reload", async ({ page }) => {

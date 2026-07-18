@@ -29,10 +29,78 @@ test("e2e script starts required local services before Playwright", async () => 
   assert.equal(typeof e2eScript, "string");
   assert.match(e2eScript, /^node scripts\/run-e2e\.mjs -- /);
   assert.match(runner, /name: "server"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/server", "dev"\]/);
-  assert.match(runner, /name: "web"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/web", "dev"\]/);
+  assert.match(
+    runner,
+    /name: "web"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/web", "dev", "--", "--strictPort"\]/
+  );
   assert.match(runner, /http:\/\/127\.0\.0\.1:4317\/health/);
   assert.match(runner, /http:\/\/127\.0\.0\.1:5173\//);
   assert.match(runner, /"pnpm",\s*\["exec",\s*"playwright",\s*"test"/);
+  assert.match(runner, /mkdtemp/);
+  assert.match(runner, /LAYO_E2E_STORAGE_DIR/);
+  assert.match(runner, /LAYO_E2E_STORAGE_TOKEN/);
+  assert.match(runner, /randomUUID/);
+  assert.match(runner, /writeFile/);
+  assert.match(runner, /--strictPort/);
+  assert.match(runner, /assertServiceProcessAlive/);
+  assert.match(runner, /already running/);
+  assert.match(runner, /rm\(e2eStorageRoot/);
+
+  const storageHelper = await readFile("apps/web/e2e/test-storage.ts", "utf8");
+  assert.match(storageHelper, /process\.env\.LAYO_E2E_STORAGE_DIR/);
+  assert.match(storageHelper, /process\.env\.LAYO_E2E_STORAGE_TOKEN/);
+  assert.match(storageHelper, /realpath/);
+  assert.match(storageHelper, /tmpdir/);
+  assert.doesNotMatch(storageHelper, /apps\/server\/\.layo/);
+
+  for (const specPath of [
+    "apps/web/e2e/editor-mvp.spec.ts",
+    "apps/web/e2e/collaboration.spec.ts"
+  ]) {
+    const spec = await readFile(specPath, "utf8");
+    assert.doesNotMatch(spec, /rm\(["'](?:apps\/server\/)?\.layo/);
+  }
+
+  assert.match(packageJson.scripts["test:e2e:collab"], /scripts\/run-e2e\.mjs/);
+
+  const activePlan = await readFile(
+    "docs/superpowers/plans/2026-07-16-penpot-file-version-visual-preview.md",
+    "utf8"
+  );
+  assert.doesNotMatch(activePlan, /pnpm exec playwright test/);
+});
+
+test("document writes and file-version mutations share the per-file operation queue", async () => {
+  const app = await readFile("apps/web/src/App.tsx", "utf8");
+
+  assert.match(app, /useRef\(createFileOperationQueue\(\)\)/);
+  assert.doesNotMatch(app, /(?:void|await)\s+persist[A-Z]/);
+  assert.doesNotMatch(app, /componentVariantSaveRef/);
+  assert.match(app, /enqueueDocumentPersistence\(fileId, \(\) => saveFileVersion\(fileId, message\)\)/);
+  assert.match(app, /enqueueDocumentPersistence\(fileId, \(\) =>\s*restoreFileVersion\(fileId, version\.versionId\)/);
+  for (const operation of [
+    "importLibraryArchive",
+    "importLibraryRegistryItem",
+    "importLibraryRegistryTokens",
+    "updateLibraryRegistryTokens",
+    "updateLibraryRegistryItem",
+    "importDesignTokensDtcg"
+  ]) {
+    assert.match(
+      app,
+      new RegExp(`enqueueDocumentPersistence\\(fileId, \\(\\) =>[\\s\\S]{0,80}${operation}\\(`)
+    );
+  }
+});
+
+test("MCP browser tests pass only an explicit subprocess environment allowlist", async () => {
+  const spec = await readFile("apps/web/e2e/mcp-stdio.spec.ts", "utf8");
+
+  assert.match(spec, /MCP_STDIO_ENV_ALLOWLIST/);
+  assert.doesNotMatch(spec, /\.\.\.process\.env/);
+  assert.doesNotMatch(spec, /Object\.entries\(process\.env\)/);
+  assert.match(spec, /LAYO_STORAGE_DIR/);
+  assert.match(spec, /LAYO_LIBRARY_REGISTRY_MEMBERS_FILE/);
 });
 
 test("storage backup script exposes backup review and restore operations", async () => {

@@ -2,10 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 async function openFilePanel(page: Page) {
@@ -44,6 +44,7 @@ test("team panel shows live collaboration controls only in the collaboration tab
   await expect(page.getByTestId("relay-url")).toHaveCount(0);
   await expect(page.getByTestId("relay-token")).toHaveCount(0);
   await expect(page.getByTestId("member-token")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "멤버 토큰 적용" })).toHaveCount(0);
   await expect(page.getByTestId("team-e2ee-toggle")).toHaveCount(0);
   await expect(page.getByTestId("team-e2ee-passphrase")).toHaveCount(0);
   await expect(page.getByTestId("team-manifest-url")).toHaveCount(0);
@@ -65,6 +66,8 @@ test("team panel shows live collaboration controls only in the collaboration tab
 
   await page.getByRole("tab", { name: "팀 설정" }).click();
   await expect(page.getByTestId("relay-url")).toHaveCount(0);
+  await expect(page.getByTestId("member-token")).toBeVisible();
+  await expect(page.getByRole("button", { name: "멤버 토큰 적용" })).toBeVisible();
   await expect(page.getByLabel("팀 설정 URL")).toBeVisible();
   await expect(page.getByTestId("team-manifest-url")).toBeVisible();
   await expect(page.getByTestId("team-manifest")).toBeVisible();
@@ -200,8 +203,6 @@ test("relay team syncs document edits between two browser contexts", async ({ br
 });
 
 test("two editors keep independent node move and text edits", async ({ browser }) => {
-  await rm(".layo/files/sample-file.json", { force: true });
-  await rm("apps/server/.layo/files/sample-file.json", { force: true });
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
   const firstContext = await browser.newContext();
@@ -247,6 +248,92 @@ test("two editors keep independent node move and text edits", async ({ browser }
     await expect(secondPage.getByTestId("inspector-text")).toHaveValue("Concurrent headline", {
       timeout: 8000
     });
+  } finally {
+    await firstContext.close();
+    await secondContext.close();
+    await rm(downloadDir, { force: true, recursive: true });
+  }
+});
+
+test("collaborative structural undo preserves a later remote text edit", async ({ browser }) => {
+  const downloadDir = await mkdtemp(join(tmpdir(), "canvas-history-manifest-"));
+  const firstContext = await browser.newContext();
+  const secondContext = await browser.newContext();
+  const firstPage = await firstContext.newPage();
+  const secondPage = await secondContext.newPage();
+
+  try {
+    const documentId = await createProjectFromEmptyState(firstPage);
+    const fileResponse = await firstPage.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    const file = (await fileResponse.json()).file;
+    const parentId = file.pages[0].children[0].id as string;
+    const seeded = await firstPage.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/agent/commands`,
+      {
+        data: {
+          dryRun: false,
+          commands: [
+            { type: "create_path", parentId, ...pathCommand("history-left", "히스토리 왼쪽", 40) },
+            { type: "create_path", parentId, ...pathCommand("history-right", "히스토리 오른쪽", 90) },
+            {
+              type: "create_boolean_path",
+              nodeId: "history-boolean",
+              name: "히스토리 불리언",
+              operation: "union",
+              sourceNodeIds: ["history-left", "history-right"]
+            }
+          ]
+        }
+      }
+    );
+    expect(seeded.ok()).toBeTruthy();
+    await firstPage.reload();
+    await secondPage.goto("http://127.0.0.1:5173/");
+
+    await openTeamPanel(firstPage);
+    await firstPage.getByRole("tab", { name: "실시간 협업" }).click();
+    await firstPage.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+    await firstPage.getByRole("button", { name: "협업 팀 만들기" }).click();
+    await expect(firstPage.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await firstPage.getByRole("tab", { name: "팀 설정" }).click();
+    const downloadPromise = firstPage.waitForEvent("download");
+    await firstPage.getByRole("button", { name: "파일로 저장" }).click();
+    const download = await downloadPromise;
+    const manifestPath = join(downloadDir, download.suggestedFilename());
+    await download.saveAs(manifestPath);
+
+    await openTeamPanel(secondPage);
+    await secondPage.getByRole("tab", { name: "팀 설정" }).click();
+    await secondPage.getByTestId("team-manifest-file").setInputFiles(manifestPath);
+    await expect(secondPage.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await openLayersPanel(firstPage);
+    await openLayersPanel(secondPage);
+    await expect(secondPage.getByRole("button", { name: "히스토리 불리언" })).toBeVisible({ timeout: 8000 });
+    await firstPage.getByRole("button", { name: "히스토리 불리언" }).click();
+    await firstPage.getByRole("button", { name: "불리언 분리" }).click();
+    await expect(firstPage.getByRole("button", { name: "히스토리 왼쪽" })).toBeVisible();
+    await expect(secondPage.getByRole("button", { name: "히스토리 오른쪽" })).toBeVisible({ timeout: 8000 });
+
+    await secondPage.getByRole("button", { name: "헤드라인" }).click();
+    await secondPage.getByTestId("inspector-text").fill("원격 히스토리 보존");
+    await firstPage.getByRole("button", { name: "헤드라인" }).click();
+    await expect(firstPage.getByTestId("inspector-text")).toHaveValue("원격 히스토리 보존", {
+      timeout: 8000
+    });
+
+    await firstPage.keyboard.press("Control+z");
+    await expect(firstPage.getByRole("button", { name: "히스토리 불리언" })).toBeVisible();
+    await expect(secondPage.getByRole("button", { name: "히스토리 불리언" })).toBeVisible({ timeout: 8000 });
+    await expect(firstPage.getByTestId("inspector-text")).toHaveValue("원격 히스토리 보존");
+    await expect(secondPage.getByTestId("inspector-text")).toHaveValue("원격 히스토리 보존");
+
+    await firstPage.keyboard.press("Control+Shift+z");
+    await expect(firstPage.getByRole("button", { name: "히스토리 왼쪽" })).toBeVisible();
+    await expect(secondPage.getByRole("button", { name: "히스토리 오른쪽" })).toBeVisible({ timeout: 8000 });
+    await expect(firstPage.getByTestId("inspector-text")).toHaveValue("원격 히스토리 보존");
+    await expect(secondPage.getByTestId("inspector-text")).toHaveValue("원격 히스토리 보존");
   } finally {
     await firstContext.close();
     await secondContext.close();
@@ -347,6 +434,22 @@ test("five team members join a relay room and observe concurrent edits", async (
     await Promise.all(contexts.map((context) => context.close()));
   }
 });
+
+function pathCommand(id: string, name: string, x: number) {
+  return {
+    id,
+    name,
+    x,
+    y: 40,
+    width: 100,
+    height: 100,
+    fill: "#0ea5e9",
+    stroke: "#0f172a",
+    strokeWidth: 1,
+    pathData: "M0 0 H100 V100 H0 Z",
+    fillRule: "nonzero" as const
+  };
+}
 
 test("encrypted relay team syncs document edits without exporting the passphrase", async ({ browser }) => {
   const contextA = await browser.newContext();

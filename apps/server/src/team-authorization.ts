@@ -2324,7 +2324,7 @@ async function quarantineWatchedManagedTokenState(
         currentBaseSnapshot
       );
     }
-    mergeManagedTokenState(currentBaseConfig, state);
+    mergeManagedTokenState(currentBaseConfig, state, true);
     await recoverWhileLocked();
   });
 }
@@ -2354,7 +2354,8 @@ async function readStableMergedTeamAuthorizationConfig(
   ]);
   const nextConfig = mergeManagedTokenState(
     parseRequiredTeamAuthorizationConfig(baseSnapshot),
-    parseManagedTokenState(sidecarSnapshot)
+    parseManagedTokenState(sidecarSnapshot),
+    true
   );
   const [verifiedBaseSnapshot, verifiedSidecarSnapshot] = await Promise.all([
     readFile(filePath, "utf8"),

@@ -119,8 +119,13 @@ import {
   type LibraryRegistryUpdateNotification
 } from "./document-api";
 import { editorKonvaTokens } from "./design-tokens";
+import { createFileOperationQueue } from "./file-operation-queue";
 import { imageAssetIdsForNode, pdfForNode, svgForNode, type NodeArtifactAsset } from "./node-artifacts";
-import { uploadImageAsset, type UploadedAsset } from "./asset-api";
+import {
+  deleteImageAssetIfUnreferenced,
+  uploadImageAsset,
+  type UploadedAsset
+} from "./asset-api";
 import {
   createCollabDocumentSession,
   type CollabDocumentSession
@@ -154,6 +159,7 @@ import {
   type ProjectManifest
 } from "./project-api";
 import { getVisibleProjects, promoteRecentProject } from "./project-list";
+import { createProjectLoadCoordinator } from "./project-load-coordinator";
 import { createIndexedDbProjectStore } from "./project-store";
 import {
   alignSelectedNodeToParent,
@@ -1394,6 +1400,7 @@ type LeftPanelMode = "files" | "assets" | "layers" | "team";
 
 interface FileVersionPreviewState {
   version: FileVersionSummary;
+  document: RendererDocument;
   summary: FileVersionChangeSummary;
 }
 
@@ -2148,53 +2155,6 @@ async function persistBooleanPathCommand(
   }
 }
 
-function booleanPathCommandForTransition(
-  current: RendererDocument,
-  next: RendererDocument
-): BooleanPathAgentCommand | null {
-  const currentBooleanNodes = new Map(
-    flattenRendererNodes(current)
-      .filter((node) => node.content.type === "boolean_path")
-      .map((node) => [node.id, node])
-  );
-  const nextBooleanNodes = new Map(
-    flattenRendererNodes(next)
-      .filter((node) => node.content.type === "boolean_path")
-      .map((node) => [node.id, node])
-  );
-
-  for (const [nodeId, node] of currentBooleanNodes) {
-    if (!nextBooleanNodes.has(nodeId)) {
-      return { type: "detach_boolean_path", nodeId };
-    }
-    const nextNode = nextBooleanNodes.get(nodeId);
-    if (
-      node.content.type === "boolean_path" &&
-      nextNode?.content.type === "boolean_path" &&
-      node.content.relation.operation !== nextNode.content.relation.operation
-    ) {
-      return {
-        type: "set_boolean_path_operation",
-        nodeId,
-        operation: nextNode.content.relation.operation
-      };
-    }
-  }
-
-  for (const [nodeId, node] of nextBooleanNodes) {
-    if (!currentBooleanNodes.has(nodeId) && node.content.type === "boolean_path") {
-      return {
-        type: "create_boolean_path",
-        nodeId,
-        name: node.name,
-        operation: node.content.relation.operation,
-        sourceNodeIds: [...node.content.relation.source_node_ids]
-      };
-    }
-  }
-  return null;
-}
-
 async function persistPathChange(
   fileId: string,
   nodeId: string,
@@ -2212,6 +2172,22 @@ async function persistPathChange(
 
   if (!response.ok) {
     throw new Error(`경로 저장 실패: ${response.status} ${response.statusText}`.trim());
+  }
+}
+
+async function persistDocumentSnapshot(
+  fileId: string,
+  baseDocument: RendererDocument,
+  document: RendererDocument
+) {
+  const response = await fetch(apiUrl(`/files/${fileId}`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ baseDocument, document })
+  });
+
+  if (!response.ok) {
+    throw new Error(`문서 저장 실패: ${response.status} ${response.statusText}`.trim());
   }
 }
 
@@ -4560,6 +4536,7 @@ function renderNode({
   hasSelectedAncestor = false,
   hasComponentInstanceAncestor = false,
   isCanvasPanning = false,
+  readOnly = false,
   dragPreview = null,
   onSelect,
   onGeometryChange,
@@ -4576,6 +4553,7 @@ function renderNode({
   hasSelectedAncestor?: boolean;
   hasComponentInstanceAncestor?: boolean;
   isCanvasPanning?: boolean;
+  readOnly?: boolean;
   dragPreview?: NodeDragPreview | null;
   onSelect: (nodeId: string, additive: boolean, preserveMultiSelection?: boolean) => void;
   onGeometryChange: (nodeId: string, patch: GeometryPatch) => void;
@@ -4598,7 +4576,7 @@ function renderNode({
   const nodeIsLocked = isNodeLocked(node);
   const shouldDeferToAncestor = hasSelectedAncestor || hasComponentInstanceAncestor;
   const canResize =
-    isPrimarySelected && selectedNodeIds.length === 1 && !isCanvasPanning && !nodeIsLocked;
+    isPrimarySelected && selectedNodeIds.length === 1 && !isCanvasPanning && !nodeIsLocked && !readOnly;
   const previewDelta =
     dragPreview &&
     dragPreview.primaryNodeId !== node.id &&
@@ -4622,6 +4600,10 @@ function renderNode({
     }
   };
   const selectAndPrimeDrag = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    if (readOnly) {
+      event.cancelBubble = true;
+      return;
+    }
     if (isCanvasPanning) {
       return;
     }
@@ -4650,6 +4632,10 @@ function renderNode({
     onSelect(node.id, false);
   };
   const selectFromClick = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
+    if (readOnly) {
+      event.cancelBubble = true;
+      return;
+    }
     if (isCanvasPanning) {
       return;
     }
@@ -4668,7 +4654,7 @@ function renderNode({
   const startDirectEditFromDoubleClick = (
     event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>
   ) => {
-    if (isCanvasPanning || nodeIsLocked || shouldDeferToAncestor) {
+    if (readOnly || isCanvasPanning || nodeIsLocked || shouldDeferToAncestor) {
       return;
     }
 
@@ -4839,7 +4825,7 @@ function renderNode({
       x={node.transform.x + (previewDelta?.x ?? 0)}
       y={node.transform.y + (previewDelta?.y ?? 0)}
       rotation={node.transform.rotation}
-      draggable={!nodeIsLocked && !shouldDeferToAncestor && isSelected && !isCanvasPanning}
+      draggable={!readOnly && !nodeIsLocked && !shouldDeferToAncestor && isSelected && !isCanvasPanning}
       onMouseDown={selectAndPrimeDrag}
       onTouchStart={selectAndPrimeDrag}
       onClick={selectFromClick}
@@ -4905,6 +4891,7 @@ function renderNode({
           hasSelectedAncestor: hasSelectedAncestor || isSelected,
           hasComponentInstanceAncestor: hasComponentInstanceAncestor || node.kind === "component_instance",
           isCanvasPanning,
+          readOnly,
           dragPreview,
           onSelect,
           onGeometryChange,
@@ -6621,6 +6608,7 @@ function variantIdForControlValue(
 }
 
 function Inspector({
+  readOnly,
   activeTab,
   selectedNode,
   selectedNodes,
@@ -6700,6 +6688,7 @@ function Inspector({
   onExportPresetsChange,
   onTabChange
 }: {
+  readOnly: boolean;
   activeTab: InspectorTab;
   selectedNode: RendererNode | null;
   selectedNodes: RendererNode[];
@@ -6831,7 +6820,7 @@ function Inspector({
 
   if (selectedNodeCount > 1) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" inert={readOnly ? true : undefined}>
         <InspectorHeader
           zoomLabel={zoomLabel}
           canShare={canShare}
@@ -6878,7 +6867,7 @@ function Inspector({
 
   if (!selectedNode) {
     return (
-      <aside className="inspector">
+      <aside className="inspector" inert={readOnly ? true : undefined}>
         <InspectorHeader
           zoomLabel={zoomLabel}
           canShare={canShare}
@@ -7683,7 +7672,7 @@ function Inspector({
   };
 
   return (
-    <aside className="inspector">
+    <aside className="inspector" inert={readOnly ? true : undefined}>
       <InspectorHeader
         zoomLabel={zoomLabel}
         canShare={canShare}
@@ -9484,6 +9473,7 @@ export function App() {
   const [fileVersionMessage, setFileVersionMessage] = useState("검토 전");
   const [fileVersionRetentionKeep, setFileVersionRetentionKeep] = useState("10");
   const [fileVersionStatus, setFileVersionStatus] = useState("버전 기록 대기 중");
+  const [fileVersionRestorePending, setFileVersionRestorePending] = useState(false);
   const [fileArchiveReview, setFileArchiveReview] = useState<FileArchiveReviewState | null>(null);
   const [fileArchiveImportName, setFileArchiveImportName] = useState("");
   const [fileArchiveStatus, setFileArchiveStatus] = useState("아카이브 대기 중");
@@ -9557,8 +9547,15 @@ export function App() {
   accountTokenIdentityRef.current = accountTokenIdentityKey;
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
-  const nodeStylePersistenceQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const documentPersistenceQueueRef = useRef(createFileOperationQueue());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
+  const projectLoadCoordinatorRef = useRef<ReturnType<typeof createProjectLoadCoordinator> | null>(null);
+  if (!projectLoadCoordinatorRef.current) {
+    projectLoadCoordinatorRef.current = createProjectLoadCoordinator((projectId) =>
+      projectStore.setCurrentProjectId(projectId)
+    );
+  }
+  const projectLoadCoordinator = projectLoadCoordinatorRef.current;
   const pathEditingNodeIdRef = useRef<string | null>(null);
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
@@ -9588,7 +9585,10 @@ export function App() {
   } | null>(null);
   const isSpacePanningRef = useRef(false);
   const collabSessionRef = useRef<CollabDocumentSession | null>(null);
-  const componentVariantSaveRef = useRef(Promise.resolve());
+  const fileVersionPreviewActiveRef = useRef(false);
+  const fileVersionPreviewRequestRef = useRef(0);
+  const fileVersionRestorePendingRef = useRef(false);
+  const editorMutationGenerationRef = useRef(0);
   const publishedCursorRef = useRef<PublishedCursor | null>(null);
   const remotePresenceSignatureRef = useRef(new Map<string, string>());
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
@@ -9615,19 +9615,36 @@ export function App() {
       : `${visibleProjects.length}개 프로젝트`
     : `${projects.length}개 프로젝트`;
 
+  fileVersionPreviewActiveRef.current = fileVersionPreview !== null || fileVersionRestorePending;
+
   const resetFileVersions = (status = "버전 기록 대기 중") => {
+    fileVersionPreviewRequestRef.current += 1;
     setFileVersions([]);
     setFileVersionPreview(null);
     setFileVersionStatus(status);
   };
 
   const refreshFileVersions = async (fileId: string, status?: string) => {
+    const requestId = fileVersionPreviewRequestRef.current + 1;
+    fileVersionPreviewRequestRef.current = requestId;
     try {
       const versions = await listFileVersions(fileId);
+      if (
+        requestId !== fileVersionPreviewRequestRef.current ||
+        currentProjectRef.current?.currentDocumentId !== fileId
+      ) {
+        return;
+      }
       setFileVersions(versions);
       setFileVersionPreview(null);
       setFileVersionStatus(status ?? (versions.length > 0 ? `${versions.length}개 버전` : "저장된 버전 없음"));
     } catch (error) {
+      if (
+        requestId !== fileVersionPreviewRequestRef.current ||
+        currentProjectRef.current?.currentDocumentId !== fileId
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "버전 기록을 불러오지 못했습니다";
       setFileVersions([]);
       setFileVersionPreview(null);
@@ -10049,29 +10066,48 @@ export function App() {
   ]);
 
   const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
-    const response = await fetch(apiUrl(`/files/${project.currentDocumentId}`));
-    if (!response.ok) {
-      throw new Error(`프로젝트 문서를 불러오지 못했습니다: ${response.status}`);
+    const requestId = projectLoadCoordinator.beginRequest();
+    try {
+      const response = await fetch(apiUrl(`/files/${project.currentDocumentId}`));
+      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+        return false;
+      }
+      if (!response.ok) {
+        throw new Error(`프로젝트 문서를 불러오지 못했습니다: ${response.status}`);
+      }
+      const payload = await response.json();
+      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+        return false;
+      }
+      if (!await projectLoadCoordinator.persistIfCurrent(requestId, project.projectId)) {
+        return false;
+      }
+      setProjects(projectList);
+      setCurrentProject(project);
+      setProjectNameDraft(project.name);
+      setRecentProjectIds((current) => promoteRecentProject(project.projectId, current));
+      setEditor(createEditorState(parseDocumentPayload(payload)));
+      setTokenDtcgDraft("");
+      setTokenDtcgStatus("");
+      setProjectStatus(`${project.name} 불러옴`);
+      void refreshFileVersions(project.currentDocumentId);
+      void refreshCommentThreads(project.currentDocumentId);
+      void refreshCommentNotifications();
+      void refreshCommentActivity();
+      await refreshLibraryRegistry(undefined, project.currentDocumentId);
+      return projectLoadCoordinator.isCurrentRequest(requestId);
+    } catch (error) {
+      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+        return false;
+      }
+      throw error;
     }
-    const payload = await response.json();
-    setProjects(projectList);
-    setCurrentProject(project);
-    setProjectNameDraft(project.name);
-    await projectStore.setCurrentProjectId(project.projectId);
-    setRecentProjectIds((current) => promoteRecentProject(project.projectId, current));
-    setEditor(createEditorState(parseDocumentPayload(payload)));
-    setTokenDtcgDraft("");
-    setTokenDtcgStatus("");
-    setProjectStatus(`${project.name} 불러옴`);
-    void refreshFileVersions(project.currentDocumentId);
-    void refreshCommentThreads(project.currentDocumentId);
-    void refreshCommentNotifications();
-    void refreshCommentActivity();
-    await refreshLibraryRegistry(undefined, project.currentDocumentId);
   };
 
   useEffect(() => {
     let cancelled = false;
+    const requestId = projectLoadCoordinator.beginRequest();
+    const isCurrentRequest = () => !cancelled && projectLoadCoordinator.isCurrentRequest(requestId);
 
     const loadInitialProject = async () => {
       try {
@@ -10086,7 +10122,7 @@ export function App() {
           orderedProjectList[0] ??
           null;
         if (!selectedProject) {
-          if (!cancelled) {
+          if (isCurrentRequest()) {
             setProjects(projectList);
             setRecentProjectIds(storedRecentProjectIds);
             setProjectStatus("저장된 프로젝트 없음");
@@ -10101,17 +10137,22 @@ export function App() {
         }
 
         const response = await fetch(apiUrl(`/files/${selectedProject.currentDocumentId}`));
+        if (!isCurrentRequest()) {
+          return;
+        }
         if (!response.ok) {
           throw new Error(`프로젝트 문서를 불러오지 못했습니다: ${response.status}`);
         }
         const payload = await response.json();
-        if (cancelled) {
+        if (!isCurrentRequest()) {
+          return;
+        }
+        if (!await projectLoadCoordinator.persistIfCurrent(requestId, selectedProject.projectId)) {
           return;
         }
         setProjects(projectList);
         setCurrentProject(selectedProject);
         setProjectNameDraft(selectedProject.name);
-        await projectStore.setCurrentProjectId(selectedProject.projectId);
         setRecentProjectIds(promoteRecentProject(selectedProject.projectId, storedRecentProjectIds));
         setEditor(createEditorState(parseDocumentPayload(payload)));
         setTokenDtcgDraft("");
@@ -10123,7 +10164,7 @@ export function App() {
         void refreshCommentActivity();
         void refreshLibraryRegistry(undefined, selectedProject.currentDocumentId);
       } catch {
-        if (!cancelled) {
+        if (isCurrentRequest()) {
           setProjectStatus("로컬 서버를 시작하면 프로젝트를 불러옵니다");
           resetFileVersions("버전 기록 대기 중");
           resetCommentThreads("코멘트 대기 중");
@@ -10178,26 +10219,34 @@ export function App() {
     return () => window.clearInterval(interval);
   }, [collabSession]);
 
+  const isFileVersionPreviewing = fileVersionPreview !== null;
+  const displayedDocument = fileVersionPreview?.document ?? editor?.document ?? null;
   const nodes = useMemo(
-    () => (editor ? flattenRendererNodes(editor.document) : []),
-    [editor]
+    () => (displayedDocument ? flattenRendererNodes(displayedDocument) : []),
+    [displayedDocument]
   );
-  const activePage = editor?.document.pages[0] ?? null;
+  const activePage = displayedDocument?.pages[0] ?? null;
   const pageExportReviewItems = useMemo(
-    () => (editor ? buildPageExportPresetReviewItems(editor.document, activePage?.id) : []),
-    [activePage?.id, editor]
+    () => (displayedDocument ? buildPageExportPresetReviewItems(displayedDocument, activePage?.id) : []),
+    [activePage?.id, displayedDocument]
   );
   const selectedNode = useMemo(
-    () => (editor?.selection.nodeId ? findNodeById(editor.document, editor.selection.nodeId) : null),
-    [editor]
+    () =>
+      !isFileVersionPreviewing && editor?.selection.nodeId
+        ? findNodeById(editor.document, editor.selection.nodeId)
+        : null,
+    [editor, isFileVersionPreviewing]
   );
   const selectedNodeCommentThreads = useMemo(
     () => (selectedNode ? commentThreads.filter((thread) => thread.nodeId === selectedNode.id) : []),
     [commentThreads, selectedNode]
   );
   const commentBubbleOverlays = useMemo(
-    () => (editor ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport) : []),
-    [commentThreads, editor]
+    () =>
+      editor && !isFileVersionPreviewing
+        ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport)
+        : [],
+    [commentThreads, editor, isFileVersionPreviewing]
   );
   const currentProjectCommentNotification = useMemo(
     () =>
@@ -10235,7 +10284,7 @@ export function App() {
         : selectedNode,
     [editor, objectContextMenu, selectedNode]
   );
-  const selectedNodeIds = editor?.selection.nodeIds ?? [];
+  const selectedNodeIds = isFileVersionPreviewing ? [] : editor?.selection.nodeIds ?? [];
   const selectedNodes = useMemo(() => {
     if (!editor) {
       return [];
@@ -10593,7 +10642,7 @@ export function App() {
       };
     });
   }, [editor, snapGuides]);
-  const components = editor?.document.components ?? [];
+  const components = displayedDocument?.components ?? [];
   const selectedComponent = selectedNode
     ? components.find((component) => component.source_node.id === selectedNode.id)
     : undefined;
@@ -10805,13 +10854,97 @@ export function App() {
     publishPresenceSnapshot(activeSession);
   };
 
+  const enqueueDocumentPersistence = <T,>(fileId: string, operation: () => Promise<T>) =>
+    documentPersistenceQueueRef.current.enqueue(fileId, operation);
+
+  const enqueueDocumentSnapshotPersistence = (
+    baseDocument: RendererDocument,
+    document: RendererDocument
+  ) => {
+    const fileId = currentProjectRef.current?.currentDocumentId;
+    if (!fileId) {
+      return;
+    }
+    const baseSnapshot = structuredClone(baseDocument);
+    const snapshot = structuredClone(document);
+    void enqueueDocumentPersistence(fileId, () =>
+      persistDocumentSnapshot(fileId, baseSnapshot, snapshot)
+    ).catch((error) => {
+      const message = error instanceof Error ? error.message : "문서를 저장하지 못했습니다";
+      setProjectStatus(message);
+    });
+  };
+
+  const applyCollaborativeHistory = (direction: "undo" | "redo") => {
+    const activeSession = collabSessionRef.current;
+    const current = editorRef.current;
+    if (!activeSession || !current) {
+      return false;
+    }
+    const baseDocument = structuredClone(activeSession.getDocument());
+    const document = direction === "undo" ? activeSession.undo() : activeSession.redo();
+    if (!document) {
+      return false;
+    }
+
+    const nextState = setMultiSelection(
+      { ...current, document, history: { past: [], future: [] } },
+      current.selection.nodeIds,
+      current.selection.nodeId
+    );
+    editorRef.current = nextState;
+    setEditor(nextState);
+    publishEditorPresence(nextState);
+    enqueueDocumentSnapshotPersistence(baseDocument, document);
+    return true;
+  };
+
+  const updateEditorFromInteraction = (deriveNextState: (state: EditorState) => EditorState) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return false;
+    }
+    const current = editorRef.current;
+    if (!current) {
+      return false;
+    }
+
+    const activeSession = collabSessionRef.current;
+    const baseState = activeSession
+      ? { ...current, document: activeSession.getDocument() }
+      : current;
+    const derivedState = deriveNextState(baseState);
+    const documentChanged = derivedState.document !== baseState.document;
+    let nextState = derivedState;
+
+    if (documentChanged && activeSession) {
+      activeSession.transact("editor-interaction", () => derivedState.document);
+      nextState = {
+        ...derivedState,
+        document: activeSession.getDocument(),
+        history: { past: [], future: [] }
+      };
+    } else if (activeSession) {
+      nextState = { ...derivedState, history: { past: [], future: [] } };
+    }
+
+    editorRef.current = nextState;
+    setEditor(nextState);
+    publishEditorPresence(nextState);
+
+    if (documentChanged) {
+      enqueueDocumentSnapshotPersistence(baseState.document, nextState.document);
+    }
+    return true;
+  };
+
   const updateViewportFromInteraction = (deriveNextState: (state: EditorState) => EditorState) => {
     setEditor((current) => {
       if (!current) {
         return current;
       }
 
-      const nextState = deriveNextState(current);
+      const derivedState = deriveNextState(current);
+      const nextState = { ...current, viewport: derivedState.viewport };
       publishEditorPresence(nextState);
       return nextState;
     });
@@ -10829,7 +10962,7 @@ export function App() {
   };
 
   const runContextMenuStateAction = (deriveNextState: (state: EditorState) => EditorState) => {
-    updateViewportFromInteraction((state) => deriveNextState(scopeStateToContextNode(state)));
+    updateEditorFromInteraction((state) => deriveNextState(scopeStateToContextNode(state)));
     setObjectContextMenu(null);
   };
 
@@ -10869,28 +11002,21 @@ export function App() {
       return;
     }
 
-    updateViewportFromInteraction((state) => setSelectedNodeStyle(scopeStateToContextNode(state), style));
+    updateEditorFromInteraction((state) => setSelectedNodeStyle(scopeStateToContextNode(state), style));
     setProjectStatus(`${targetNode.name} 스타일 적용됨`);
     setObjectContextMenu(null);
   };
 
   const cutContextSelection = () => {
-    setEditor((current) => {
-      if (!current) {
-        return current;
-      }
-
+    updateEditorFromInteraction((current) => {
       const scopedState = scopeStateToContextNode(current);
       const clipboard = copySelectedNode(scopedState);
       if (!clipboard) {
-        publishEditorPresence(scopedState);
         return scopedState;
       }
 
       objectClipboardRef.current = clipboard;
-      const nextState = deleteSelectedNode(scopedState);
-      publishEditorPresence(nextState);
-      return nextState;
+      return deleteSelectedNode(scopedState);
     });
     setObjectContextMenu(null);
   };
@@ -11285,6 +11411,7 @@ export function App() {
 
     const nodeId = contextMenuNode.id;
     const nodeName = contextMenuNode.name;
+    const fileId = currentProject.currentDocumentId;
     setObjectContextMenu(null);
 
     if ((contextMenuNode.content.fit_mode ?? "fill") === fitMode) {
@@ -11292,8 +11419,8 @@ export function App() {
     }
 
     try {
-      await persistImageFitMode(currentProject.currentDocumentId, nodeId, fitMode);
-      dispatch({ type: "set_image_fit_mode", nodeId, fitMode });
+      await enqueueDocumentPersistence(fileId, () => persistImageFitMode(fileId, nodeId, fitMode));
+      applyPersistedEditorCommand(fileId, { type: "set_image_fit_mode", nodeId, fitMode });
       setProjectStatus(`${nodeName} 이미지 ${fitMode === "fit" ? "맞춤" : "채우기"}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "이미지 맞춤을 저장하지 못했습니다";
@@ -11321,7 +11448,7 @@ export function App() {
     event.currentTarget.value = "";
     const nodeId = imageReplacementNodeIdRef.current;
     imageReplacementNodeIdRef.current = null;
-    if (!file || !nodeId || !currentProject) {
+    if (fileVersionPreviewActiveRef.current || !file || !nodeId || !currentProject) {
       return;
     }
 
@@ -11331,16 +11458,39 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    const mutationGeneration = editorMutationGenerationRef.current;
+    let pendingAsset: UploadedAsset | null = null;
     try {
-      const [asset, naturalSize]: [UploadedAsset, { width: number; height: number }] =
-        await Promise.all([uploadImageAsset(file), readImageFileSize(file)]);
+      const naturalSize = await readImageFileSize(file);
+      if (
+        fileVersionPreviewActiveRef.current ||
+        mutationGeneration !== editorMutationGenerationRef.current ||
+        currentProjectRef.current?.currentDocumentId !== fileId
+      ) {
+        return;
+      }
+      const asset = await uploadImageAsset(file);
+      pendingAsset = asset;
+      if (
+        fileVersionPreviewActiveRef.current ||
+        mutationGeneration !== editorMutationGenerationRef.current ||
+        currentProjectRef.current?.currentDocumentId !== fileId
+      ) {
+        await deleteImageAssetIfUnreferenced(asset.assetId);
+        pendingAsset = null;
+        return;
+      }
       const replacement = {
         assetId: asset.assetId,
         naturalWidth: naturalSize.width,
         naturalHeight: naturalSize.height
       };
-      await persistImageAssetReplacement(currentProject.currentDocumentId, nodeId, replacement);
-      dispatch({
+      await enqueueDocumentPersistence(fileId, () =>
+        persistImageAssetReplacement(fileId, nodeId, replacement)
+      );
+      pendingAsset = null;
+      applyPersistedEditorCommand(fileId, {
         type: "replace_image_asset",
         nodeId,
         assetId: replacement.assetId,
@@ -11349,7 +11499,18 @@ export function App() {
       });
       setProjectStatus(`${node.name} 이미지 바뀜`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "이미지를 바꾸지 못했습니다";
+      let cleanupError: unknown;
+      if (pendingAsset) {
+        try {
+          await deleteImageAssetIfUnreferenced(pendingAsset.assetId);
+        } catch (assetCleanupError) {
+          cleanupError = assetCleanupError;
+        }
+      }
+      const primaryMessage = error instanceof Error ? error.message : "이미지를 바꾸지 못했습니다";
+      const message = cleanupError instanceof Error
+        ? `${primaryMessage} · ${cleanupError.message}`
+        : primaryMessage;
       setProjectStatus(message);
     }
   };
@@ -11393,6 +11554,9 @@ export function App() {
   const openObjectContextMenuFromPointer = (event: KonvaEventObject<MouseEvent>) => {
     event.evt.preventDefault();
     event.cancelBubble = true;
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     setInlineTextEditingNodeId(null);
     setMeasurementTargetNodeId(null);
     setGridTrackContextMenu(null);
@@ -11489,73 +11653,21 @@ export function App() {
         updateViewportFromInteraction((state) => setViewport(state, { scale: 1, x: 0, y: 0 }));
         return;
       }
+      if (fileVersionPreviewActiveRef.current) {
+        event.preventDefault();
+        if (event.key === "Escape") {
+          setFileVersionPreview(null);
+          setFileVersionStatus("미리보기 종료됨");
+        }
+        return;
+      }
       if (isCommand && event.key.toLowerCase() === "z") {
         event.preventDefault();
-        setEditor((current) => {
-          if (!current) {
-            return current;
-          }
-
-          const nextState = event.shiftKey ? redo(current) : undo(current);
-          const nodeId = current.selection.nodeId;
-          const currentNode = nodeId ? findNodeById(current.document, nodeId) : null;
-          const nextNode = nodeId ? findNodeById(nextState.document, nodeId) : null;
-          if (
-            currentProjectRef.current &&
-            currentNode?.kind === "path" &&
-            currentNode.content.type === "path" &&
-            nextNode?.kind === "path" &&
-            nextNode.content.type === "path" &&
-            (currentNode.content.path_data !== nextNode.content.path_data ||
-              currentNode.content.fill_rule !== nextNode.content.fill_rule)
-          ) {
-            void persistPathChange(
-              currentProjectRef.current.currentDocumentId,
-              nextNode.id,
-              nextNode.content.path_data,
-              nextNode.content.fill_rule
-            ).catch((error) => {
-              const message = error instanceof Error ? error.message : "경로를 저장하지 못했습니다";
-              setProjectStatus(message);
-            });
-          }
-          if (
-            currentProjectRef.current &&
-            currentNode &&
-            nextNode &&
-            JSON.stringify(currentNode.style) !== JSON.stringify(nextNode.style)
-          ) {
-            const persistence = nodeStylePersistenceQueueRef.current
-              .catch(() => undefined)
-              .then(() =>
-                persistNodeStyle(
-                  currentProjectRef.current!.currentDocumentId,
-                  nextNode.id,
-                  nextNode.style
-                )
-              );
-            nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
-            void persistence.catch((error) => {
-              const message = error instanceof Error ? error.message : "스타일을 저장하지 못했습니다";
-              setProjectStatus(message);
-            });
-          }
-          const booleanCommand = booleanPathCommandForTransition(
-            current.document,
-            nextState.document
-          );
-          if (currentProjectRef.current && booleanCommand) {
-            void persistBooleanPathCommand(
-              currentProjectRef.current.currentDocumentId,
-              booleanCommand
-            ).catch((error) => {
-              const message = error instanceof Error ? error.message : "불리언 경로를 저장하지 못했습니다";
-              setProjectStatus(message);
-            });
-          }
-          publishEditorPresence(nextState);
-          return nextState;
-        });
+        if (collabSessionRef.current) {
+          applyCollaborativeHistory(event.shiftKey ? "redo" : "undo");
+        } else {
+          updateEditorFromInteraction(event.shiftKey ? redo : undo);
+        }
         return;
       }
       if (!isCommand && event.shiftKey && event.code === "Digit1") {
@@ -11570,7 +11682,7 @@ export function App() {
       }
       if (isCommand && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        updateViewportFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
+        updateEditorFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
         return;
       }
       if (isCommand && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "e") {
@@ -11612,7 +11724,7 @@ export function App() {
         const node = nodeId && currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
         if (style && node && !isNodeLocked(node)) {
           event.preventDefault();
-          updateViewportFromInteraction((state) => setSelectedNodeStyle(state, style));
+          updateEditorFromInteraction((state) => setSelectedNodeStyle(state, style));
           setProjectStatus(`${node.name} 스타일 적용됨`);
         }
         return;
@@ -11633,13 +11745,13 @@ export function App() {
         if (clipboard) {
           event.preventDefault();
           objectClipboardRef.current = clipboard;
-          updateViewportFromInteraction(deleteSelectedNode);
+          updateEditorFromInteraction(deleteSelectedNode);
         }
         return;
       }
       if (isCommand && event.key.toLowerCase() === "v" && objectClipboardRef.current) {
         event.preventDefault();
-        updateViewportFromInteraction((state) => pasteCopiedNode(state, objectClipboardRef.current));
+        updateEditorFromInteraction((state) => pasteCopiedNode(state, objectClipboardRef.current));
         return;
       }
       if (isCommand && event.key.toLowerCase() === "r") {
@@ -11650,19 +11762,19 @@ export function App() {
           event.preventDefault();
           const nextName = window.prompt("레이어 이름", node.name);
           if (nextName?.trim()) {
-            updateViewportFromInteraction((state) => renameSelectedNode(state, nextName));
+            updateEditorFromInteraction((state) => renameSelectedNode(state, nextName));
           }
         }
         return;
       }
       if (isCommand && event.key.toLowerCase() === "d") {
         event.preventDefault();
-        updateViewportFromInteraction(duplicateSelectedNode);
+        updateEditorFromInteraction(duplicateSelectedNode);
         return;
       }
       if (isCommand && event.key.toLowerCase() === "g") {
         event.preventDefault();
-        updateViewportFromInteraction((state) => {
+        updateEditorFromInteraction((state) => {
           if (event.shiftKey) {
             return ungroupSelectedNode(state);
           }
@@ -11736,13 +11848,13 @@ export function App() {
       }
       if (!isCommand && (event.key === "Backspace" || event.key === "Delete")) {
         event.preventDefault();
-        updateViewportFromInteraction(deleteSelectedNode);
+        updateEditorFromInteraction(deleteSelectedNode);
         return;
       }
       const alignmentShortcut = event.altKey ? ALIGNMENT_SHORTCUTS[event.key.toLowerCase()] : undefined;
       if (!isCommand && alignmentShortcut) {
         event.preventDefault();
-        updateViewportFromInteraction((state) =>
+        updateEditorFromInteraction((state) =>
           state.selection.nodeIds.length === 1
             ? alignSelectedNodeToParent(state, alignmentShortcut)
             : alignSelectedNodes(state, alignmentShortcut)
@@ -11764,28 +11876,28 @@ export function App() {
       const nudgeStep = event.shiftKey ? 10 : 1;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        updateViewportFromInteraction((state) =>
+        updateEditorFromInteraction((state) =>
           state.selection.nodeId
             ? nudgeSelectedNode(state, { x: -nudgeStep, y: 0 })
             : panViewport(state, { x: panStep, y: 0 })
         );
       } else if (event.key === "ArrowRight") {
         event.preventDefault();
-        updateViewportFromInteraction((state) =>
+        updateEditorFromInteraction((state) =>
           state.selection.nodeId
             ? nudgeSelectedNode(state, { x: nudgeStep, y: 0 })
             : panViewport(state, { x: -panStep, y: 0 })
         );
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        updateViewportFromInteraction((state) =>
+        updateEditorFromInteraction((state) =>
           state.selection.nodeId
             ? nudgeSelectedNode(state, { x: 0, y: -nudgeStep })
             : panViewport(state, { x: 0, y: panStep })
         );
       } else if (event.key === "ArrowDown") {
         event.preventDefault();
-        updateViewportFromInteraction((state) =>
+        updateEditorFromInteraction((state) =>
           state.selection.nodeId
             ? nudgeSelectedNode(state, { x: 0, y: nudgeStep })
             : panViewport(state, { x: 0, y: -panStep })
@@ -11819,34 +11931,86 @@ export function App() {
     };
   }, [stageSize.height, stageSize.width]);
 
-  const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
+  const applyEditorCommand = (command: Parameters<typeof executeEditorCommand>[1]) => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor) {
+      return false;
+    }
     const activeSession = collabSessionRef.current;
     if (!activeSession) {
-      setEditor((current) => (current ? executeEditorCommand(current, command) : current));
-      return;
+      const nextState = executeEditorCommand(currentEditor, command);
+      editorRef.current = nextState;
+      setEditor(nextState);
+      return true;
     }
 
-    if (!editor) {
-      return;
-    }
-
-    const nextState = executeEditorCommand(
-      { ...editor, document: activeSession.getDocument() },
+    const derivedState = executeEditorCommand(
+      { ...currentEditor, document: activeSession.getDocument() },
       command
     );
-    activeSession.transact("editor-command", () => nextState.document);
+    activeSession.transact("editor-command", () => derivedState.document);
+    const nextState = {
+      ...derivedState,
+      document: activeSession.getDocument(),
+      history: { past: [], future: [] }
+    };
+    editorRef.current = nextState;
     publishEditorPresence(nextState);
     setEditor(nextState);
+    return true;
+  };
+
+  const dispatchWithoutSnapshotPersistence = (
+    command: Parameters<typeof executeEditorCommand>[1]
+  ) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return false;
+    }
+    return applyEditorCommand(command);
+  };
+
+  const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return false;
+    }
+    const current = editorRef.current;
+    const fileId = currentProjectRef.current?.currentDocumentId;
+    if (!current || !fileId) {
+      return false;
+    }
+    const baseDocument = collabSessionRef.current?.getDocument() ?? current.document;
+    if (!applyEditorCommand(command)) {
+      return false;
+    }
+    const nextDocument = editorRef.current?.document;
+    if (nextDocument) {
+      enqueueDocumentSnapshotPersistence(baseDocument, nextDocument);
+    }
+    return true;
+  };
+
+  const applyPersistedEditorCommand = (
+    fileId: string,
+    command: Parameters<typeof executeEditorCommand>[1]
+  ) => {
+    if (currentProjectRef.current?.currentDocumentId !== fileId) {
+      return false;
+    }
+    return applyEditorCommand(command);
   };
 
   gridTrackDispatchRef.current = dispatch;
 
   const updateComponentInstanceVariant = (nodeId: string, variantId: string) => {
-    dispatch({ type: "set_component_instance_variant", nodeId, variantId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_component_instance_variant", nodeId, variantId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
-    void persistComponentInstanceVariant(currentProject.currentDocumentId, nodeId, variantId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistComponentInstanceVariant(currentProject.currentDocumentId, nodeId, variantId)
+    )
       .then(() => {
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -11858,16 +12022,15 @@ export function App() {
   };
 
   const updateComponentDefinitionVariants = (componentId: string, variants: ComponentVariant[]) => {
-    dispatch({ type: "set_component_variants", componentId, variants });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_component_variants", componentId, variants })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
 
     const fileId = currentProject.currentDocumentId;
-    componentVariantSaveRef.current = componentVariantSaveRef.current
-      .catch(() => undefined)
-      .then(() => persistComponentVariants(fileId, componentId, variants));
-    void componentVariantSaveRef.current
+    void enqueueDocumentPersistence(fileId, () => persistComponentVariants(fileId, componentId, variants))
       .then(() => {
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -11879,16 +12042,15 @@ export function App() {
   };
 
   const updateComponentDefinitionVariantArea = (componentId: string, area: ComponentVariantArea | null) => {
-    dispatch({ type: "set_component_variant_area", componentId, area });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_component_variant_area", componentId, area })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
 
     const fileId = currentProject.currentDocumentId;
-    componentVariantSaveRef.current = componentVariantSaveRef.current
-      .catch(() => undefined)
-      .then(() => persistComponentVariantArea(fileId, componentId, area));
-    void componentVariantSaveRef.current
+    void enqueueDocumentPersistence(fileId, () => persistComponentVariantArea(fileId, componentId, area))
       .then(() => {
         setProjectStatus("컴포넌트 변형 영역 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -12090,23 +12252,39 @@ export function App() {
     command: Parameters<typeof executeEditorCommand>[1],
     nodeId: string
   ) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return false;
+    }
+    const currentEditor = editorRef.current;
+    if (!currentEditor) {
+      return false;
+    }
     const activeSession = collabSessionRef.current;
     if (!activeSession) {
-      setEditor((current) => (current ? setSelection(executeEditorCommand(current, command), nodeId) : current));
-      return;
+      const nextState = setSelection(executeEditorCommand(currentEditor, command), nodeId);
+      editorRef.current = nextState;
+      setEditor(nextState);
+      enqueueDocumentSnapshotPersistence(currentEditor.document, nextState.document);
+      return true;
     }
 
-    if (!editor) {
-      return;
-    }
+    const baseDocument = activeSession.getDocument();
 
-    const nextState = setSelection(
-      executeEditorCommand({ ...editor, document: activeSession.getDocument() }, command),
+    const derivedState = setSelection(
+      executeEditorCommand({ ...currentEditor, document: activeSession.getDocument() }, command),
       nodeId
     );
-    activeSession.transact("editor-command", () => nextState.document);
+    activeSession.transact("editor-command", () => derivedState.document);
+    const nextState = {
+      ...derivedState,
+      document: activeSession.getDocument(),
+      history: { past: [], future: [] }
+    };
+    editorRef.current = nextState;
     publishEditorPresence(nextState);
     setEditor(nextState);
+    enqueueDocumentSnapshotPersistence(baseDocument, nextState.document);
+    return true;
   };
 
   const applyBooleanPathOperation = (operation: BooleanPathOperation) => {
@@ -12133,7 +12311,7 @@ export function App() {
         nodeId: selectedBoolean.id,
         operation
       };
-      dispatch({
+      dispatchWithoutSnapshotPersistence({
         type: "set_boolean_path_operation",
         nodeId: selectedBoolean.id,
         operation
@@ -12163,7 +12341,7 @@ export function App() {
         operation,
         sourceNodeIds: selectedIds
       };
-      dispatch({
+      dispatchWithoutSnapshotPersistence({
         type: "create_boolean_path",
         nodeId,
         name: command.name,
@@ -12172,7 +12350,9 @@ export function App() {
       });
     }
 
-    void persistBooleanPathCommand(project.currentDocumentId, command)
+    void enqueueDocumentPersistence(project.currentDocumentId, () =>
+      persistBooleanPathCommand(project.currentDocumentId, command)
+    )
       .then(() => setProjectStatus("불리언 경로 저장됨"))
       .catch((error) => {
         const message = error instanceof Error ? error.message : "불리언 경로를 저장하지 못했습니다";
@@ -12215,8 +12395,10 @@ export function App() {
       sourceNodeIds,
       name: sourceNodeIds.length === 1 ? sources[0].name : "평탄화 경로"
     };
-    dispatch(command);
-    void persistBooleanPathCommand(project.currentDocumentId, command)
+    dispatchWithoutSnapshotPersistence(command);
+    void enqueueDocumentPersistence(project.currentDocumentId, () =>
+      persistBooleanPathCommand(project.currentDocumentId, command)
+    )
       .then(() => setProjectStatus("경로 평탄화됨"))
       .catch((error) => {
         const message = error instanceof Error ? error.message : "경로를 평탄화하지 못했습니다";
@@ -12233,8 +12415,10 @@ export function App() {
       return;
     }
     const command: BooleanPathAgentCommand = { type: "detach_boolean_path", nodeId: node.id };
-    dispatch(command);
-    void persistBooleanPathCommand(project.currentDocumentId, command)
+    dispatchWithoutSnapshotPersistence(command);
+    void enqueueDocumentPersistence(project.currentDocumentId, () =>
+      persistBooleanPathCommand(project.currentDocumentId, command)
+    )
       .then(() => setProjectStatus("불리언 경로 분리됨"))
       .catch((error) => {
         const message = error instanceof Error ? error.message : "불리언 경로를 분리하지 못했습니다";
@@ -12268,13 +12452,15 @@ export function App() {
     fillRule: "nonzero" | "evenodd"
   ) => {
     const pathData = serializeEditablePath(path);
-    dispatch({ type: "set_path_data", nodeId, pathData, fillRule });
+    dispatchWithoutSnapshotPersistence({ type: "set_path_data", nodeId, pathData, fillRule });
     const project = currentProjectRef.current;
     if (!project) {
       return;
     }
 
-    void persistPathChange(project.currentDocumentId, nodeId, pathData, fillRule)
+    void enqueueDocumentPersistence(project.currentDocumentId, () =>
+      persistPathChange(project.currentDocumentId, nodeId, pathData, fillRule)
+    )
       .then(() => setProjectStatus("경로 편집 저장됨"))
       .catch((error) => {
         const message = error instanceof Error ? error.message : "경로를 저장하지 못했습니다";
@@ -12408,6 +12594,9 @@ export function App() {
   };
 
   const startInlineTextEdit = (nodeId: string) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     const currentEditor = editorRef.current;
     const node = currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
     if (
@@ -12429,27 +12618,34 @@ export function App() {
   };
 
   const updateTextNode = (nodeId: string, value: string) => {
-    dispatch({ type: "update_text", nodeId, value });
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
+    dispatchWithoutSnapshotPersistence({ type: "update_text", nodeId, value });
     if (!currentProject) {
       return;
     }
 
-    void persistTextChange(currentProject.currentDocumentId, nodeId, value).catch((error) => {
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTextChange(currentProject.currentDocumentId, nodeId, value)
+    ).catch((error) => {
       const message = error instanceof Error ? error.message : "텍스트를 저장하지 못했습니다";
       setProjectStatus(message);
     });
   };
 
   const updateNodeStyle = (nodeId: string, style: RendererNode["style"]) => {
-    dispatch({ type: "set_node_style", nodeId, style });
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
+    dispatchWithoutSnapshotPersistence({ type: "set_node_style", nodeId, style });
     if (!currentProject) {
       return;
     }
 
-    const persistence = nodeStylePersistenceQueueRef.current
-      .catch(() => undefined)
-      .then(() => persistNodeStyle(currentProject.currentDocumentId, nodeId, style));
-    nodeStylePersistenceQueueRef.current = persistence.then(() => undefined, () => undefined);
+    const persistence = enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistNodeStyle(currentProject.currentDocumentId, nodeId, style)
+    );
     void persistence
       .then(() => {
         setProjectStatus("스타일 저장됨");
@@ -12462,12 +12658,14 @@ export function App() {
   };
 
   const updateTextWritingMode = (nodeId: string, writingMode: TextWritingMode) => {
-    dispatch({ type: "set_text_writing_mode", nodeId, writingMode });
+    dispatchWithoutSnapshotPersistence({ type: "set_text_writing_mode", nodeId, writingMode });
     if (!currentProject) {
       return;
     }
 
-    void persistTextWritingMode(currentProject.currentDocumentId, nodeId, writingMode)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTextWritingMode(currentProject.currentDocumentId, nodeId, writingMode)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12478,12 +12676,14 @@ export function App() {
   };
 
   const updateTextOrientation = (nodeId: string, textOrientation: TextOrientation) => {
-    dispatch({ type: "set_text_orientation", nodeId, textOrientation });
+    dispatchWithoutSnapshotPersistence({ type: "set_text_orientation", nodeId, textOrientation });
     if (!currentProject) {
       return;
     }
 
-    void persistTextOrientation(currentProject.currentDocumentId, nodeId, textOrientation)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTextOrientation(currentProject.currentDocumentId, nodeId, textOrientation)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12494,12 +12694,14 @@ export function App() {
   };
 
   const updateTextTypographyToken = (nodeId: string, tokenId: string) => {
-    dispatch({ type: "set_text_typography_token", nodeId, tokenId });
+    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_token", nodeId, tokenId });
     if (!currentProject) {
       return;
     }
 
-    void persistTextTypographyToken(currentProject.currentDocumentId, nodeId, tokenId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTextTypographyToken(currentProject.currentDocumentId, nodeId, tokenId)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12519,12 +12721,14 @@ export function App() {
       return;
     }
 
-    dispatch({ type: "set_effect_shadow_token", nodeId, tokenId });
+    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_token", nodeId, tokenId });
     if (!currentProject) {
       return;
     }
 
-    void persistEffectShadowToken(currentProject.currentDocumentId, nodeId, tokenId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistEffectShadowToken(currentProject.currentDocumentId, nodeId, tokenId)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12535,13 +12739,15 @@ export function App() {
   };
 
   const createEffectStyle = (nodeId: string, style: DesignStyle) => {
-    dispatch({ type: "create_style", style });
-    dispatch({ type: "set_effect_shadow_style", nodeId, styleId: style.id });
+    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
+    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId: style.id });
     if (!currentProject) {
       return;
     }
 
-    void persistCreateEffectStyle(currentProject.currentDocumentId, nodeId, style)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistCreateEffectStyle(currentProject.currentDocumentId, nodeId, style)
+    )
       .then(() => {
         setProjectStatus("효과 스타일 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -12562,12 +12768,14 @@ export function App() {
       return;
     }
 
-    dispatch({ type: "set_effect_shadow_style", nodeId, styleId });
+    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId });
     if (!currentProject) {
       return;
     }
 
-    void persistEffectShadowStyle(currentProject.currentDocumentId, nodeId, styleId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistEffectShadowStyle(currentProject.currentDocumentId, nodeId, styleId)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12593,12 +12801,14 @@ export function App() {
       return;
     }
 
-    dispatch({ type: "set_effect_shadows", nodeId, shadows });
+    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadows", nodeId, shadows });
     if (!currentProject) {
       return;
     }
 
-    void persistEffectShadows(currentProject.currentDocumentId, nodeId, shadows)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistEffectShadows(currentProject.currentDocumentId, nodeId, shadows)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12609,13 +12819,15 @@ export function App() {
   };
 
   const createFillStyle = (nodeId: string, style: DesignStyle) => {
-    dispatch({ type: "create_style", style });
-    dispatch({ type: "set_fill_style", nodeId, styleId: style.id });
+    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
+    dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId: style.id });
     if (!currentProject) {
       return;
     }
 
-    void persistCreateFillStyle(currentProject.currentDocumentId, nodeId, style)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistCreateFillStyle(currentProject.currentDocumentId, nodeId, style)
+    )
       .then(() => {
         setProjectStatus("색상 스타일 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -12627,12 +12839,14 @@ export function App() {
   };
 
   const updateFillStyle = (nodeId: string, styleId: string) => {
-    dispatch({ type: "set_fill_style", nodeId, styleId });
+    dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId });
     if (!currentProject) {
       return;
     }
 
-    void persistFillStyle(currentProject.currentDocumentId, nodeId, styleId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistFillStyle(currentProject.currentDocumentId, nodeId, styleId)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12643,12 +12857,14 @@ export function App() {
   };
 
   const renameStyle = (styleId: string, name: string) => {
-    dispatch({ type: "rename_style", styleId, name });
+    dispatchWithoutSnapshotPersistence({ type: "rename_style", styleId, name });
     if (!currentProject) {
       return;
     }
 
-    void persistRenameStyle(currentProject.currentDocumentId, styleId, name)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistRenameStyle(currentProject.currentDocumentId, styleId, name)
+    )
       .then(() => {
         setProjectStatus("스타일 이름 변경됨");
         setCodeExportRevision((current) => current + 1);
@@ -12660,12 +12876,14 @@ export function App() {
   };
 
   const duplicateStyle = (styleId: string, newStyleId: string, name: string) => {
-    dispatch({ type: "duplicate_style", styleId, newStyleId, name });
+    dispatchWithoutSnapshotPersistence({ type: "duplicate_style", styleId, newStyleId, name });
     if (!currentProject) {
       return;
     }
 
-    void persistDuplicateStyle(currentProject.currentDocumentId, styleId, newStyleId, name)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistDuplicateStyle(currentProject.currentDocumentId, styleId, newStyleId, name)
+    )
       .then(() => {
         setProjectStatus("스타일 복제됨");
         setCodeExportRevision((current) => current + 1);
@@ -12677,12 +12895,14 @@ export function App() {
   };
 
   const deleteStyle = (styleId: string) => {
-    dispatch({ type: "delete_style", styleId });
+    dispatchWithoutSnapshotPersistence({ type: "delete_style", styleId });
     if (!currentProject) {
       return;
     }
 
-    void persistDeleteStyle(currentProject.currentDocumentId, styleId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistDeleteStyle(currentProject.currentDocumentId, styleId)
+    )
       .then(() => {
         setProjectStatus("스타일 삭제됨");
         setCodeExportRevision((current) => current + 1);
@@ -12694,13 +12914,15 @@ export function App() {
   };
 
   const createTypographyStyle = (nodeId: string, style: DesignStyle) => {
-    dispatch({ type: "create_style", style });
-    dispatch({ type: "set_text_typography_style", nodeId, styleId: style.id });
+    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
+    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_style", nodeId, styleId: style.id });
     if (!currentProject) {
       return;
     }
 
-    void persistCreateTypographyStyle(currentProject.currentDocumentId, nodeId, style)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistCreateTypographyStyle(currentProject.currentDocumentId, nodeId, style)
+    )
       .then(() => {
         setProjectStatus("타이포그래피 스타일 저장됨");
         setCodeExportRevision((current) => current + 1);
@@ -12712,12 +12934,14 @@ export function App() {
   };
 
   const updateTextTypographyStyle = (nodeId: string, styleId: string) => {
-    dispatch({ type: "set_text_typography_style", nodeId, styleId });
+    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_style", nodeId, styleId });
     if (!currentProject) {
       return;
     }
 
-    void persistTextTypographyStyle(currentProject.currentDocumentId, nodeId, styleId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTextTypographyStyle(currentProject.currentDocumentId, nodeId, styleId)
+    )
       .then(() => {
         setCodeExportRevision((current) => current + 1);
       })
@@ -12742,6 +12966,9 @@ export function App() {
   };
 
   const selectNode = (nodeId: string, additive = false, preserveMultiSelection = false) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     setMeasurementTargetNodeId(null);
     if (dragSessionRef.current && !dragSessionRef.current.hasMoved) {
       dragSessionRef.current = null;
@@ -12769,6 +12996,9 @@ export function App() {
   };
 
   const updateGeometry = (nodeId: string, patch: GeometryPatch) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     dispatch({ type: "update_node_geometry", nodeId, patch });
   };
 
@@ -12893,21 +13123,31 @@ export function App() {
     dragSessionRef.current = null;
     setDragPreview(null);
     setSnapGuides([]);
-    updateViewportFromInteraction((state) => {
+    updateEditorFromInteraction((state) => {
       const selected = setMultiSelection(state, activeDrag.selectedNodeIds, activeDrag.nodeId);
       return moveSelectedNodesBy(selected, finalDelta, activeDrag.selectedNodeIds);
     });
   };
 
   const updateLayout = (nodeId: string, layout: NodeLayout) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     const persistedLayout = layout.mode === "none" ? null : layout;
-    dispatch({
-      type: "set_node_layout",
+    const layoutCommand = {
+      type: "set_node_layout" as const,
       nodeId,
       layout: persistedLayout
-    });
+    };
     if (currentProject && persistedLayout) {
-      void persistNodeLayout(currentProject.currentDocumentId, nodeId, persistedLayout)
+      dispatchWithoutSnapshotPersistence(layoutCommand);
+    } else {
+      dispatch(layoutCommand);
+    }
+    if (currentProject && persistedLayout) {
+      void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+        persistNodeLayout(currentProject.currentDocumentId, nodeId, persistedLayout)
+      )
         .then(() => {
           setCodeExportRevision((current) => current + 1);
         })
@@ -13957,9 +14197,18 @@ export function App() {
   }, [gridAreaBoundarySession]);
 
   const updateLayoutItem = (nodeId: string, layoutItem: NodeLayoutItem) => {
-    dispatch({ type: "set_node_layout_item", nodeId, layoutItem });
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     if (currentProject) {
-      void persistNodeLayoutItem(currentProject.currentDocumentId, nodeId, layoutItem)
+      dispatchWithoutSnapshotPersistence({ type: "set_node_layout_item", nodeId, layoutItem });
+    } else {
+      dispatch({ type: "set_node_layout_item", nodeId, layoutItem });
+    }
+    if (currentProject) {
+      void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+        persistNodeLayoutItem(currentProject.currentDocumentId, nodeId, layoutItem)
+      )
         .then(() => {
           setCodeExportRevision((current) => current + 1);
         })
@@ -13971,13 +14220,25 @@ export function App() {
   };
 
   const updateConstraints = (nodeId: string, constraints: NodeConstraints) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     dispatch({ type: "set_node_constraints", nodeId, constraints });
   };
 
   const updateExportPresets = (nodeId: string, presets: NodeExportPreset[]) => {
-    dispatch({ type: "set_node_export_presets", nodeId, presets });
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     if (currentProject) {
-      void persistNodeExportPresets(currentProject.currentDocumentId, nodeId, presets).catch((error) => {
+      dispatchWithoutSnapshotPersistence({ type: "set_node_export_presets", nodeId, presets });
+    } else {
+      dispatch({ type: "set_node_export_presets", nodeId, presets });
+    }
+    if (currentProject) {
+      void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+        persistNodeExportPresets(currentProject.currentDocumentId, nodeId, presets)
+      ).catch((error) => {
         const message = error instanceof Error ? error.message : "export preset을 저장하지 못했습니다";
         setProjectStatus(message);
       });
@@ -14246,10 +14507,13 @@ export function App() {
 
     try {
       setLibraryArchiveStatus("라이브러리 가져오는 중");
-      const imported = await importLibraryArchive(currentProject.currentDocumentId, {
-        archiveBase64: libraryArchiveReview.archiveBase64,
-        idPrefix: libraryArchivePrefix.trim() || undefined
-      });
+      const fileId = currentProject.currentDocumentId;
+      const imported = await enqueueDocumentPersistence(fileId, () =>
+        importLibraryArchive(fileId, {
+          archiveBase64: libraryArchiveReview.archiveBase64,
+          idPrefix: libraryArchivePrefix.trim() || undefined
+        })
+      );
       await loadProjectDocument(currentProject, projects);
       setLibraryArchiveReview(null);
       setLibraryArchiveStatus(
@@ -14360,14 +14624,17 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 가져오는 중");
-      const imported = await importLibraryRegistryItem(
-        currentProject.currentDocumentId,
-        {
-          libraryId: libraryRegistryReview.review.libraryId,
-          idPrefix: libraryRegistryPrefix.trim() || undefined
-        },
-        undefined,
-        activeLibraryRegistryCredentials
+      const fileId = currentProject.currentDocumentId;
+      const imported = await enqueueDocumentPersistence(fileId, () =>
+        importLibraryRegistryItem(
+          fileId,
+          {
+            libraryId: libraryRegistryReview.review.libraryId,
+            idPrefix: libraryRegistryPrefix.trim() || undefined
+          },
+          undefined,
+          activeLibraryRegistryCredentials
+        )
       );
       await loadProjectDocument(currentProject, projects);
       setLibraryRegistryReview(null);
@@ -14394,11 +14661,14 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 가져오는 중");
-      const imported = await importLibraryRegistryTokens(
-        currentProject.currentDocumentId,
-        libraryRegistryTokenReview.review.libraryId,
-        undefined,
-        activeLibraryRegistryCredentials
+      const fileId = currentProject.currentDocumentId;
+      const imported = await enqueueDocumentPersistence(fileId, () =>
+        importLibraryRegistryTokens(
+          fileId,
+          libraryRegistryTokenReview.review.libraryId,
+          undefined,
+          activeLibraryRegistryCredentials
+        )
       );
       await loadProjectDocument(currentProject, projects);
       await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
@@ -14422,11 +14692,14 @@ export function App() {
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 업데이트 적용 중");
-      const imported = await updateLibraryRegistryTokens(
-        currentProject.currentDocumentId,
-        libraryId,
-        undefined,
-        activeLibraryRegistryCredentials
+      const fileId = currentProject.currentDocumentId;
+      const imported = await enqueueDocumentPersistence(fileId, () =>
+        updateLibraryRegistryTokens(
+          fileId,
+          libraryId,
+          undefined,
+          activeLibraryRegistryCredentials
+        )
       );
       await loadProjectDocument(currentProject, projects);
       await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
@@ -14474,11 +14747,14 @@ export function App() {
       }
 
       setLibraryRegistryStatus("게시 라이브러리 업데이트 적용 중");
-      const imported = await updateLibraryRegistryItem(
-        currentProject.currentDocumentId,
-        libraryId,
-        undefined,
-        activeLibraryRegistryCredentials
+      const fileId = currentProject.currentDocumentId;
+      const imported = await enqueueDocumentPersistence(fileId, () =>
+        updateLibraryRegistryItem(
+          fileId,
+          libraryId,
+          undefined,
+          activeLibraryRegistryCredentials
+        )
       );
       await loadProjectDocument(currentProject, projects);
       setLibraryRegistryStatus(
@@ -14695,10 +14971,11 @@ export function App() {
     }
 
     const message = fileVersionMessage.trim() || "저장된 버전";
+    const fileId = currentProject.currentDocumentId;
     try {
-      const version = await saveFileVersion(currentProject.currentDocumentId, message);
+      const version = await enqueueDocumentPersistence(fileId, () => saveFileVersion(fileId, message));
       setFileVersionMessage(version.message);
-      await refreshFileVersions(currentProject.currentDocumentId, `${version.message} 저장됨`);
+      await refreshFileVersions(fileId, `${version.message} 저장됨`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "현재 버전을 저장하지 못했습니다";
       setFileVersionStatus(message);
@@ -14711,20 +14988,74 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    editorMutationGenerationRef.current += 1;
+    const requestId = fileVersionPreviewRequestRef.current + 1;
+    fileVersionPreviewRequestRef.current = requestId;
     try {
-      const snapshot = await readFileVersion(currentProject.currentDocumentId, version.versionId);
+      const snapshot = await readFileVersion(fileId, version.versionId);
       const summary = await summarizeDocumentChanges(
-        currentProject.currentDocumentId,
+        fileId,
         snapshot.document,
         editorRef.current.document
       );
-      setFileVersionPreview({ version, summary });
+      if (
+        requestId !== fileVersionPreviewRequestRef.current ||
+        currentProjectRef.current?.currentDocumentId !== fileId
+      ) {
+        return;
+      }
+      resizeSessionRef.current = null;
+      gridResizeSessionRef.current = null;
+      gridResizeClientPointRef.current = null;
+      gridAreaBoundarySessionRef.current = null;
+      gridAreaBoundaryClientPointRef.current = null;
+      gridTrackDragRef.current = null;
+      areaSelectionRef.current = null;
+      dragSessionRef.current = null;
+      pathEditorDragSessionRef.current = null;
+      panSessionRef.current = null;
+      isSpacePanningRef.current = false;
+      frameSpacingDragClientPointRef.current = null;
+      componentVariantAreaGapClientPointRef.current = null;
+      componentVariantSourceReorderClientPointRef.current = null;
+      setResizeSession(null);
+      setGridResizeSession(null);
+      setGridAreaBoundarySession(null);
+      setComponentVariantAreaGapSession(null);
+      setComponentVariantSourceReorderSession(null);
+      setFrameSpacingDragSession(null);
+      setIsSpacePanning(false);
+      setAreaSelection(null);
+      setDragPreview(null);
+      setSnapGuides([]);
+      setInlineTextEditingNodeId(null);
+      setPathEditingNodeId(null);
+      setSelectedPathAnchorIndices([]);
+      setObjectContextMenu(null);
+      setGridTrackContextMenu(null);
+      setGridCellContextMenu(null);
+      setGridCellSelection(null);
+      document.body.style.cursor = "";
+      setFileVersionPreview({ version, document: snapshot.document, summary });
       setFileVersionStatus(`${version.message} 미리보기`);
     } catch (error) {
+      if (requestId !== fileVersionPreviewRequestRef.current) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "버전을 미리보지 못했습니다";
       setFileVersionPreview(null);
       setFileVersionStatus(message);
     }
+  };
+
+  const exitFileVersionPreview = () => {
+    if (fileVersionRestorePendingRef.current) {
+      return;
+    }
+    fileVersionPreviewRequestRef.current += 1;
+    setFileVersionPreview(null);
+    setFileVersionStatus(fileVersions.length > 0 ? `${fileVersions.length}개 버전` : "저장된 버전 없음");
   };
 
   const restoreCurrentFileVersion = async (version: FileVersionSummary) => {
@@ -14732,22 +15063,48 @@ export function App() {
       setFileVersionStatus("프로젝트 없음");
       return;
     }
+    if (fileVersionRestorePendingRef.current) {
+      return;
+    }
 
+    const fileId = currentProject.currentDocumentId;
+    fileVersionRestorePendingRef.current = true;
+    fileVersionPreviewActiveRef.current = true;
+    setFileVersionRestorePending(true);
+    editorMutationGenerationRef.current += 1;
+    fileVersionPreviewRequestRef.current += 1;
     try {
-      const result = await restoreFileVersion(currentProject.currentDocumentId, version.versionId);
+      const result = await enqueueDocumentPersistence(fileId, () =>
+        restoreFileVersion(fileId, version.versionId)
+      );
+      if (currentProjectRef.current?.currentDocumentId !== fileId) {
+        return;
+      }
+      const activeSession = collabSessionRef.current;
+      const restoredDocument =
+        activeSession?.documentId === fileId
+          ? (() => {
+              activeSession.transact("file-version-restore", () => result.file);
+              return activeSession.getDocument();
+            })()
+          : result.file;
       setEditor((current) => {
-        const nextState = createEditorState(result.file);
+        const nextState = createEditorState(restoredDocument);
         return current ? { ...nextState, viewport: current.viewport } : nextState;
       });
+      fileVersionPreviewRequestRef.current += 1;
       setFileVersionPreview(null);
       setTokenDtcgDraft("");
       setTokenDtcgStatus("");
-      await refreshFileVersions(currentProject.currentDocumentId, `${version.message} 복원됨`);
-      void refreshCommentThreads(currentProject.currentDocumentId);
+      await refreshFileVersions(fileId, `${version.message} 복원됨`);
+      void refreshCommentThreads(fileId);
       void refreshCommentNotifications();
     } catch (error) {
       const message = error instanceof Error ? error.message : "버전을 복원하지 못했습니다";
       setFileVersionStatus(message);
+    } finally {
+      fileVersionRestorePendingRef.current = false;
+      setFileVersionRestorePending(false);
     }
   };
 
@@ -14757,14 +15114,13 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
     try {
-      const updated = await setFileVersionPinned(
-        currentProject.currentDocumentId,
-        version.versionId,
-        !version.pinned
+      const updated = await enqueueDocumentPersistence(fileId, () =>
+        setFileVersionPinned(fileId, version.versionId, !version.pinned)
       );
       await refreshFileVersions(
-        currentProject.currentDocumentId,
+        fileId,
         updated.pinned ? `${updated.message} 고정됨` : `${updated.message} 고정 해제됨`
       );
     } catch (error) {
@@ -14779,12 +15135,15 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
     try {
-      const deleted = await deleteFileVersion(currentProject.currentDocumentId, version.versionId);
+      const deleted = await enqueueDocumentPersistence(fileId, () =>
+        deleteFileVersion(fileId, version.versionId)
+      );
       if (fileVersionPreview?.version.versionId === version.versionId) {
         setFileVersionPreview(null);
       }
-      await refreshFileVersions(currentProject.currentDocumentId, `${deleted.message} 삭제됨`);
+      await refreshFileVersions(fileId, `${deleted.message} 삭제됨`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "버전을 삭제하지 못했습니다";
       setFileVersionStatus(message);
@@ -14803,15 +15162,18 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
     try {
-      const result = await pruneFileVersions(currentProject.currentDocumentId, keepUnpinned);
+      const result = await enqueueDocumentPersistence(fileId, () =>
+        pruneFileVersions(fileId, keepUnpinned)
+      );
       setFileVersionPreview((preview) =>
         preview && result.deletedVersions.some((version) => version.versionId === preview.version.versionId)
           ? null
           : preview
       );
       await refreshFileVersions(
-        currentProject.currentDocumentId,
+        fileId,
         result.deletedVersions.length > 0
           ? `오래된 버전 ${result.deletedVersions.length}개 정리됨`
           : "정리할 오래된 버전 없음"
@@ -14969,7 +15331,10 @@ export function App() {
     }
 
     try {
-      const document = await importDesignTokensDtcg(currentProject.currentDocumentId, parsedTokens);
+      const fileId = currentProject.currentDocumentId;
+      const document = await enqueueDocumentPersistence(fileId, () =>
+        importDesignTokensDtcg(fileId, parsedTokens)
+      );
       setEditor((current) => {
         const nextState = createEditorState(document);
         return current ? { ...nextState, viewport: current.viewport } : nextState;
@@ -14983,12 +15348,14 @@ export function App() {
   };
 
   const updateTokenSetEnabled = (tokenSetId: string, enabled: boolean) => {
-    dispatch({ type: "set_token_set_enabled", tokenSetId, enabled });
+    dispatchWithoutSnapshotPersistence({ type: "set_token_set_enabled", tokenSetId, enabled });
     if (!currentProject) {
       return;
     }
 
-    void persistTokenSetEnabled(currentProject.currentDocumentId, tokenSetId, enabled)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTokenSetEnabled(currentProject.currentDocumentId, tokenSetId, enabled)
+    )
       .then(() => {
         setTokenDtcgStatus(enabled ? "토큰 세트 활성화됨" : "토큰 세트 비활성화됨");
         setProjectStatus("토큰 세트 저장됨");
@@ -15001,12 +15368,14 @@ export function App() {
   };
 
   const updateTokenThemeEnabled = (tokenThemeId: string, enabled: boolean) => {
-    dispatch({ type: "set_token_theme_enabled", tokenThemeId, enabled });
+    dispatchWithoutSnapshotPersistence({ type: "set_token_theme_enabled", tokenThemeId, enabled });
     if (!currentProject) {
       return;
     }
 
-    void persistTokenThemeEnabled(currentProject.currentDocumentId, tokenThemeId, enabled)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistTokenThemeEnabled(currentProject.currentDocumentId, tokenThemeId, enabled)
+    )
       .then(() => {
         setTokenDtcgStatus(enabled ? "토큰 테마 활성화됨" : "토큰 테마 비활성화됨");
         setProjectStatus("토큰 테마 저장됨");
@@ -15023,12 +15392,14 @@ export function App() {
       return;
     }
 
-    dispatch({ type: "upsert_token_theme", tokenTheme });
+    dispatchWithoutSnapshotPersistence({ type: "upsert_token_theme", tokenTheme });
     if (!currentProject) {
       return;
     }
 
-    void persistUpsertTokenTheme(currentProject.currentDocumentId, tokenTheme)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistUpsertTokenTheme(currentProject.currentDocumentId, tokenTheme)
+    )
       .then(() => {
         setTokenDtcgStatus("토큰 테마 저장됨");
         setProjectStatus("토큰 테마 저장됨");
@@ -15041,12 +15412,14 @@ export function App() {
   };
 
   const deleteTokenTheme = (tokenThemeId: string) => {
-    dispatch({ type: "delete_token_theme", tokenThemeId });
+    dispatchWithoutSnapshotPersistence({ type: "delete_token_theme", tokenThemeId });
     if (!currentProject) {
       return;
     }
 
-    void persistDeleteTokenTheme(currentProject.currentDocumentId, tokenThemeId)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistDeleteTokenTheme(currentProject.currentDocumentId, tokenThemeId)
+    )
       .then(() => {
         setTokenDtcgStatus("토큰 테마 삭제됨");
         setProjectStatus("토큰 테마 삭제됨");
@@ -15059,12 +15432,14 @@ export function App() {
   };
 
   const reorderTokenTheme = (tokenThemeId: string, direction: "up" | "down") => {
-    dispatch({ type: "reorder_token_theme", tokenThemeId, direction });
+    dispatchWithoutSnapshotPersistence({ type: "reorder_token_theme", tokenThemeId, direction });
     if (!currentProject) {
       return;
     }
 
-    void persistReorderTokenTheme(currentProject.currentDocumentId, tokenThemeId, direction)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistReorderTokenTheme(currentProject.currentDocumentId, tokenThemeId, direction)
+    )
       .then(() => {
         setTokenDtcgStatus("토큰 테마 순서 저장됨");
         setProjectStatus("토큰 테마 순서 저장됨");
@@ -15077,12 +15452,14 @@ export function App() {
   };
 
   const reorderTokenThemeSet = (tokenThemeId: string, tokenSetId: string, direction: "up" | "down") => {
-    dispatch({ type: "reorder_token_theme_set", tokenThemeId, tokenSetId, direction });
+    dispatchWithoutSnapshotPersistence({ type: "reorder_token_theme_set", tokenThemeId, tokenSetId, direction });
     if (!currentProject) {
       return;
     }
 
-    void persistReorderTokenThemeSet(currentProject.currentDocumentId, tokenThemeId, tokenSetId, direction)
+    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
+      persistReorderTokenThemeSet(currentProject.currentDocumentId, tokenThemeId, tokenSetId, direction)
+    )
       .then(() => {
         setTokenDtcgStatus("토큰 세트 우선순위 저장됨");
         setProjectStatus("토큰 세트 우선순위 저장됨");
@@ -15095,7 +15472,7 @@ export function App() {
   };
 
   const createNode = (kind: "rectangle" | "text") => {
-    if (!editor) {
+    if (fileVersionPreviewActiveRef.current || !editor) {
       return;
     }
 
@@ -15122,10 +15499,12 @@ export function App() {
     files: File[],
     insertionPoint: { x: number; y: number } | null
   ) => {
-    if (!editor || !currentProject || files.length === 0) {
+    if (fileVersionPreviewActiveRef.current || !editor || !currentProject || files.length === 0) {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    const mutationGeneration = editorMutationGenerationRef.current;
     const firstPage = editor.document.pages[0];
     if (!firstPage) {
       return;
@@ -15145,10 +15524,35 @@ export function App() {
       y: (stageSize.height / 2 - editor.viewport.y) / editor.viewport.scale
     };
 
+    let pendingAsset: UploadedAsset | null = null;
     try {
       for (const [index, file] of files.entries()) {
-        const [asset, naturalSize]: [UploadedAsset, { width: number; height: number }] =
-          await Promise.all([uploadImageAsset(file), readImageFileSize(file)]);
+        if (
+          fileVersionPreviewActiveRef.current ||
+          mutationGeneration !== editorMutationGenerationRef.current ||
+          currentProjectRef.current?.currentDocumentId !== fileId
+        ) {
+          return;
+        }
+        const naturalSize = await readImageFileSize(file);
+        if (
+          fileVersionPreviewActiveRef.current ||
+          mutationGeneration !== editorMutationGenerationRef.current ||
+          currentProjectRef.current?.currentDocumentId !== fileId
+        ) {
+          return;
+        }
+        const asset = await uploadImageAsset(file);
+        pendingAsset = asset;
+        if (
+          fileVersionPreviewActiveRef.current ||
+          mutationGeneration !== editorMutationGenerationRef.current ||
+          currentProjectRef.current?.currentDocumentId !== fileId
+        ) {
+          await deleteImageAssetIfUnreferenced(asset.assetId);
+          pendingAsset = null;
+          return;
+        }
         const imageSize = fitImportedImageSize(naturalSize);
         const node = createImageNode(baseSequence + index + 1, {
           assetId: asset.assetId,
@@ -15160,17 +15564,32 @@ export function App() {
           height: imageSize.height
         });
 
-        await persistCreatedNode(currentProject.currentDocumentId, parentId, node);
-        dispatch({ type: "create_node", parentId, node });
+        await enqueueDocumentPersistence(fileId, () => persistCreatedNode(fileId, parentId, node));
+        pendingAsset = null;
+        applyPersistedEditorCommand(fileId, { type: "create_node", parentId, node });
         setProjectStatus(`${node.name} 추가됨`);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "이미지를 가져오지 못했습니다";
+      let cleanupError: unknown;
+      if (pendingAsset) {
+        try {
+          await deleteImageAssetIfUnreferenced(pendingAsset.assetId);
+        } catch (assetCleanupError) {
+          cleanupError = assetCleanupError;
+        }
+      }
+      const primaryMessage = error instanceof Error ? error.message : "이미지를 가져오지 못했습니다";
+      const message = cleanupError instanceof Error
+        ? `${primaryMessage} · ${cleanupError.message}`
+        : primaryMessage;
       setProjectStatus(message);
     }
   };
 
   const handleImageDragOver = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
     if (imageFilesFromList(event.dataTransfer.files).length === 0) {
       return;
     }
@@ -15180,6 +15599,10 @@ export function App() {
   };
 
   const handleImageDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    if (fileVersionPreviewActiveRef.current) {
+      event.preventDefault();
+      return;
+    }
     const imageFiles = imageFilesFromList(event.dataTransfer.files);
     if (imageFiles.length === 0) {
       return;
@@ -15262,21 +15685,16 @@ export function App() {
       encryptionPassphrase: runtimeEncryptionPassphrase
     });
     session.subscribe((document) => {
-      setEditor((current) => {
-        if (!current) {
-          return createEditorState(document);
-        }
-
-        return {
-          ...current,
-          document,
-          selection: setMultiSelection(
-            { ...current, document },
+      const current = editorRef.current;
+      const nextState = current
+        ? setMultiSelection(
+            { ...current, document, history: { past: [], future: [] } },
             current.selection.nodeIds,
             current.selection.nodeId
-          ).selection
-        };
-      });
+          )
+        : createEditorState(document);
+      editorRef.current = nextState;
+      setEditor(nextState);
       setPresence(session.getPresence());
     });
     session.subscribePresence((nextPresence) => {
@@ -15863,7 +16281,10 @@ export function App() {
   };
 
   const startAreaSelectionFromPointer = (event: KonvaEventObject<MouseEvent>) => {
-    if (!editor || event.evt.button !== 0) {
+    if (fileVersionPreviewActiveRef.current || !editor || event.evt.button !== 0) {
+      if (fileVersionPreviewActiveRef.current) {
+        event.evt.preventDefault();
+      }
       return false;
     }
 
@@ -15995,6 +16416,10 @@ export function App() {
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
+      if (fileVersionPreviewActiveRef.current) {
+        event.preventDefault();
+        return;
+      }
       if (isEditableKeyboardTarget(event.target) || isEditableKeyboardTarget(document.activeElement)) {
         return;
       }
@@ -16013,8 +16438,13 @@ export function App() {
   }, [editor, currentProject, selectedNode, nodes.length, stageSize.height, stageSize.width]);
 
   return (
-    <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}`}>
-      <nav className="editor-rail" data-testid="editor-rail" aria-label="편집기 탐색">
+    <main className={`app-shell${isSidebarCollapsed ? " is-sidebar-collapsed" : ""}${isFileVersionPreviewing ? " is-version-preview" : ""}`}>
+      <nav
+        className="editor-rail"
+        data-testid="editor-rail"
+        aria-label="편집기 탐색"
+        inert={isFileVersionPreviewing ? true : undefined}
+      >
         <div className="editor-rail-brand" aria-label="Layo">
           <img
             src="/assets/brand/layo-logo-mark.png"
@@ -16067,7 +16497,7 @@ export function App() {
           </button>
         </div>
       </nav>
-      <aside className="sidebar">
+      <aside className="sidebar" inert={isFileVersionPreviewing ? true : undefined}>
         <button
           type="button"
           className="sidebar-toggle"
@@ -16763,7 +17193,11 @@ export function App() {
                             {formatFileVersionSource(fileVersionPreview.version.source)}
                           </span>
                         </span>
-                        <button type="button" onClick={() => setFileVersionPreview(null)}>
+                        <button
+                          type="button"
+                          onClick={exitFileVersionPreview}
+                          disabled={fileVersionRestorePending}
+                        >
                           미리보기 닫기
                         </button>
                       </div>
@@ -16784,6 +17218,7 @@ export function App() {
                         type="button"
                         className="file-version-preview-restore"
                         onClick={() => void restoreCurrentFileVersion(fileVersionPreview.version)}
+                        disabled={fileVersionRestorePending}
                       >
                         이 버전 복원
                       </button>
@@ -16829,6 +17264,7 @@ export function App() {
                               type="button"
                               aria-label={`${version.message} 복원`}
                               onClick={() => void restoreCurrentFileVersion(version)}
+                              disabled={fileVersionRestorePending}
                             >
                               복원
                             </button>
@@ -16992,18 +17428,20 @@ export function App() {
                     </label>
                   </>
                 ) : null}
-                <label>
-                  멤버 인증 토큰
-                  <input
-                    ref={memberTokenInputRef}
-                    data-testid="member-token"
-                    name="layo-member-token-new"
-                    type="password"
-                    autoComplete="new-password"
-                    value={memberToken}
-                    onChange={(event) => setMemberToken(event.currentTarget.value)}
-                  />
-                </label>
+                {teamPanelMode !== "local" ? (
+                  <label>
+                    멤버 인증 토큰
+                    <input
+                      ref={memberTokenInputRef}
+                      data-testid="member-token"
+                      name="layo-member-token-new"
+                      type="password"
+                      autoComplete="new-password"
+                      value={memberToken}
+                      onChange={(event) => setMemberToken(event.currentTarget.value)}
+                    />
+                  </label>
+                ) : null}
                 {teamPanelMode === "manifest" ? (
                   <label>
                     팀 설정 URL
@@ -17046,20 +17484,22 @@ export function App() {
                     </button>
                   </>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={applyMemberToken}
-                  disabled={
-                    !collabSession
-                    || !memberToken.trim()
-                    || (
-                      memberToken.trim() === activeMemberToken
-                      && !libraryRegistryAuthorizationEndedRef.current
-                    )
-                  }
-                >
-                  멤버 토큰 적용
-                </button>
+                {teamPanelMode !== "local" ? (
+                  <button
+                    type="button"
+                    onClick={applyMemberToken}
+                    disabled={
+                      !collabSession
+                      || !memberToken.trim()
+                      || (
+                        memberToken.trim() === activeMemberToken
+                        && !libraryRegistryAuthorizationEndedRef.current
+                      )
+                    }
+                  >
+                    멤버 토큰 적용
+                  </button>
+                ) : null}
               </div>
               <input
                 ref={manifestFileInputRef}
@@ -17315,7 +17755,12 @@ export function App() {
         )}
       </aside>
       <section className="editor-workspace">
-        <div className="top-file-bar" data-testid="top-file-bar" aria-label="파일 바">
+        <div
+          className="top-file-bar"
+          data-testid="top-file-bar"
+          aria-label="파일 바"
+          inert={isFileVersionPreviewing ? true : undefined}
+        >
           <div className="top-file-tabs">
             <div className="top-file-tab" data-testid="top-file-project">
               <span>{currentProjectName}</span>
@@ -17334,6 +17779,31 @@ export function App() {
             <span>{topFileShareLabel}</span>
           </button>
         </div>
+        {fileVersionPreview ? (
+          <div
+            className="file-version-preview-banner"
+            data-testid="file-version-preview-banner"
+            role="region"
+            aria-label="저장 버전 미리보기"
+          >
+            <span className="file-version-preview-banner-copy">
+              <strong>{fileVersionPreview.version.message}</strong>
+              <span>읽기 전용 · {formatFileVersionCreatedAt(fileVersionPreview.version.createdAt)}</span>
+            </span>
+            <span className="file-version-preview-banner-actions">
+              <button type="button" onClick={exitFileVersionPreview}>
+                미리보기 종료
+              </button>
+              <button
+                type="button"
+                className="file-version-preview-banner-restore"
+                onClick={() => void restoreCurrentFileVersion(fileVersionPreview.version)}
+              >
+                이 버전 복원
+              </button>
+            </span>
+          </div>
+        ) : null}
         <div className="canvas-ruler-corner" aria-hidden="true" />
         <div className="canvas-ruler canvas-ruler-horizontal" data-testid="canvas-ruler-horizontal" aria-hidden="true">
           {RULER_MARKS.map((mark) => (
@@ -17349,7 +17819,12 @@ export function App() {
             </span>
           ))}
         </div>
-        <div className="toolbar" data-testid="floating-toolbar" aria-label="에디터 도구 모음">
+        <div
+          className="toolbar"
+          data-testid="floating-toolbar"
+          aria-label="에디터 도구 모음"
+          inert={isFileVersionPreviewing ? true : undefined}
+        >
           <button type="button" aria-label="사각형 만들기" onClick={() => createNode("rectangle")}>
             ▭
           </button>
@@ -17556,12 +18031,13 @@ export function App() {
               }}
             >
               <Layer>
-                {orderedAppChildrenForPaint(editor?.document.pages[0]?.children ?? []).map((node) =>
+                {orderedAppChildrenForPaint(displayedDocument?.pages[0]?.children ?? []).map((node) =>
                   renderNode({
                     node,
-                    selectedNodeId: editor?.selection.nodeId ?? null,
-                    selectedNodeIds: editor?.selection.nodeIds ?? [],
+                    selectedNodeId: isFileVersionPreviewing ? null : editor?.selection.nodeId ?? null,
+                    selectedNodeIds: isFileVersionPreviewing ? [] : editor?.selection.nodeIds ?? [],
                     isCanvasPanning: isSpacePanning,
+                    readOnly: isFileVersionPreviewing,
                     dragPreview,
                     onSelect: selectNode,
                     onGeometryChange: updateGeometry,
@@ -17647,7 +18123,7 @@ export function App() {
                 }}
               />
             ) : null}
-            {editor ? (
+            {editor && !isFileVersionPreviewing ? (
               <RemotePresenceOverlay
                 localSessionId={localSessionId}
                 nowMs={presenceClock}
@@ -18065,6 +18541,7 @@ export function App() {
         </div>
       </section>
       <Inspector
+        readOnly={isFileVersionPreviewing}
         activeTab={inspectorTab}
         selectedNode={selectedNode}
         selectedNodes={selectedNodes}
@@ -18077,11 +18554,11 @@ export function App() {
         selectedNodeCount={selectedNodeIds.length}
         codeExport={codeExportPayload}
         codeExportStatus={codeExportStatus}
-        documentTokens={editor?.document.tokens ?? []}
-        documentTokenSets={editor?.document.token_sets ?? []}
-        documentTokenThemes={editor?.document.token_themes ?? []}
-        documentStyles={editor?.document.styles ?? []}
-        documentStyleUsageCounts={countStyleUsage(editor?.document ?? null)}
+        documentTokens={displayedDocument?.tokens ?? []}
+        documentTokenSets={displayedDocument?.token_sets ?? []}
+        documentTokenThemes={displayedDocument?.token_themes ?? []}
+        documentStyles={displayedDocument?.styles ?? []}
+        documentStyleUsageCounts={countStyleUsage(displayedDocument)}
         canAlign={canAlignInspectorSelection}
         canDistribute={canDistributeSelection}
         zoomLabel={`${Math.round((editor?.viewport.scale ?? 1) * 100)}%`}
@@ -18144,14 +18621,14 @@ export function App() {
         onComponentDefinitionVariantsChange={updateComponentDefinitionVariants}
         onComponentDefinitionVariantAreaChange={updateComponentDefinitionVariantArea}
         onAlign={(mode) =>
-          updateViewportFromInteraction((current) =>
+          updateEditorFromInteraction((current) =>
             current.selection.nodeIds.length === 1
               ? alignSelectedNodeToParent(current, mode)
               : alignSelectedNodes(current, mode)
           )
         }
         onDistribute={(mode) =>
-          updateViewportFromInteraction((current) => distributeSelectedNodes(current, mode))
+          updateEditorFromInteraction((current) => distributeSelectedNodes(current, mode))
         }
       />
       {objectContextMenu ? (

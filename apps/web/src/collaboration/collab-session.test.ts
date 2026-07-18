@@ -53,6 +53,9 @@ describe("web collaboration session", () => {
     expect(session.getDocument().name).toBe("Renamed File");
     expect(updates).toEqual(["Sample File", "Renamed File"]);
 
+    expect(session.undo()?.name).toBe("Sample File");
+    expect(session.redo()?.name).toBe("Renamed File");
+
     unsubscribe();
     session.destroy();
   });
