@@ -251,12 +251,69 @@ needed compensation when the newer request failed before persistence. The
 project-load coordinator now restores the last accepted project in its serialized
 queue; focused re-review found no P0-P2 findings.
 
+PR CI exposed one additional authorization-watcher registration window: a sidecar
+created before the first `watchFile` observation could leave cached authentication
+open. The first unconditional strict-reload repair could disturb an unchanged
+recoverable startup sidecar and relied on polling a transient test state. Two
+deterministic no-callback REDs now prove that post-registration snapshot changes
+fail closed and recover after repair while unchanged startup snapshots never enter
+quarantine.
+
+Direct headed verification exposed a second timing boundary: an active resize
+could commit while the version snapshot request was still pending. The regression
+now holds that response until pointer movement and mouseup, and the request itself
+immediately blocks mutations and cancels active canvas sessions before network I/O.
+Escape invalidates a pending request instead of allowing its late response to reopen
+Preview, and Restore cancels active canvas sessions before entering persistence.
+
+GitHub review exposed a remaining collaboration durability gap: Restore applied the
+server snapshot through Yjs but never persisted the CRDT's final merged document.
+The first focused browser RED proved the missing post-Restore snapshot request, but
+independent review rejected that test because it did not create a real remote merge.
+The replacement two-browser relay RED suppressed the remote peer's HTTP write and
+showed its Yjs-only text edit revert to `Layo` when the delayed Restore response
+arrived. Layo now shares one stable-id 3-way snapshot merge contract between browser
+and server. The browser captures Yjs state when the ordered Restore operation actually
+starts, merges it with the restored version and response-time Yjs state, then persists
+the result through the existing base-aware complete-snapshot API. Server GET and a
+fresh browser reload retain both the restored fill and the concurrent remote text.
+Same-field conflicts abort and compensate with the current room document. A changed
+session identity also aborts and re-persists the replacement session instead of
+transacting the old response into another room. Every post-Restore snapshot write
+rechecks the room document and session identity; same-session edits received during a
+held write advance the base into another bounded persistence attempt, while a session
+replacement is stabilized and then aborted. The pre-Restore document also remains a
+temporary recovery boundary: project switching compensates the already-mutated source
+file, and a replacement team cannot initialize from a transient restored snapshot.
+Each PUT consumes its actual merged response, merges independent server-only changes
+back into Yjs, and advances that response as the next base. This adapts Penpot's durable
+shared-document expectation without making the team-owned relay the source of truth.
+Recovery is also an explicit inverse rather than a forward overwrite: it removes only
+the Restore-applied delta while retaining later relay edits, publishes rollback before
+leaving the old room, and waits for compensation before create/import/duplicate/delete
+project transitions can mutate server state. Compensation PUT responses enter the same
+bounded room/server convergence loop, so an independent server edit arriving during
+the abort is not left out of active Yjs peers. Failed compensation remains fail-closed
+for later project mutations, and one transition token spans preparation, server mutation,
+and document load so Restore cannot start inside a create/import/duplicate/delete window.
+Pure project navigation remains replaceable so the latest selection wins, while active
+team identity and its in-memory credential context are retained separately from the
+document-specific relay session. A private target document is not joined to that room;
+the user must explicitly share it before team-scoped product operations continue.
+Registry event streams and HTTP operations use that retained identity only after the
+opened project's team ID matches it; private and different-team projects do not receive
+the token. The same scoped context preserves structured team mentions after a document
+session is removed, and a retained display name is used only for the exact match.
+Focused browser REDs proved the missing post-switch headers, the later private-token
+leak, stale target HTTP and polling credentials, and the missing retained-team mention
+target before the repairs.
+
 The corrected browser RED passed the historical diff card and failed on the
 missing preview banner. Focused GREEN passed saved/current pixel switching,
 Delete protection, Control-wheel zoom, safe Exit, Restore, post-restore Yjs
 editing, delayed Save/Restore ordering, local-only collaboration Undo/Redo, and
-cancelled-upload cleanup. The latest local gates passed 211 general Playwright
-cases, six collaboration cases, 280 web tests, and 439 server tests. This advances
+cancelled-upload cleanup. The latest local gates passed 218 general Playwright
+cases, seven collaboration cases, 280 web tests, and 441 server tests. This advances
 collaboration/history, browser editor, visible product workflow, and failure-loop
 gates; it does not close multi-page preview navigation, hosted durable event
 delivery, comment edit/delete, or branch/review/merge. See

@@ -431,3 +431,4 @@ export function flattenRendererNodes(document: RendererDocument): RendererNode[]
 }
 
 export * from "./boolean-path.js";
+export * from "./document-snapshot-merge.js";

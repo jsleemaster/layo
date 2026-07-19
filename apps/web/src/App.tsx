@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -13,7 +14,9 @@ import type { KonvaEventObject } from "konva/lib/Node";
 import type { Stage as KonvaStage } from "konva/lib/Stage";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Path as KonvaPath, Rect, RegularPolygon, Shape, Stage, Text } from "react-konva";
 import {
+  DocumentSnapshotConflictError,
   flattenRendererNodes,
+  mergeConcurrentDocumentSnapshots,
   pathHasOnlyClosedSubpaths,
   type BooleanPathOperation,
   type DesignStyle,
@@ -112,6 +115,7 @@ import {
   type FileVersionChangeSummary,
   type FileVersionSummary,
   type LibraryArchiveReview,
+  type LibraryRegistryCredentials,
   type LibraryRegistryEntry,
   type LibraryRegistryReview,
   type LibraryRegistryTokenReview,
@@ -248,6 +252,12 @@ import {
 
 const LOCAL_COMMENT_VIEWER_ID = "사용자";
 const COMMENT_LIVE_REFRESH_INTERVAL_MS = 2_000;
+const FILE_VERSION_RESTORE_STABILIZATION_LIMIT = 8;
+const DOCUMENT_SNAPSHOT_PERSISTENCE_STABILIZATION_LIMIT = 8;
+
+function rendererDocumentsEqual(first: RendererDocument, second: RendererDocument) {
+  return JSON.stringify(first) === JSON.stringify(second);
+}
 
 function formatCommentActivityType(type: CommentActivityFeed["events"][number]["type"]) {
   switch (type) {
@@ -2179,7 +2189,7 @@ async function persistDocumentSnapshot(
   fileId: string,
   baseDocument: RendererDocument,
   document: RendererDocument
-) {
+): Promise<RendererDocument> {
   const response = await fetch(apiUrl(`/files/${fileId}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -2187,8 +2197,44 @@ async function persistDocumentSnapshot(
   });
 
   if (!response.ok) {
-    throw new Error(`문서 저장 실패: ${response.status} ${response.statusText}`.trim());
+    let detail = response.statusText;
+    try {
+      const payload = await response.json() as { error?: unknown; message?: unknown };
+      const responseDetail =
+        typeof payload.message === "string" ? payload.message : payload.error;
+      if (typeof responseDetail === "string" && responseDetail.trim()) {
+        detail = responseDetail;
+      }
+    } catch {
+      // Keep the HTTP status text when the server does not return JSON.
+    }
+    throw new DocumentSnapshotPersistenceError(response.status, detail);
   }
+  return parseDocumentPayload(await response.json());
+}
+
+class DocumentSnapshotPersistenceError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string
+  ) {
+    super(`문서 저장 실패: ${status} ${detail}`.trim());
+    this.name = "DocumentSnapshotPersistenceError";
+  }
+}
+
+function isDocumentSnapshotConflict(error: unknown) {
+  return error instanceof DocumentSnapshotPersistenceError
+    && error.status === 400
+    && error.detail.includes("document snapshot conflict");
+}
+
+async function readPersistedDocumentSnapshot(fileId: string): Promise<RendererDocument> {
+  const response = await fetch(apiUrl(`/files/${fileId}`));
+  if (!response.ok) {
+    throw new Error(`문서 최신 상태 확인 실패: ${response.status} ${response.statusText}`.trim());
+  }
+  return parseDocumentPayload(await response.json());
 }
 
 async function persistTextChange(fileId: string, nodeId: string, value: string) {
@@ -2941,6 +2987,27 @@ function resolveCommentMentionTargets(
   return Array.from(targetsByUserId.values())
     .sort((first, second) => first.index - second.index || first.target.displayName.localeCompare(second.target.displayName))
     .map((entry) => entry.target);
+}
+
+function libraryRegistryCredentialsForProject(
+  project: ProjectManifest | null | undefined,
+  team: TeamManifest | null | undefined,
+  memberToken: string
+): LibraryRegistryCredentials | undefined {
+  const token = memberToken.trim();
+  if (
+    !project ||
+    project.sharing.mode !== "team" ||
+    !team ||
+    team.teamId !== project.sharing.teamId ||
+    !token
+  ) {
+    return undefined;
+  }
+  return {
+    userId: team.currentUserId,
+    memberToken: token
+  };
 }
 
 function unresolvedCommentMentions(mentions: string[], mentionTargets: CommentMentionTarget[] | undefined) {
@@ -9515,8 +9582,29 @@ export function App() {
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("assets");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
+  const [activeTeamContext, setActiveTeamContext] = useState<TeamManifest | null>(null);
+  const activeProjectTeamContext =
+    currentProject?.sharing.mode === "team" &&
+    activeTeamContext?.teamId === currentProject.sharing.teamId
+      ? activeTeamContext
+      : null;
+  const activeLibraryRegistryCredentials = libraryRegistryCredentialsForProject(
+    currentProject,
+    activeTeamContext,
+    activeMemberToken
+  );
+  const libraryRegistryAccessScopeKey = JSON.stringify([
+    currentProject?.currentDocumentId ?? null,
+    currentProject?.sharing.mode ?? null,
+    currentProject?.sharing.mode === "team" ? currentProject.sharing.teamId : null,
+    activeProjectTeamContext?.teamId ?? null,
+    activeProjectTeamContext?.currentUserId ?? null,
+    activeMemberToken,
+    memberTokenRevision
+  ]);
   const [collabStatus, setCollabStatus] = useState("offline");
   const [presence, setPresence] = useState<CollaborationPresence[]>([]);
+  const [projectDocumentTransitionActive, setProjectDocumentTransitionActive] = useState(false);
   const [presenceClock, setPresenceClock] = useState(() => Date.now());
   const [areaSelection, setAreaSelection] = useState<AreaSelectionSession | null>(null);
   const [dragPreview, setDragPreview] = useState<NodeDragPreview | null>(null);
@@ -9548,6 +9636,21 @@ export function App() {
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
+  const documentSnapshotRevisionRef = useRef(0);
+  const documentSnapshotEpochRef = useRef(new Map<string, number>());
+  const latestDocumentSnapshotRef = useRef(new Map<
+    string,
+    Map<
+      number,
+      {
+        revision: number;
+        baseDocument: RendererDocument | null;
+        document: RendererDocument;
+        collaborationSession: CollabDocumentSession | null;
+        verifyServerDocument: boolean;
+      }
+    >
+  >());
   const currentProjectRef = useRef<ProjectManifest | null>(null);
   const projectLoadCoordinatorRef = useRef<ReturnType<typeof createProjectLoadCoordinator> | null>(null);
   if (!projectLoadCoordinatorRef.current) {
@@ -9562,6 +9665,14 @@ export function App() {
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
+  const libraryRegistryAccessScopeRef = useRef(libraryRegistryAccessScopeKey);
+  libraryRegistryAccessScopeRef.current = libraryRegistryAccessScopeKey;
+  const libraryRegistryCredentialsRef = useRef(activeLibraryRegistryCredentials);
+  libraryRegistryCredentialsRef.current = activeLibraryRegistryCredentials;
+  const libraryRegistryReviewRef = useRef(libraryRegistryReview);
+  libraryRegistryReviewRef.current = libraryRegistryReview;
+  const libraryRegistryTokenReviewRef = useRef(libraryRegistryTokenReview);
+  libraryRegistryTokenReviewRef.current = libraryRegistryTokenReview;
   const libraryRegistryAuthorizationEndedRef = useRef(false);
   const libraryRegistryCredentialReconnectPendingRef = useRef(false);
   const objectClipboardRef = useRef<EditorNodeClipboard | null>(null);
@@ -9585,10 +9696,35 @@ export function App() {
   } | null>(null);
   const isSpacePanningRef = useRef(false);
   const collabSessionRef = useRef<CollabDocumentSession | null>(null);
+  const collaborationSnapshotBaselineRef = useRef<{
+    session: CollabDocumentSession;
+    document: RendererDocument;
+  } | null>(null);
   const fileVersionPreviewActiveRef = useRef(false);
   const fileVersionPreviewRequestRef = useRef(0);
+  const fileVersionPreviewPendingRequestRef = useRef<number | null>(null);
   const fileVersionRestorePendingRef = useRef(false);
+  const fileVersionRestoreCompletionRef = useRef<{
+    fileId: string;
+    promise: Promise<{ safe: boolean; error?: Error }>;
+    resolve: (result: { safe: boolean; error?: Error }) => void;
+  } | null>(null);
+  const fileVersionRestoreUnsafeRef = useRef<Error | null>(null);
+  const fileVersionRestoreRecoveryRef = useRef<{
+    fileId: string;
+    rollbackDocument: RendererDocument;
+    appliedDocument: RendererDocument | null;
+    latestDocument: RendererDocument;
+    cancelled: boolean;
+    cancelReason: "project-transition" | "session-replacement" | null;
+  } | null>(null);
+  const projectDocumentTransitionRef = useRef<{
+    token: symbol;
+    kind: "mutation" | "navigation";
+  } | null>(null);
   const editorMutationGenerationRef = useRef(0);
+  const isEditorDocumentMutationBlocked = () =>
+    fileVersionPreviewActiveRef.current || projectDocumentTransitionRef.current !== null;
   const publishedCursorRef = useRef<PublishedCursor | null>(null);
   const remotePresenceSignatureRef = useRef(new Map<string, string>());
   const remotePresenceSeenAtRef = useRef(new Map<string, number>());
@@ -9615,10 +9751,139 @@ export function App() {
       : `${visibleProjects.length}개 프로젝트`
     : `${projects.length}개 프로젝트`;
 
-  fileVersionPreviewActiveRef.current = fileVersionPreview !== null || fileVersionRestorePending;
+  const restoreRecoveryDocument = (
+    recovery: NonNullable<typeof fileVersionRestoreRecoveryRef.current>,
+    currentDocument = recovery.latestDocument
+  ) =>
+    recovery.appliedDocument
+      ? mergeConcurrentDocumentSnapshots(
+          recovery.appliedDocument,
+          recovery.rollbackDocument,
+          currentDocument,
+          { conflictPreference: "current" }
+        )
+      : structuredClone(currentDocument);
+
+  const rollbackPendingFileVersionRestoreInActiveSession = (
+    reason: "project-transition" | "session-replacement"
+  ) => {
+    const recovery = fileVersionRestoreRecoveryRef.current;
+    if (!fileVersionRestorePendingRef.current || !recovery) {
+      return null;
+    }
+    const activeSession =
+      collabSessionRef.current?.documentId === recovery.fileId ? collabSessionRef.current : null;
+    const currentDocument = activeSession?.getDocument() ?? recovery.latestDocument;
+    const rollbackDocument = restoreRecoveryDocument(recovery, currentDocument);
+    recovery.rollbackDocument = structuredClone(rollbackDocument);
+    recovery.appliedDocument = null;
+    recovery.latestDocument = structuredClone(rollbackDocument);
+    recovery.cancelled = true;
+    recovery.cancelReason = reason;
+    if (activeSession && !rendererDocumentsEqual(currentDocument, rollbackDocument)) {
+      activeSession.transact(
+        "file-version-restore-abort",
+        () => rollbackDocument,
+        { undoable: false }
+      );
+    }
+    return rollbackDocument;
+  };
+
+  const prepareForProjectDocumentTransition = async (flushSourceSnapshot = true) => {
+    rollbackPendingFileVersionRestoreInActiveSession("project-transition");
+    const completion = fileVersionRestoreCompletionRef.current;
+    if (completion) {
+      const result = await completion.promise;
+      if (!result.safe) {
+        throw result.error ?? new Error("복원 보상이 완료되지 않아 프로젝트를 전환할 수 없습니다");
+      }
+    }
+    if (fileVersionRestoreUnsafeRef.current) {
+      throw fileVersionRestoreUnsafeRef.current;
+    }
+    const sourceFileId = currentProjectRef.current?.currentDocumentId;
+    if (flushSourceSnapshot && sourceFileId) {
+      await enqueueDocumentSnapshotBarrier(sourceFileId, async () => undefined);
+    }
+  };
+
+  const runProjectDocumentTransition = async <T,>(
+    operation: (token: symbol) => Promise<T>,
+    options: { flushSourceSnapshot?: boolean } = {}
+  ) => {
+    if (projectDocumentTransitionRef.current) {
+      throw new Error("다른 프로젝트 전환이 진행 중입니다");
+    }
+    const transition = {
+      token: Symbol("project-document-transition"),
+      kind: "mutation" as const
+    };
+    projectDocumentTransitionRef.current = transition;
+    setProjectDocumentTransitionActive(true);
+    editorMutationGenerationRef.current += 1;
+    cancelActiveCanvasInteractions();
+    try {
+      await prepareForProjectDocumentTransition(options.flushSourceSnapshot ?? true);
+      return await operation(transition.token);
+    } finally {
+      if (projectDocumentTransitionRef.current === transition) {
+        projectDocumentTransitionRef.current = null;
+        setProjectDocumentTransitionActive(false);
+      }
+    }
+  };
+
+  const runProjectDocumentNavigation = async (operation: (token: symbol) => Promise<boolean>) => {
+    if (projectDocumentTransitionRef.current?.kind === "mutation") {
+      throw new Error("다른 프로젝트 전환이 진행 중입니다");
+    }
+    const transition = {
+      token: Symbol("project-document-navigation"),
+      kind: "navigation" as const
+    };
+    projectDocumentTransitionRef.current = transition;
+    setProjectDocumentTransitionActive(true);
+    editorMutationGenerationRef.current += 1;
+    cancelActiveCanvasInteractions();
+    try {
+      await prepareForProjectDocumentTransition();
+      if (projectDocumentTransitionRef.current !== transition) {
+        return false;
+      }
+      return await operation(transition.token);
+    } finally {
+      if (projectDocumentTransitionRef.current === transition) {
+        projectDocumentTransitionRef.current = null;
+        setProjectDocumentTransitionActive(false);
+      }
+    }
+  };
+
+  const deactivateCollaborationForDocumentSwitch = (nextDocumentId: string) => {
+    const activeSession = collabSessionRef.current;
+    if (!activeSession || activeSession.documentId === nextDocumentId) {
+      return;
+    }
+    activeSession.destroy();
+    if (collaborationSnapshotBaselineRef.current?.session === activeSession) {
+      collaborationSnapshotBaselineRef.current = null;
+    }
+    collabSessionRef.current = null;
+    setCollabSession(null);
+    setCollabStatus("offline");
+    setPresence([]);
+  };
+
+  fileVersionPreviewActiveRef.current =
+    fileVersionPreviewPendingRequestRef.current !== null
+    || fileVersionPreview !== null
+    || fileVersionRestorePending;
 
   const resetFileVersions = (status = "버전 기록 대기 중") => {
     fileVersionPreviewRequestRef.current += 1;
+    fileVersionPreviewPendingRequestRef.current = null;
+    fileVersionPreviewActiveRef.current = fileVersionRestorePendingRef.current;
     setFileVersions([]);
     setFileVersionPreview(null);
     setFileVersionStatus(status);
@@ -9627,6 +9892,9 @@ export function App() {
   const refreshFileVersions = async (fileId: string, status?: string) => {
     const requestId = fileVersionPreviewRequestRef.current + 1;
     fileVersionPreviewRequestRef.current = requestId;
+    fileVersionPreviewPendingRequestRef.current = null;
+    fileVersionPreviewActiveRef.current =
+      fileVersionPreview !== null || fileVersionRestorePendingRef.current;
     try {
       const versions = await listFileVersions(fileId);
       if (
@@ -9813,7 +10081,10 @@ export function App() {
     selectedPathAnchorIndicesRef.current = selectedPathAnchorIndices;
   }, [selectedPathAnchorIndices]);
 
-  const refreshLibraryRegistryUpdates = async (fileId?: string) => {
+  const refreshLibraryRegistryUpdates = async (
+    fileId?: string,
+    credentials: LibraryRegistryCredentials | null | undefined = activeLibraryRegistryCredentials
+  ) => {
     const accessGeneration = libraryRegistryAccessGenerationRef.current;
     if (libraryRegistryAuthorizationEndedRef.current) {
       return [];
@@ -9823,10 +10094,11 @@ export function App() {
       setLibraryRegistryTokenUpdates([]);
       return [];
     }
+    const requestCredentials = credentials ?? undefined;
     try {
       const [updates, tokenUpdates] = await Promise.all([
-        listLibraryRegistryUpdates(fileId, undefined, activeLibraryRegistryCredentials),
-        listLibraryRegistryTokenUpdates(fileId, undefined, activeLibraryRegistryCredentials)
+        listLibraryRegistryUpdates(fileId, undefined, requestCredentials),
+        listLibraryRegistryTokenUpdates(fileId, undefined, requestCredentials)
       ]);
       if (
         libraryRegistryAuthorizationEndedRef.current
@@ -9850,17 +10122,22 @@ export function App() {
     }
   };
 
-  const refreshLibraryRegistry = async (status?: string | null, fileId = currentProject?.currentDocumentId) => {
+  const refreshLibraryRegistry = async (
+    status?: string | null,
+    fileId = currentProject?.currentDocumentId,
+    credentials: LibraryRegistryCredentials | null | undefined = activeLibraryRegistryCredentials
+  ) => {
     const accessGeneration = libraryRegistryAccessGenerationRef.current;
     if (libraryRegistryAuthorizationEndedRef.current) {
       return;
     }
+    const requestCredentials = credentials ?? undefined;
     try {
       const [libraries] = await Promise.all([
         fileId
-          ? listLibraryRegistry(fileId, undefined, activeLibraryRegistryCredentials)
-          : listLibraryRegistry(undefined, activeLibraryRegistryCredentials),
-        refreshLibraryRegistryUpdates(fileId)
+          ? listLibraryRegistry(fileId, undefined, requestCredentials)
+          : listLibraryRegistry(undefined, requestCredentials),
+        refreshLibraryRegistryUpdates(fileId, credentials)
       ]);
       if (
         libraryRegistryAuthorizationEndedRef.current
@@ -9888,6 +10165,39 @@ export function App() {
     }
   };
 
+  const clearProtectedLibraryRegistryState = useCallback(() => {
+    setLibraryRegistry([]);
+    setLibraryRegistryUpdates([]);
+    setLibraryRegistryTokenUpdates([]);
+    setLibraryRegistryReview(null);
+    setLibraryRegistryTokenReview(null);
+  }, []);
+
+  const beginLibraryRegistryAccessOperation = (fileId: string) => ({
+    fileId,
+    generation: libraryRegistryAccessGenerationRef.current,
+    scopeKey: libraryRegistryAccessScopeRef.current
+  });
+
+  const isCurrentLibraryRegistryAccessOperation = (
+    operation: ReturnType<typeof beginLibraryRegistryAccessOperation>
+  ) =>
+    operation.generation === libraryRegistryAccessGenerationRef.current
+    && operation.scopeKey === libraryRegistryAccessScopeRef.current
+    && operation.fileId === currentProjectRef.current?.currentDocumentId;
+
+  const requireCurrentLibraryRegistryAccess = (
+    operation: ReturnType<typeof beginLibraryRegistryAccessOperation>
+  ) => {
+    if (
+      libraryRegistryAuthorizationEndedRef.current
+      || !isCurrentLibraryRegistryAccessOperation(operation)
+    ) {
+      throw new Error("팀 라이브러리 접근 범위가 변경되어 작업을 취소했습니다");
+    }
+    return libraryRegistryCredentialsRef.current ?? undefined;
+  };
+
   useEffect(() => {
     const fileId = currentProject?.currentDocumentId;
     if (!fileId) {
@@ -9895,11 +10205,28 @@ export function App() {
       setLibraryRegistryTokenUpdates([]);
       return;
     }
+    if (
+      !activeProjectTeamContext
+      && (activeTeamContext !== null || currentProject?.sharing.mode === "team")
+    ) {
+      setLibraryRegistryUpdates([]);
+      setLibraryRegistryTokenUpdates([]);
+      return;
+    }
+    const credentials = activeLibraryRegistryCredentials;
     const intervalId = window.setInterval(() => {
-      void refreshLibraryRegistryUpdates(fileId);
+      void refreshLibraryRegistryUpdates(fileId, credentials);
     }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
     return () => window.clearInterval(intervalId);
-  }, [currentProject?.currentDocumentId]);
+  }, [
+    currentProject?.currentDocumentId,
+    currentProject?.sharing.mode,
+    currentProject?.sharing.mode === "team" ? currentProject.sharing.teamId : undefined,
+    activeProjectTeamContext?.currentUserId,
+    activeTeamContext?.teamId,
+    activeMemberToken,
+    memberTokenRevision
+  ]);
 
   useEffect(() => {
     const fileId = currentProject?.currentDocumentId;
@@ -9907,17 +10234,22 @@ export function App() {
     libraryRegistryAuthorizationEndedRef.current = false;
     if (!fileId) {
       libraryRegistryEventSequenceRef.current = 0;
+      clearProtectedLibraryRegistryState();
+      setLibraryRegistryStatus("게시 라이브러리 없음");
+      return;
+    }
+    if (
+      !activeProjectTeamContext
+      && (activeTeamContext !== null || currentProject?.sharing.mode === "team")
+    ) {
+      libraryRegistryEventSequenceRef.current = 0;
+      clearProtectedLibraryRegistryState();
+      setLibraryRegistryStatus("게시 라이브러리 없음");
       return;
     }
 
     libraryRegistryEventSequenceRef.current = 0;
-    const credentials =
-      collabSession && activeMemberToken
-        ? {
-            userId: collabSession.team.currentUserId,
-            memberToken: activeMemberToken
-          }
-        : undefined;
+    const credentials = activeLibraryRegistryCredentials;
     return subscribeToLibraryRegistryEvents({
       fileId,
       after: libraryRegistryEventSequenceRef.current,
@@ -9927,7 +10259,7 @@ export function App() {
           libraryRegistryEventSequenceRef.current,
           event.sequence
         );
-        void refreshLibraryRegistry(null, fileId);
+        void refreshLibraryRegistry(null, fileId, credentials);
       },
       onReady: () => {
         if (libraryRegistryCredentialReconnectPendingRef.current) {
@@ -9935,18 +10267,14 @@ export function App() {
           setLibraryRegistryStatus("팀 인증 다시 연결됨");
           setMemberTokenStatus("팀 인증 다시 연결됨");
         }
-        void refreshLibraryRegistry(null, fileId);
+        void refreshLibraryRegistry(null, fileId, credentials);
       },
       onAuthorizationEnded: (code) => {
         libraryRegistryCredentialReconnectPendingRef.current = false;
         libraryRegistryAuthorizationEndedRef.current = true;
         libraryRegistryAccessGenerationRef.current += 1;
         libraryRegistryEventSequenceRef.current = 0;
-        setLibraryRegistry([]);
-        setLibraryRegistryUpdates([]);
-        setLibraryRegistryTokenUpdates([]);
-        setLibraryRegistryReview(null);
-        setLibraryRegistryTokenReview(null);
+        clearProtectedLibraryRegistryState();
         const authorizationStatus =
           code === "credential_inactive"
             ? "팀 인증이 만료되었습니다. 새 멤버 토큰으로 다시 연결해 주세요."
@@ -9957,9 +10285,13 @@ export function App() {
     });
   }, [
     currentProject?.currentDocumentId,
-    collabSession?.team.currentUserId,
+    currentProject?.sharing.mode,
+    currentProject?.sharing.mode === "team" ? currentProject.sharing.teamId : undefined,
+    activeProjectTeamContext?.currentUserId,
+    activeTeamContext?.teamId,
     activeMemberToken,
-    memberTokenRevision
+    memberTokenRevision,
+    clearProtectedLibraryRegistryState
   ]);
 
   useEffect(() => {
@@ -10065,28 +10397,56 @@ export function App() {
     collabSession?.team.currentUserId
   ]);
 
-  const loadProjectDocument = async (project: ProjectManifest, projectList = projects) => {
+  const loadProjectDocument = async (
+    project: ProjectManifest,
+    projectList = projects,
+    transitionToken?: symbol
+  ) => {
+    const activeTransition = projectDocumentTransitionRef.current;
+    if (activeTransition?.kind === "mutation" && activeTransition.token !== transitionToken) {
+      throw new Error("다른 프로젝트 전환이 진행 중입니다");
+    }
+    const isTransitionOwner = () =>
+      transitionToken
+        ? projectDocumentTransitionRef.current?.token === transitionToken
+        : projectDocumentTransitionRef.current?.kind !== "mutation";
+    if (!isTransitionOwner()) {
+      return false;
+    }
     const requestId = projectLoadCoordinator.beginRequest();
     try {
+      if (
+        !transitionToken
+        && project.currentDocumentId !== currentProjectRef.current?.currentDocumentId
+      ) {
+        await prepareForProjectDocumentTransition();
+        if (!isTransitionOwner() || !projectLoadCoordinator.isCurrentRequest(requestId)) {
+          return false;
+        }
+      }
       const response = await fetch(apiUrl(`/files/${project.currentDocumentId}`));
-      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+      if (!isTransitionOwner() || !projectLoadCoordinator.isCurrentRequest(requestId)) {
         return false;
       }
       if (!response.ok) {
         throw new Error(`프로젝트 문서를 불러오지 못했습니다: ${response.status}`);
       }
       const payload = await response.json();
-      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+      if (!isTransitionOwner() || !projectLoadCoordinator.isCurrentRequest(requestId)) {
         return false;
       }
       if (!await projectLoadCoordinator.persistIfCurrent(requestId, project.projectId)) {
         return false;
       }
+      const nextEditor = createEditorState(parseDocumentPayload(payload));
+      deactivateCollaborationForDocumentSwitch(project.currentDocumentId);
+      currentProjectRef.current = project;
+      editorRef.current = nextEditor;
       setProjects(projectList);
       setCurrentProject(project);
       setProjectNameDraft(project.name);
       setRecentProjectIds((current) => promoteRecentProject(project.projectId, current));
-      setEditor(createEditorState(parseDocumentPayload(payload)));
+      setEditor(nextEditor);
       setTokenDtcgDraft("");
       setTokenDtcgStatus("");
       setProjectStatus(`${project.name} 불러옴`);
@@ -10094,13 +10454,27 @@ export function App() {
       void refreshCommentThreads(project.currentDocumentId);
       void refreshCommentNotifications();
       void refreshCommentActivity();
-      await refreshLibraryRegistry(undefined, project.currentDocumentId);
-      return projectLoadCoordinator.isCurrentRequest(requestId);
+      await refreshLibraryRegistry(
+        undefined,
+        project.currentDocumentId,
+        libraryRegistryCredentialsForProject(project, activeTeamContext, activeMemberToken) ?? null
+      );
+      return isTransitionOwner() && projectLoadCoordinator.isCurrentRequest(requestId);
     } catch (error) {
-      if (!projectLoadCoordinator.isCurrentRequest(requestId)) {
+      if (!isTransitionOwner() || !projectLoadCoordinator.isCurrentRequest(requestId)) {
         return false;
       }
       throw error;
+    }
+  };
+
+  const requireProjectDocumentLoad = async (
+    project: ProjectManifest,
+    projectList: ProjectManifest[],
+    transitionToken: symbol
+  ) => {
+    if (!await loadProjectDocument(project, projectList, transitionToken)) {
+      throw new Error("프로젝트 전환이 취소되었습니다");
     }
   };
 
@@ -10162,7 +10536,11 @@ export function App() {
         void refreshCommentThreads(selectedProject.currentDocumentId);
         void refreshCommentNotifications();
         void refreshCommentActivity();
-        void refreshLibraryRegistry(undefined, selectedProject.currentDocumentId);
+        void refreshLibraryRegistry(
+          undefined,
+          selectedProject.currentDocumentId,
+          libraryRegistryCredentialsForProject(selectedProject, activeTeamContext, activeMemberToken) ?? null
+        );
       } catch {
         if (isCurrentRequest()) {
           setProjectStatus("로컬 서버를 시작하면 프로젝트를 불러옵니다");
@@ -10661,18 +11039,11 @@ export function App() {
     [components, editor, selectedNodeIds]
   );
   const localSessionId = collabSession?.getLocalPresence().sessionId ?? null;
-  const activeLibraryRegistryCredentials =
-    collabSession && activeMemberToken
-      ? {
-          userId: collabSession.team.currentUserId,
-          memberToken: activeMemberToken
-        }
-      : undefined;
   const currentDocumentName = editor?.document.name ?? "문서 없음";
   const currentProjectName = currentProject?.name ?? "프로젝트 없음";
   const topFileShareLabel =
     currentProject?.sharing.mode === "team"
-      ? `공유됨 · ${collabSession?.team.name ?? currentProject.sharing.teamId}`
+      ? `공유됨 · ${activeProjectTeamContext?.name ?? currentProject.sharing.teamId}`
       : "비공개";
   const showProjectPanel = leftPanelMode === "files";
   const showAssetPanel = leftPanelMode === "assets";
@@ -10857,6 +11228,265 @@ export function App() {
   const enqueueDocumentPersistence = <T,>(fileId: string, operation: () => Promise<T>) =>
     documentPersistenceQueueRef.current.enqueue(fileId, operation);
 
+  const getDocumentSnapshotEpoch = (fileId: string) =>
+    documentSnapshotEpochRef.current.get(fileId) ?? 0;
+
+  const advanceDocumentSnapshotEpoch = (fileId: string) => {
+    documentSnapshotEpochRef.current.set(fileId, getDocumentSnapshotEpoch(fileId) + 1);
+  };
+
+  const getLatestDocumentSnapshot = (fileId: string, epoch: number) =>
+    latestDocumentSnapshotRef.current.get(fileId)?.get(epoch);
+
+  const deleteLatestDocumentSnapshot = (fileId: string, epoch: number, revision: number) => {
+    const fileSnapshots = latestDocumentSnapshotRef.current.get(fileId);
+    if (fileSnapshots?.get(epoch)?.revision !== revision) {
+      return false;
+    }
+    fileSnapshots.delete(epoch);
+    if (fileSnapshots.size === 0) {
+      latestDocumentSnapshotRef.current.delete(fileId);
+    }
+    return true;
+  };
+
+  const updateCollaborationSnapshotBaseline = (
+    session: CollabDocumentSession | null,
+    persistedDocument: RendererDocument
+  ) => {
+    if (session && collaborationSnapshotBaselineRef.current?.session === session) {
+      collaborationSnapshotBaselineRef.current = {
+        session,
+        document: structuredClone(persistedDocument)
+      };
+    }
+  };
+
+  const completeLatestDocumentSnapshot = (
+    fileId: string,
+    epoch: number,
+    snapshot: NonNullable<ReturnType<typeof getLatestDocumentSnapshot>>,
+    persistedDocument: RendererDocument
+  ) => {
+    if (!deleteLatestDocumentSnapshot(fileId, epoch, snapshot.revision)) {
+      return;
+    }
+    updateCollaborationSnapshotBaseline(snapshot.collaborationSession, persistedDocument);
+  };
+
+  const stabilizeDocumentSnapshotPersistence = async (
+    fileId: string,
+    initialBaseDocument: RendererDocument,
+    initialDocument: RendererDocument,
+    snapshotEpoch: number
+  ) => {
+    let persistenceBase = initialBaseDocument;
+    let persistenceDocument = initialDocument;
+    let observedCurrentDocument = initialDocument;
+
+    const rebaseLatestCurrentDocument = () => {
+      const activeSession =
+        collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+      const currentEditor =
+        currentProjectRef.current?.currentDocumentId === fileId
+        && editorRef.current?.document.id === fileId
+          ? editorRef.current
+          : null;
+      const latestQueuedDocument = getLatestDocumentSnapshot(fileId, snapshotEpoch)?.document;
+      const latestCurrentDocument = getDocumentSnapshotEpoch(fileId) === snapshotEpoch
+        ? activeSession?.getDocument()
+          ?? latestQueuedDocument
+          ?? currentEditor?.document
+          ?? observedCurrentDocument
+        : latestQueuedDocument ?? observedCurrentDocument;
+      const rebasedDocument = mergeConcurrentDocumentSnapshots(
+        observedCurrentDocument,
+        latestCurrentDocument,
+        persistenceDocument,
+        { conflictPreference: "local" }
+      );
+      observedCurrentDocument = latestCurrentDocument;
+      return rebasedDocument;
+    };
+
+    for (
+      let attempt = 0;
+      attempt < DOCUMENT_SNAPSHOT_PERSISTENCE_STABILIZATION_LIMIT;
+      attempt += 1
+    ) {
+      persistenceDocument = rebaseLatestCurrentDocument();
+      let actualServerDocument: RendererDocument;
+      let convergenceBase = persistenceDocument;
+      try {
+        actualServerDocument = await persistDocumentSnapshot(
+          fileId,
+          persistenceBase,
+          persistenceDocument
+        );
+      } catch (error) {
+        if (!isDocumentSnapshotConflict(error)) {
+          throw error;
+        }
+        actualServerDocument = await readPersistedDocumentSnapshot(fileId);
+        convergenceBase = persistenceBase;
+      }
+
+      const activeSession =
+        collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+      const currentDocument = rebaseLatestCurrentDocument();
+      let convergedDocument = mergeConcurrentDocumentSnapshots(
+        convergenceBase,
+        actualServerDocument,
+        currentDocument,
+        { conflictPreference: "current" }
+      );
+
+      if (
+        getDocumentSnapshotEpoch(fileId) === snapshotEpoch
+        && activeSession
+        && !rendererDocumentsEqual(activeSession.getDocument(), convergedDocument)
+      ) {
+        activeSession.transact(
+          "document-snapshot-server-convergence",
+          () => convergedDocument,
+          { undoable: false }
+        );
+        convergedDocument = activeSession.getDocument();
+        observedCurrentDocument = convergedDocument;
+      }
+
+      if (rendererDocumentsEqual(convergedDocument, actualServerDocument)) {
+        if (getDocumentSnapshotEpoch(fileId) !== snapshotEpoch && activeSession) {
+          const currentSessionDocument = activeSession.getDocument();
+          const reconciledSessionDocument = mergeConcurrentDocumentSnapshots(
+            initialDocument,
+            actualServerDocument,
+            currentSessionDocument,
+            { conflictPreference: "current" }
+          );
+          if (!rendererDocumentsEqual(currentSessionDocument, reconciledSessionDocument)) {
+            activeSession.transact(
+              "document-snapshot-sealed-server-convergence",
+              () => reconciledSessionDocument,
+              { undoable: false }
+            );
+          }
+        }
+        return actualServerDocument;
+      }
+      persistenceBase = actualServerDocument;
+      persistenceDocument = convergedDocument;
+    }
+
+    throw new Error("협업 변경이 계속되어 문서 저장을 완료하지 못했습니다");
+  };
+
+  const flushDocumentSnapshotEpoch = async (
+    fileId: string,
+    snapshotEpoch: number,
+    expectedRevision?: number
+  ) => {
+    const latestSnapshot = getLatestDocumentSnapshot(fileId, snapshotEpoch);
+    if (!latestSnapshot || (
+      expectedRevision !== undefined
+      && latestSnapshot.revision !== expectedRevision
+    )) {
+      return;
+    }
+    const verifiedServerDocument =
+      latestSnapshot.verifyServerDocument || latestSnapshot.baseDocument === null
+        ? await readPersistedDocumentSnapshot(fileId)
+        : null;
+    if (
+      verifiedServerDocument
+      && rendererDocumentsEqual(verifiedServerDocument, latestSnapshot.document)
+    ) {
+      completeLatestDocumentSnapshot(
+        fileId,
+        snapshotEpoch,
+        latestSnapshot,
+        verifiedServerDocument
+      );
+      return;
+    }
+    const baseDocument = latestSnapshot.baseDocument ?? verifiedServerDocument;
+    if (!baseDocument) {
+      throw new Error("문서 저장 기준을 확인하지 못했습니다");
+    }
+    const persistedDocument = await stabilizeDocumentSnapshotPersistence(
+      fileId,
+      baseDocument,
+      latestSnapshot.document,
+      snapshotEpoch
+    );
+    completeLatestDocumentSnapshot(
+      fileId,
+      snapshotEpoch,
+      latestSnapshot,
+      persistedDocument
+    );
+  };
+
+  const flushDocumentSnapshotEpochsThrough = async (
+    fileId: string,
+    sealedEpoch: number,
+    expectedSealedRevision?: number
+  ) => {
+    const retainedEpochs = [
+      ...(latestDocumentSnapshotRef.current.get(fileId)?.keys() ?? [])
+    ]
+      .filter((epoch) => epoch <= sealedEpoch)
+      .sort((first, second) => first - second);
+    for (const epoch of retainedEpochs) {
+      await flushDocumentSnapshotEpoch(
+        fileId,
+        epoch,
+        epoch === sealedEpoch ? expectedSealedRevision : undefined
+      );
+    }
+  };
+
+  const captureActiveCollaborationSnapshotForBarrier = (fileId: string, epoch: number) => {
+    const activeSession =
+      collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+    if (!activeSession) {
+      return;
+    }
+    const document = structuredClone(activeSession.getDocument());
+    let fileSnapshots = latestDocumentSnapshotRef.current.get(fileId);
+    if (!fileSnapshots) {
+      fileSnapshots = new Map();
+      latestDocumentSnapshotRef.current.set(fileId, fileSnapshots);
+    }
+    const pendingSnapshot = fileSnapshots.get(epoch);
+    const baseline = collaborationSnapshotBaselineRef.current;
+    const referenceDocument = pendingSnapshot?.document
+      ?? (baseline?.session === activeSession ? baseline.document : null);
+    if (referenceDocument && rendererDocumentsEqual(referenceDocument, document)) {
+      return;
+    }
+    const revision = documentSnapshotRevisionRef.current + 1;
+    documentSnapshotRevisionRef.current = revision;
+    fileSnapshots.set(epoch, {
+      revision,
+      baseDocument: pendingSnapshot?.baseDocument
+        ?? (baseline?.session === activeSession ? structuredClone(baseline.document) : null),
+      document,
+      collaborationSession: activeSession,
+      verifyServerDocument: pendingSnapshot?.verifyServerDocument ?? true
+    });
+  };
+
+  const enqueueDocumentSnapshotBarrier = <T,>(fileId: string, operation: () => Promise<T>) => {
+    const sealedEpoch = getDocumentSnapshotEpoch(fileId);
+    captureActiveCollaborationSnapshotForBarrier(fileId, sealedEpoch);
+    advanceDocumentSnapshotEpoch(fileId);
+    return enqueueDocumentPersistence(fileId, async () => {
+      await flushDocumentSnapshotEpochsThrough(fileId, sealedEpoch);
+      return operation();
+    });
+  };
+
   const enqueueDocumentSnapshotPersistence = (
     baseDocument: RendererDocument,
     document: RendererDocument
@@ -10867,15 +11497,36 @@ export function App() {
     }
     const baseSnapshot = structuredClone(baseDocument);
     const snapshot = structuredClone(document);
-    void enqueueDocumentPersistence(fileId, () =>
-      persistDocumentSnapshot(fileId, baseSnapshot, snapshot)
-    ).catch((error) => {
+    const revision = documentSnapshotRevisionRef.current + 1;
+    documentSnapshotRevisionRef.current = revision;
+    const snapshotEpoch = getDocumentSnapshotEpoch(fileId);
+    let fileSnapshots = latestDocumentSnapshotRef.current.get(fileId);
+    if (!fileSnapshots) {
+      fileSnapshots = new Map();
+      latestDocumentSnapshotRef.current.set(fileId, fileSnapshots);
+    }
+    const pendingSnapshot = fileSnapshots.get(snapshotEpoch);
+    const activeSession =
+      collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+    fileSnapshots.set(snapshotEpoch, {
+      revision,
+      baseDocument: pendingSnapshot?.baseDocument ?? baseSnapshot,
+      document: snapshot,
+      collaborationSession: activeSession ?? pendingSnapshot?.collaborationSession ?? null,
+      verifyServerDocument: pendingSnapshot?.verifyServerDocument ?? false
+    });
+    void enqueueDocumentPersistence(fileId, async () => {
+      await flushDocumentSnapshotEpochsThrough(fileId, snapshotEpoch, revision);
+    }).catch((error) => {
       const message = error instanceof Error ? error.message : "문서를 저장하지 못했습니다";
       setProjectStatus(message);
     });
   };
 
   const applyCollaborativeHistory = (direction: "undo" | "redo") => {
+    if (isEditorDocumentMutationBlocked()) {
+      return false;
+    }
     const activeSession = collabSessionRef.current;
     const current = editorRef.current;
     if (!activeSession || !current) {
@@ -10900,7 +11551,7 @@ export function App() {
   };
 
   const updateEditorFromInteraction = (deriveNextState: (state: EditorState) => EditorState) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return false;
     }
     const current = editorRef.current;
@@ -11448,7 +12099,7 @@ export function App() {
     event.currentTarget.value = "";
     const nodeId = imageReplacementNodeIdRef.current;
     imageReplacementNodeIdRef.current = null;
-    if (fileVersionPreviewActiveRef.current || !file || !nodeId || !currentProject) {
+    if (isEditorDocumentMutationBlocked() || !file || !nodeId || !currentProject) {
       return;
     }
 
@@ -11464,7 +12115,7 @@ export function App() {
     try {
       const naturalSize = await readImageFileSize(file);
       if (
-        fileVersionPreviewActiveRef.current ||
+        isEditorDocumentMutationBlocked() ||
         mutationGeneration !== editorMutationGenerationRef.current ||
         currentProjectRef.current?.currentDocumentId !== fileId
       ) {
@@ -11473,7 +12124,7 @@ export function App() {
       const asset = await uploadImageAsset(file);
       pendingAsset = asset;
       if (
-        fileVersionPreviewActiveRef.current ||
+        isEditorDocumentMutationBlocked() ||
         mutationGeneration !== editorMutationGenerationRef.current ||
         currentProjectRef.current?.currentDocumentId !== fileId
       ) {
@@ -11655,7 +12306,10 @@ export function App() {
       }
       if (fileVersionPreviewActiveRef.current) {
         event.preventDefault();
-        if (event.key === "Escape") {
+        if (event.key === "Escape" && !fileVersionRestorePendingRef.current) {
+          fileVersionPreviewRequestRef.current += 1;
+          fileVersionPreviewPendingRequestRef.current = null;
+          fileVersionPreviewActiveRef.current = false;
           setFileVersionPreview(null);
           setFileVersionStatus("미리보기 종료됨");
         }
@@ -11963,14 +12617,14 @@ export function App() {
   const dispatchWithoutSnapshotPersistence = (
     command: Parameters<typeof executeEditorCommand>[1]
   ) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return false;
     }
     return applyEditorCommand(command);
   };
 
   const dispatch = (command: Parameters<typeof executeEditorCommand>[1]) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return false;
     }
     const current = editorRef.current;
@@ -11993,7 +12647,10 @@ export function App() {
     fileId: string,
     command: Parameters<typeof executeEditorCommand>[1]
   ) => {
-    if (currentProjectRef.current?.currentDocumentId !== fileId) {
+    if (
+      isEditorDocumentMutationBlocked()
+      || currentProjectRef.current?.currentDocumentId !== fileId
+    ) {
       return false;
     }
     return applyEditorCommand(command);
@@ -12252,7 +12909,7 @@ export function App() {
     command: Parameters<typeof executeEditorCommand>[1],
     nodeId: string
   ) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return false;
     }
     const currentEditor = editorRef.current;
@@ -12311,11 +12968,13 @@ export function App() {
         nodeId: selectedBoolean.id,
         operation
       };
-      dispatchWithoutSnapshotPersistence({
+      if (!dispatchWithoutSnapshotPersistence({
         type: "set_boolean_path_operation",
         nodeId: selectedBoolean.id,
         operation
-      });
+      })) {
+        return;
+      }
     } else {
       if (
         selected.length < 2 ||
@@ -12341,13 +13000,15 @@ export function App() {
         operation,
         sourceNodeIds: selectedIds
       };
-      dispatchWithoutSnapshotPersistence({
+      if (!dispatchWithoutSnapshotPersistence({
         type: "create_boolean_path",
         nodeId,
         name: command.name,
         operation,
         sourceNodeIds: selectedIds
-      });
+      })) {
+        return;
+      }
     }
 
     void enqueueDocumentPersistence(project.currentDocumentId, () =>
@@ -12395,7 +13056,9 @@ export function App() {
       sourceNodeIds,
       name: sourceNodeIds.length === 1 ? sources[0].name : "평탄화 경로"
     };
-    dispatchWithoutSnapshotPersistence(command);
+    if (!dispatchWithoutSnapshotPersistence(command)) {
+      return;
+    }
     void enqueueDocumentPersistence(project.currentDocumentId, () =>
       persistBooleanPathCommand(project.currentDocumentId, command)
     )
@@ -12415,7 +13078,9 @@ export function App() {
       return;
     }
     const command: BooleanPathAgentCommand = { type: "detach_boolean_path", nodeId: node.id };
-    dispatchWithoutSnapshotPersistence(command);
+    if (!dispatchWithoutSnapshotPersistence(command)) {
+      return;
+    }
     void enqueueDocumentPersistence(project.currentDocumentId, () =>
       persistBooleanPathCommand(project.currentDocumentId, command)
     )
@@ -12452,7 +13117,9 @@ export function App() {
     fillRule: "nonzero" | "evenodd"
   ) => {
     const pathData = serializeEditablePath(path);
-    dispatchWithoutSnapshotPersistence({ type: "set_path_data", nodeId, pathData, fillRule });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_path_data", nodeId, pathData, fillRule })) {
+      return;
+    }
     const project = currentProjectRef.current;
     if (!project) {
       return;
@@ -12618,7 +13285,7 @@ export function App() {
   };
 
   const updateTextNode = (nodeId: string, value: string) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     dispatchWithoutSnapshotPersistence({ type: "update_text", nodeId, value });
@@ -12635,7 +13302,7 @@ export function App() {
   };
 
   const updateNodeStyle = (nodeId: string, style: RendererNode["style"]) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     dispatchWithoutSnapshotPersistence({ type: "set_node_style", nodeId, style });
@@ -12658,7 +13325,9 @@ export function App() {
   };
 
   const updateTextWritingMode = (nodeId: string, writingMode: TextWritingMode) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_text_writing_mode", nodeId, writingMode });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_text_writing_mode", nodeId, writingMode })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12676,7 +13345,9 @@ export function App() {
   };
 
   const updateTextOrientation = (nodeId: string, textOrientation: TextOrientation) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_text_orientation", nodeId, textOrientation });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_text_orientation", nodeId, textOrientation })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12694,7 +13365,9 @@ export function App() {
   };
 
   const updateTextTypographyToken = (nodeId: string, tokenId: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_token", nodeId, tokenId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_text_typography_token", nodeId, tokenId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12721,7 +13394,9 @@ export function App() {
       return;
     }
 
-    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_token", nodeId, tokenId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_token", nodeId, tokenId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12739,8 +13414,12 @@ export function App() {
   };
 
   const createEffectStyle = (nodeId: string, style: DesignStyle) => {
-    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
-    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId: style.id });
+    if (
+      !dispatchWithoutSnapshotPersistence({ type: "create_style", style })
+      || !dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId: style.id })
+    ) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12768,7 +13447,9 @@ export function App() {
       return;
     }
 
-    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_effect_shadow_style", nodeId, styleId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12801,7 +13482,9 @@ export function App() {
       return;
     }
 
-    dispatchWithoutSnapshotPersistence({ type: "set_effect_shadows", nodeId, shadows });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_effect_shadows", nodeId, shadows })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12819,8 +13502,12 @@ export function App() {
   };
 
   const createFillStyle = (nodeId: string, style: DesignStyle) => {
-    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
-    dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId: style.id });
+    if (
+      !dispatchWithoutSnapshotPersistence({ type: "create_style", style })
+      || !dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId: style.id })
+    ) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12839,7 +13526,9 @@ export function App() {
   };
 
   const updateFillStyle = (nodeId: string, styleId: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_fill_style", nodeId, styleId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12857,7 +13546,9 @@ export function App() {
   };
 
   const renameStyle = (styleId: string, name: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "rename_style", styleId, name });
+    if (!dispatchWithoutSnapshotPersistence({ type: "rename_style", styleId, name })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12876,7 +13567,9 @@ export function App() {
   };
 
   const duplicateStyle = (styleId: string, newStyleId: string, name: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "duplicate_style", styleId, newStyleId, name });
+    if (!dispatchWithoutSnapshotPersistence({ type: "duplicate_style", styleId, newStyleId, name })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12895,7 +13588,9 @@ export function App() {
   };
 
   const deleteStyle = (styleId: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "delete_style", styleId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "delete_style", styleId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12914,8 +13609,16 @@ export function App() {
   };
 
   const createTypographyStyle = (nodeId: string, style: DesignStyle) => {
-    dispatchWithoutSnapshotPersistence({ type: "create_style", style });
-    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_style", nodeId, styleId: style.id });
+    if (
+      !dispatchWithoutSnapshotPersistence({ type: "create_style", style })
+      || !dispatchWithoutSnapshotPersistence({
+        type: "set_text_typography_style",
+        nodeId,
+        styleId: style.id
+      })
+    ) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12934,7 +13637,9 @@ export function App() {
   };
 
   const updateTextTypographyStyle = (nodeId: string, styleId: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_text_typography_style", nodeId, styleId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_text_typography_style", nodeId, styleId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -12996,7 +13701,7 @@ export function App() {
   };
 
   const updateGeometry = (nodeId: string, patch: GeometryPatch) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     dispatch({ type: "update_node_geometry", nodeId, patch });
@@ -13130,7 +13835,7 @@ export function App() {
   };
 
   const updateLayout = (nodeId: string, layout: NodeLayout) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     const persistedLayout = layout.mode === "none" ? null : layout;
@@ -14197,7 +14902,7 @@ export function App() {
   }, [gridAreaBoundarySession]);
 
   const updateLayoutItem = (nodeId: string, layoutItem: NodeLayoutItem) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     if (currentProject) {
@@ -14220,14 +14925,14 @@ export function App() {
   };
 
   const updateConstraints = (nodeId: string, constraints: NodeConstraints) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     dispatch({ type: "set_node_constraints", nodeId, constraints });
   };
 
   const updateExportPresets = (nodeId: string, presets: NodeExportPreset[]) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     if (currentProject) {
@@ -14252,7 +14957,9 @@ export function App() {
     }
 
     try {
-      await loadProjectDocument(project);
+      await runProjectDocumentNavigation((transitionToken) =>
+        loadProjectDocument(project, projects, transitionToken)
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "프로젝트를 불러오지 못했습니다";
       setProjectStatus(message);
@@ -14261,12 +14968,14 @@ export function App() {
 
   const createNewProject = async () => {
     try {
-      const project = await createSavedProject({
-        name: `새 프로젝트 ${projects.length + 1}`,
-        documentName: `새 문서 ${projects.length + 1}`
+      await runProjectDocumentTransition(async (transitionToken) => {
+        const project = await createSavedProject({
+          name: `새 프로젝트 ${projects.length + 1}`,
+          documentName: `새 문서 ${projects.length + 1}`
+        });
+        const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
+        await requireProjectDocumentLoad(project, nextProjects, transitionToken);
       });
-      const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
-      await loadProjectDocument(project, nextProjects);
       setProjectStatus("새 프로젝트 저장됨");
     } catch (error) {
       const message = error instanceof Error ? error.message : "새 프로젝트를 만들지 못했습니다";
@@ -14281,7 +14990,10 @@ export function App() {
     }
 
     try {
-      const archive = await exportFileArchive(currentProject.currentDocumentId);
+      const fileId = currentProject.currentDocumentId;
+      const archive = await enqueueDocumentSnapshotBarrier(fileId, () =>
+        exportFileArchive(fileId)
+      );
       downloadBlob(archive.blob, archive.fileName);
       setFileArchiveStatus(`${archive.fileName} 내보냄`);
       setProjectStatus("파일 아카이브 내보냄");
@@ -14370,17 +15082,20 @@ export function App() {
     const importName = externalMigrationReview.review.documentCandidates[0]?.name || "가져온 외부 디자인";
     try {
       setExternalMigrationStatus("외부 디자인 가져오는 중");
-      const imported = await importExternalMigrationArchive({
-        archiveBase64: externalMigrationReview.archiveBase64,
-        fileName: externalMigrationReview.sourceFileName,
-        sourceHint: externalMigrationReview.review.source,
-        name: importName
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await importExternalMigrationArchive({
+          archiveBase64: externalMigrationReview.archiveBase64,
+          fileName: externalMigrationReview.sourceFileName,
+          sourceHint: externalMigrationReview.review.source,
+          name: importName
+        });
+        const nextProjects = [
+          nextImported.project,
+          ...projects.filter((candidate) => candidate.projectId !== nextImported.project.projectId)
+        ];
+        await requireProjectDocumentLoad(nextImported.project, nextProjects, transitionToken);
+        return nextImported;
       });
-      const nextProjects = [
-        imported.project,
-        ...projects.filter((candidate) => candidate.projectId !== imported.project.projectId)
-      ];
-      await loadProjectDocument(imported.project, nextProjects);
       setExternalMigrationReview(null);
       setExternalMigrationStatus(`${imported.project.name} 가져옴 · ${imported.sourceLabel}`);
       setProjectStatus(`${imported.project.name} 가져옴`);
@@ -14405,30 +15120,33 @@ export function App() {
 
     try {
       setFileArchiveStatus("아카이브 가져오는 중");
-      const project = await createSavedProject({
-        name: archiveName,
-        documentName: archiveName
+      const importedName = await runProjectDocumentTransition(async (transitionToken) => {
+        const project = await createSavedProject({
+          name: archiveName,
+          documentName: archiveName
+        });
+        const imported = await importFileArchive({
+          archiveBase64: fileArchiveReview.archiveBase64,
+          fileId: project.currentDocumentId,
+          name: archiveName
+        });
+        const nextImportedName = imported.name || archiveName;
+        const importedProject: ProjectManifest = {
+          ...project,
+          name: nextImportedName,
+          documents: project.documents.map((document) =>
+            document.documentId === project.currentDocumentId
+              ? { ...document, name: nextImportedName, updatedAt: new Date().toISOString() }
+              : document
+          )
+        };
+        const nextProjects = [
+          importedProject,
+          ...projects.filter((candidate) => candidate.projectId !== importedProject.projectId)
+        ];
+        await requireProjectDocumentLoad(importedProject, nextProjects, transitionToken);
+        return nextImportedName;
       });
-      const imported = await importFileArchive({
-        archiveBase64: fileArchiveReview.archiveBase64,
-        fileId: project.currentDocumentId,
-        name: archiveName
-      });
-      const importedName = imported.name || archiveName;
-      const importedProject: ProjectManifest = {
-        ...project,
-        name: importedName,
-        documents: project.documents.map((document) =>
-          document.documentId === project.currentDocumentId
-            ? { ...document, name: importedName, updatedAt: new Date().toISOString() }
-            : document
-        )
-      };
-      const nextProjects = [
-        importedProject,
-        ...projects.filter((candidate) => candidate.projectId !== importedProject.projectId)
-      ];
-      await loadProjectDocument(importedProject, nextProjects);
       setFileArchiveReview(null);
       setFileArchiveImportName("");
       setFileArchiveStatus(`${importedName} 가져옴`);
@@ -14447,7 +15165,10 @@ export function App() {
     }
 
     try {
-      const archive = await exportLibraryArchive(currentProject.currentDocumentId);
+      const fileId = currentProject.currentDocumentId;
+      const archive = await enqueueDocumentSnapshotBarrier(fileId, () =>
+        exportLibraryArchive(fileId)
+      );
       downloadBlob(archive.blob, archive.fileName);
       setLibraryArchiveStatus(`${archive.fileName} 내보냄`);
       setProjectStatus("라이브러리 아카이브 내보냄");
@@ -14508,13 +15229,16 @@ export function App() {
     try {
       setLibraryArchiveStatus("라이브러리 가져오는 중");
       const fileId = currentProject.currentDocumentId;
-      const imported = await enqueueDocumentPersistence(fileId, () =>
-        importLibraryArchive(fileId, {
-          archiveBase64: libraryArchiveReview.archiveBase64,
-          idPrefix: libraryArchivePrefix.trim() || undefined
-        })
-      );
-      await loadProjectDocument(currentProject, projects);
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await enqueueDocumentPersistence(fileId, () =>
+          importLibraryArchive(fileId, {
+            archiveBase64: libraryArchiveReview.archiveBase64,
+            idPrefix: libraryArchivePrefix.trim() || undefined
+          })
+        );
+        await requireProjectDocumentLoad(currentProject, projects, transitionToken);
+        return nextImported;
+      });
       setLibraryArchiveReview(null);
       setLibraryArchiveStatus(
         `라이브러리 가져옴 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
@@ -14532,21 +15256,39 @@ export function App() {
       setLibraryRegistryStatus("프로젝트 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
 
     try {
       setLibraryRegistryStatus("라이브러리 게시 중");
-      const published = await publishLibraryToRegistry(
-        currentProject.currentDocumentId,
-        {
-          name: libraryRegistryName.trim() || editor.document.name
-        },
-        undefined,
-        activeLibraryRegistryCredentials
+      const published = await enqueueDocumentSnapshotBarrier(
+        fileId,
+        () => publishLibraryToRegistry(
+          fileId,
+          {
+            name: libraryRegistryName.trim() || editor.document.name
+          },
+          undefined,
+          requireCurrentLibraryRegistryAccess(accessOperation)
+        )
       );
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       setLibraryRegistryName(published.name);
-      await refreshLibraryRegistry(`${published.name} 게시됨`);
+      await refreshLibraryRegistry(
+        `${published.name} 게시됨`,
+        fileId,
+        requireCurrentLibraryRegistryAccess(accessOperation)
+      );
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       setProjectStatus(`${published.name} 게시됨`);
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "라이브러리를 게시하지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
@@ -14558,20 +15300,29 @@ export function App() {
       setLibraryRegistryStatus("프로젝트 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
+    const credentials = activeLibraryRegistryCredentials;
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 검토 중");
       const review = await reviewLibraryRegistryItem(
-        currentProject.currentDocumentId,
+        fileId,
         libraryId,
         undefined,
-        activeLibraryRegistryCredentials
+        credentials
       );
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       setLibraryRegistryReview({ review });
       setLibraryRegistryTokenReview(null);
       setLibraryRegistryPrefix("team");
       setLibraryRegistryStatus(`${review.libraryName} 검토됨`);
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리를 검토하지 못했습니다";
       setLibraryRegistryReview(null);
       setLibraryRegistryStatus(message);
@@ -14583,19 +15334,28 @@ export function App() {
       setLibraryRegistryStatus("프로젝트 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
+    const credentials = activeLibraryRegistryCredentials;
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 검토 중");
       const review = await reviewLibraryRegistryTokens(
-        currentProject.currentDocumentId,
+        fileId,
         libraryId,
         undefined,
-        activeLibraryRegistryCredentials
+        credentials
       );
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       setLibraryRegistryTokenReview({ review });
       setLibraryRegistryReview(null);
       setLibraryRegistryStatus(`${review.libraryName} 토큰 검토됨`);
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리 토큰을 검토하지 못했습니다";
       setLibraryRegistryTokenReview(null);
       setLibraryRegistryStatus(message);
@@ -14621,28 +15381,40 @@ export function App() {
       setLibraryRegistryStatus("검토된 게시 라이브러리 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const reviewedLibraryId = libraryRegistryReview.review.libraryId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 가져오는 중");
-      const fileId = currentProject.currentDocumentId;
-      const imported = await enqueueDocumentPersistence(fileId, () =>
-        importLibraryRegistryItem(
-          fileId,
-          {
-            libraryId: libraryRegistryReview.review.libraryId,
-            idPrefix: libraryRegistryPrefix.trim() || undefined
-          },
-          undefined,
-          activeLibraryRegistryCredentials
-        )
-      );
-      await loadProjectDocument(currentProject, projects);
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await enqueueDocumentPersistence(fileId, () => {
+          const currentReview = libraryRegistryReviewRef.current;
+          if (currentReview?.review.libraryId !== reviewedLibraryId) {
+            throw new Error("게시 라이브러리 검토 대상이 변경되어 가져오기를 취소했습니다");
+          }
+          return importLibraryRegistryItem(
+            fileId,
+            {
+              libraryId: currentReview.review.libraryId,
+              idPrefix: libraryRegistryPrefix.trim() || undefined
+            },
+            undefined,
+            requireCurrentLibraryRegistryAccess(accessOperation)
+          );
+        });
+        await requireProjectDocumentLoad(currentProject, projects, transitionToken);
+        return nextImported;
+      });
       setLibraryRegistryReview(null);
       setLibraryRegistryStatus(
         `게시 라이브러리 가져옴 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
       );
       setProjectStatus("게시 라이브러리 가져옴");
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리를 가져오지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
@@ -14658,26 +15430,41 @@ export function App() {
       setLibraryRegistryStatus("검토된 게시 라이브러리 토큰 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const reviewedLibraryId = libraryRegistryTokenReview.review.libraryId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 가져오는 중");
-      const fileId = currentProject.currentDocumentId;
-      const imported = await enqueueDocumentPersistence(fileId, () =>
-        importLibraryRegistryTokens(
-          fileId,
-          libraryRegistryTokenReview.review.libraryId,
-          undefined,
-          activeLibraryRegistryCredentials
-        )
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await enqueueDocumentPersistence(fileId, () => {
+          const currentReview = libraryRegistryTokenReviewRef.current;
+          if (currentReview?.review.libraryId !== reviewedLibraryId) {
+            throw new Error("게시 라이브러리 토큰 검토 대상이 변경되어 가져오기를 취소했습니다");
+          }
+          return importLibraryRegistryTokens(
+            fileId,
+            currentReview.review.libraryId,
+            undefined,
+            requireCurrentLibraryRegistryAccess(accessOperation)
+          );
+        });
+        await requireProjectDocumentLoad(currentProject, projects, transitionToken);
+        return nextImported;
+      });
+      await refreshLibraryRegistryUpdates(
+        fileId,
+        requireCurrentLibraryRegistryAccess(accessOperation)
       );
-      await loadProjectDocument(currentProject, projects);
-      await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
       setLibraryRegistryTokenReview(null);
       setLibraryRegistryStatus(
         `${imported.libraryName} 토큰 가져옴 · 토큰 ${imported.tokenCount}개 · 세트 ${imported.tokenSetCount}개 · 테마 ${imported.tokenThemeCount}개`
       );
       setProjectStatus("게시 라이브러리 토큰 가져옴");
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리 토큰을 가져오지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
@@ -14689,25 +15476,35 @@ export function App() {
       setLibraryRegistryStatus("프로젝트 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 토큰 업데이트 적용 중");
-      const fileId = currentProject.currentDocumentId;
-      const imported = await enqueueDocumentPersistence(fileId, () =>
-        updateLibraryRegistryTokens(
-          fileId,
-          libraryId,
-          undefined,
-          activeLibraryRegistryCredentials
-        )
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await enqueueDocumentPersistence(fileId, () =>
+          updateLibraryRegistryTokens(
+            fileId,
+            libraryId,
+            undefined,
+            requireCurrentLibraryRegistryAccess(accessOperation)
+          )
+        );
+        await requireProjectDocumentLoad(currentProject, projects, transitionToken);
+        return nextImported;
+      });
+      await refreshLibraryRegistryUpdates(
+        fileId,
+        requireCurrentLibraryRegistryAccess(accessOperation)
       );
-      await loadProjectDocument(currentProject, projects);
-      await refreshLibraryRegistryUpdates(currentProject.currentDocumentId);
       setLibraryRegistryStatus(
         `${imported.libraryName} 토큰 업데이트 적용됨 · 토큰 ${imported.tokenCount}개 · 세트 ${imported.tokenSetCount}개 · 테마 ${imported.tokenThemeCount}개`
       );
       setProjectStatus("게시 라이브러리 토큰 업데이트 적용됨");
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리 토큰 업데이트를 적용하지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
@@ -14719,15 +15516,18 @@ export function App() {
       setLibraryRegistryStatus("프로젝트 없음");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessOperation = beginLibraryRegistryAccessOperation(fileId);
 
     try {
       setLibraryRegistryStatus("게시 라이브러리 업데이트 검토 중");
       const review = await reviewLibraryRegistryItemUpdate(
-        currentProject.currentDocumentId,
+        fileId,
         libraryId,
         undefined,
-        activeLibraryRegistryCredentials
+        requireCurrentLibraryRegistryAccess(accessOperation)
       );
+      requireCurrentLibraryRegistryAccess(accessOperation);
       if (!review.canUpdate) {
         const conflictAffectedInstanceCount = new Set(
           review.conflictedComponents.flatMap((component) => component.affectedInstanceIds)
@@ -14747,21 +15547,26 @@ export function App() {
       }
 
       setLibraryRegistryStatus("게시 라이브러리 업데이트 적용 중");
-      const fileId = currentProject.currentDocumentId;
-      const imported = await enqueueDocumentPersistence(fileId, () =>
-        updateLibraryRegistryItem(
-          fileId,
-          libraryId,
-          undefined,
-          activeLibraryRegistryCredentials
-        )
-      );
-      await loadProjectDocument(currentProject, projects);
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await enqueueDocumentPersistence(fileId, () =>
+          updateLibraryRegistryItem(
+            fileId,
+            libraryId,
+            undefined,
+            requireCurrentLibraryRegistryAccess(accessOperation)
+          )
+        );
+        await requireProjectDocumentLoad(currentProject, projects, transitionToken);
+        return nextImported;
+      });
       setLibraryRegistryStatus(
         `${imported.libraryName} 업데이트 적용됨 · 컴포넌트 ${imported.componentCount}개 · 토큰 ${imported.tokenCount}개`
       );
       setProjectStatus("게시 라이브러리 업데이트 적용됨");
     } catch (error) {
+      if (!isCurrentLibraryRegistryAccessOperation(accessOperation)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "게시 라이브러리 업데이트를 적용하지 못했습니다";
       setLibraryRegistryStatus(message);
       setProjectStatus(message);
@@ -14775,7 +15580,10 @@ export function App() {
     }
 
     try {
-      const archive = await exportProjectArchive(currentProject.projectId);
+      const fileId = currentProject.currentDocumentId;
+      const archive = await enqueueDocumentSnapshotBarrier(fileId, () =>
+        exportProjectArchive(currentProject.projectId)
+      );
       downloadBlob(archive.blob, archive.fileName);
       setProjectArchiveStatus(`${archive.fileName} 내보냄`);
       setProjectStatus("프로젝트 아카이브 내보냄");
@@ -14834,15 +15642,18 @@ export function App() {
 
     try {
       setProjectArchiveStatus("프로젝트 아카이브 가져오는 중");
-      const imported = await importProjectArchive({
-        archiveBase64: projectArchiveReview.archiveBase64,
-        name: archiveName
+      const imported = await runProjectDocumentTransition(async (transitionToken) => {
+        const nextImported = await importProjectArchive({
+          archiveBase64: projectArchiveReview.archiveBase64,
+          name: archiveName
+        });
+        const nextProjects = [
+          nextImported.project,
+          ...projects.filter((candidate) => candidate.projectId !== nextImported.project.projectId)
+        ];
+        await requireProjectDocumentLoad(nextImported.project, nextProjects, transitionToken);
+        return nextImported;
       });
-      const nextProjects = [
-        imported.project,
-        ...projects.filter((candidate) => candidate.projectId !== imported.project.projectId)
-      ];
-      await loadProjectDocument(imported.project, nextProjects);
       setProjectArchiveReview(null);
       setProjectArchiveImportName("");
       setProjectArchiveStatus(`${imported.project.name} 가져옴`);
@@ -14878,13 +15689,19 @@ export function App() {
     if (!currentProject) {
       return;
     }
+    const sourceProject = currentProject;
 
     try {
-      const project = await duplicateProject(currentProject.projectId, {
-        name: `${currentProject.name} 사본`
-      });
-      const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
-      await loadProjectDocument(project, nextProjects);
+      await runProjectDocumentTransition(async (transitionToken) => {
+        const project = await enqueueDocumentSnapshotBarrier(
+          sourceProject.currentDocumentId,
+          () => duplicateProject(sourceProject.projectId, {
+            name: `${sourceProject.name} 사본`
+          })
+        );
+        const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
+        await requireProjectDocumentLoad(project, nextProjects, transitionToken);
+      }, { flushSourceSnapshot: false });
       setProjectStatus("프로젝트 복제됨");
     } catch (error) {
       const message = error instanceof Error ? error.message : "프로젝트를 복제하지 못했습니다";
@@ -14906,20 +15723,22 @@ export function App() {
 
     try {
       const deletedProject = currentProject;
-      await deleteProject(currentProject.projectId);
-      const nextProjects = projects.filter((candidate) => candidate.projectId !== deletedProject.projectId);
-      const nextProject = nextProjects[0] ?? null;
-      if (nextProject) {
-        await loadProjectDocument(nextProject, nextProjects);
-      } else {
-        setProjects([]);
-        setCurrentProject(null);
-        setProjectNameDraft("");
-        resetFileVersions("프로젝트 없음");
-        resetCommentThreads("프로젝트 없음");
-        resetCommentNotifications();
-        await projectStore.setCurrentProjectId("");
-      }
+      await runProjectDocumentTransition(async (transitionToken) => {
+        await deleteProject(currentProject.projectId);
+        const nextProjects = projects.filter((candidate) => candidate.projectId !== deletedProject.projectId);
+        const nextProject = nextProjects[0] ?? null;
+        if (nextProject) {
+          await requireProjectDocumentLoad(nextProject, nextProjects, transitionToken);
+        } else {
+          setProjects([]);
+          setCurrentProject(null);
+          setProjectNameDraft("");
+          resetFileVersions("프로젝트 없음");
+          resetCommentThreads("프로젝트 없음");
+          resetCommentNotifications();
+          await projectStore.setCurrentProjectId("");
+        }
+      });
       setProjectStatus(`${deletedProject.name} 프로젝트 삭제됨`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "프로젝트를 삭제하지 못했습니다";
@@ -14928,14 +15747,14 @@ export function App() {
   };
 
   const linkProjectToCurrentTeam = async () => {
-    if (!currentProject || !collabSession) {
+    if (!currentProject || !activeTeamContext) {
       return;
     }
 
     try {
       const project = await setProjectSharing(currentProject.projectId, {
         mode: "team",
-        teamId: collabSession.team.teamId
+        teamId: activeTeamContext.teamId
       });
       const documentSummaries = project.documents.map((document) => ({
         documentId: document.documentId,
@@ -14944,13 +15763,14 @@ export function App() {
       }));
       const knownDocumentIds = new Set(documentSummaries.map((document) => document.documentId));
       const nextTeam: TeamManifest = {
-        ...collabSession.team,
+        ...activeTeamContext,
         documents: [
-          ...collabSession.team.documents.filter((document) => !knownDocumentIds.has(document.documentId)),
+          ...activeTeamContext.documents.filter((document) => !knownDocumentIds.has(document.documentId)),
           ...documentSummaries
         ]
       };
       await teamStore.saveTeam(nextTeam);
+      setActiveTeamContext(nextTeam);
       setCurrentProject(project);
       setProjects((current) =>
         current.map((candidate) => (candidate.projectId === project.projectId ? project : candidate))
@@ -14973,13 +15793,50 @@ export function App() {
     const message = fileVersionMessage.trim() || "저장된 버전";
     const fileId = currentProject.currentDocumentId;
     try {
-      const version = await enqueueDocumentPersistence(fileId, () => saveFileVersion(fileId, message));
+      const version = await enqueueDocumentSnapshotBarrier(fileId, () =>
+        saveFileVersion(fileId, message)
+      );
       setFileVersionMessage(version.message);
       await refreshFileVersions(fileId, `${version.message} 저장됨`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "현재 버전을 저장하지 못했습니다";
       setFileVersionStatus(message);
     }
+  };
+
+  const cancelActiveCanvasInteractions = () => {
+    resizeSessionRef.current = null;
+    gridResizeSessionRef.current = null;
+    gridResizeClientPointRef.current = null;
+    gridAreaBoundarySessionRef.current = null;
+    gridAreaBoundaryClientPointRef.current = null;
+    gridTrackDragRef.current = null;
+    areaSelectionRef.current = null;
+    dragSessionRef.current = null;
+    pathEditorDragSessionRef.current = null;
+    panSessionRef.current = null;
+    isSpacePanningRef.current = false;
+    frameSpacingDragClientPointRef.current = null;
+    componentVariantAreaGapClientPointRef.current = null;
+    componentVariantSourceReorderClientPointRef.current = null;
+    setResizeSession(null);
+    setGridResizeSession(null);
+    setGridAreaBoundarySession(null);
+    setComponentVariantAreaGapSession(null);
+    setComponentVariantSourceReorderSession(null);
+    setFrameSpacingDragSession(null);
+    setIsSpacePanning(false);
+    setAreaSelection(null);
+    setDragPreview(null);
+    setSnapGuides([]);
+    setInlineTextEditingNodeId(null);
+    setPathEditingNodeId(null);
+    setSelectedPathAnchorIndices([]);
+    setObjectContextMenu(null);
+    setGridTrackContextMenu(null);
+    setGridCellContextMenu(null);
+    setGridCellSelection(null);
+    document.body.style.cursor = "";
   };
 
   const previewCurrentFileVersion = async (version: FileVersionSummary) => {
@@ -14992,6 +15849,9 @@ export function App() {
     editorMutationGenerationRef.current += 1;
     const requestId = fileVersionPreviewRequestRef.current + 1;
     fileVersionPreviewRequestRef.current = requestId;
+    fileVersionPreviewPendingRequestRef.current = requestId;
+    fileVersionPreviewActiveRef.current = true;
+    cancelActiveCanvasInteractions();
     try {
       const snapshot = await readFileVersion(fileId, version.versionId);
       const summary = await summarizeDocumentChanges(
@@ -15005,44 +15865,15 @@ export function App() {
       ) {
         return;
       }
-      resizeSessionRef.current = null;
-      gridResizeSessionRef.current = null;
-      gridResizeClientPointRef.current = null;
-      gridAreaBoundarySessionRef.current = null;
-      gridAreaBoundaryClientPointRef.current = null;
-      gridTrackDragRef.current = null;
-      areaSelectionRef.current = null;
-      dragSessionRef.current = null;
-      pathEditorDragSessionRef.current = null;
-      panSessionRef.current = null;
-      isSpacePanningRef.current = false;
-      frameSpacingDragClientPointRef.current = null;
-      componentVariantAreaGapClientPointRef.current = null;
-      componentVariantSourceReorderClientPointRef.current = null;
-      setResizeSession(null);
-      setGridResizeSession(null);
-      setGridAreaBoundarySession(null);
-      setComponentVariantAreaGapSession(null);
-      setComponentVariantSourceReorderSession(null);
-      setFrameSpacingDragSession(null);
-      setIsSpacePanning(false);
-      setAreaSelection(null);
-      setDragPreview(null);
-      setSnapGuides([]);
-      setInlineTextEditingNodeId(null);
-      setPathEditingNodeId(null);
-      setSelectedPathAnchorIndices([]);
-      setObjectContextMenu(null);
-      setGridTrackContextMenu(null);
-      setGridCellContextMenu(null);
-      setGridCellSelection(null);
-      document.body.style.cursor = "";
+      fileVersionPreviewPendingRequestRef.current = null;
       setFileVersionPreview({ version, document: snapshot.document, summary });
       setFileVersionStatus(`${version.message} 미리보기`);
     } catch (error) {
       if (requestId !== fileVersionPreviewRequestRef.current) {
         return;
       }
+      fileVersionPreviewPendingRequestRef.current = null;
+      fileVersionPreviewActiveRef.current = fileVersionRestorePendingRef.current;
       const message = error instanceof Error ? error.message : "버전을 미리보지 못했습니다";
       setFileVersionPreview(null);
       setFileVersionStatus(message);
@@ -15054,6 +15885,8 @@ export function App() {
       return;
     }
     fileVersionPreviewRequestRef.current += 1;
+    fileVersionPreviewPendingRequestRef.current = null;
+    fileVersionPreviewActiveRef.current = false;
     setFileVersionPreview(null);
     setFileVersionStatus(fileVersions.length > 0 ? `${fileVersions.length}개 버전` : "저장된 버전 없음");
   };
@@ -15066,32 +15899,427 @@ export function App() {
     if (fileVersionRestorePendingRef.current) {
       return;
     }
+    if (projectDocumentTransitionRef.current) {
+      setFileVersionStatus("프로젝트 전환 중에는 버전을 복원할 수 없습니다");
+      return;
+    }
+    if (fileVersionRestoreUnsafeRef.current) {
+      setFileVersionStatus(fileVersionRestoreUnsafeRef.current.message);
+      return;
+    }
 
     const fileId = currentProject.currentDocumentId;
+    let restoreServerStateSafe = false;
+    let restoreMutationAttempted = false;
+    let restoreFailure: Error | undefined;
+    let resolveRestoreCompletion: (result: { safe: boolean; error?: Error }) => void = () => {};
+    const restoreCompletion = {
+      fileId,
+      promise: new Promise<{ safe: boolean; error?: Error }>((resolve) => {
+        resolveRestoreCompletion = resolve;
+      }),
+      resolve: (result: { safe: boolean; error?: Error }) => resolveRestoreCompletion(result)
+    };
+    fileVersionRestoreCompletionRef.current = restoreCompletion;
+    const initialFallbackDocument =
+      (collabSessionRef.current?.documentId === fileId
+        ? collabSessionRef.current.getDocument()
+        : null) ??
+      (editorRef.current?.document.id === fileId ? editorRef.current.document : null);
+    fileVersionRestoreRecoveryRef.current = initialFallbackDocument
+      ? {
+          fileId,
+          rollbackDocument: structuredClone(initialFallbackDocument),
+          appliedDocument: null,
+          latestDocument: structuredClone(initialFallbackDocument),
+          cancelled: false,
+          cancelReason: null
+        }
+      : null;
     fileVersionRestorePendingRef.current = true;
+    fileVersionPreviewPendingRequestRef.current = null;
     fileVersionPreviewActiveRef.current = true;
+    cancelActiveCanvasInteractions();
     setFileVersionRestorePending(true);
     editorMutationGenerationRef.current += 1;
     fileVersionPreviewRequestRef.current += 1;
     try {
-      const result = await enqueueDocumentPersistence(fileId, () =>
-        restoreFileVersion(fileId, version.versionId)
-      );
-      if (currentProjectRef.current?.currentDocumentId !== fileId) {
+      const restoreOperation = await enqueueDocumentSnapshotBarrier(fileId, async () => {
+        if (currentProjectRef.current?.currentDocumentId !== fileId) {
+          return null;
+        }
+        const collaborationSessionAtStart =
+          collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+        const collaborationBaseDocument = collaborationSessionAtStart?.getDocument() ?? null;
+        const currentDocumentBeforeRestore =
+          collaborationBaseDocument ??
+          (editorRef.current?.document.id === fileId ? editorRef.current.document : null);
+        if (!currentDocumentBeforeRestore) {
+          throw new Error("복원 전 문서를 확인하지 못했습니다");
+        }
+        const documentBeforeRestore = structuredClone(currentDocumentBeforeRestore);
+        const restoreAlreadyCancelled = Boolean(
+          fileVersionRestoreRecoveryRef.current?.fileId === fileId
+          && fileVersionRestoreRecoveryRef.current.cancelled
+        );
+        fileVersionRestoreRecoveryRef.current = {
+          fileId,
+          rollbackDocument: structuredClone(documentBeforeRestore),
+          appliedDocument: null,
+          latestDocument: structuredClone(documentBeforeRestore),
+          cancelled: restoreAlreadyCancelled,
+          cancelReason:
+            fileVersionRestoreRecoveryRef.current?.fileId === fileId
+              ? fileVersionRestoreRecoveryRef.current.cancelReason
+              : null
+        };
+        if (restoreAlreadyCancelled) {
+          return null;
+        }
+        restoreMutationAttempted = true;
+        const result = await restoreFileVersion(fileId, version.versionId);
+        return {
+          result,
+          collaborationSessionAtStart,
+          collaborationBaseDocument,
+          documentBeforeRestore
+        };
+      });
+      if (!restoreOperation) {
+        const cancelReason = fileVersionRestoreRecoveryRef.current?.cancelReason;
+        restoreServerStateSafe = true;
+        if (cancelReason === "session-replacement") {
+          throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+        }
         return;
       }
-      const activeSession = collabSessionRef.current;
-      const restoredDocument =
-        activeSession?.documentId === fileId
-          ? (() => {
-              activeSession.transact("file-version-restore", () => result.file);
-              return activeSession.getDocument();
-            })()
-          : result.file;
-      setEditor((current) => {
-        const nextState = createEditorState(restoredDocument);
-        return current ? { ...nextState, viewport: current.viewport } : nextState;
-      });
+      const {
+        result,
+        collaborationSessionAtStart,
+        collaborationBaseDocument,
+        documentBeforeRestore
+      } = restoreOperation;
+      const compensateRestoredFile = async (
+        persistedServerDocument: RendererDocument,
+        restoreMutationDocument: RendererDocument,
+        currentRestoreDocument?: RendererDocument
+      ) => {
+        const recovery = fileVersionRestoreRecoveryRef.current;
+        const recoveryDocument =
+          recovery?.fileId === fileId
+            ? restoreRecoveryDocument(
+                recovery,
+                currentRestoreDocument ?? recovery.latestDocument
+              )
+            : documentBeforeRestore;
+        const compensationDocument = mergeConcurrentDocumentSnapshots(
+          restoreMutationDocument,
+          recoveryDocument,
+          persistedServerDocument,
+          { conflictPreference: "local" }
+        );
+        if (recovery?.fileId === fileId) {
+          recovery.rollbackDocument = structuredClone(compensationDocument);
+          recovery.appliedDocument = null;
+          recovery.latestDocument = structuredClone(compensationDocument);
+        }
+        const activeSession =
+          collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+        if (
+          activeSession
+          && !rendererDocumentsEqual(activeSession.getDocument(), compensationDocument)
+        ) {
+          activeSession.transact(
+            "file-version-restore-compensation",
+            () => compensationDocument,
+            { undoable: false }
+          );
+        }
+        let persistenceBase = persistedServerDocument;
+        let persistenceDocument = compensationDocument;
+        for (let attempt = 0; attempt < FILE_VERSION_RESTORE_STABILIZATION_LIMIT; attempt += 1) {
+          const actualServerDocument = await enqueueDocumentPersistence(fileId, () =>
+            persistDocumentSnapshot(fileId, persistenceBase, persistenceDocument)
+          );
+          const latestRecovery = fileVersionRestoreRecoveryRef.current;
+          const currentSession =
+            collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+          const currentDocument =
+            currentSession?.getDocument()
+            ?? (latestRecovery?.fileId === fileId ? latestRecovery.latestDocument : persistenceDocument);
+          let convergedDocument = mergeConcurrentDocumentSnapshots(
+            persistenceDocument,
+            actualServerDocument,
+            currentDocument,
+            { conflictPreference: "current" }
+          );
+          if (
+            currentSession
+            && !rendererDocumentsEqual(currentSession.getDocument(), convergedDocument)
+          ) {
+            currentSession.transact(
+              "file-version-restore-compensation-server-merge",
+              () => convergedDocument,
+              { undoable: false }
+            );
+            convergedDocument = currentSession.getDocument();
+          }
+          if (latestRecovery?.fileId === fileId) {
+            latestRecovery.rollbackDocument = structuredClone(convergedDocument);
+            latestRecovery.appliedDocument = null;
+            latestRecovery.latestDocument = structuredClone(convergedDocument);
+          }
+          if (rendererDocumentsEqual(convergedDocument, actualServerDocument)) {
+            updateCollaborationSnapshotBaseline(currentSession, actualServerDocument);
+            restoreServerStateSafe = true;
+            return {
+              document: convergedDocument,
+              serverDocument: actualServerDocument
+            };
+          }
+          persistenceBase = actualServerDocument;
+          persistenceDocument = convergedDocument;
+        }
+        throw new Error("복원 취소 변경이 계속되어 서버와 협업 문서를 맞추지 못했습니다");
+      };
+      if (
+        fileVersionRestoreRecoveryRef.current?.fileId === fileId
+        && fileVersionRestoreRecoveryRef.current.cancelled
+      ) {
+        const cancelReason = fileVersionRestoreRecoveryRef.current.cancelReason;
+        await compensateRestoredFile(result.file, result.file);
+        if (cancelReason === "session-replacement") {
+          throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+        }
+        return;
+      }
+      if (currentProjectRef.current?.currentDocumentId !== fileId) {
+        await compensateRestoredFile(result.file, result.file);
+        return;
+      }
+      const readCurrentCollaborationSnapshot = () => {
+        const session =
+          collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+        const document =
+          session?.getDocument() ??
+          (editorRef.current?.document.id === fileId ? editorRef.current.document : null);
+        return { session, document };
+      };
+      const stabilizeCollaborationSnapshotPersistence = async (
+        baseDocument: RendererDocument,
+        initialSession: CollabDocumentSession | null,
+        initialDocument: RendererDocument
+      ) => {
+        let persistenceBase = baseDocument;
+        let persistenceSession = initialSession;
+        let persistenceDocument = initialDocument;
+        let sessionChanged = false;
+
+        for (let attempt = 0; attempt < FILE_VERSION_RESTORE_STABILIZATION_LIMIT; attempt += 1) {
+          const persistedServerDocument = await enqueueDocumentPersistence(fileId, () =>
+            persistDocumentSnapshot(fileId, persistenceBase, persistenceDocument)
+          );
+          if (
+            fileVersionRestoreRecoveryRef.current?.fileId === fileId
+            && fileVersionRestoreRecoveryRef.current.cancelled
+          ) {
+            const cancellation = fileVersionRestoreRecoveryRef.current;
+            await compensateRestoredFile(
+              persistedServerDocument,
+              persistenceDocument,
+              cancellation.latestDocument
+            );
+            if (cancellation.cancelReason === "session-replacement") {
+              throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+            }
+            return null;
+          }
+          if (currentProjectRef.current?.currentDocumentId !== fileId) {
+            await compensateRestoredFile(persistedServerDocument, persistenceDocument);
+            return null;
+          }
+
+          const currentSnapshot = readCurrentCollaborationSnapshot();
+          if (!currentSnapshot.document) {
+            throw new Error("협업 복원 문서를 확인하지 못했습니다");
+          }
+          const currentSessionChanged = currentSnapshot.session !== persistenceSession;
+          if (currentSessionChanged) {
+            sessionChanged = true;
+          }
+          let convergedDocument: RendererDocument;
+          try {
+            convergedDocument = mergeConcurrentDocumentSnapshots(
+              persistenceDocument,
+              persistedServerDocument,
+              currentSnapshot.document
+            );
+          } catch (error) {
+            if (!(error instanceof DocumentSnapshotConflictError)) {
+              throw error;
+            }
+            if (currentSessionChanged) {
+              persistenceBase = persistedServerDocument;
+              persistenceSession = currentSnapshot.session;
+              persistenceDocument = currentSnapshot.document;
+              continue;
+            }
+            await compensateRestoredFile(
+              persistedServerDocument,
+              persistenceDocument,
+              currentSnapshot.document
+            );
+            throw new Error("동시 편집 충돌로 복원을 적용하지 않았습니다");
+          }
+
+          if (
+            currentSnapshot.session
+            && !rendererDocumentsEqual(currentSnapshot.document, convergedDocument)
+          ) {
+            currentSnapshot.session.transact(
+              "file-version-restore-server-merge",
+              () => convergedDocument,
+              { undoable: false }
+            );
+            convergedDocument = currentSnapshot.session.getDocument();
+          }
+          if (rendererDocumentsEqual(convergedDocument, persistedServerDocument)) {
+            updateCollaborationSnapshotBaseline(
+              currentSnapshot.session,
+              persistedServerDocument
+            );
+            return {
+              session: currentSnapshot.session,
+              document: convergedDocument,
+              serverDocument: persistedServerDocument,
+              sessionChanged
+            };
+          }
+
+          persistenceBase = persistedServerDocument;
+          persistenceSession = currentSnapshot.session;
+          persistenceDocument = convergedDocument;
+        }
+
+        throw new Error("협업 변경이 계속되어 복원을 완료하지 못했습니다");
+      };
+
+      const responseTimeSnapshot = readCurrentCollaborationSnapshot();
+      if (responseTimeSnapshot.session !== collaborationSessionAtStart) {
+        if (responseTimeSnapshot.document) {
+          const compensated = await stabilizeCollaborationSnapshotPersistence(
+            result.file,
+            responseTimeSnapshot.session,
+            responseTimeSnapshot.document
+          );
+          if (!compensated) {
+            return;
+          }
+          restoreServerStateSafe = true;
+        }
+        throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+      }
+      const activeSession = responseTimeSnapshot.session;
+      let restoredDocument = result.file;
+      if (activeSession) {
+        const responseTimeCollaborativeDocument = responseTimeSnapshot.document ?? activeSession.getDocument();
+        let collaborativeRestoreDocument = result.file;
+        if (collaborationBaseDocument) {
+          try {
+            collaborativeRestoreDocument = mergeConcurrentDocumentSnapshots(
+              collaborationBaseDocument,
+              result.file,
+              responseTimeCollaborativeDocument
+            );
+          } catch (error) {
+            if (!(error instanceof DocumentSnapshotConflictError)) {
+              throw error;
+            }
+            const compensated = await stabilizeCollaborationSnapshotPersistence(
+              result.file,
+              activeSession,
+              responseTimeCollaborativeDocument
+            );
+            if (!compensated) {
+              return;
+            }
+            restoreServerStateSafe = true;
+            throw new Error(
+              compensated.sessionChanged
+                ? "협업 세션이 변경되어 복원을 적용하지 않았습니다"
+                : "동시 편집 충돌로 복원을 적용하지 않았습니다"
+            );
+          }
+        }
+        const recovery = fileVersionRestoreRecoveryRef.current;
+        if (recovery?.fileId === fileId) {
+          recovery.rollbackDocument = structuredClone(responseTimeCollaborativeDocument);
+          recovery.appliedDocument = structuredClone(collaborativeRestoreDocument);
+          recovery.latestDocument = structuredClone(collaborativeRestoreDocument);
+        }
+        activeSession.transact("file-version-restore", () => collaborativeRestoreDocument);
+        if (recovery?.fileId === fileId) {
+          recovery.latestDocument = structuredClone(activeSession.getDocument());
+        }
+        const stabilized = await stabilizeCollaborationSnapshotPersistence(
+          result.file,
+          activeSession,
+          activeSession.getDocument()
+        );
+        if (!stabilized) {
+          return;
+        }
+        if (stabilized.sessionChanged || stabilized.session !== collaborationSessionAtStart) {
+          restoreServerStateSafe = true;
+          throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+        }
+        if (!stabilized.document) {
+          throw new Error("협업 복원 문서를 확인하지 못했습니다");
+        }
+        if (currentProjectRef.current?.currentDocumentId !== fileId) {
+          await compensateRestoredFile(
+            stabilized.serverDocument,
+            stabilized.document
+          );
+          return;
+        }
+        const finalSession =
+          collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+        if (finalSession !== collaborationSessionAtStart) {
+          const finalDocument =
+            finalSession?.getDocument() ??
+            (editorRef.current?.document.id === fileId ? editorRef.current.document : null);
+          if (finalDocument) {
+            const compensated = await stabilizeCollaborationSnapshotPersistence(
+              stabilized.serverDocument,
+              finalSession,
+              finalDocument
+            );
+            if (!compensated) {
+              return;
+            }
+            restoreServerStateSafe = true;
+          }
+          throw new Error("협업 세션이 변경되어 복원을 적용하지 않았습니다");
+        }
+        restoredDocument = stabilized.document;
+      }
+      if (
+        currentProjectRef.current?.currentDocumentId !== fileId
+        || (collaborationSessionAtStart
+          && collabSessionRef.current !== collaborationSessionAtStart)
+      ) {
+        throw new Error("복원 대상이 변경되어 복원을 적용하지 않았습니다");
+      }
+      restoreServerStateSafe = true;
+      fileVersionRestoreRecoveryRef.current = null;
+      const currentEditor = editorRef.current;
+      const nextEditor = createEditorState(restoredDocument);
+      const committedEditor = currentEditor
+        ? { ...nextEditor, viewport: currentEditor.viewport }
+        : nextEditor;
+      editorRef.current = committedEditor;
+      setEditor(committedEditor);
       fileVersionPreviewRequestRef.current += 1;
       setFileVersionPreview(null);
       setTokenDtcgDraft("");
@@ -15100,11 +16328,33 @@ export function App() {
       void refreshCommentThreads(fileId);
       void refreshCommentNotifications();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "버전을 복원하지 못했습니다";
-      setFileVersionStatus(message);
+      restoreFailure = error instanceof Error ? error : new Error("버전을 복원하지 못했습니다");
+      if (!restoreMutationAttempted) {
+        restoreServerStateSafe = true;
+      }
+      const message = restoreFailure.message;
+      if (currentProjectRef.current?.currentDocumentId === fileId) {
+        setFileVersionStatus(message);
+      }
     } finally {
+      if (restoreServerStateSafe && fileVersionRestoreRecoveryRef.current?.fileId === fileId) {
+        fileVersionRestoreRecoveryRef.current = null;
+      }
       fileVersionRestorePendingRef.current = false;
       setFileVersionRestorePending(false);
+      const completionResult = {
+        safe: restoreServerStateSafe,
+        error: restoreServerStateSafe
+          ? undefined
+          : restoreFailure ?? new Error("복원 보상이 완료되지 않았습니다")
+      };
+      fileVersionRestoreUnsafeRef.current = completionResult.safe
+        ? null
+        : completionResult.error ?? new Error("복원 보상이 완료되지 않았습니다");
+      restoreCompletion.resolve(completionResult);
+      if (completionResult.safe && fileVersionRestoreCompletionRef.current === restoreCompletion) {
+        fileVersionRestoreCompletionRef.current = null;
+      }
     }
   };
 
@@ -15200,7 +16450,7 @@ export function App() {
         nodeId,
         body,
         authorName: "사용자",
-        mentionTargets: resolveCommentMentionTargets(body, collabSession?.team)
+        mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       });
       setCommentBody("");
       await Promise.all([
@@ -15229,7 +16479,7 @@ export function App() {
       await addCommentReply(currentProject.currentDocumentId, threadId, {
         body,
         authorName: "사용자",
-        mentionTargets: resolveCommentMentionTargets(body, collabSession?.team)
+        mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       });
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
       await Promise.all([
@@ -15321,6 +16571,15 @@ export function App() {
       setTokenDtcgStatus("프로젝트 없음");
       return;
     }
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    const fileId = currentProject.currentDocumentId;
+    const mutationGeneration = editorMutationGenerationRef.current;
+    const isCurrentTokenImport = () =>
+      mutationGeneration === editorMutationGenerationRef.current
+      && currentProjectRef.current?.currentDocumentId === fileId
+      && !isEditorDocumentMutationBlocked();
 
     let parsedTokens: unknown;
     try {
@@ -15331,10 +16590,12 @@ export function App() {
     }
 
     try {
-      const fileId = currentProject.currentDocumentId;
       const document = await enqueueDocumentPersistence(fileId, () =>
         importDesignTokensDtcg(fileId, parsedTokens)
       );
+      if (!isCurrentTokenImport()) {
+        return;
+      }
       setEditor((current) => {
         const nextState = createEditorState(document);
         return current ? { ...nextState, viewport: current.viewport } : nextState;
@@ -15342,13 +16603,18 @@ export function App() {
       setTokenDtcgStatus(`${document.tokens?.length ?? 0}개 토큰 가져옴`);
       setProjectStatus("토큰 가져오기 완료");
     } catch (error) {
+      if (!isCurrentTokenImport()) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "토큰을 가져오지 못했습니다";
       setTokenDtcgStatus(message);
     }
   };
 
   const updateTokenSetEnabled = (tokenSetId: string, enabled: boolean) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_token_set_enabled", tokenSetId, enabled });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_token_set_enabled", tokenSetId, enabled })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15368,7 +16634,9 @@ export function App() {
   };
 
   const updateTokenThemeEnabled = (tokenThemeId: string, enabled: boolean) => {
-    dispatchWithoutSnapshotPersistence({ type: "set_token_theme_enabled", tokenThemeId, enabled });
+    if (!dispatchWithoutSnapshotPersistence({ type: "set_token_theme_enabled", tokenThemeId, enabled })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15392,7 +16660,9 @@ export function App() {
       return;
     }
 
-    dispatchWithoutSnapshotPersistence({ type: "upsert_token_theme", tokenTheme });
+    if (!dispatchWithoutSnapshotPersistence({ type: "upsert_token_theme", tokenTheme })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15412,7 +16682,9 @@ export function App() {
   };
 
   const deleteTokenTheme = (tokenThemeId: string) => {
-    dispatchWithoutSnapshotPersistence({ type: "delete_token_theme", tokenThemeId });
+    if (!dispatchWithoutSnapshotPersistence({ type: "delete_token_theme", tokenThemeId })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15432,7 +16704,9 @@ export function App() {
   };
 
   const reorderTokenTheme = (tokenThemeId: string, direction: "up" | "down") => {
-    dispatchWithoutSnapshotPersistence({ type: "reorder_token_theme", tokenThemeId, direction });
+    if (!dispatchWithoutSnapshotPersistence({ type: "reorder_token_theme", tokenThemeId, direction })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15452,7 +16726,14 @@ export function App() {
   };
 
   const reorderTokenThemeSet = (tokenThemeId: string, tokenSetId: string, direction: "up" | "down") => {
-    dispatchWithoutSnapshotPersistence({ type: "reorder_token_theme_set", tokenThemeId, tokenSetId, direction });
+    if (!dispatchWithoutSnapshotPersistence({
+      type: "reorder_token_theme_set",
+      tokenThemeId,
+      tokenSetId,
+      direction
+    })) {
+      return;
+    }
     if (!currentProject) {
       return;
     }
@@ -15472,7 +16753,7 @@ export function App() {
   };
 
   const createNode = (kind: "rectangle" | "text") => {
-    if (fileVersionPreviewActiveRef.current || !editor) {
+    if (isEditorDocumentMutationBlocked() || !editor) {
       return;
     }
 
@@ -15499,7 +16780,7 @@ export function App() {
     files: File[],
     insertionPoint: { x: number; y: number } | null
   ) => {
-    if (fileVersionPreviewActiveRef.current || !editor || !currentProject || files.length === 0) {
+    if (isEditorDocumentMutationBlocked() || !editor || !currentProject || files.length === 0) {
       return;
     }
 
@@ -15528,7 +16809,7 @@ export function App() {
     try {
       for (const [index, file] of files.entries()) {
         if (
-          fileVersionPreviewActiveRef.current ||
+          isEditorDocumentMutationBlocked() ||
           mutationGeneration !== editorMutationGenerationRef.current ||
           currentProjectRef.current?.currentDocumentId !== fileId
         ) {
@@ -15536,7 +16817,7 @@ export function App() {
         }
         const naturalSize = await readImageFileSize(file);
         if (
-          fileVersionPreviewActiveRef.current ||
+          isEditorDocumentMutationBlocked() ||
           mutationGeneration !== editorMutationGenerationRef.current ||
           currentProjectRef.current?.currentDocumentId !== fileId
         ) {
@@ -15545,7 +16826,7 @@ export function App() {
         const asset = await uploadImageAsset(file);
         pendingAsset = asset;
         if (
-          fileVersionPreviewActiveRef.current ||
+          isEditorDocumentMutationBlocked() ||
           mutationGeneration !== editorMutationGenerationRef.current ||
           currentProjectRef.current?.currentDocumentId !== fileId
         ) {
@@ -15599,7 +16880,7 @@ export function App() {
   };
 
   const handleImageDrop = (event: ReactDragEvent<HTMLDivElement>) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       event.preventDefault();
       return;
     }
@@ -15672,19 +16953,45 @@ export function App() {
       throw new Error("암호화 팀 동기화에는 공유 암호가 필요합니다");
     }
 
+    const restoreRecovery = fileVersionRestoreRecoveryRef.current;
+    const rollbackDocument =
+      restoreRecovery?.fileId === editor.document.id
+        ? rollbackPendingFileVersionRestoreInActiveSession("session-replacement")
+        : null;
+    const initialDocument = structuredClone(
+      rollbackDocument ??
+        (restoreRecovery?.fileId === editor.document.id
+          ? restoreRecoveryDocument(restoreRecovery)
+          : editor.document)
+    );
     await teamStore.saveTeam(team);
     await teamStore.setCurrentTeam(team.teamId);
     collabSessionRef.current?.destroy();
+    collaborationSnapshotBaselineRef.current = null;
 
     const session = createCollabDocumentSession({
       team,
       documentId: editor.document.id,
-      initialDocument: editor.document,
+      initialDocument,
       relayToken: credentials.relayToken,
       memberToken: credentials.memberToken,
       encryptionPassphrase: runtimeEncryptionPassphrase
     });
+    collaborationSnapshotBaselineRef.current = {
+      session,
+      document: structuredClone(session.getDocument())
+    };
     session.subscribe((document) => {
+      const activeRecovery = fileVersionRestoreRecoveryRef.current;
+      if (
+        fileVersionRestorePendingRef.current
+        && activeRecovery?.fileId === document.id
+      ) {
+        activeRecovery.latestDocument = structuredClone(document);
+        if (!activeRecovery.appliedDocument) {
+          activeRecovery.rollbackDocument = structuredClone(document);
+        }
+      }
       const current = editorRef.current;
       const nextState = current
         ? setMultiSelection(
@@ -15706,11 +17013,12 @@ export function App() {
     collabSessionRef.current = session;
     session.updatePresence({
       selectedNodeId: editor?.selection.nodeId ?? null,
-      selectedNodeBounds: getSelectedNodeBounds(editor.document, editor.selection.nodeId),
+      selectedNodeBounds: getSelectedNodeBounds(initialDocument, editor.selection.nodeId),
       viewport: editor.viewport,
       updatedAtMs: Date.now()
     });
     setCollabSession(session);
+    setActiveTeamContext(team);
     setActiveMemberToken(credentials.memberToken?.trim() ?? "");
     setCollabStatus(session.status);
     publishPresenceSnapshot(session);
@@ -16106,7 +17414,7 @@ export function App() {
   };
 
   const finishResize = (event: KonvaEventObject<MouseEvent> | KonvaEventObject<TouchEvent>) => {
-    const activeResize = resizeSessionRef.current ?? resizeSession;
+    const activeResize = resizeSessionRef.current;
     if (!editor || !activeResize) {
       return;
     }
@@ -16416,7 +17724,7 @@ export function App() {
 
   useEffect(() => {
     const handlePaste = (event: ClipboardEvent) => {
-      if (fileVersionPreviewActiveRef.current) {
+      if (isEditorDocumentMutationBlocked()) {
         event.preventDefault();
         return;
       }
@@ -16559,7 +17867,7 @@ export function App() {
                   <button type="button" onClick={deleteCurrentProject} disabled={!currentProject || projects.length <= 1}>
                     현재 프로젝트 삭제
                   </button>
-                  <button type="button" onClick={linkProjectToCurrentTeam} disabled={!currentProject || !collabSession}>
+                  <button type="button" onClick={linkProjectToCurrentTeam} disabled={!currentProject || !activeTeamContext}>
                     현재 팀과 공유
                   </button>
                 </div>
@@ -18566,7 +19874,7 @@ export function App() {
         onShare={linkProjectToCurrentTeam}
         tokenDtcgDraft={tokenDtcgDraft}
         tokenDtcgStatus={tokenDtcgStatus}
-        canEditTokens={Boolean(currentProject && editor)}
+        canEditTokens={Boolean(currentProject && editor && !projectDocumentTransitionActive)}
         commentThreads={selectedNodeCommentThreads}
         commentBody={commentBody}
         commentReplyBodies={commentReplyBodies}

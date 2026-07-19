@@ -327,6 +327,36 @@ describe("collaborative design document", () => {
     second.destroy();
   });
 
+  test("keeps system convergence outside local undo and redo history", () => {
+    const document = createCollaborativeDesignDocument({ document: sampleDocument() });
+
+    document.transact("move-local", (current) => {
+      const next = structuredClone(current);
+      next.pages[0]!.children[0]!.transform.x = 96;
+      return next;
+    });
+    document.transact("server-convergence", (current) => {
+      const next = structuredClone(current);
+      const textNode = next.pages[0]!.children[0]!;
+      if (textNode.content.type !== "text") {
+        throw new Error("missing text node");
+      }
+      textNode.content.value = "Server headline";
+      return next;
+    }, { undoable: false });
+
+    expect(document.undo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 32 },
+      content: { type: "text", value: "Server headline" }
+    });
+    expect(document.redo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 96 },
+      content: { type: "text", value: "Server headline" }
+    });
+
+    document.destroy();
+  });
+
   test("merges concurrent edits to different geometry axes on the same node", () => {
     const first = createCollaborativeDesignDocument({ document: sampleDocument() });
     const second = createCollaborativeDesignDocument({ document: sampleDocument() });

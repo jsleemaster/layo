@@ -38,10 +38,14 @@ Selecting a saved version now:
   current.
 
 Exit reveals the latest live editor state without a reload. Restore continues
-to use the server route that first saves a recovery version, then publishes the
-restored document through the active Yjs session in one
-`file-version-restore` transaction. The next local collaborative edit therefore
-starts from the restored document instead of a stale pre-restore snapshot.
+to use the server route that first saves a recovery version. When its ordered
+per-file queue actually starts the request, it captures the active Yjs session
+and base document, then merges response-time room edits before publishing one
+`file-version-restore` transaction and persisting the final CRDT document. A
+same-field conflict preserves and re-persists the current room state instead of
+overwriting it. If the collaboration session changes while the response is
+pending, Restore compensates the server with the replacement session document
+and aborts instead of mutating a different room.
 
 The reliability follow-up closes the write-order and collaboration gaps exposed
 by independent review:
@@ -50,6 +54,14 @@ by independent review:
   mutation uses one failure-tolerant queue per `fileId`;
 - version Save and Restore wait for earlier writes, so neither can capture or be
   overwritten by stale delayed persistence;
+- Restore captures its collaboration base only after earlier queued writes have
+  completed and rejects a response whose collaboration session identity changed;
+- Restore keeps the exact pre-mutation document as a temporary recovery boundary,
+  so a project switch compensates the original file and a replacement team session
+  cannot initialize from the transient restored document;
+- every complete-snapshot write consumes the actual merged server response, merges
+  independent server-only changes back into the current Yjs room, and uses that
+  response as the next persistence base;
 - complete document snapshots persist through `PUT /files/:fileId`, including
   tokens, token sets, token themes, reusable styles, components, and code mappings;
 - stale complete snapshots include their base document and use a recursive
@@ -189,6 +201,404 @@ and restores it inside the same persistence queue whenever an in-flight write
 becomes stale. Focused GREEN passed 2/2, and independent re-review reported no
 P0-P2 findings.
 
+PR Full Verification `29654443216` then failed Core tests at 485/486 because the
+authorization watcher did not observe a newly created conflicting token sidecar
+before the cached credential assertion timed out. The focused case passed 30/30
+locally, identifying a registration timing window rather than deterministic merge
+logic. A watcher-mocked RED then suppressed every `watchFile` callback and timed
+out while cached authentication remained open. The first repair scheduled an
+unconditional strict reload, but independent review found that it could briefly
+clear an unchanged recoverable startup sidecar and that the test polled a transient
+fail-closed window. A second RED observed one unnecessary quarantine attempt. The
+watcher now retains the initial base and sidecar snapshots and runs the serialized
+strict reload only when post-registration snapshots actually differ. The repaired
+test holds quarantine publication while asserting fail-closed state, removes the
+sidecar, and proves retry recovery; a second test proves unchanged recoverable
+startup state never enters quarantine. Focused GREEN passed both registration
+cases and the combined authorization regression set 55/55.
+
+The post-CI direct headed interaction pass then failed because a resize started
+before Preview could finish after the asynchronous version response. The request
+did not become a mutation barrier until its response arrived, and resize completion
+could revive a cleared ref from stale React state; the headline changed from
+`260x48` to `335x103`. The browser test now holds the version response until after
+pointer movement and mouseup, making the same mutation fail deterministically in
+headless mode. Preview requests now register an immediate request-owned mutation
+barrier, cancel every active canvas interaction before network I/O, and never fall
+back to stale resize state. Focused GREEN passed all 11 file-version browser cases,
+280 web tests, and the direct headed interaction pair 2/2.
+
+Independent follow-up review found two P2 exit boundaries in that repair. Escape
+during a pending request cleared only rendered preview state, so the delayed
+response reopened Preview and kept editing blocked; Restore also enabled its
+barrier without explicitly cancelling an already active pointer session. The
+delayed-response test reproduced the Escape reopen as RED. Escape now invalidates
+the request and clears its pending barrier, while Restore invokes the same canvas
+interaction cancellation before persistence. The Restore/upload regression also
+holds resize mouse-down through barrier release and asserts the restored headline
+remains `260x48`. Focused GREEN passed both cases 2/2.
+
+GitHub review then found a P1 durability gap at the collaboration boundary. Restore
+persisted the selected server version and applied it to Yjs, but the final document
+returned by the CRDT merge was only installed in browser state. A concurrent remote
+edit retained by Yjs could therefore disappear from server export or a fresh load
+after relay restart. The browser regression activates a collaboration session and
+requires a base-aware complete-snapshot `PUT` after Restore; it failed because no
+such request occurred. The first repair serialized that second write, but independent
+review found a P2 weakness because the regression never produced an actual remote
+merge and would accept the unmerged server result. A two-browser relay RED now holds
+the Restore response after its server write, suppresses the remote browser's HTTP
+write, and delivers its text edit only through Yjs. The saved snapshot incorrectly
+contained `Layo`, proving the remote edit was overwritten before persistence. The
+stable-id 3-way snapshot merge is now a shared renderer contract used by both server
+and browser. Restore captures the Yjs document when its queued request actually starts,
+merges the restored version with the response-time Yjs document, applies that result to
+the room, and persists it with the server-restored file as `baseDocument`. The same
+two-browser case also drives both peers into a same-field conflict and proves that Layo
+aborts Restore, compensates the server with the current room document, and retains that
+document after a fresh reload. Focused GREEN proves all seven collaboration cases pass.
+
+Re-review found two more P1 timing boundaries. First, the collaboration base was
+captured when Restore was clicked, before an older queued image-fit write completed.
+The exact RED restored a saved `fill` image but finished with the delayed `fit` value.
+Second, a delayed Restore response could transact into a newly created team session;
+the exact RED reported success instead of the expected session-change abort. The base
+capture now occurs inside the dequeued operation. Response handling requires the same
+session object; otherwise it re-persists the replacement session/current editor
+document and reports `협업 세션이 변경되어 복원을 적용하지 않았습니다`. Both focused
+browser cases passed independently and in the complete suite.
+
+The next re-review found two final P1 windows after the first post-Restore `PUT`
+started. A relay-only edit arriving while that request was held was visible through
+Yjs, but the completed request and stale `setEditor` path reverted it. A team session
+replaced during the same wait also escaped the earlier one-time identity check. Exact
+REDs held the first `PUT`: one delivered a second remote text edit, and the other
+created a replacement local team. Restore persistence now advances its base and
+rechecks both the current CRDT document and session identity after every write, for a
+bounded maximum of eight attempts. Same-session changes receive another base-aware
+write; any session change stabilizes the latest replacement/current document and then
+aborts. Both REDs are GREEN, including the second request body, both relay browsers,
+server GET, fresh reload, compensation request count, and replacement-session UI.
+
+Moving the merge contract into `@layo/renderer` first broke five server child-process
+tests because they loaded a stale built package entry. Server tests now run with the
+workspace development export condition, and the repository script contract enforces
+that source-resolution rule. A later root run stopped at the same script contract
+because its Restore queue regex only accepted the old synchronous callback shape; the
+guard now proves `restoreFileVersion` is awaited inside the async per-file queue callback.
+The first root rerun after adding stabilization then treated the helper name
+`persistCollaborationSnapshotUntilStable` as a direct queue bypass. Renaming it to
+`stabilizeCollaborationSnapshotPersistence` retained the guard unchanged and the full
+root verification passed.
+
+An intermediate full browser run passed 210/211 and exposed a separate export-preset
+timing assumption. The UI had optimistically rendered both presets while the second
+serialized write was still pending, so an immediate server GET sometimes observed only
+the first. The test now polls the persisted file contract instead of treating render
+completion as disk completion. After that repair and the two Restore timing repairs, the
+complete suite passed 213/213 in one run. After the final `PUT` stabilization case was
+added, the exact-head suite passed 214/214 in 5.9 minutes.
+
+The next independent review found three remaining recovery failures. A project switch
+after the Restore route had already written the selected version returned early and
+left the original file at `Layo`; the final-`PUT` session-replacement test captured its
+expected value from the already-restored UI and therefore accepted the same loss; and
+the stabilization loop advanced from its request document instead of the server's
+actual 3-way merged response. Exact REDs received `Layo` instead of both
+`저장 대기 전 현재 편집` and `프로젝트 전환 전 현재 편집`, while a concurrent HTTP
+geometry mutation remained `x=120` in the next PUT instead of `x=144`. Restore now
+retains the pre-mutation document until completion, uses it for replacement-session
+initialization and original-file compensation, parses every PUT response, merges its
+server-only changes into Yjs, and advances the response as the next base. Focused GREEN
+passed both browser recovery cases 2/2 and the two-browser relay case 1/1, including
+both active peers, the next request body, server GET, and a fresh reload.
+
+The first root rerun after this repair failed only because the queue contract test
+limited the async Restore callback to 500 characters. The added recovery checks made
+the valid queued call longer. The guard now scopes itself to
+`restoreCurrentFileVersion` and checks the ordered queue/call contract without a fixed
+character window; its focused suite passes 7/7.
+
+The next re-review found that compensating a Restore was still a forward overwrite,
+not a true inverse. A relay edit made after the restored snapshot could be dropped,
+the old Yjs room could remain restored after project navigation, and a final-PUT
+same-field conflict reported an abort while retaining an unrelated restored fill.
+The exact conflict RED left `#16a34a` on the server instead of the pre-Restore
+`#2563eb`. Restore recovery now records the applied boundary and reverse-merges it
+into the latest room document with current-room conflict preference. Project changes
+publish that inverse before deactivating the old session, compensation keeps its
+recovered side when merging server-only fields, and the final editor commit rechecks
+the live project and session refs instead of an earlier snapshot. The expanded
+two-browser case proves the old room, server, active peers, and fresh reload retain
+both the pre-Restore fill and later relay text.
+
+The following re-review found two paths around that boundary. Create, external/file/
+project import, duplicate, and delete actions could switch documents without the
+project-switcher's rollback call; duplication could therefore snapshot the transient
+restored server file. Its RED duplicated `Layo` instead of `복제 전 현재 편집`.
+Separately, a server-only geometry edit made while the compensation PUT was held
+returned as `x=288`, but both Yjs peers remained at `x=144` because the response was
+discarded. All document transitions now synchronously publish rollback and await the
+full compensation operation before their server mutation, with a guarded fallback in
+the shared document loader. Compensation now consumes every actual PUT response,
+three-way merges it with the latest room document, republishes server-only changes,
+and repeats on the new base until room and server converge. Both exact REDs are GREEN.
+
+One more review pass found that the transition barrier still treated completion as
+`void`. When every compensation PUT returned 503, Restore showed an error but released
+the waiting duplicate, which then copied the transient server snapshot. A second RED
+held the duplicate POST first and proved a new Restore could start in the gap between
+the barrier check and the eventual project load. Restore completion now reports an
+explicit safe/unsafe result. Unsafe compensation retains its recovery boundary and
+settled failure for the rest of the browser session, so current and later project
+mutations fail closed instead of continuing. A synchronous transition token now spans
+rollback preparation, create/import/duplicate/delete server mutation, and final document
+load; Restore refuses to start while that token is held. Focused GREEN proves the 503
+case sends zero duplicate requests and the inverse ordering sends zero Restore requests.
+
+The first complete 218-case browser run then passed 213. One failure showed that
+destroying a document-specific collaboration session also discarded the active team
+credential context, disabling `현재 팀과 공유` after creating a project. Two failures
+showed that session-replacement cancellation compensated safely but returned without
+the established abort status. The other two showed that the exclusive transition lock
+also rejected a newer pure project selection instead of preserving latest-selection
+wins. Active team identity and the in-memory member credential now outlive only the
+document session; private documents are not joined to a relay, but can be explicitly
+linked to that retained team and continue authorized library requests. Recovery records
+whether rollback came from project navigation or session replacement and reports the
+stable session-change error after the latter is compensated. Transition ownership now
+separates exclusive server mutation from replaceable navigation, so a newer selection
+supersedes an older fetch while Restore remains blocked for the entire active transition.
+The exact five REDs passed 5/5, the four prior recovery cases passed 4/4, and the
+two-browser collaboration case passed 1/1. The repaired complete browser suite then
+passed 218/218 in 6.0 minutes.
+
+The final independent review found two retained-team-context leaks after that repair.
+The library event stream still derived credentials from the document-specific session,
+so switching documents reconnected without either authorization header even though
+publish/import requests retained the team token. The top sharing label also reused the
+retained team name without proving that its team ID matched the opened project's team.
+The existing credential E2E now fails if the post-switch event stream omits either
+header and drives a different-team project response through the UI before asserting the
+external team ID. Stream credentials now come from the retained active-team context,
+and a friendly team name is shown only for an exact team-ID match. The focused RED
+omitted both headers; the repaired scenario passes end to end.
+
+Re-review found that the first stream repair overcorrected: it sent that retained token
+to a new private project and to a project shared with a different team. A configured
+server rejects both with terminal 403, and the stream effect did not depend on sharing,
+so explicitly sharing the project afterward could not reconnect. It also found that
+comment and reply mention targets still read only the destroyed document session. The
+shared `activeProjectTeamContext` now exists only when the current project's team ID
+exactly matches the retained team. Private and mismatched projects make no credentialed
+stream connection, sharing changes restart the effect, library HTTP credentials and the
+friendly label use the same scope, and comment/reply mention resolution uses the retained
+matching team. Exact REDs observed one private credentialed stream and an empty
+`mentionTargets` request. During GREEN, a test's old `새 프로젝트 저장됨` status exposed
+that it was sharing the previous project; both project-switch tests now wait for the
+selected project ID to change. The corrected pair passes 2/2.
+
+The next re-review found the same scope was not yet enforced by registry HTTP refreshes.
+The polling effect depended only on document ID, and `loadProjectDocument` refreshed the
+target file through the previous render's credentials. The exact RED recorded Team A's
+token on all three private-target GETs: registry list, component updates, and token
+updates. Refresh helpers now accept an explicit target-project credential, polling
+restarts for sharing/team/token scope changes and stops on a retained-team mismatch,
+and a `null` sentinel distinguishes intentional no-credential requests from a default
+parameter. The E2E also proves authenticated polling after an exact share and no token
+after switching the same file to another team. Its first full run passed 217/218 because
+the expired-token test still expected an authenticated stream on a private file; adding
+the required explicit share made that focused lifecycle scenario GREEN.
+
+The following re-review found that stopping the event stream and polling on a team-scope
+mismatch still left the previous team's registry list and open review state visible. The
+exact RED kept `Credentialed Team Kit` on screen after the same document moved from the
+retained team to `team-external`. Protected registry state now has one reset path for the
+published list, component and token update notices, component review, and token review.
+File removal, a missing exact team context, and terminal stream authorization all use that
+reset after invalidating in-flight access generations. The repaired team-mismatch scenario
+clears the visible list and review panels immediately and passes 1/1.
+
+The next exact-diff review found one persistence split and two transition/test gaps. General
+collaborative snapshot saves discarded the actual PUT response and stopped on a concurrent
+same-field conflict, so reversed browser PUTs left both Yjs peers at frame `x=202` while the
+server remained at `x=101`. A library import could also issue a newer document load while an
+exclusive project creation was waiting for its target GET, leaving the created project on the
+server while the UI returned to the old project. Finally, the team mismatch assertion checked
+an already-null token review. General snapshot saves now use a bounded response-aware
+convergence loop, read the current server snapshot after an explicit snapshot conflict, merge
+the latest room document with current preference, and repeat until server and room agree.
+Project mutation and navigation loads carry an owner token; every library archive, registry,
+and token import/update uses the same exclusive transition and treats a cancelled load as a
+failure. The registry E2E opens the token review before changing teams. Exact REDs reproduced
+server `x=101` and the old selected project; the repaired scenarios pass 3/3 and a fresh
+browser reads `x=202`.
+
+The first 219-case rerun then failed the existing open-path lifecycle: Undo reached the
+server's `triangle` end marker, but Redo stayed there instead of restoring `line_arrow`.
+The same focused case failed 3/3. Retaining the local command stacks fixed that case, but
+the next rerun exposed a second stale-response effect: a queued pre-insertion snapshot
+reinstalled one grid child after `열과 객체 삭제`; that exact case also failed 3/3. Server
+responses are now transacted into an active Yjs room, where every peer must converge, but
+are not reinstalled into a non-collaborative editor. Its latest user document still drives
+server convergence without letting an older response change local history or auto-layout
+placement. The two local lifecycle cases pass 6/6 across three repetitions, and the reversed
+two-browser PUT convergence remains GREEN 1/1.
+
+Re-review then exposed two more P1 boundaries. The server's 400 snapshot conflict body uses
+`error`, while the client read only `message`, so a single conflicting PUT never entered the
+retry path; its exact RED left server frame `x=202` instead of local `x=101`. After parsing the
+real error contract, the first retry preserved `x=101` but a later stabilization iteration
+mistook an accepted server text edit for a local deletion. The loop now rebases only changes
+since the previously observed local document onto its accepted convergence document. The
+focused scenario keeps the independent server text through conflict retry, local Undo, and
+Redo. A second RED completed a Team A token-review response on the server, changed the same
+file to Team B while browser delivery was held, and reproduced the protected Team A panel
+after the scope clear. Publish and both review operations now capture file, sharing/team/user,
+token revision, access generation, and credentials, then discard stale success and failure
+state. The conflict, delayed authorization response, and grid lifecycle pass together 3/3.
+
+The next complete 220-case run passed 219 and failed the existing multi-stroke reload
+lifecycle: the server briefly exposed the final `0.35` opacity, then an older queued
+Undo/Redo snapshot restored `0.5`, so an immediate reload rendered stale data. The focused
+case reproduced 3/10 before repair. Snapshot stabilization originally folded current editor
+state only after its first PUT, and relying on React refs still left an older callback without
+a durable final target during reload. Snapshot persistence now records one latest revision
+per file, rebases an in-flight write onto that target before and after each PUT, and skips
+superseded queued snapshots. The original ordered multi-stroke lifecycle, including Undo,
+Redo, server persistence, and immediate reload, passes 10/10 without retries after repair.
+
+Independent review then found that server convergence used the same tracked Yjs origin as a
+user edit. The exact unit RED showed Undo leaving the local move at `x=96` while removing the
+server-only headline, rather than reverting the move and preserving the headline. Collaborative
+transactions now accept an explicit `undoable` policy. Server convergence, restore aborts,
+compensation, and server-merge corrections use an untracked system origin, while user editor and
+Restore transactions remain undoable. The Yjs regression passes 39/39 package tests, and the
+two-browser reversed-PUT E2E now converges a server-only headline, undoes and redoes the user's
+frame movement, and retains that headline in both peers and the persisted server document.
+
+The next root verification stopped at the queue ownership script contract even though all
+snapshot calls remained inside the per-file queue. Its broad `await persist*` expression also
+matched the new bounded stabilizer's internal PUT. The contract now isolates that helper,
+requires its server write and its queue-owned caller explicitly, and continues to reject every
+direct persistence call outside the helper. This keeps the ownership boundary enforceable
+without treating the implementation of the guarded retry loop as a violation.
+
+The next review found that revision coalescing retained only the latest document, not the
+earliest unsaved base. A deterministic RED held a version save in the per-file queue, applied
+frame `x=101` and then `y=202`, and finished with server `x=120, y=202`: the first revision was
+skipped, while the second revision's base already contained `x=101`, so the merge could no
+longer identify that field as local work. Each file's pending snapshot target now carries the
+earliest unsaved base across every superseding revision. The final writer starts from that base
+and the latest target, including when an earlier in-flight writer fails or finishes after a
+newer edit is queued.
+
+The following review found that project duplication still bypassed that general persistence
+queue. A deterministic RED held a version save, queued frame `x=101` and `y=202`, and observed
+the duplicate POST before either snapshot could persist, allowing the copy to retain the older
+server geometry. Duplication now captures its source project at click time and enqueues the
+duplicate request on that source file. Earlier edits therefore finish before the server copies
+the document, while later edits retain their natural position behind the copy operation. The
+first focused E2E passed, but re-review found that a post-click `x=303` edit could still
+supersede the file-wide A/B snapshot target. Both earlier callbacks then skipped, so the queued
+duplicate still copied `x=120, y=80`. Snapshot coalescing now uses file-local queue epochs.
+The first epoch repair made that case GREEN, but the next review found that a failed sealed PUT
+was swallowed by the queue tail, version Save had no equivalent boundary, and advancing before
+transition admission could leave Yjs without server-only convergence. Two more REDs saved the
+initial `x=120, y=80` instead of click-time A/B and allowed duplication after only one failed
+PUT. Save, Restore, and Duplicate now use one snapshot-barrier API after transition admission.
+The barrier seals its current epoch, flushes that epoch successfully before the server operation,
+retains failed targets for a barrier retry, and aborts the operation if that retry also fails.
+A sealed writer reads only its epoch target, then 3-way merges independent server changes into
+the newer active Yjs session without persisting post-barrier edits early. The duplicate therefore
+copies `x=101, y=202`, the source's next epoch persists `x=303, y=202`, a version captures A/B
+instead of later C, and a persistent snapshot failure sends zero duplicate requests. The three
+focused barrier E2Es pass 3/3 and the static queue ownership contract passes 7/7.
+
+The next re-review found that one retained failed epoch was retried only by its first barrier.
+After that retry also failed, a later barrier sealed the next empty epoch and could proceed
+without the older target. It also found that a Restore preflight flush failure marked the whole
+session unsafe even though `restoreFileVersion` was never called. Exact REDs reproduced a second
+duplicate with stale `x=120` after the 503 cleared and a Restore retry permanently stuck on the
+first preflight error. Every snapshot writer and barrier now drains all retained epochs through
+its boundary in ascending order, so later edits cannot bypass earlier unsaved state. Restore
+separately records whether its mutating request was attempted; preflight failure clears recovery
+as safe, while any possibly mutating request remains fail-closed until compensation is proven.
+The recovered duplicate copies `x=101`, the same-session Restore retry succeeds, and both focused
+recovery E2Es pass 2/2.
+
+The following review expanded the same durability boundary beyond explicit Save and Duplicate.
+A failed source PUT could be abandoned by project navigation and returned as `x=120`; a browser
+that had only received `x=101` through Yjs saved a version with server `x=120`; and file archive
+export began before a held click-time PUT. Project/document transitions now flush the source
+snapshot before leaving and fail the transition when it cannot persist. Duplicate keeps its
+combined operation barrier so post-click edits remain outside the copy. Every barrier also
+captures the active Yjs click-time document as a synthetic target; when no local base exists it
+reads the current server document before the 3-way PUT. File archive, library archive, registry
+publication, and project archive operations all use the same barrier. Exact GREEN coverage proves
+failed navigation preserves `x=101` after leaving and returning, a remote-only receiver saves
+`x=101` while the originating PUT is held, and all four snapshot-dependent output requests wait
+behind persistence. The static ownership contract continues to pass 7/7.
+
+The first full collaboration rerun then timed out because the synthetic target was created even
+when the active room document had not changed. The Restore test deliberately held the first PUT
+from the mutating restore path, but the no-op preflight PUT consumed that gate before the restore
+request and deadlocked the scenario. Each collaboration session now keeps a normalized persisted
+baseline. A barrier compares the active room against its pending target or that session baseline,
+creates a synthetic target only for a real difference, and advances the baseline only after the
+matching target completes. Session replacement clears the baseline. The unchanged-room Restore
+and the remote-only receiver Save both pass focused E2E, while the complete collaboration suite
+passes 8/8 without the extra preflight write.
+
+The next 227-case editor run passed 225 and exposed two assertions written for the earlier
+queue behavior. The session-replacement Restore test required at least two compensation PUTs
+even though the product contract is the final replacement-session and server document; that
+state already converged correctly with one observed PUT. The delayed version Save test expected
+project B to load before project A's held Save completed, directly contradicting the new source
+flush boundary. The focused tests now assert final server/session recovery instead of an internal
+request count, and prove navigation remains on A while Save is held, loads B after release, and
+never leaks A's version list into B. Both corrected scenarios pass 2/2.
+
+Exact-head re-review then found three more durability and authorization gaps. First, the
+synthetic Yjs target used the current server document as its merge base instead of the room's
+last persisted baseline. The RED combined relay-only frame `x=101` with an independent HTTP
+headline edit and saved `Layo`, proving the server text was overwritten. Synthetic targets now
+carry the same-session persisted baseline, successful writers advance that baseline from the
+actual accepted server document, and Restore/compensation convergence does the same. The saved
+version now contains both `x=101` and `서버 독립 편집`.
+
+The first collaboration rerun after that repair passed 7/8 because a specialized text/style
+PATCH had already made the room and server equal while the persisted baseline was older. Giving
+the synthetic target a real baseline bypassed the prior null-base equality shortcut, inserted an
+unnecessary PUT before Restore, and displaced the test's held final request. Synthetic targets
+now verify the current server document before writing: equality advances the baseline without a
+PUT, while a difference still uses the persisted baseline for the lossless 3-way merge. The
+combined independent-edit Save and final-PUT Restore conflict scenarios pass together 2/2.
+
+Second, the source barrier ended before a held target-document GET, so an Inspector edit made
+after navigation admission issued one source PUT and could be abandoned. Project transitions
+now cancel active interactions, invalidate asynchronous editor mutations, and reject every
+document command/persistence path for the full transition lifetime. The exact RED/GREEN proves
+the held navigation produces zero source PUTs and returns to unchanged `x=120`. Third, a queued
+library publication captured Team A credentials before its snapshot barrier and still sent one
+POST after the project changed to Team B. Protected publication, registry import, token import,
+component update, and token update now validate the current file/scope/generation immediately
+before each request and re-resolve credentials plus reviewed targets from refs. The stale-scope
+publication sends zero POSTs, while the five focused normal/stale registry and navigation cases
+pass 5/5 and the static contract passes 7/7.
+
+The next 229-case run passed 228 and exposed one now-obsolete Duplicate expectation: it still
+required a post-admission `x=303` edit to persist while the new transition lock deliberately
+rejects that edit. The contract now asserts both the duplicate and source remain at the sealed
+click-time `x=101, y=202`; the corrected focused case passes. Final re-review then found a direct
+DTCG import path outside the command dispatcher. A delayed source response could install an A
+document after navigation identified B, and the import control remained active during the held
+target GET. DTCG import now rejects at transition entry, captures file ID plus mutation generation,
+revalidates both before applying success or error state, and disables token mutation controls for
+the transition lifetime. The delayed-response E2E proves a pre-admission import cannot publish
+stale UI state, a forced second import sends no request while B is loading, and B retains an empty
+token set. The focused case and static contract pass 1/1 and 7/7.
+
 The user-reported Vercel deployment `dpl_6qaTjzmQHPus1bM4Ga1jXjAMBj45` was a
 historical PR #279 build at commit `c3d54b0`. It failed because `App.tsx` imported
 `pathHasOnlyClosedSubpaths` from `path-editor` before that module exported it.
@@ -213,7 +623,36 @@ Focused Playwright CLI coverage proves:
 - a delayed image upload cannot create a node or retain an orphan asset after
   preview entry;
 - delayed document writes complete before version Save/Restore;
+- Restore captures collaboration state after earlier queued writes and does not
+  preserve an earlier delayed image-fit mutation over the selected saved version;
+- a delayed Restore cannot mutate a replacement collaboration session and compensates
+  its server-side write with the replacement document;
 - collaborative structural Undo/Redo preserves a later remote text edit;
+- relay-only independent remote edits survive Restore, while same-field conflicts
+  preserve the current room document and abort Restore;
+- relay-only edits arriving during the final Restore `PUT` trigger another base-aware
+  write instead of being replaced by stale browser state;
+- replacing the collaboration session during that final `PUT` triggers compensation
+  and aborts before the old session document can be installed, while the replacement
+  session starts from the exact pre-Restore edit;
+- switching projects after the Restore route mutates the server compensates the
+  original file without changing the newly selected project;
+- project duplication waits for that compensation and snapshots the current document,
+  never the transient restored server file;
+- failed compensation blocks the current and later project transitions instead of
+  treating an unsafe server state as completed;
+- a project mutation holds one transition lock through its server request and document
+  load, so a new Restore cannot start inside that interval;
+- a newer pure project navigation supersedes an older pending navigation without
+  entering an exclusive server-mutation transition;
+- replacing a collaboration session retains its explicit abort status after safe
+  compensation;
+- changing documents retains active team identity and in-memory member credentials
+  without joining a private target document to the old relay room;
+- server-only edits merged by a held complete-snapshot PUT become the next persistence
+  base and converge into both Yjs peers;
+- server-only edits returned by a held compensation PUT also converge into both Yjs
+  peers before the abort completes;
 - local team mode does not expose unused member credentials;
 - an immediate create is present in the next saved version;
 - stale complete snapshots preserve independent remote edits and reject
@@ -237,12 +676,12 @@ persisted server document were asserted after those actions.
 
 Latest local verification passed:
 
-- complete Playwright CLI suite: 211/211 in 5.7 minutes;
-- collaboration Playwright CLI suite: 6/6;
+- complete Playwright CLI suite: 230/230 in 6.9 minutes;
+- collaboration Playwright CLI suite: 8/8 in 33.0 seconds;
 - direct headed Playwright CLI interaction: 2/2;
 - web unit tests: 280/280;
-- server tests: 439/439 with 47 deliberate skips;
-- collaboration package: 38/38; renderer: 14/14; relay: 7/7;
+- server tests: 441/441 with 47 deliberate skips;
+- collaboration package: 39/39; renderer: 18/18; relay: 7/7;
 - Rust workspace tests: 12 relay, 74 editor core, 7 command/context, and 24
   document-model tests;
 - full workspace typecheck, web production build, design rules, Penpot maturity
@@ -252,7 +691,7 @@ Exact PR-head check and merge evidence will be appended before completion.
 
 ## Remaining Gaps
 
-Multi-page preview navigation, remote two-browser restore conflict policy,
-comment edit/delete and visibility preferences, hosted durable comment delivery,
+Multi-page preview navigation, comment edit/delete and visibility preferences,
+hosted durable comment delivery,
 automatic conflict-resolution UI for divergent snapshot reorders, and
 branch/review/merge product workflows remain open. Deployment remains non-gating.

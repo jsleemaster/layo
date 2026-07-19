@@ -70,7 +70,26 @@ Run: `node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts -g "file versi
 - [x] Serialize asset reference cleanup with document/version writes and retain component-variant assets.
 - [x] Make Restore a mutation barrier; serialize project-ID persistence; reject stale success, error, and version-list responses.
 - [x] Restore the last accepted project ID when an in-flight stale persistence finishes and its replacement request fails.
+- [x] Reconcile changed authorization snapshots after watcher registration so a missed first sidecar event fails closed without disturbing recoverable startup state.
+- [x] Make a pending Preview request an immediate mutation barrier and deterministically cancel an in-flight resize before the response arrives.
+- [x] Invalidate a pending Preview on Escape and cancel active canvas sessions before Restore persistence.
+- [x] Capture request-start Yjs state, 3-way merge a delayed Restore with relay-only remote edits, and persist the merged result.
+- [x] Capture collaboration state only when Restore dequeues after older writes, and preserve the selected version over that older mutation.
+- [x] Abort and compensate when a delayed Restore response observes a replacement collaboration session or same-field room conflict.
+- [x] Stabilize relay-only edits that arrive during the final Restore PUT, and recheck session identity after every held persistence request.
+- [x] Preserve the exact pre-Restore document for replacement-session initialization and original-file compensation after project switching.
+- [x] Consume each complete-snapshot PUT response, converge server-only changes into Yjs, and advance that response as the next persistence base.
+- [x] Reverse only the Restore-applied delta so project exit and same-field abort preserve later Yjs edits and pre-Restore fields.
+- [x] Make create/import/duplicate/delete transitions await Restore compensation before server mutation.
+- [x] Consume compensation PUT responses and converge server-only changes into the active Yjs room.
+- [x] Propagate failed compensation as a retained fail-closed transition barrier.
+- [x] Hold one project-transition token across preparation, server mutation, and document load so Restore cannot enter the interval.
+- [x] Keep pure navigation replaceable, preserve session-replacement abort status, and retain team credentials separately from document relay sessions.
+- [x] Reuse retained team credentials, names, and mention targets only for an exact project-team match; skip private and different-team streams.
+- [x] Compute registry HTTP credentials from the target project and restart polling across sharing, team, and token scope changes.
+- [x] Make export-preset browser verification wait for its serialized persistence instead of assuming optimistic render means disk completion.
 - [x] Restrict MCP stdio test subprocesses to an explicit environment allowlist.
+- [x] Run the final complete Playwright CLI suite at 230/230 and the collaboration suite at 8/8.
 
 ### Task 5: Document, review, PR, and merge
 
@@ -83,6 +102,6 @@ Run: `node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts -g "file versi
 
 - [x] Record RED/GREEN evidence, current Penpot source, exact product delta, and remaining risks.
 - [x] Obtain independent exact-head code review and resolve every actionable finding.
-- [ ] Open the PR with failure mode, verification, and deliberate divergence.
+- [x] Open the PR with failure mode, verification, and deliberate divergence.
 - [ ] Merge only after exact-head checks pass.
 - [ ] Run post-merge cleanup and publish the completed-plan MD cleanup state.

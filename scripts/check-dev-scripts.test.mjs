@@ -6,9 +6,11 @@ test("server dev script resolves workspace packages from source exports", async 
   const packageJson = JSON.parse(await readFile("apps/server/package.json", "utf8"));
   const devScript = packageJson.scripts?.dev;
   const mcpScript = packageJson.scripts?.mcp;
+  const testScript = packageJson.scripts?.test;
 
   assert.equal(typeof devScript, "string");
   assert.equal(typeof mcpScript, "string");
+  assert.equal(typeof testScript, "string");
   assert.match(
     devScript,
     /--conditions=development|@layo\/collaboration build/,
@@ -18,6 +20,11 @@ test("server dev script resolves workspace packages from source exports", async 
     mcpScript,
     /--conditions=development|@layo\/collaboration build/,
     "server mcp must not require prebuilt package dist files"
+  );
+  assert.match(
+    testScript,
+    /--conditions=development|@layo\/renderer build/,
+    "server tests and child processes must not require prebuilt package dist files"
   );
 });
 
@@ -72,12 +79,100 @@ test("e2e script starts required local services before Playwright", async () => 
 
 test("document writes and file-version mutations share the per-file operation queue", async () => {
   const app = await readFile("apps/web/src/App.tsx", "utf8");
+  const snapshotStabilizerStart = app.indexOf("const stabilizeDocumentSnapshotPersistence = async");
+  const snapshotStabilizerEnd = app.indexOf(
+    "const enqueueDocumentSnapshotPersistence =",
+    snapshotStabilizerStart
+  );
+  const restoreHandlerStart = app.indexOf("const restoreCurrentFileVersion = async");
+  const restoreHandlerEnd = app.indexOf("const toggleFileVersionPinned = async", restoreHandlerStart);
+  assert.ok(snapshotStabilizerStart >= 0 && snapshotStabilizerEnd > snapshotStabilizerStart);
+  assert.ok(restoreHandlerStart >= 0 && restoreHandlerEnd > restoreHandlerStart);
+  const snapshotStabilizer = app.slice(snapshotStabilizerStart, snapshotStabilizerEnd);
+  const appOutsideSnapshotStabilizer =
+    app.slice(0, snapshotStabilizerStart) + app.slice(snapshotStabilizerEnd);
+  const restoreHandler = app.slice(restoreHandlerStart, restoreHandlerEnd);
 
   assert.match(app, /useRef\(createFileOperationQueue\(\)\)/);
-  assert.doesNotMatch(app, /(?:void|await)\s+persist[A-Z]/);
+  assert.match(snapshotStabilizer, /actualServerDocument = await persistDocumentSnapshot\(/);
+  assert.doesNotMatch(appOutsideSnapshotStabilizer, /(?:void|await)\s+persist[A-Z]/);
+  assert.match(
+    app,
+    /enqueueDocumentPersistence\(fileId, async \(\) => \{[\s\S]{0,200}await flushDocumentSnapshotEpochsThrough\(/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /const flushDocumentSnapshotEpoch = async[\s\S]*await stabilizeDocumentSnapshotPersistence\(/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /const flushDocumentSnapshotEpochsThrough = async[\s\S]*await flushDocumentSnapshotEpoch\(/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /const enqueueDocumentSnapshotBarrier =[\s\S]*advanceDocumentSnapshotEpoch\(fileId\)[\s\S]*await flushDocumentSnapshotEpochsThrough\(/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /const captureActiveCollaborationSnapshotForBarrier =[\s\S]*activeSession\.getDocument\(\)/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /const referenceDocument = pendingSnapshot\?\.document[\s\S]*baseline\?\.session === activeSession[\s\S]*rendererDocumentsEqual\(referenceDocument, document\)/
+  );
+  assert.match(
+    app,
+    /const completeLatestDocumentSnapshot =[\s\S]*updateCollaborationSnapshotBaseline\(snapshot\.collaborationSession, persistedDocument\)/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /baseDocument: pendingSnapshot\?\.baseDocument[\s\S]*baseline\?\.session === activeSession[\s\S]*baseline\.document/
+  );
+  assert.match(
+    snapshotStabilizer,
+    /latestSnapshot\.verifyServerDocument[\s\S]*readPersistedDocumentSnapshot\(fileId\)[\s\S]*baseDocument = latestSnapshot\.baseDocument \?\? verifiedServerDocument/
+  );
+  assert.match(
+    app,
+    /const prepareForProjectDocumentTransition = async[\s\S]{0,1200}enqueueDocumentSnapshotBarrier\(sourceFileId/
+  );
+  assert.match(
+    app,
+    /const isEditorDocumentMutationBlocked =[\s\S]{0,160}projectDocumentTransitionRef\.current !== null/
+  );
+  assert.match(
+    app,
+    /const dispatch =[^]*?if \(isEditorDocumentMutationBlocked\(\)\)/
+  );
+  assert.match(
+    app,
+    /const importCurrentDocumentTokensDtcg = async[\s\S]{0,1600}isEditorDocumentMutationBlocked\(\)[\s\S]{0,1600}mutationGeneration === editorMutationGenerationRef\.current[\s\S]{0,1600}if \(!isCurrentTokenImport\(\)\)/
+  );
+  assert.match(
+    app,
+    /canEditTokens=\{Boolean\(currentProject && editor && !projectDocumentTransitionActive\)\}/
+  );
   assert.doesNotMatch(app, /componentVariantSaveRef/);
-  assert.match(app, /enqueueDocumentPersistence\(fileId, \(\) => saveFileVersion\(fileId, message\)\)/);
-  assert.match(app, /enqueueDocumentPersistence\(fileId, \(\) =>\s*restoreFileVersion\(fileId, version\.versionId\)/);
+  assert.match(app, /enqueueDocumentSnapshotBarrier\(fileId, \(\) =>[\s\S]{0,80}saveFileVersion\(fileId, message\)/);
+  assert.match(
+    app,
+    /enqueueDocumentSnapshotBarrier\([\s\S]{0,80}sourceProject\.currentDocumentId,[\s\S]{0,120}duplicateProject\(/
+  );
+  assert.match(
+    restoreHandler,
+    /const restoreOperation = await enqueueDocumentSnapshotBarrier\(fileId, async \(\) => \{[\s\S]*const result = await restoreFileVersion\(fileId, version\.versionId\)/
+  );
+  for (const operation of [
+    "exportFileArchive",
+    "exportLibraryArchive",
+    "publishLibraryToRegistry",
+    "exportProjectArchive"
+  ]) {
+    assert.match(
+      app,
+      new RegExp(`enqueueDocumentSnapshotBarrier\\([\\s\\S]{0,120}${operation}\\(`)
+    );
+  }
   for (const operation of [
     "importLibraryArchive",
     "importLibraryRegistryItem",
@@ -88,7 +183,19 @@ test("document writes and file-version mutations share the per-file operation qu
   ]) {
     assert.match(
       app,
-      new RegExp(`enqueueDocumentPersistence\\(fileId, \\(\\) =>[\\s\\S]{0,80}${operation}\\(`)
+      new RegExp(`enqueueDocumentPersistence\\(fileId, \\(\\) =>[\\s\\S]{0,500}${operation}\\(`)
+    );
+  }
+  for (const operation of [
+    "publishLibraryToRegistry",
+    "importLibraryRegistryItem",
+    "importLibraryRegistryTokens",
+    "updateLibraryRegistryTokens",
+    "updateLibraryRegistryItem"
+  ]) {
+    assert.match(
+      app,
+      new RegExp(`${operation}\\([\\s\\S]{0,500}requireCurrentLibraryRegistryAccess\\(`)
     );
   }
 });

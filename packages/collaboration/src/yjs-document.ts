@@ -5,11 +5,19 @@ export interface CollaborativeDesignDocument {
   ydoc: Y.Doc;
   getDocument(): RendererDocument;
   setDocument(document: RendererDocument, origin?: unknown): void;
-  transact(label: string, apply: (document: RendererDocument) => RendererDocument): void;
+  transact(
+    label: string,
+    apply: (document: RendererDocument) => RendererDocument,
+    options?: CollaborativeTransactionOptions
+  ): void;
   undo(): RendererDocument | null;
   redo(): RendererDocument | null;
   subscribe(listener: (document: RendererDocument) => void): () => void;
   destroy(): void;
+}
+
+export interface CollaborativeTransactionOptions {
+  undoable?: boolean;
 }
 
 const DOCUMENT_MAP = "design";
@@ -65,6 +73,7 @@ export function createCollaborativeDesignDocument(input: {
     setDocument(parseDesignDocument(root.get(DOCUMENT_JSON)), input.origin);
   }
   const localOrigin = { label: "editor-transaction" };
+  const systemOrigin = { label: "system-transaction" };
   const undoManager = new Y.UndoManager(root, {
     captureTimeout: 0,
     trackedOrigins: new Set([localOrigin])
@@ -74,14 +83,15 @@ export function createCollaborativeDesignDocument(input: {
     ydoc,
     getDocument,
     setDocument,
-    transact(label, apply) {
+    transact(label, apply, options) {
       const before = getDocument();
       const nextDocument = parseDesignDocument(apply(structuredClone(before)));
-      localOrigin.label = label;
+      const origin = options?.undoable === false ? systemOrigin : localOrigin;
+      origin.label = label;
       undoManager.stopCapturing();
       ydoc.transact(() => {
         applyDocumentPatch(ydoc, before, nextDocument);
-      }, localOrigin);
+      }, origin);
       undoManager.stopCapturing();
     },
     undo() {
