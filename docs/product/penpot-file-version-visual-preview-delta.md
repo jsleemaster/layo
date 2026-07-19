@@ -599,6 +599,15 @@ the transition lifetime. The delayed-response E2E proves a pre-admission import 
 stale UI state, a forced second import sends no request while B is loading, and B retains an empty
 token set. The focused case and static contract pass 1/1 and 7/7.
 
+PR-head Full Verification run `29670676984` then failed one server case because the
+`conflicting token id` sidecar test polled for a transient empty credential cache while
+the watcher automatically quarantined and recovered that binding error in the same
+reload. The cache did fail closed, but a 10 ms observer was not guaranteed to run before
+recovery completed. That test now holds the managed-token quarantine hook, directly
+asserts authentication failure while recovery is paused, removes the conflicting
+sidecar, and then releases recovery. The exact failed case passes 1/1 and the complete
+sidecar suite passes 31/31.
+
 The user-reported Vercel deployment `dpl_6qaTjzmQHPus1bM4Ga1jXjAMBj45` was a
 historical PR #279 build at commit `c3d54b0`. It failed because `App.tsx` imported
 `pathHasOnlyClosedSubpaths` from `path-editor` before that module exported it.

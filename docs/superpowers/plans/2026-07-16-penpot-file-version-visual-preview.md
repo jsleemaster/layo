@@ -89,6 +89,7 @@ Run: `node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts -g "file versi
 - [x] Compute registry HTTP credentials from the target project and restart polling across sharing, team, and token scope changes.
 - [x] Make export-preset browser verification wait for its serialized persistence instead of assuming optimistic render means disk completion.
 - [x] Restrict MCP stdio test subprocesses to an explicit environment allowlist.
+- [x] Hold automatic sidecar quarantine while asserting conflicting-token fail-closed behavior so the CI regression is deterministic.
 - [x] Run the final complete Playwright CLI suite at 230/230 and the collaboration suite at 8/8.
 
 ### Task 5: Document, review, PR, and merge
