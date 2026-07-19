@@ -2572,7 +2572,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
             }
           }
         : undefined;
-    const server = createMcpServer(undefined, {
+    // Purpose: keep MCP and HTTP edits on the same operator-selected document root.
+    const storageRoot = process.env.LAYO_STORAGE_DIR?.trim() || undefined;
+    const server = createMcpServer(new FileStorage(storageRoot), {
       libraryRegistryAuth: authorizationRuntime.libraryRegistryAuth,
       libraryRegistryAuthorizationProvider:
         authorizationRuntime.authorizationProvider,

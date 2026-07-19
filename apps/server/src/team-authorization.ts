@@ -2324,7 +2324,7 @@ async function quarantineWatchedManagedTokenState(
         currentBaseSnapshot
       );
     }
-    mergeManagedTokenState(currentBaseConfig, state);
+    mergeManagedTokenState(currentBaseConfig, state, true);
     await recoverWhileLocked();
   });
 }
@@ -2354,7 +2354,8 @@ async function readStableMergedTeamAuthorizationConfig(
   ]);
   const nextConfig = mergeManagedTokenState(
     parseRequiredTeamAuthorizationConfig(baseSnapshot),
-    parseManagedTokenState(sidecarSnapshot)
+    parseManagedTokenState(sidecarSnapshot),
+    true
   );
   const [verifiedBaseSnapshot, verifiedSidecarSnapshot] = await Promise.all([
     readFile(filePath, "utf8"),
@@ -2381,14 +2382,20 @@ export async function watchTeamAuthorizationConfigFile(
     throw new Error("LAYO_LIBRARY_REGISTRY_MEMBERS_FILE must not be blank");
   }
   const sidecarPath = managedTokenSidecarPath(normalizedPath);
-  const initialConfig = await readMergedTeamAuthorizationConfig(
-    normalizedPath,
+  const [initialBaseSnapshot, initialSidecarSnapshot] = await Promise.all([
+    readFile(normalizedPath, "utf8"),
+    readOptionalFile(sidecarPath)
+  ]);
+  const initialConfig = mergeManagedTokenState(
+    parseRequiredTeamAuthorizationConfig(initialBaseSnapshot),
+    parseManagedTokenState(initialSidecarSnapshot),
     true
   );
   const pollIntervalMs = Math.max(10, Math.floor(options.pollIntervalMs ?? 1_000));
   let closed = false;
   let reloadTail = Promise.resolve();
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let registrationVerificationTimer: ReturnType<typeof setTimeout> | undefined;
 
   function cancelRetry(): void {
     if (retryTimer === undefined) {
@@ -2409,94 +2416,119 @@ export async function watchTeamAuthorizationConfigFile(
     retryTimer.unref();
   }
 
-  function reload(): void {
-    reloadTail = reloadTail.then(async () => {
+  async function performReload(
+    skipWhenSnapshotsMatch?: {
+      baseSnapshot: string;
+      sidecarSnapshot: string | undefined;
+    }
+  ): Promise<void> {
+    if (closed) {
+      return;
+    }
+    let observedBaseSnapshot: string | undefined;
+    let observedSidecarSnapshot: string | undefined;
+    const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
+    try {
+      const [baseSnapshot, sidecarSnapshot] = await Promise.all([
+        readFile(normalizedPath, "utf8"),
+        readOptionalFile(sidecarPath)
+      ]);
+      observedBaseSnapshot = baseSnapshot;
+      observedSidecarSnapshot = sidecarSnapshot;
+      if (
+        skipWhenSnapshotsMatch
+        && baseSnapshot === skipWhenSnapshotsMatch.baseSnapshot
+        && sidecarSnapshot === skipWhenSnapshotsMatch.sidecarSnapshot
+      ) {
+        return;
+      }
+      const nextConfig = mergeManagedTokenState(
+        parseRequiredTeamAuthorizationConfig(baseSnapshot),
+        parseManagedTokenState(sidecarSnapshot)
+      );
+      cancelRetry();
+      if (
+        generationBeforeRead
+        !== teamAuthorizationConfigGeneration(initialConfig)
+      ) {
+        return;
+      }
+      replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
+    } catch (error) {
+      replaceTeamAuthorizationMembers(initialConfig, []);
+      let recovered = false;
+      if (error instanceof ManagedTokenBindingError) {
+        try {
+          await options.beforeManagedTokenQuarantine?.();
+          if (closed) {
+            return;
+          }
+          if (observedBaseSnapshot === undefined) {
+            throw managementError(
+              "team authorization base snapshot was not observed",
+              409
+            );
+          }
+          await quarantineWatchedManagedTokenState(
+            normalizedPath,
+            observedBaseSnapshot,
+            observedSidecarSnapshot,
+            async () => {
+              const recoveryGeneration =
+                teamAuthorizationConfigGeneration(initialConfig);
+              const recoveredConfig =
+                await readStableMergedTeamAuthorizationConfig(normalizedPath);
+              await options.beforeManagedTokenRecoveryPublish?.();
+              if (closed) {
+                return;
+              }
+              if (
+                recoveryGeneration
+                === teamAuthorizationConfigGeneration(initialConfig)
+              ) {
+                replaceTeamAuthorizationMembers(
+                  initialConfig,
+                  recoveredConfig.members
+                );
+                cancelRetry();
+                recovered = true;
+              }
+            }
+          );
+        } catch (quarantineError) {
+          if (closed) {
+            return;
+          }
+          options.onError?.(
+            quarantineError instanceof Error
+              ? quarantineError
+              : new Error(String(quarantineError))
+          );
+        }
+      }
       if (closed) {
         return;
       }
-      let observedBaseSnapshot: string | undefined;
-      let observedSidecarSnapshot: string | undefined;
-      const generationBeforeRead = teamAuthorizationConfigGeneration(initialConfig);
-      try {
-        const [baseSnapshot, sidecarSnapshot] = await Promise.all([
-          readFile(normalizedPath, "utf8"),
-          readOptionalFile(sidecarPath)
-        ]);
-        observedBaseSnapshot = baseSnapshot;
-        observedSidecarSnapshot = sidecarSnapshot;
-        const nextConfig = mergeManagedTokenState(
-          parseRequiredTeamAuthorizationConfig(baseSnapshot),
-          parseManagedTokenState(sidecarSnapshot)
-        );
-        cancelRetry();
-        if (
-          generationBeforeRead
-          !== teamAuthorizationConfigGeneration(initialConfig)
-        ) {
-          return;
-        }
-        replaceTeamAuthorizationMembers(initialConfig, nextConfig.members);
-      } catch (error) {
-        replaceTeamAuthorizationMembers(initialConfig, []);
-        let recovered = false;
-        if (error instanceof ManagedTokenBindingError) {
-          try {
-            await options.beforeManagedTokenQuarantine?.();
-            if (closed) {
-              return;
-            }
-            if (observedBaseSnapshot === undefined) {
-              throw managementError(
-                "team authorization base snapshot was not observed",
-                409
-              );
-            }
-            await quarantineWatchedManagedTokenState(
-              normalizedPath,
-              observedBaseSnapshot,
-              observedSidecarSnapshot,
-              async () => {
-                const recoveryGeneration =
-                  teamAuthorizationConfigGeneration(initialConfig);
-                const recoveredConfig =
-                  await readStableMergedTeamAuthorizationConfig(normalizedPath);
-                await options.beforeManagedTokenRecoveryPublish?.();
-                if (closed) {
-                  return;
-                }
-                if (
-                  recoveryGeneration
-                  === teamAuthorizationConfigGeneration(initialConfig)
-                ) {
-                  replaceTeamAuthorizationMembers(
-                    initialConfig,
-                    recoveredConfig.members
-                  );
-                  cancelRetry();
-                  recovered = true;
-                }
-              }
-            );
-          } catch (quarantineError) {
-            if (closed) {
-              return;
-            }
-            options.onError?.(
-              quarantineError instanceof Error
-                ? quarantineError
-                : new Error(String(quarantineError))
-            );
-          }
-        }
-        if (closed) {
-          return;
-        }
-        options.onError?.(error instanceof Error ? error : new Error(String(error)));
-        if (!recovered) {
-          scheduleRetry();
-        }
+      options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      if (!recovered) {
+        scheduleRetry();
       }
-    });
+    }
+  }
+
+  function reload(): void {
+    reloadTail = reloadTail.then(() => performReload());
+  }
+
+  function scheduleRegistrationVerification(): void {
+    registrationVerificationTimer = setTimeout(() => {
+      registrationVerificationTimer = undefined;
+      reloadTail = reloadTail.then(() => performReload({
+        baseSnapshot: initialBaseSnapshot,
+        sidecarSnapshot: initialSidecarSnapshot
+      }));
+    }, pollIntervalMs);
+    registrationVerificationTimer.unref();
   }
   teamAuthorizationConfigReloads.set(initialConfig, () => reloadTail);
   const listener: StatsListener = () => reload();
@@ -2506,6 +2538,7 @@ export async function watchTeamAuthorizationConfigFile(
   };
   watchFile(normalizedPath, watchOptions, listener);
   watchFile(sidecarPath, watchOptions, listener);
+  scheduleRegistrationVerification();
 
   return {
     config: initialConfig,
@@ -2524,6 +2557,10 @@ export async function watchTeamAuthorizationConfigFile(
       }
       closed = true;
       cancelRetry();
+      if (registrationVerificationTimer !== undefined) {
+        clearTimeout(registrationVerificationTimer);
+        registrationVerificationTimer = undefined;
+      }
       teamAuthorizationConfigReloads.delete(initialConfig);
       unwatchFile(normalizedPath, listener);
       unwatchFile(sidecarPath, listener);

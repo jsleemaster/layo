@@ -8,7 +8,7 @@
     "dev": "NODE_OPTIONS=--conditions=development tsx watch src/index.ts",
     "mcp": "NODE_OPTIONS=--conditions=development tsx src/mcp.ts",
     "start": "node dist/index.js",
-    "test": "vitest run",
+    "test": "NODE_OPTIONS=--conditions=development vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
     "authorization:migrate": "NODE_OPTIONS=--conditions=development tsx src/team-authorization-postgres.ts",

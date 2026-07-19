@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-16
+Last audited: 2026-07-18
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,7 +29,51 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-None. The next maturity goal must come from the current Penpot benchmark's highest-priority open gap.
+`2026-07-16-penpot-file-version-visual-preview.md` is active. It adapts
+Penpot's saved-version view-only workspace by rendering the complete persisted
+snapshot on Layo's canvas without replacing or mutating the live editor state.
+The exact RED requires a named read-only banner, visually distinct saved canvas
+pixels, inert mutation entry points, safe Exit, and recovery-safe Restore. The
+review follow-up also requires complete Yjs document fields, local-only
+collaborative Undo/Redo, one ordered persistence queue per file, marker-owned E2E
+storage across HTTP/browser/MCP, reference-safe cancelled-upload cleanup,
+base-aware complete-snapshot merge with explicit reorder and insertion-placement
+conflicts, per-ID Yjs collections, a Restore mutation barrier, storage-root
+asset-reference exclusion, stale project/version response rejection, and
+compensation for an already-started stale current-project persistence. PR CI also
+requires a post-registration authorization snapshot comparison so a missed first
+sidecar event cannot leave cached authentication open without disturbing unchanged
+recoverable startup state. Direct headed verification also requires a pending
+preview request to cancel active canvas sessions and block mutations before its
+version snapshot arrives; pending Escape and Restore reuse the same cancellation
+boundary. A collaborative Restore must also persist the final Yjs document through
+the base-aware complete-snapshot route before reporting success. It captures the
+request-start Yjs document and uses the shared stable-id 3-way merge contract against
+the response-time room state, so relay restart or fresh server reads cannot discard
+independent concurrent edits. The request-start snapshot is taken only when Restore
+actually dequeues after older writes. Same-field conflicts and changed collaboration
+session identities compensate with the current room/replacement document and abort
+instead of overwriting current work or a different room. Each held snapshot write
+rechecks those boundaries and advances same-session changes through a bounded
+base-aware stabilization loop before Restore may report success. The exact
+pre-Restore document remains available until completion so a project switch restores
+the already-mutated source file and a replacement session cannot inherit a transient
+restored snapshot. Every stabilization write consumes its actual server merge result,
+converges independent server-only changes into Yjs, and advances that result as the
+next persistence base. Recovery reverse-merges only the Restore-applied delta, publishes
+that rollback into the old room before any project transition, and blocks project
+create/import/duplicate/delete mutations until compensation finishes. Compensation PUT
+responses also re-enter the bounded room/server convergence loop. Failed compensation
+remains fail-closed, and a transition token spans preparation, server mutation, and load
+so a new Restore cannot enter the middle of that transaction. Pure navigation stays
+replaceable for latest-selection wins, and active team credentials remain separate from
+the document-specific session so switching files neither joins a private relay room nor
+loses the explicit share path. Library SSE credentials use that retained team context,
+but only after an exact project-team ID match; private and different-team files receive
+no retained token. The same scoped context preserves structured team mentions after the
+document session is removed, and the retained team name follows the same exact match.
+Target-project HTTP refreshes receive an explicitly computed credential, and polling
+restarts whenever sharing, team identity, or token scope changes.
 
 ## Completed Plans
 

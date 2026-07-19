@@ -43,6 +43,137 @@ describe("collaborative design document", () => {
     document.destroy();
   });
 
+  test("round-trips every top-level design-system field through Yjs", () => {
+    const source = sampleDocument();
+    const sourceNode = structuredClone(source.pages[0]!.children[0]!);
+    source.tokens = [
+      { id: "token-color", name: "Brand/Primary", type: "color", value: "#2563eb", set_id: "core" }
+    ];
+    source.token_sets = [{ id: "core", name: "Core", enabled: true }];
+    source.token_themes = [
+      { id: "theme-light", name: "Light", group: "Brand", enabled: true, token_set_ids: ["core"] }
+    ];
+    source.styles = [{ id: "style-brand", name: "Brand", type: "color", value: "#2563eb" }];
+    source.components = [
+      {
+        id: "component-headline",
+        name: "Headline",
+        source_node: sourceNode,
+        variants: []
+      }
+    ];
+    source.code_mappings = [
+      {
+        id: "mapping-headline",
+        component_id: "component-headline",
+        package_name: "@layo/ui",
+        import_path: "@layo/ui/headline",
+        export_name: "Headline",
+        import_mode: "named",
+        props: [],
+        variant_props: [],
+        docs_url: "https://example.com/headline"
+      }
+    ];
+
+    const first = createCollaborativeDesignDocument({ document: source });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    expect(second.getDocument()).toEqual(source);
+
+    second.transact("rename-design-system", (current) => ({
+      ...current,
+      tokens: current.tokens?.map((token) => ({ ...token, name: "Brand/Interactive" })),
+      styles: current.styles?.map((style) => ({ ...style, name: "Interactive" })),
+      code_mappings: current.code_mappings?.map((mapping) => ({
+        ...mapping,
+        export_name: "InteractiveHeadline"
+      }))
+    }));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
+
+    expect(first.getDocument()).toEqual(second.getDocument());
+
+    first.destroy();
+    second.destroy();
+  });
+
+  test("preserves document version metadata through Yjs updates", () => {
+    const source = { ...sampleDocument(), version: 7 };
+    const first = createCollaborativeDesignDocument({ document: source });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    expect((second.getDocument() as RendererDocument & { version?: number }).version).toBe(7);
+
+    first.destroy();
+    second.destroy();
+  });
+
+  test("merges concurrent additions to the same design-system collection", () => {
+    const source = sampleDocument();
+    source.tokens = [];
+    const first = createCollaborativeDesignDocument({ document: source });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    first.transact("add-primary-token", (current) => ({
+      ...current,
+      tokens: [
+        ...(current.tokens ?? []),
+        { id: "token-primary", name: "Brand/Primary", type: "color", value: "#2563eb" }
+      ]
+    }));
+    second.transact("add-secondary-token", (current) => ({
+      ...current,
+      tokens: [
+        ...(current.tokens ?? []),
+        { id: "token-secondary", name: "Brand/Secondary", type: "color", value: "#16a34a" }
+      ]
+    }));
+
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
+
+    expect(first.getDocument().tokens?.map((token) => token.id).sort()).toEqual([
+      "token-primary",
+      "token-secondary"
+    ]);
+    expect(second.getDocument().tokens).toEqual(first.getDocument().tokens);
+
+    first.destroy();
+    second.destroy();
+  });
+
+  test("deduplicates the order when collaborators concurrently add the same collection id", () => {
+    const source = sampleDocument();
+    source.tokens = [];
+    const first = createCollaborativeDesignDocument({ document: source });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    for (const document of [first, second]) {
+      document.transact("add-shared-token", (current) => ({
+        ...current,
+        tokens: [
+          ...(current.tokens ?? []),
+          { id: "token-primary", name: "Brand/Primary", type: "color", value: "#2563eb" }
+        ]
+      }));
+    }
+
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+    Y.applyUpdate(first.ydoc, Y.encodeStateAsUpdate(second.ydoc));
+
+    expect(first.getDocument().tokens?.map((token) => token.id)).toEqual(["token-primary"]);
+    expect(second.getDocument().tokens?.map((token) => token.id)).toEqual(["token-primary"]);
+
+    first.destroy();
+    second.destroy();
+  });
+
   test("applies transactions and notifies subscribers once", () => {
     const document = createCollaborativeDesignDocument({ document: sampleDocument() });
     const updates: RendererDocument[] = [];
@@ -141,6 +272,89 @@ describe("collaborative design document", () => {
 
     first.destroy();
     second.destroy();
+  });
+
+  test("undoes only local transactions while preserving later remote edits", () => {
+    const first = createCollaborativeDesignDocument({ document: sampleDocument() });
+    const second = createCollaborativeDesignDocument({ ydoc: new Y.Doc() });
+    Y.applyUpdate(second.ydoc, Y.encodeStateAsUpdate(first.ydoc));
+
+    first.ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin !== "from-second") {
+        Y.applyUpdate(second.ydoc, update, "from-first");
+      }
+    });
+    second.ydoc.on("update", (update: Uint8Array, origin: unknown) => {
+      if (origin !== "from-first") {
+        Y.applyUpdate(first.ydoc, update, "from-second");
+      }
+    });
+
+    first.transact("move-local", (current) => {
+      const next = structuredClone(current);
+      next.pages[0]!.children[0]!.transform.x = 96;
+      return next;
+    });
+    second.transact("edit-remote", (current) => {
+      const next = structuredClone(current);
+      const textNode = next.pages[0]!.children[0]!;
+      if (textNode.content.type !== "text") {
+        throw new Error("missing text node");
+      }
+      textNode.content.value = "Remote headline";
+      return next;
+    });
+
+    expect(first.undo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 32 },
+      content: { type: "text", value: "Remote headline" }
+    });
+    expect(second.getDocument().pages[0]?.children[0]).toMatchObject({
+      transform: { x: 32 },
+      content: { type: "text", value: "Remote headline" }
+    });
+
+    expect(first.redo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 96 },
+      content: { type: "text", value: "Remote headline" }
+    });
+    expect(second.getDocument().pages[0]?.children[0]).toMatchObject({
+      transform: { x: 96 },
+      content: { type: "text", value: "Remote headline" }
+    });
+
+    first.destroy();
+    second.destroy();
+  });
+
+  test("keeps system convergence outside local undo and redo history", () => {
+    const document = createCollaborativeDesignDocument({ document: sampleDocument() });
+
+    document.transact("move-local", (current) => {
+      const next = structuredClone(current);
+      next.pages[0]!.children[0]!.transform.x = 96;
+      return next;
+    });
+    document.transact("server-convergence", (current) => {
+      const next = structuredClone(current);
+      const textNode = next.pages[0]!.children[0]!;
+      if (textNode.content.type !== "text") {
+        throw new Error("missing text node");
+      }
+      textNode.content.value = "Server headline";
+      return next;
+    }, { undoable: false });
+
+    expect(document.undo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 32 },
+      content: { type: "text", value: "Server headline" }
+    });
+    expect(document.redo()?.pages[0]?.children[0]).toMatchObject({
+      transform: { x: 96 },
+      content: { type: "text", value: "Server headline" }
+    });
+
+    document.destroy();
   });
 
   test("merges concurrent edits to different geometry axes on the same node", () => {

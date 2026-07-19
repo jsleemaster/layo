@@ -5,6 +5,7 @@ import {
   createPresenceState,
   summarizeAwarenessStates,
   type CollaborationPresence,
+  type CollaborativeTransactionOptions,
   type TeamManifest
 } from "@layo/collaboration";
 import { Awareness } from "y-protocols/awareness";
@@ -41,7 +42,13 @@ export interface CollabDocumentSession {
   documentId: string;
   readonly status: CollabConnectionStatus;
   getDocument(): RendererDocument;
-  transact(label: string, apply: (document: RendererDocument) => RendererDocument): void;
+  transact(
+    label: string,
+    apply: (document: RendererDocument) => RendererDocument,
+    options?: CollaborativeTransactionOptions
+  ): void;
+  undo(): RendererDocument | null;
+  redo(): RendererDocument | null;
   subscribe(listener: (document: RendererDocument) => void): () => void;
   subscribeStatus(listener: (status: CollabConnectionStatus) => void): () => void;
   subscribePresence(listener: (presence: CollaborationPresence[]) => void): () => void;
@@ -143,6 +150,8 @@ export function createCollabDocumentSession(
     },
     getDocument: document.getDocument,
     transact: document.transact,
+    undo: document.undo,
+    redo: document.redo,
     subscribe: document.subscribe,
     subscribeStatus(listener) {
       statusListeners.add(listener);

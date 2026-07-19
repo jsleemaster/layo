@@ -135,10 +135,10 @@ Run collaboration e2e against the TypeScript relay:
 pnpm test:e2e:collab
 ```
 
-Run the encrypted collaboration e2e against the Rust relay by starting `apps/server`, `apps/web`, and `pnpm dev:collab:rust`, then:
+Run the encrypted collaboration e2e by starting `pnpm dev:collab:rust`; the isolated runner starts `apps/server` and `apps/web`, then:
 
 ```bash
-pnpm exec playwright test apps/web/e2e/collaboration.spec.ts --grep "encrypted relay team syncs document edits without exporting the passphrase" --reporter=line
+node scripts/run-e2e.mjs -- apps/web/e2e/collaboration.spec.ts --grep "encrypted relay team syncs document edits without exporting the passphrase" --reporter=line
 ```
 
 ## AI Editing Workflow

@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 test("non-destructive boolean controls preserve operands through every operation, undo, redo, and detach", async ({ page }) => {

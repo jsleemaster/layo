@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 test("Inspector manages an ordered multi-stroke stack and persists it across reload", async ({ page }) => {

@@ -320,7 +320,8 @@ describe("team authorization managed token sidecar", () => {
   test.each([
     {
       label: "malformed JSON",
-      content: "{not-json"
+      content: "{not-json",
+      holdQuarantine: false
     },
     {
       label: "plaintext credential",
@@ -331,7 +332,8 @@ describe("team authorization managed token sidecar", () => {
           tokens: [{ id: "bad", name: "Bad", token: "plaintext" }],
           revocations: []
         }]
-      })
+      }),
+      holdQuarantine: false
     },
     {
       label: "conflicting token id",
@@ -346,28 +348,57 @@ describe("team authorization managed token sidecar", () => {
           }],
           revocations: []
         }]
-      })
+      }),
+      holdQuarantine: true
     }
   ])("fails cached authentication closed for $label sidecar and recovers after repair", async ({
-    content
+    content,
+    holdQuarantine
   }) => {
-    const setup = await fixture(baseMembers());
+    let quarantineStarted = false;
+    let releaseQuarantine = () => {};
+    const quarantineRelease = new Promise<void>((resolve) => {
+      releaseQuarantine = resolve;
+    });
+    const setup = await fixture(
+      baseMembers(),
+      10,
+      holdQuarantine
+        ? {
+            beforeManagedTokenQuarantine: async () => {
+              quarantineStarted = true;
+              await quarantineRelease;
+            }
+          }
+        : {}
+    );
 
     try {
       await writeFile(sidecarPath(setup.basePath), content, "utf8");
-      await waitFor(() => authenticationFails(
-        setup.source.config,
-        "owner-user",
-        "legacy-owner-token"
-      ));
+      if (holdQuarantine) {
+        await waitFor(() => quarantineStarted);
+        expect(authenticationFails(
+          setup.source.config,
+          "owner-user",
+          "legacy-owner-token"
+        )).toBe(true);
+      } else {
+        await waitFor(() => authenticationFails(
+          setup.source.config,
+          "owner-user",
+          "legacy-owner-token"
+        ));
+      }
 
       await rm(sidecarPath(setup.basePath), { force: true });
+      releaseQuarantine();
       await waitFor(() => !authenticationFails(
         setup.source.config,
         "owner-user",
         "legacy-owner-token"
       ));
     } finally {
+      releaseQuarantine();
       await setup.close();
     }
   });
@@ -616,4 +647,3 @@ function baseMembers(): string {
 function hash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
-

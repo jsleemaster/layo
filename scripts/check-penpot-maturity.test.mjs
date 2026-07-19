@@ -70,7 +70,7 @@ test("remote-merged plans archive while local cleanup exceptions remain explicit
   assert.match(plan, /exited 134 even through \`\/usr\/bin\/git\`/);
   assert.match(plan, /- \[ \] Resolve the retained local cleanup exception/);
   assert.match(status, /broken local[\s\S]*Completed-plan cleanup evidence/);
-  assert.match(activePlan, /None\./);
+  assert.ok((activePlan.match(/`[^`\n]+\.md`/g) ?? []).length <= 1);
   assert.doesNotMatch(activePlan, /penpot-token-mcp-ui|penpot-shared-authorization-generation|penpot-agent-reviewed-token-mutation/);
   assert.match(completedPlans, /2026-07-14-penpot-token-mcp-ui\.md/);
   assert.match(completedPlans, /2026-07-15-penpot-shared-authorization-generation\.md/);

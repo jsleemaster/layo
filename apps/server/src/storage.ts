@@ -1,8 +1,13 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import {
+  DocumentSnapshotConflictError,
+  mergeConcurrentDocumentSnapshots as mergeRendererDocumentSnapshots
+} from "@layo/renderer";
 import {
   applyAgentCommandsToDocument,
   createAgentBatchResult,
@@ -52,6 +57,7 @@ export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+z
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
+const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
 
@@ -297,6 +303,24 @@ async function withStoragePathMutationLock<T>(
       }
     }
   }
+}
+
+async function withAssetReferenceMutationLock<T>(
+  storagePath: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const normalizedPath = path.resolve(storagePath);
+  const activePaths = assetReferenceMutationContext.getStore();
+  if (activePaths?.has(normalizedPath)) {
+    return operation();
+  }
+
+  return withStoragePathMutationLock(storagePath, () =>
+    assetReferenceMutationContext.run(
+      new Set([...(activePaths ?? []), normalizedPath]),
+      operation
+    )
+  );
 }
 
 export interface LayoutSpacing {
@@ -937,6 +961,12 @@ export interface StoredAssetData extends StoredAsset {
   data: Buffer;
 }
 
+export interface DeleteAssetResult {
+  assetId: string;
+  deleted: boolean;
+  reason: "unreferenced" | "referenced" | "missing";
+}
+
 export interface FileArchiveManifest {
   schemaVersion: 1;
   format: "layo.file.archive";
@@ -1389,6 +1419,20 @@ export class FileStorage {
   private assetMetadataPathFor(assetId: string) {
     assertSafeStorageId(assetId);
     return path.join(this.assetsDir, `${assetId}.json`);
+  }
+
+  private assetReferenceMutationPath() {
+    return path.join(this.filesDir, ".asset-references");
+  }
+
+  private async withFileMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
+    );
   }
 
   private async adoptPriorDefaultStoreIfNeeded() {
@@ -1923,10 +1967,41 @@ export class FileStorage {
   }
 
   async writeFile(fileId: string, document: DesignFile): Promise<DesignFile> {
-    return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => this.writeFileWithoutMutationLock(fileId, document)
+    return this.withFileMutationLock(fileId, () =>
+      this.writeFileWithoutMutationLock(fileId, document)
     );
+  }
+
+  async replaceFileSnapshot(
+    fileId: string,
+    document: DesignFile,
+    baseDocument?: DesignFile
+  ): Promise<DesignFile> {
+    if (!document || typeof document !== "object" || !Array.isArray(document.pages)) {
+      throw inputValidationError("document snapshot is required");
+    }
+    if (document.id !== fileId) {
+      throw inputValidationError("document snapshot id must match the target file");
+    }
+    if (baseDocument && baseDocument.id !== fileId) {
+      throw inputValidationError("base document snapshot id must match the target file");
+    }
+
+    return this.withFileMutationLock(fileId, async () => {
+      const current = await this.readFile(fileId);
+      const snapshot = baseDocument
+        ? mergeConcurrentDocumentSnapshots(baseDocument, document, current)
+        : structuredClone(document);
+      const validation = validateDesignFile(snapshot);
+      if (!validation.ok) {
+        throw inputValidationError(
+          `document snapshot is invalid: ${validation.issues.map((issue) => issue.message).join("; ")}`
+        );
+      }
+      await this.writeFileWithoutMutationLock(fileId, snapshot);
+      await this.recordFileEditForAutoVersion(fileId, snapshot);
+      return snapshot;
+    });
   }
 
   private async mutateFile<T>(
@@ -1934,7 +2009,7 @@ export class FileStorage {
     mutation: (document: DesignFile) => Promise<T> | T,
     recordAutoVersion = true
   ): Promise<T> {
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const document = await this.readFile(fileId);
       const result = await mutation(document);
       await this.writeFileWithoutMutationLock(fileId, document);
@@ -2841,9 +2916,8 @@ export class FileStorage {
   ): Promise<ImportedLibraryRegistryItem> {
     return withStoragePathMutationLock(
       this.librarySubscriptionsPath(),
-      () => withStoragePathMutationLock(
-        this.filePathFor(fileId),
-        () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      () => this.withFileMutationLock(fileId, () =>
+        this.updateLibraryRegistryItemLocked(fileId, libraryId)
       )
     );
   }
@@ -3063,8 +3137,10 @@ export class FileStorage {
     fileId: string,
     input: SaveFileVersionInput = {}
   ): Promise<StoredFileVersionSummary> {
-    const document = await this.readFile(fileId);
-    return this.writeFileVersion(fileId, document, input);
+    return this.withFileMutationLock(fileId, async () => {
+      const document = await this.readFile(fileId);
+      return this.writeFileVersion(fileId, document, input);
+    });
   }
 
   async readFileVersion(fileId: string, versionId: string): Promise<StoredFileVersion> {
@@ -3114,7 +3190,7 @@ export class FileStorage {
 
   async restoreFileVersion(fileId: string, versionId: string): Promise<RestoreFileVersionResult> {
     const restoredVersion = await this.readFileVersion(fileId, versionId);
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const currentDocument = await this.readFile(fileId);
       const recoveryVersion = await this.writeFileVersion(fileId, currentDocument, {
         message: "복원 전 자동 저장",
@@ -3582,6 +3658,47 @@ export class FileStorage {
     return { ...asset, data };
   }
 
+  private async isAssetReferenced(assetId: string): Promise<boolean> {
+    const files = await this.listFiles();
+    for (const file of files) {
+      const document = await this.readFile(file.id);
+      if (collectImageAssetIds(document).includes(assetId)) {
+        return true;
+      }
+      const versions = await this.listFileVersions(file.id);
+      for (const version of versions) {
+        const snapshot = await this.readFileVersion(file.id, version.versionId);
+        if (collectImageAssetIds(snapshot.document).includes(assetId)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async deleteAssetIfUnreferenced(assetId: string): Promise<DeleteAssetResult> {
+    assertSafeStorageId(assetId);
+    await this.adoptPriorDefaultStoreIfNeeded();
+    return withAssetReferenceMutationLock(
+      this.assetReferenceMutationPath(),
+      () => withStoragePathMutationLock(this.assetMetadataPathFor(assetId), async () => {
+        const assetPath = this.assetPathFor(assetId);
+        const metadataPath = this.assetMetadataPathFor(assetId);
+        if (!(await pathExists(assetPath)) && !(await pathExists(metadataPath))) {
+          return { assetId, deleted: false, reason: "missing" };
+        }
+        if (await this.isAssetReferenced(assetId)) {
+          return { assetId, deleted: false, reason: "referenced" };
+        }
+
+        await rm(assetPath, { force: true });
+        await rm(metadataPath, { force: true });
+        await syncDirectory(this.assetsDir);
+        return { assetId, deleted: true, reason: "unreferenced" };
+      })
+    );
+  }
+
   async listComponents(fileId: string): Promise<ComponentDefinition[]> {
     const document = await this.readFile(fileId);
     return document.components ?? [];
@@ -3827,7 +3944,7 @@ export class FileStorage {
       return createAgentBatchResult(fileId, before, preview, input, false, changedNodeIds);
     }
 
-    return withStoragePathMutationLock(this.filePathFor(fileId), async () => {
+    return this.withFileMutationLock(fileId, async () => {
       const before = await this.readFile(fileId);
       if (input.collaboration) {
         const collaborativeResult = await applyAgentCommandsToCollaboration({
@@ -4537,6 +4654,21 @@ function inputValidationError(message: string) {
   error.code = INPUT_VALIDATION_ERROR_CODE;
   error.statusCode = 400;
   return error;
+}
+
+function mergeConcurrentDocumentSnapshots(
+  base: DesignFile,
+  local: DesignFile,
+  current: DesignFile
+): DesignFile {
+  try {
+    return mergeRendererDocumentSnapshots(base, local, current);
+  } catch (error) {
+    if (error instanceof DocumentSnapshotConflictError) {
+      throw inputValidationError(error.message);
+    }
+    throw error;
+  }
 }
 
 function parseCodeComponentMapping(input: unknown): CodeComponentMapping {
@@ -5440,6 +5572,14 @@ function collectImageAssetIds(document: DesignFile): string[] {
   for (const root of document.pages.flatMap((page) => page.children)) {
     collectImageAssetIdsFromNode(root, assetIds);
   }
+  for (const component of document.components ?? []) {
+    collectImageAssetIdsFromNode(component.source_node, assetIds);
+    for (const variant of component.variants) {
+      if (variant.source_node) {
+        collectImageAssetIdsFromNode(variant.source_node, assetIds);
+      }
+    }
+  }
   return [...assetIds].sort();
 }
 
@@ -5447,6 +5587,11 @@ function collectComponentImageAssetIds(components: ComponentDefinition[]): strin
   const assetIds = new Set<string>();
   for (const component of components) {
     collectImageAssetIdsFromNode(component.source_node, assetIds);
+    for (const variant of component.variants) {
+      if (variant.source_node) {
+        collectImageAssetIdsFromNode(variant.source_node, assetIds);
+      }
+    }
   }
   return [...assetIds].sort();
 }

@@ -1,9 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { resetE2eStorage } from "./test-storage";
 
 test.beforeEach(async () => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 });
 
 test("closed path alignment paints distinct canvas regions and normalizes open paths", async ({ page }) => {
@@ -126,6 +126,19 @@ test("closed path alignment paints distinct canvas regions and normalizes open p
   await expect(position).toHaveValue("outside");
   await page.keyboard.press("Control+Shift+z");
   await expect(position).toHaveValue("inside");
+  await expect
+    .poll(async () => {
+      const persistedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(persistedResponse.ok()).toBeTruthy();
+      const persisted = (await persistedResponse.json()).file;
+      const findNode = (nodes: any[]): any =>
+        nodes.reduce<any | null>(
+          (found, node) => found ?? (node.id === "closed-compound" ? node : findNode(node.children ?? [])),
+          null
+        );
+      return findNode(persisted.pages[0].children)?.style?.strokes?.[0]?.position;
+    })
+    .toBe("inside");
   await page.reload();
   await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "닫힌 복합 경로" }).click();

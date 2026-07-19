@@ -5,9 +5,19 @@ export interface CollaborativeDesignDocument {
   ydoc: Y.Doc;
   getDocument(): RendererDocument;
   setDocument(document: RendererDocument, origin?: unknown): void;
-  transact(label: string, apply: (document: RendererDocument) => RendererDocument): void;
+  transact(
+    label: string,
+    apply: (document: RendererDocument) => RendererDocument,
+    options?: CollaborativeTransactionOptions
+  ): void;
+  undo(): RendererDocument | null;
+  redo(): RendererDocument | null;
   subscribe(listener: (document: RendererDocument) => void): () => void;
   destroy(): void;
+}
+
+export interface CollaborativeTransactionOptions {
+  undoable?: boolean;
 }
 
 const DOCUMENT_MAP = "design";
@@ -15,7 +25,15 @@ const DOCUMENT_JSON = "documentJson";
 const DOCUMENT_META = "documentMeta";
 const PAGES = "pages";
 const NODES = "nodes";
-const COMPONENTS = "components";
+const DOCUMENT_COLLECTION_FIELDS = [
+  "tokens",
+  "token_sets",
+  "token_themes",
+  "styles",
+  "components",
+  "code_mappings"
+] as const;
+type DocumentCollectionField = (typeof DOCUMENT_COLLECTION_FIELDS)[number];
 
 type YNodeMap = Y.Map<unknown>;
 interface StoredPage {
@@ -54,17 +72,43 @@ export function createCollaborativeDesignDocument(input: {
   } else if (root.has(DOCUMENT_JSON) && !hasGranularDocument(ydoc)) {
     setDocument(parseDesignDocument(root.get(DOCUMENT_JSON)), input.origin);
   }
+  const localOrigin = { label: "editor-transaction" };
+  const systemOrigin = { label: "system-transaction" };
+  const undoManager = new Y.UndoManager(root, {
+    captureTimeout: 0,
+    trackedOrigins: new Set([localOrigin])
+  });
 
   return {
     ydoc,
     getDocument,
     setDocument,
-    transact(label, apply) {
+    transact(label, apply, options) {
       const before = getDocument();
       const nextDocument = parseDesignDocument(apply(structuredClone(before)));
+      const origin = options?.undoable === false ? systemOrigin : localOrigin;
+      origin.label = label;
+      undoManager.stopCapturing();
       ydoc.transact(() => {
         applyDocumentPatch(ydoc, before, nextDocument);
-      }, label);
+      }, origin);
+      undoManager.stopCapturing();
+    },
+    undo() {
+      if (undoManager.undoStack.length === 0) {
+        return null;
+      }
+      undoManager.stopCapturing();
+      undoManager.undo();
+      return getDocument();
+    },
+    redo() {
+      if (undoManager.redoStack.length === 0) {
+        return null;
+      }
+      undoManager.stopCapturing();
+      undoManager.redo();
+      return getDocument();
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -78,6 +122,7 @@ export function createCollaborativeDesignDocument(input: {
     destroy() {
       root.unobserveDeep(observer);
       listeners.clear();
+      undoManager.destroy();
       ydoc.destroy();
     }
   };
@@ -88,6 +133,7 @@ function writeDocumentToYjs(ydoc: Y.Doc, document: RendererDocument): void {
   const meta = ensureMap(root, DOCUMENT_META);
   meta.set("id", document.id);
   meta.set("name", document.name);
+  setOptionalValue(meta, "version", document.version);
 
   const pages = ensureArray<StoredPage>(root, PAGES);
   pages.delete(0, pages.length);
@@ -113,10 +159,8 @@ function writeDocumentToYjs(ydoc: Y.Doc, document: RendererDocument): void {
     }
   }
 
-  if (document.components) {
-    root.set(COMPONENTS, structuredClone(document.components));
-  } else {
-    root.delete(COMPONENTS);
+  for (const field of DOCUMENT_COLLECTION_FIELDS) {
+    writeDocumentCollection(root, field, document[field]);
   }
   root.delete(DOCUMENT_JSON);
 }
@@ -134,11 +178,10 @@ function applyDocumentPatch(
   if (before.name !== next.name) {
     meta.set("name", next.name);
   }
-  if (!deepEqual(before.components ?? null, next.components ?? null)) {
-    if (next.components) {
-      root.set(COMPONENTS, structuredClone(next.components));
-    } else {
-      root.delete(COMPONENTS);
+  setOptionalIfChanged(meta, "version", before.version, next.version);
+  for (const field of DOCUMENT_COLLECTION_FIELDS) {
+    if (!deepEqual(before[field] ?? null, next[field] ?? null)) {
+      patchDocumentCollection(root, field, before[field], next[field]);
     }
   }
 
@@ -230,9 +273,15 @@ function readDocumentFromYjs(ydoc: Y.Doc): RendererDocument {
       children: page.children.map((nodeId) => readNode(nodes, nodeId))
     }))
   };
-  const components = root.get(COMPONENTS);
-  if (components) {
-    document.components = structuredClone(components as RendererDocument["components"]);
+  if (typeof meta.get("version") === "number") {
+    document.version = meta.get("version") as number;
+  }
+  const mutableDocument = document as unknown as Record<string, unknown>;
+  for (const field of DOCUMENT_COLLECTION_FIELDS) {
+    const value = readDocumentCollection(root, field);
+    if (value !== undefined) {
+      mutableDocument[field] = value;
+    }
   }
   return parseDesignDocument(document);
 }
@@ -319,6 +368,214 @@ function ensureArray<T>(parent: Y.Map<unknown>, key: string): Y.Array<T> {
   const next = new Y.Array<T>();
   parent.set(key, next);
   return next;
+}
+
+function collectionOrderKey(field: DocumentCollectionField): string {
+  return `${field}Order`;
+}
+
+function writeDocumentCollection(
+  root: Y.Map<unknown>,
+  field: DocumentCollectionField,
+  value: Array<{ id: string }> | undefined
+): void {
+  if (value === undefined) {
+    root.delete(field);
+    root.delete(collectionOrderKey(field));
+    return;
+  }
+
+  const items = ensureDocumentCollectionMap(root, field, value);
+  const nextIds = new Set(value.map((item) => item.id));
+  for (const itemId of Array.from(items.keys())) {
+    if (!nextIds.has(itemId)) {
+      items.delete(itemId);
+    }
+  }
+  for (const item of value) {
+    syncObjectMap(getOrCreateCollectionItemMap(items, item.id), item as Record<string, unknown>);
+  }
+
+  const order = ensureArray<string>(root, collectionOrderKey(field));
+  order.delete(0, order.length);
+  if (value.length > 0) {
+    order.insert(0, value.map((item) => item.id));
+  }
+}
+
+function patchDocumentCollection(
+  root: Y.Map<unknown>,
+  field: DocumentCollectionField,
+  before: Array<{ id: string }> | undefined,
+  next: Array<{ id: string }> | undefined
+): void {
+  if (next === undefined) {
+    root.delete(field);
+    root.delete(collectionOrderKey(field));
+    return;
+  }
+
+  const items = ensureDocumentCollectionMap(root, field, before ?? []);
+  const beforeById = new Map((before ?? []).map((item) => [item.id, item]));
+  const nextById = new Map(next.map((item) => [item.id, item]));
+  for (const itemId of beforeById.keys()) {
+    if (!nextById.has(itemId)) {
+      items.delete(itemId);
+    }
+  }
+  for (const item of next) {
+    const beforeItem = beforeById.get(item.id);
+    const itemMap = getOrCreateCollectionItemMap(items, item.id);
+    if (!beforeItem) {
+      syncObjectMap(itemMap, item as Record<string, unknown>);
+      continue;
+    }
+    patchCollectionItem(itemMap, beforeItem as Record<string, unknown>, item as Record<string, unknown>);
+  }
+
+  const order = ensureDocumentCollectionOrder(root, field, (before ?? []).map((item) => item.id));
+  const nextIds = next.map((item) => item.id);
+  const nextIdSet = new Set(nextIds);
+  const currentOrder = order.toArray();
+  for (let index = currentOrder.length - 1; index >= 0; index -= 1) {
+    if (!nextIdSet.has(currentOrder[index]!)) {
+      order.delete(index, 1);
+    }
+  }
+  for (const itemId of nextIds) {
+    const orderedIds = order.toArray();
+    if (orderedIds.includes(itemId)) {
+      continue;
+    }
+    const desiredIndex = nextIds.indexOf(itemId);
+    const nextNeighbor = nextIds
+      .slice(desiredIndex + 1)
+      .find((candidateId) => orderedIds.includes(candidateId));
+    const insertionIndex = nextNeighbor ? orderedIds.indexOf(nextNeighbor) : orderedIds.length;
+    order.insert(insertionIndex, [itemId]);
+  }
+
+  const beforeIds = (before ?? []).map((item) => item.id);
+  const membershipChanged =
+    beforeIds.length !== nextIds.length || beforeIds.some((itemId) => !nextIdSet.has(itemId));
+  if (!membershipChanged && !deepEqual(beforeIds, nextIds)) {
+    order.delete(0, order.length);
+    order.insert(0, nextIds);
+  }
+}
+
+function ensureDocumentCollectionMap(
+  root: Y.Map<unknown>,
+  field: DocumentCollectionField,
+  fallback: Array<{ id: string }>
+): Y.Map<Y.Map<unknown>> {
+  const existing = root.get(field);
+  if (existing instanceof Y.Map) {
+    return existing as Y.Map<Y.Map<unknown>>;
+  }
+
+  const initial = Array.isArray(existing) ? existing : fallback;
+  const items = new Y.Map<Y.Map<unknown>>();
+  root.set(field, items);
+  for (const candidate of initial) {
+    if (!isRecord(candidate) || typeof candidate.id !== "string") {
+      continue;
+    }
+    syncObjectMap(getOrCreateCollectionItemMap(items, candidate.id), candidate);
+  }
+  ensureDocumentCollectionOrder(
+    root,
+    field,
+    initial.flatMap((candidate) =>
+      isRecord(candidate) && typeof candidate.id === "string" ? [candidate.id] : []
+    )
+  );
+  return items;
+}
+
+function ensureDocumentCollectionOrder(
+  root: Y.Map<unknown>,
+  field: DocumentCollectionField,
+  fallback: string[]
+): Y.Array<string> {
+  const key = collectionOrderKey(field);
+  const existing = root.get(key);
+  if (existing instanceof Y.Array) {
+    return existing as Y.Array<string>;
+  }
+  const order = new Y.Array<string>();
+  root.set(key, order);
+  if (fallback.length > 0) {
+    order.insert(0, fallback);
+  }
+  return order;
+}
+
+function getOrCreateCollectionItemMap(
+  items: Y.Map<Y.Map<unknown>>,
+  itemId: string
+): Y.Map<unknown> {
+  const existing = items.get(itemId);
+  if (existing instanceof Y.Map) {
+    return existing;
+  }
+  const itemMap = new Y.Map<unknown>();
+  items.set(itemId, itemMap);
+  return itemMap;
+}
+
+function patchCollectionItem(
+  itemMap: Y.Map<unknown>,
+  before: Record<string, unknown>,
+  next: Record<string, unknown>
+): void {
+  for (const key of new Set([...Object.keys(before), ...Object.keys(next)])) {
+    if (!(key in next)) {
+      itemMap.delete(key);
+      continue;
+    }
+    if (!deepEqual(before[key], next[key])) {
+      itemMap.set(key, structuredClone(next[key]));
+    }
+  }
+}
+
+function readDocumentCollection(
+  root: Y.Map<unknown>,
+  field: DocumentCollectionField
+): unknown[] | undefined {
+  const value = root.get(field);
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!(value instanceof Y.Map)) {
+    return structuredClone(value as unknown[]);
+  }
+
+  const items = value as Y.Map<Y.Map<unknown>>;
+  const order = root.get(collectionOrderKey(field));
+  const orderedIds = order instanceof Y.Array
+    ? deduplicateOrderedIds(order.toArray().map(String))
+    : [];
+  const orderedIdSet = new Set(orderedIds);
+  const remainingIds = Array.from(items.keys())
+    .filter((itemId) => !orderedIdSet.has(itemId))
+    .sort();
+  return [...orderedIds, ...remainingIds].flatMap((itemId) => {
+    const item = items.get(itemId);
+    return item instanceof Y.Map ? [readPlainValue(item)] : [];
+  });
+}
+
+function deduplicateOrderedIds(itemIds: string[]): string[] {
+  const seen = new Set<string>();
+  return itemIds.filter((itemId) => {
+    if (seen.has(itemId)) {
+      return false;
+    }
+    seen.add(itemId);
+    return true;
+  });
 }
 
 function getOrCreateNodeMap(nodes: Y.Map<YNodeMap>, nodeId: string): YNodeMap {

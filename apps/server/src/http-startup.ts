@@ -1,4 +1,5 @@
 import { createHttpServer } from "./http.js";
+import { FileStorage } from "./storage.js";
 import {
   createTeamAuthorizationRuntime,
   type TeamAuthorizationRuntime,
@@ -9,6 +10,8 @@ export interface HttpStartupEnvironment
   extends TeamAuthorizationRuntimeEnvironment {
   HOST?: string;
   PORT?: string;
+  // Purpose: allow isolated or persistent operators to choose the document root explicitly.
+  LAYO_STORAGE_DIR?: string;
 }
 
 export interface HttpStartupServer {
@@ -22,7 +25,8 @@ export interface HttpStartupDependencies {
     environment: TeamAuthorizationRuntimeEnvironment
   ) => Promise<TeamAuthorizationRuntime>;
   createServer: (
-    runtime: TeamAuthorizationRuntime
+    runtime: TeamAuthorizationRuntime,
+    storageRoot?: string
   ) => HttpStartupServer;
 }
 
@@ -34,8 +38,8 @@ export interface StartedHttpServer {
 
 const defaultDependencies: HttpStartupDependencies = {
   createAuthorizationRuntime: createTeamAuthorizationRuntime,
-  createServer: (runtime) =>
-    createHttpServer(undefined, {
+  createServer: (runtime, storageRoot) =>
+    createHttpServer(new FileStorage(storageRoot), {
       libraryRegistryAuth: runtime.libraryRegistryAuth,
       libraryRegistryAuthorizationProvider: runtime.authorizationProvider,
       teamAuthorizationManager: runtime.teamAuthorizationManager
@@ -52,7 +56,10 @@ export async function startHttpServer(
   let shutdownPromise: Promise<void> | undefined;
 
   try {
-    server = dependencies.createServer(authorizationRuntime);
+    server = dependencies.createServer(
+      authorizationRuntime,
+      environment.LAYO_STORAGE_DIR?.trim() || undefined
+    );
     server.addHook("onClose", async () => {
       // Purpose: drain authorization work after Fastify stops accepting requests.
       await authorizationRuntime.close();

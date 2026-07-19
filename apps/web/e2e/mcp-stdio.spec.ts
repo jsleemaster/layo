@@ -4,12 +4,39 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { resetE2eStorage } from "./test-storage";
 
 const execFileAsync = promisify(execFile);
+const MCP_STDIO_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "PNPM_HOME",
+  "COREPACK_HOME",
+  "LAYO_STORAGE_DIR",
+  "LAYO_LIBRARY_REGISTRY_MEMBERS_FILE",
+  "LAYO_MCP_USER_ID",
+  "LAYO_MCP_MEMBER_TOKEN"
+] as const;
+
+function mcpStdioEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  // Purpose: keep unrelated CI and deployment credentials out of MCP subprocesses.
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of MCP_STDIO_ENV_ALLOWLIST) {
+    const value = process.env[name];
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+  return { ...environment, ...overrides };
+}
 
 test("stdio MCP edits move a node, create a component instance, and render in the editor", async ({ page }) => {
-  await rm(".layo", { recursive: true, force: true });
-  await rm("apps/server/.layo", { recursive: true, force: true });
+  await resetE2eStorage();
 
   const result = await runStdioMcpEdit();
 
@@ -51,10 +78,15 @@ async function runStdioMcpEdit() {
     const componentId = "mcp-stdio-component";
     const instanceId = "mcp-stdio-instance";
     const client = new Client({ name: "playwright-stdio-mcp", version: "1.0.0" });
+    const environment = {};
+    for (const name of ${JSON.stringify(MCP_STDIO_ENV_ALLOWLIST)}) {
+      if (process.env[name] !== undefined) environment[name] = process.env[name];
+    }
     const transport = new StdioClientTransport({
       command: "pnpm",
       args: ["mcp"],
-      cwd: process.cwd()
+      cwd: process.cwd(),
+      env: environment
     });
 
     function parseToolJson(result) {
@@ -153,6 +185,7 @@ async function runStdioMcpEdit() {
 
   const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: path.join(process.cwd(), "apps/server"),
+    env: mcpStdioEnvironment(),
     maxBuffer: 1024 * 1024
   });
 
@@ -204,9 +237,10 @@ async function runStdioTokenManagement(membersFile) {
     import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
     const client = new Client({ name: "playwright-stdio-token-mcp", version: "1.0.0" });
-    const env = Object.fromEntries(
-      Object.entries(process.env).filter((entry) => typeof entry[1] === "string")
-    );
+    const env = {};
+    for (const name of ${JSON.stringify(MCP_STDIO_ENV_ALLOWLIST)}) {
+      if (process.env[name] !== undefined) env[name] = process.env[name];
+    }
     const transport = new StdioClientTransport({
       command: "pnpm",
       args: ["mcp"],
@@ -243,12 +277,11 @@ async function runStdioTokenManagement(membersFile) {
 
   const { stdout } = await execFileAsync(process.execPath, ["--input-type=module", "-e", script], {
     cwd: path.join(process.cwd(), "apps/server"),
-    env: {
-      ...process.env,
+    env: mcpStdioEnvironment({
       LAYO_LIBRARY_REGISTRY_MEMBERS_FILE: membersFile,
       LAYO_MCP_USER_ID: "owner-user",
       LAYO_MCP_MEMBER_TOKEN: "owner-member-token"
-    },
+    }),
     maxBuffer: 1024 * 1024
   });
 

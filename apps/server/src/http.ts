@@ -27,6 +27,7 @@ import {
   type ComponentVariantArea,
   type CreateAssetInput,
   type DesignNode,
+  type DesignFile,
   type GeometryPatch
 } from "./storage.js";
 
@@ -297,6 +298,10 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     reply.header("Content-Type", asset.mimeType);
     reply.header("Cache-Control", "no-store");
     return reply.send(asset.data);
+  });
+
+  server.delete<{ Params: { assetId: string } }>("/assets/:assetId", async (request) => {
+    return { result: await storage.deleteAssetIfUnreferenced(request.params.assetId) };
   });
 
   server.get("/projects", async () => {
@@ -696,6 +701,20 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Params: { fileId: string } }>("/files/:fileId", async (request) => {
     return { file: await storage.readFile(request.params.fileId) };
   });
+
+  server.put<{
+    Params: { fileId: string };
+    Body: { document: DesignFile; baseDocument?: DesignFile };
+  }>(
+    "/files/:fileId",
+    async (request) => ({
+      file: await storage.replaceFileSnapshot(
+        request.params.fileId,
+        request.body.document,
+        request.body.baseDocument
+      )
+    })
+  );
 
   server.get<{ Params: { fileId: string } }>("/files/:fileId/versions", async (request) => {
     return { versions: await storage.listFileVersions(request.params.fileId) };
