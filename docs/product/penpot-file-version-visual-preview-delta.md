@@ -707,6 +707,15 @@ review threads were resolved. PR #316 squash-merged as
 deleted. Post-merge cleanup removed the clean merged PR #199 worktree and
 retained the user-owned `.playwright-mcp/` state in the primary worktree.
 
+The first MD-cleanup Full Verification run `29671324323` exposed a second
+test-observation race in the authorization close-boundary case. The test claimed
+to assert that `close()` plus `settled()` emitted no later errors, but it required
+the error list for the watcher's entire pre-close lifetime to be empty. A direct
+`writeFile` may legitimately expose a transient truncated base file and trigger a
+pre-close fail-closed parser error. The regression now snapshots the error count
+immediately before `close()` and proves `settled()` adds no new errors after that
+boundary.
+
 ## Remaining Gaps
 
 Multi-page preview navigation, comment edit/delete and visibility preferences,

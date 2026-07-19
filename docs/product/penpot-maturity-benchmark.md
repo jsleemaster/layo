@@ -314,7 +314,9 @@ transition mutation barriers, and last-moment file/team/access-generation checks
 registry and DTCG operations. PR-head CI also exposed a nondeterministic conflicting-token
 sidecar assertion: automatic quarantine could recover between 10 ms polls. The regression
 now holds quarantine while directly proving fail-closed authentication, then repairs and
-releases recovery.
+releases recovery. The MD-cleanup CI then exposed a close-boundary test that incorrectly
+included pre-close parser errors; it now snapshots the error count at `close()` and proves
+`settled()` emits no later errors.
 
 The corrected browser RED passed the historical diff card and failed on the
 missing preview banner. Focused GREEN passed saved/current pixel switching,

@@ -619,14 +619,14 @@ describe("team library authorization", () => {
       releaseQuarantineResolve = resolve;
     });
     await writeFile(configPath, JSON.stringify([removedMember, survivingMember]), "utf8");
-    const closeErrors: Error[] = [];
+    const reloadErrors: Error[] = [];
     const source = await watchTeamAuthorizationConfigFile(configPath, {
       pollIntervalMs: 10,
       beforeManagedTokenQuarantine: async () => {
         quarantineStartedResolve?.();
         await releaseQuarantine;
       },
-      onError: (error) => closeErrors.push(error)
+      onError: (error) => reloadErrors.push(error)
     });
     const manager = createTeamAuthorizationFileManager(configPath, source.config, {
       generateId: () => "removed-managed",
@@ -641,6 +641,7 @@ describe("team library authorization", () => {
       await writeFile(configPath, JSON.stringify([survivingMember]), "utf8");
       await quarantineStarted;
 
+      const errorCountBeforeClose = reloadErrors.length;
       source.close();
       let settled = false;
       const settling = source.settled().then(() => {
@@ -652,7 +653,7 @@ describe("team library authorization", () => {
       releaseQuarantineResolve?.();
       await settling;
       expect(settled).toBe(true);
-      expect(closeErrors).toEqual([]);
+      expect(reloadErrors).toHaveLength(errorCountBeforeClose);
       expect(authenticationSucceeds(
         source.config,
         "surviving-user",
