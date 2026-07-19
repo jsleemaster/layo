@@ -696,7 +696,25 @@ Latest local verification passed:
 - full workspace typecheck, web production build, design rules, Penpot maturity
   rules, and repository script contracts.
 
-Exact PR-head check and merge evidence will be appended before completion.
+Final PR-head verification passed at
+`b35a4f67bf44343583af24641d50036122a1e338`: Full Verification
+`29670879859` completed in 10m28s, and Authorization Audit Archive
+`29670879856`, Authorization Backup `29670879844`, Storage Restore
+`29670879851`, and Retention `29670879833` also passed. Independent
+implementation review and final test-only self-review reported no P0-P2, and all
+review threads were resolved. PR #316 squash-merged as
+`6b9501c61d75179929ef260ad6a8d01f1717dd8d`; its remote feature branch was
+deleted. Post-merge cleanup removed the clean merged PR #199 worktree and
+retained the user-owned `.playwright-mcp/` state in the primary worktree.
+
+The first MD-cleanup Full Verification run `29671324323` exposed a second
+test-observation race in the authorization close-boundary case. The test claimed
+to assert that `close()` plus `settled()` emitted no later errors, but it required
+the error list for the watcher's entire pre-close lifetime to be empty. A direct
+`writeFile` may legitimately expose a transient truncated base file and trigger a
+pre-close fail-closed parser error. The regression now snapshots the error count
+immediately before `close()` and proves `settled()` adds no new errors after that
+boundary.
 
 ## Remaining Gaps
 

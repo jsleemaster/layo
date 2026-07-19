@@ -90,6 +90,7 @@ Run: `node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts -g "file versi
 - [x] Make export-preset browser verification wait for its serialized persistence instead of assuming optimistic render means disk completion.
 - [x] Restrict MCP stdio test subprocesses to an explicit environment allowlist.
 - [x] Hold automatic sidecar quarantine while asserting conflicting-token fail-closed behavior so the CI regression is deterministic.
+- [x] Compare watcher errors across the exact close/settled boundary instead of requiring its pre-close lifetime to be error-free.
 - [x] Run the final complete Playwright CLI suite at 230/230 and the collaboration suite at 8/8.
 
 ### Task 5: Document, review, PR, and merge
@@ -104,5 +105,17 @@ Run: `node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts -g "file versi
 - [x] Record RED/GREEN evidence, current Penpot source, exact product delta, and remaining risks.
 - [x] Obtain independent exact-head code review and resolve every actionable finding.
 - [x] Open the PR with failure mode, verification, and deliberate divergence.
-- [ ] Merge only after exact-head checks pass.
-- [ ] Run post-merge cleanup and publish the completed-plan MD cleanup state.
+- [x] Merge only after exact-head checks pass.
+- [x] Run post-merge cleanup and publish the completed-plan MD cleanup state.
+
+### Completion Evidence
+
+- Final head `b35a4f67bf44343583af24641d50036122a1e338` passed Full Verification
+  `29670879859` in 10m28s plus Authorization Audit Archive `29670879856`,
+  Authorization Backup `29670879844`, Storage Restore `29670879851`, and
+  Retention `29670879833`.
+- PR #316 squash-merged as `6b9501c61d75179929ef260ad6a8d01f1717dd8d`
+  after all review threads were resolved. The remote feature branch was deleted.
+- Post-merge cleanup removed the clean, merged PR #199 worktree. The primary
+  worktree remains intentionally retained because its `.playwright-mcp/` path is
+  user-owned and untracked.
