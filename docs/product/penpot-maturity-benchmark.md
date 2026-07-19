@@ -216,7 +216,7 @@ Deployment remains non-gating. See
 
 ## Current File Version Visual Preview Evidence
 
-The 2026-07-16 through 2026-07-18 visual-preview slice adapts Penpot `develop` commit
+The 2026-07-16 through 2026-07-19 visual-preview slice adapts Penpot `develop` commit
 `17c344b8f5fe785b1be7ae7a6e34945e17a118d8` by rendering the complete saved
 document as a separate read-only canvas instead of stopping at a change-summary
 card. The Korean banner exposes Exit and recovery-safe Restore, mutation entry
@@ -308,12 +308,22 @@ Focused browser REDs proved the missing post-switch headers, the later private-t
 leak, stale target HTTP and polling credentials, and the missing retained-team mention
 target before the repairs.
 
+The final exact-head loop added retained snapshot epochs, accepted-server baselines for
+synthetic collaboration snapshots, verified no-op persistence, full-lifetime project
+transition mutation barriers, and last-moment file/team/access-generation checks for
+registry and DTCG operations. PR-head CI also exposed a nondeterministic conflicting-token
+sidecar assertion: automatic quarantine could recover between 10 ms polls. The regression
+now holds quarantine while directly proving fail-closed authentication, then repairs and
+releases recovery.
+
 The corrected browser RED passed the historical diff card and failed on the
 missing preview banner. Focused GREEN passed saved/current pixel switching,
 Delete protection, Control-wheel zoom, safe Exit, Restore, post-restore Yjs
 editing, delayed Save/Restore ordering, local-only collaboration Undo/Redo, and
-cancelled-upload cleanup. The latest local gates passed 218 general Playwright
-cases, seven collaboration cases, 280 web tests, and 441 server tests. This advances
+cancelled-upload cleanup. The latest local gates passed 230 general Playwright
+cases, eight collaboration cases, 280 web tests, and 441 server tests. Exact-head
+Full Verification `29670879859` and all four authorization/storage drills passed;
+PR #316 squash-merged as `6b9501c61d75179929ef260ad6a8d01f1717dd8d`. This advances
 collaboration/history, browser editor, visible product workflow, and failure-loop
 gates; it does not close multi-page preview navigation, hosted durable event
 delivery, comment edit/delete, or branch/review/merge. See
