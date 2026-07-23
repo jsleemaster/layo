@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
 import { createHttpServer } from "./http";
 import { FileStorage } from "./storage";
+import type { TeamAuthorizationConfig } from "./team-authorization";
 
 let tempRoot: string | undefined;
 
