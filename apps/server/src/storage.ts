@@ -1455,6 +1455,14 @@ export class FileStorage {
     return path.join(this.librariesDir, "token-subscriptions.json");
   }
 
+  private libraryRegistryTargetMutationPathFor(fileId: string) {
+    return path.join(
+      this.rootDir,
+      "library-target-mutations",
+      `${canonicalStorageId(fileId)}.json`
+    );
+  }
+
   private libraryArchivePathFor(libraryId: string) {
     assertSafeStorageId(libraryId);
     return path.join(this.librariesDir, `${libraryId}.layo-library.zip`);
@@ -1781,6 +1789,17 @@ export class FileStorage {
       await restoreStoragePathSnapshots(snapshots);
       throw error;
     }
+  }
+
+  private async withLibraryRegistryTargetTransactionLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    return withStoragePathMutationLock(
+      this.libraryRegistryTargetMutationPathFor(fileId),
+      operation
+    );
   }
 
   private async withLibraryRegistryTargetMutationLocks<T>(
@@ -3489,52 +3508,57 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } =
-      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    return this.withLibraryRegistryTargetMutationLocks(
+    return this.withLibraryRegistryTargetTransactionLock(
       fileId,
-      this.librarySubscriptionsPath(),
       async () => {
-        const library = readLibraryArchivePayload(
-          readZipArchive(archive)
-        );
-        const original = await captureStoragePathSnapshots([
-          this.filePathFor(fileId),
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
+          fileId,
           this.librarySubscriptionsPath(),
-          ...library.assets.flatMap((asset) => [
-            this.assetPathFor(asset.metadata.assetId),
-            this.assetMetadataPathFor(asset.metadata.assetId)
-          ])
-        ]);
-        try {
-          const imported = await this.importLibraryArchiveLocked(
-            fileId,
-            archive,
-            options
-          );
-          const registryImport: ImportedLibraryRegistryItem = {
-            ...imported,
-            libraryId: entry.libraryId,
-            libraryName: entry.name
-          };
-          await this.upsertLibraryRegistrySubscriptionLocked(
-            fileId,
-            entry,
-            registryImport,
-            options.idPrefix
-          );
-          return registryImport;
-        } catch (error) {
-          try {
-            await restoreStoragePathSnapshots(original);
-          } catch (rollbackError) {
-            throw new AggregateError(
-              [error, rollbackError],
-              "library registry import failed and rollback failed"
+          async () => {
+            const library = readLibraryArchivePayload(
+              readZipArchive(archive)
             );
+            const original = await captureStoragePathSnapshots([
+              this.filePathFor(fileId),
+              this.librarySubscriptionsPath(),
+              ...library.assets.flatMap((asset) => [
+                this.assetPathFor(asset.metadata.assetId),
+                this.assetMetadataPathFor(asset.metadata.assetId)
+              ])
+            ]);
+            try {
+              const imported = await this.importLibraryArchiveLocked(
+                fileId,
+                archive,
+                options
+              );
+              const registryImport: ImportedLibraryRegistryItem = {
+                ...imported,
+                libraryId: entry.libraryId,
+                libraryName: entry.name
+              };
+              await this.upsertLibraryRegistrySubscriptionLocked(
+                fileId,
+                entry,
+                registryImport,
+                options.idPrefix
+              );
+              return registryImport;
+            } catch (error) {
+              try {
+                await restoreStoragePathSnapshots(original);
+              } catch (rollbackError) {
+                throw new AggregateError(
+                  [error, rollbackError],
+                  "library registry import failed and rollback failed"
+                );
+              }
+              throw error;
+            }
           }
-          throw error;
-        }
+        );
       }
     );
   }
@@ -3567,16 +3591,21 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const { entry, archive } =
-      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    return this.withLibraryRegistryTargetMutationLocks(
+    return this.withLibraryRegistryTargetTransactionLock(
       fileId,
-      this.libraryTokenSubscriptionsPath(),
       async () => {
-        return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          entry,
-          archive
+          this.libraryTokenSubscriptionsPath(),
+          async () => {
+            return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+              fileId,
+              entry,
+              archive
+            );
+          }
         );
       }
     );
@@ -3586,32 +3615,37 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const { entry, archive } =
-      await this.readAccessibleLibraryRegistryArchive(
-        fileId,
-        normalizedLibraryId
-      );
-    return this.withLibraryRegistryTargetMutationLocks(
+    return this.withLibraryRegistryTargetTransactionLock(
       fileId,
-      this.libraryTokenSubscriptionsPath(),
       async () => {
-        const subscription = (
-          await this.readLibraryRegistryTokenSubscriptions()
-        ).find(
-          (candidate) =>
-            candidate.fileId === fileId
-            && candidate.libraryId === normalizedLibraryId
-        );
-        if (!subscription) {
-          throw notFoundError(
-            `library registry token subscription not found: ${normalizedLibraryId}`
+        const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(
+            fileId,
+            normalizedLibraryId
           );
-        }
-        return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+        return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          entry,
-          archive
+          this.libraryTokenSubscriptionsPath(),
+          async () => {
+            const subscription = (
+              await this.readLibraryRegistryTokenSubscriptions()
+            ).find(
+              (candidate) =>
+                candidate.fileId === fileId
+                && candidate.libraryId === normalizedLibraryId
+            );
+            if (!subscription) {
+              throw notFoundError(
+                `library registry token subscription not found: ${normalizedLibraryId}`
+              );
+            }
+            return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+              fileId,
+              entry,
+              archive
+            );
+          }
         );
       }
     );
@@ -3719,18 +3753,23 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } =
-      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    return this.withLibraryRegistryTargetMutationLocks(
+    return this.withLibraryRegistryTargetTransactionLock(
       fileId,
-      this.librarySubscriptionsPath(),
-      () =>
-        this.updateLibraryRegistryItemLocked(
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          libraryId,
-          entry,
-          archive
-        )
+          this.librarySubscriptionsPath(),
+          () =>
+            this.updateLibraryRegistryItemLocked(
+              fileId,
+              libraryId,
+              entry,
+              archive
+            )
+        );
+      }
     );
   }
 
