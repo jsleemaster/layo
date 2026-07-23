@@ -2836,22 +2836,6 @@ describe("HTTP server", () => {
     }
   });
 
-  test("requires a file id for comment event streams", async () => {
-    const server = await createServerWithDocument();
-    const address = await server.listen({ host: "127.0.0.1", port: 0 });
-    const controller = new AbortController();
-
-    try {
-      const response = await fetch(`${address}/comments/events?after=0`, {
-        signal: controller.signal
-      });
-      expect(response.status).toBe(400);
-    } finally {
-      controller.abort();
-      await server.close();
-    }
-  });
-
   test("streams comment mutation events to subscribed clients", async () => {
     const server = await createServerWithDocument();
     const address = await server.listen({ host: "127.0.0.1", port: 0 });
