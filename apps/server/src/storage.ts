@@ -61,6 +61,7 @@ const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>
 const storageTransactionCoordinatorContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
+const STORAGE_PROCESS_LOCK_STALE_MS = 500;
 
 interface StorageProcessLockOwner {
   schemaVersion: 1;
@@ -250,7 +251,7 @@ function normalizeStorageProcessLockStale(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 50
     ? Math.floor(parsed)
-    : 5_000;
+    : STORAGE_PROCESS_LOCK_STALE_MS;
 }
 
 function parseStorageProcessLockOwner(value: unknown): StorageProcessLockOwner {
