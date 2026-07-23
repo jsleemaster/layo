@@ -1754,6 +1754,20 @@ export class FileStorage {
     );
   }
 
+  // Caller must hold the target mutation lock so a new journal cannot appear.
+  private async recoverInterruptedLibraryUpdateForTarget(
+    fileId: string
+  ): Promise<void> {
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    if (!(await pathExists(journalPath))) {
+      return;
+    }
+    await this.withLibraryRegistryTargetMutationLocks(
+      fileId,
+      () => this.recoverInterruptedLibraryUpdateJournal(journalPath)
+    );
+  }
+
   private async withFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
@@ -1761,13 +1775,7 @@ export class FileStorage {
     return this.withLibraryRegistryTargetMutationLock(
       fileId,
       async () => {
-        await this.withLibraryRegistryTargetMutationLocks(
-          fileId,
-          () =>
-            this.recoverInterruptedLibraryUpdateJournal(
-              this.libraryUpdateRecoveryPathFor(fileId)
-            )
-        );
+        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
         return this.withRawFileMutationLock(fileId, operation);
       }
     );
@@ -1974,13 +1982,7 @@ export class FileStorage {
     return this.withLibraryRegistryTargetMutationLock(
       fileId,
       async () => {
-        await this.withLibraryRegistryTargetMutationLocks(
-          fileId,
-          () =>
-            this.recoverInterruptedLibraryUpdateJournal(
-              this.libraryUpdateRecoveryPathFor(fileId)
-            )
-        );
+        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
         return operation();
       }
     );
@@ -3107,13 +3109,7 @@ export class FileStorage {
     return this.withLibraryRegistryTargetMutationLock(
       fileId,
       async () => {
-        await this.withLibraryRegistryTargetMutationLocks(
-          fileId,
-          () =>
-            this.recoverInterruptedLibraryUpdateJournal(
-              this.libraryUpdateRecoveryPathFor(fileId)
-            )
-        );
+        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
         return this.readFileWithoutLibraryTargetRecovery(fileId);
       }
     );
