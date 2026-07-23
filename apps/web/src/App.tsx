@@ -18830,7 +18830,7 @@ export function App() {
                           <span className="comment-activity-meta">
                             {formatCommentActivityType(event.type)} · {event.fileName}
                           </span>
-                          <strong>{event.actorName}</strong>
+                          <strong>{commentAuthorNames[event.actorName] ?? event.actorName}</strong>
                           <span className="comment-activity-body">{event.body}</span>
                         </li>
                       ))
