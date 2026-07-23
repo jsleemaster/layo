@@ -1037,11 +1037,26 @@ test("snapshot persistence retries a server conflict and preserves an independen
 
   const readServerFields = async () => {
     const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-    const file = (await response.json()).file;
-    return {
-      x: file.pages[0].children[0].transform.x as number,
-      text: file.pages[0].children[0].children[0].content.value as string
+    if (!response.ok()) {
+      return null;
+    }
+    const payload = (await response.json()) as {
+      file?: {
+        pages?: Array<{
+          children?: Array<{
+            transform?: { x?: number };
+            children?: Array<{ content?: { value?: string } }>;
+          }>;
+        }>;
+      };
     };
+    const frame = payload.file?.pages?.[0]?.children?.[0];
+    const x = frame?.transform?.x;
+    const text = frame?.children?.[0]?.content?.value;
+    if (typeof x !== "number" || typeof text !== "string") {
+      return null;
+    }
+    return { x, text };
   };
 
   try {
@@ -6158,6 +6173,8 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   expect(concurrentThread).toBeDefined();
 
   await page.getByRole("button", { name: "동시 수정 전 수정" }).click();
+  const threadDraft = page.getByTestId("comment-thread-edit-body");
+  await threadDraft.fill("내 오래된 수정");
   const externalUpdate = await page.request.patch(
     `http://127.0.0.1:4317/files/${documentId}/comments/${concurrentThread!.threadId}`,
     {
@@ -6169,14 +6186,19 @@ test("comments panel lets owners edit and delete threads and replies with stale-
     }
   );
   expect(externalUpdate.ok()).toBeTruthy();
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
 
-  await page.getByTestId("comment-thread-edit-body").fill("내 오래된 수정");
   await page.getByRole("button", { name: "코멘트 저장" }).click();
   await expect(page.getByTestId("comment-status")).toContainText(
     "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
   );
   await expect(page.getByTestId("comment-list")).toContainText("외부 최신 코멘트");
-  await expect(page.getByTestId("comment-list")).not.toContainText("내 오래된 수정");
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
+
+  await threadDraft.fill("내 충돌 후 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("내 충돌 후 수정");
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();

@@ -2060,6 +2060,81 @@ describe("FileStorage", () => {
     expect(updated.modifiedAt > externalModifiedAt).toBe(true);
   });
 
+  test("comment mutations advance past the latest persisted sidecar event", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "저장소 전체 시간순서",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalCreatedAt = new Date(Date.now() + 86_400_000).toISOString();
+    sidecar.activity[0].createdAt = externalCreatedAt;
+    sidecar.events[0].createdAt = externalCreatedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "외부 이벤트 이후 수정",
+      actorId: "user-owner",
+      expectedModifiedAt: created.modifiedAt
+    });
+    const persisted = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    expect(updated.modifiedAt > externalCreatedAt).toBe(true);
+    expect(persisted.activity[0].createdAt > externalCreatedAt).toBe(true);
+    expect(persisted.events[persisted.events.length - 1].createdAt > externalCreatedAt).toBe(true);
+  });
+
+  test("new comments advance past the latest persisted sidecar event", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "기존 코멘트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalCreatedAt = new Date(Date.now() + 172_800_000).toISOString();
+    sidecar.activity[0].createdAt = externalCreatedAt;
+    sidecar.events[0].createdAt = externalCreatedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "외부 이벤트 이후 새 코멘트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+
+    expect(created.createdAt > externalCreatedAt).toBe(true);
+  });
+
+  test("resolving an already resolved comment does not duplicate audit events", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "한 번만 해결",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const first = await storage.resolveCommentThread("sample-file", created.threadId, "검수자");
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const afterFirstResolve = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    const second = await storage.resolveCommentThread("sample-file", created.threadId, "검수자");
+    const afterSecondResolve = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    expect(second).toEqual(first);
+    expect(afterSecondResolve.activity).toEqual(afterFirstResolve.activity);
+    expect(afterSecondResolve.events).toEqual(afterFirstResolve.events);
+  });
+
   test("comment reply owners can edit and delete replies without leaking deleted content", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
