@@ -1940,7 +1940,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Canvas node id to attach the comment to"),
-        body: z.string().describe("Comment body"),
+        body: z.string().trim().min(1).describe("Comment body"),
         authorId: z.string().optional().describe("Local author id; team credentials override this value"),
         authorName: z.string().optional().describe("Display name for the comment author"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this comment")
@@ -1980,9 +1980,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
-        body: z.string().describe("Replacement comment body"),
+        body: z.string().trim().min(1).describe("Replacement comment body"),
         actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
-        expectedModifiedAt: z.string().describe("Current modifiedAt returned by list_comment_threads"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current modifiedAt returned by list_comment_threads"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by the replacement body"),
         dryRun: z.boolean().optional().describe("Defaults to true; pass false to persist the update")
       }
@@ -2036,7 +2036,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
         actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
-        expectedModifiedAt: z.string().describe("Current modifiedAt returned by list_comment_threads"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current modifiedAt returned by list_comment_threads"),
         dryRun: z.boolean().optional().describe("Defaults to true; pass false to delete the thread")
       }
     },
@@ -2230,7 +2230,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
-        body: z.string().describe("Reply body"),
+        body: z.string().trim().min(1).describe("Reply body"),
         authorId: z.string().optional().describe("Local author id; team credentials override this value"),
         authorName: z.string().optional().describe("Display name for the reply author"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this reply")
@@ -2270,9 +2270,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
         replyId: z.string().describe("Reply id returned by list_comment_threads"),
-        body: z.string().describe("Replacement reply body"),
+        body: z.string().trim().min(1).describe("Replacement reply body"),
         actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
-        expectedModifiedAt: z.string().describe("Current reply modifiedAt returned by list_comment_threads"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current reply modifiedAt returned by list_comment_threads"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by the replacement body"),
         dryRun: z.boolean().optional().describe("Defaults to true; pass false to persist the update")
       }
@@ -2332,7 +2332,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
         replyId: z.string().describe("Reply id returned by list_comment_threads"),
         actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
-        expectedModifiedAt: z.string().describe("Current reply modifiedAt returned by list_comment_threads"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current reply modifiedAt returned by list_comment_threads"),
         dryRun: z.boolean().optional().describe("Defaults to true; pass false to delete the reply")
       }
     },
