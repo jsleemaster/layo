@@ -3048,6 +3048,12 @@ describe("Penpot component instance migration", () => {
         "library-update-before-subscription-crashing"
       );
 
+      const editedNode = await prepared.updateNodeGeometry(
+        "prewarmed-general-edit-target",
+        `penpot-${outerMainId}`,
+        { x: 173, y: 181 }
+      );
+      expect(editedNode.transform).toMatchObject({ x: 173, y: 181 });
       const recovered = await prepared.readFile(
         "prewarmed-general-edit-target"
       );
