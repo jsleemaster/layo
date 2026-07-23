@@ -300,19 +300,40 @@ describe("HTTP server", () => {
     const server = createHttpServer(storage);
     const fixture = penpotComponentHttpArchive();
 
+    const importPayload = {
+      archiveBase64: fixture.archive.toString("base64"),
+      fileName: "components.penpot",
+      projectId: "penpot-component-project",
+      documentId: "penpot-component-document",
+      name: "Penpot components"
+    };
+    const missingIdempotencyKey = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: importPayload
+    });
+    expect(missingIdempotencyKey.statusCode).toBe(400);
+
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
-      payload: {
-        archiveBase64: fixture.archive.toString("base64"),
-        fileName: "components.penpot",
-        projectId: "penpot-component-project",
-        documentId: "penpot-component-document",
-        name: "Penpot components"
-      }
+      headers: {
+        "idempotency-key": "penpot-component-http-v1"
+      },
+      payload: importPayload
     });
 
     expect(response.statusCode).toBe(200);
+    const retried = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "penpot-component-http-v1"
+      },
+      payload: importPayload
+    });
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual(response.json());
     expect(response.json().imported.file.components).toEqual([
       expect.objectContaining({
         id: `penpot-component-${fixture.componentId}`,
@@ -423,6 +444,9 @@ describe("HTTP server", () => {
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "figma-file-http-v1"
+      },
       payload: {
         archiveBase64: figmaFile.toString("base64"),
         fileName: "landing.figma.json",
@@ -519,6 +543,9 @@ describe("HTTP server", () => {
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "figma-image-http-v1"
+      },
       payload: {
         archiveBase64: figmaPackage.toString("base64"),
         fileName: "figma-image-package.zip",
@@ -2077,15 +2104,27 @@ describe("HTTP server", () => {
       ]
     });
 
+    const importPayload = {
+      archiveBase64: exported.rawPayload.toString("base64"),
+      projectId: "restored-project",
+      name: "복원 묶음",
+      documentIdPrefix: "restored"
+    };
+    const missingIdempotencyKey = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive",
+      payload: importPayload
+    });
+    expect(missingIdempotencyKey.statusCode).toBe(400);
+
+    const importHeaders = {
+      "idempotency-key": "restore-project-http-v1"
+    };
     const imported = await targetServer.inject({
       method: "POST",
       url: "/projects/import/archive",
-      payload: {
-        archiveBase64: exported.rawPayload.toString("base64"),
-        projectId: "restored-project",
-        name: "복원 묶음",
-        documentIdPrefix: "restored"
-      }
+      headers: importHeaders,
+      payload: importPayload
     });
     expect(imported.statusCode).toBe(200);
     expect(imported.json().imported.project).toMatchObject({
@@ -2093,6 +2132,14 @@ describe("HTTP server", () => {
       name: "복원 묶음",
       currentDocumentId: "restored-archive-file-2"
     });
+    const retried = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive",
+      headers: importHeaders,
+      payload: importPayload
+    });
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual(imported.json());
   });
 
   test("updates node geometry, fill, text, and creates nodes", async () => {
@@ -2961,6 +3008,79 @@ describe("HTTP server", () => {
       name: "권한 경쟁 프로젝트",
       sharing: { mode: "team", teamId: "team-beta" }
     });
+  });
+
+  test("rejects a comment write when the authorized project moves to another team before persistence", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-team-race-project",
+      name: "코멘트 팀 경쟁 프로젝트",
+      documentId: "comment-team-race-file",
+      documentName: "코멘트 팀 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-team-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+
+    const internals = storage as unknown as {
+      createCommentThread: FileStorage["createCommentThread"];
+    };
+    const originalCreate = internals.createCommentThread.bind(storage);
+    let markMutationReached!: () => void;
+    const mutationReached = new Promise<void>((resolve) => {
+      markMutationReached = resolve;
+    });
+    let releaseMutation!: () => void;
+    const mutationReleased = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    internals.createCommentThread = async (...args) => {
+      markMutationReached();
+      await mutationReleased;
+      return originalCreate(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-member",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-token"
+          }
+        ]
+      }
+    });
+
+    const pending = server.inject({
+      method: "POST",
+      url: "/files/comment-team-race-file/comments",
+      headers: {
+        authorization: "Bearer comment-token",
+        "x-layo-user-id": "comment-member"
+      },
+      payload: {
+        nodeId: "text-1",
+        body: "이동 전 권한으로 쓰면 안 됨"
+      }
+    });
+    await mutationReached;
+    await storage.setProjectSharing("comment-team-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    releaseMutation();
+
+    const response = await pending;
+    expect(response.statusCode).toBe(409);
+    await expect(
+      storage.listCommentThreads("comment-team-race-file", {
+        includeResolved: true
+      })
+    ).resolves.toEqual([]);
   });
 
   test("closes a team comment SSE stream when its owner makes the project private", async () => {
