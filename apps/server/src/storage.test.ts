@@ -2264,6 +2264,43 @@ describe("FileStorage", () => {
     expect(await storage.listCommentThreads("sample-file", { includeResolved: true })).toHaveLength(1);
   });
 
+  test("comment sidecars and team lookup share a canonical file identity", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-comment-project",
+      name: "대소문자 코멘트 프로젝트",
+      documentId: "Shared-File",
+      documentName: "대소문자 코멘트 문서"
+    });
+    await storage.setProjectSharing("case-comment-project", {
+      mode: "team",
+      teamId: "team-case"
+    });
+
+    expect(await storage.getTeamIdForFile("shared-file")).toBe("team-case");
+    await storage.createCommentThread("Shared-File", {
+      nodeId: "text-1",
+      body: "대소문자 잠금 경계",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    const sidecar = JSON.parse(
+      await readFile(
+        path.join(tempRoot, "comments", "shared-file.json"),
+        "utf8"
+      )
+    );
+    expect(sidecar).toMatchObject({
+      fileId: "Shared-File",
+      threads: [expect.objectContaining({ body: "대소문자 잠금 경계" })]
+    });
+    await expect(
+      readFile(path.join(tempRoot, "comments", "Shared-File.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("comment threads keep replies in the sidecar store", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
