@@ -58,6 +58,7 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
 const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
+const storageTransactionCoordinatorContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
 
@@ -1140,6 +1141,7 @@ export interface ImportProjectArchiveOptions {
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
+  idempotencyKey?: string;
 }
 
 export interface ImportExternalMigrationArchiveOptions {
@@ -1149,6 +1151,19 @@ export interface ImportExternalMigrationArchiveOptions {
   documentName?: string;
   fileName?: string;
   sourceHint?: ExternalMigrationSource;
+  idempotencyKey?: string;
+}
+
+type StorageImportReceiptKind =
+  | "project-archive-import"
+  | "external-migration-import";
+
+interface StorageImportReceipt {
+  schemaVersion: 1;
+  kind: StorageImportReceiptKind;
+  idempotencyKey: string;
+  fingerprint: string;
+  result: unknown;
 }
 
 export interface ImportedExternalMigrationArchive {
@@ -1507,6 +1522,80 @@ export class FileStorage {
     );
   }
 
+  private storageImportReceiptPathFor(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string
+  ) {
+    assertSafeStorageId(idempotencyKey);
+    return path.join(
+      this.rootDir,
+      "receipts",
+      "imports",
+      kind,
+      `${idempotencyKey}.json`
+    );
+  }
+
+  private storageImportReceiptSnapshot<T>(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string,
+    fingerprint: string,
+    result: T
+  ): StoragePathSnapshot {
+    const receipt: StorageImportReceipt = {
+      schemaVersion: 1,
+      kind,
+      idempotencyKey,
+      fingerprint,
+      result
+    };
+    return {
+      filePath: this.storageImportReceiptPathFor(kind, idempotencyKey),
+      data: Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8")
+    };
+  }
+
+  private async readStorageImportReceipt<T>(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string,
+    fingerprint: string,
+    parseResult: (value: unknown) => T
+  ): Promise<T | null> {
+    const receiptPath = this.storageImportReceiptPathFor(
+      kind,
+      idempotencyKey
+    );
+    let receipt: StorageImportReceipt;
+    try {
+      receipt = parseStorageImportReceipt(
+        JSON.parse(await readFile(receiptPath, "utf8")),
+        kind,
+        idempotencyKey
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+    if (receipt.fingerprint !== fingerprint) {
+      throw idempotencyConflictError(
+        `${kind} idempotency key was already used with another request: ${idempotencyKey}`
+      );
+    }
+    return parseResult(receipt.result);
+  }
+
+  private async writeStorageImportReceipt(
+    snapshot: StoragePathSnapshot
+  ): Promise<void> {
+    if (snapshot.data === null) {
+      throw new Error("storage import receipt data is required");
+    }
+    await mkdir(path.dirname(snapshot.filePath), { recursive: true });
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
+  }
+
   private projectPathFor(projectId: string) {
     assertSafeStorageId(projectId);
     return path.join(this.projectsDir, `${projectId}.json`);
@@ -1838,18 +1927,28 @@ export class FileStorage {
     await this.recoverInterruptedLibraryUpdatesOnce();
     return withStoragePathMutationLock(
       this.libraryRegistryTargetMutationPathFor(fileId),
-      operation
+      async () => {
+        await this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          () =>
+            this.recoverInterruptedLibraryUpdateJournal(
+              this.libraryUpdateRecoveryPathFor(fileId)
+            )
+        );
+        return operation();
+      }
     );
   }
 
   private async withLibraryRegistryTargetMutationLocks<T>(
     fileId: string,
-    subscriptionPath: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    await this.recoverInterruptedLibraryUpdatesOnce();
-    return withStoragePathMutationLock(
-      subscriptionPath,
+    return withOrderedStoragePathMutationLocks(
+      [
+        this.librarySubscriptionsPath(),
+        this.libraryTokenSubscriptionsPath()
+      ],
       () => this.withFileMutationLock(fileId, operation)
     );
   }
@@ -1961,6 +2060,34 @@ export class FileStorage {
 
   private storageTransactionRecoveryDir() {
     return path.join(this.rootDir, "recovery", "transactions");
+  }
+
+  private storageTransactionCoordinatorPath() {
+    return path.join(this.storageTransactionRecoveryDir(), ".coordinator");
+  }
+
+  private isStorageTransactionCoordinatorHeld(): boolean {
+    return storageTransactionCoordinatorContext.getStore()?.has(
+      path.resolve(this.storageTransactionCoordinatorPath())
+    ) ?? false;
+  }
+
+  private async withStorageTransactionCoordinatorLock<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const coordinatorPath = path.resolve(
+      this.storageTransactionCoordinatorPath()
+    );
+    const activePaths = storageTransactionCoordinatorContext.getStore();
+    if (activePaths?.has(coordinatorPath)) {
+      return operation();
+    }
+    return withStoragePathMutationLock(coordinatorPath, () =>
+      storageTransactionCoordinatorContext.run(
+        new Set([...(activePaths ?? []), coordinatorPath]),
+        operation
+      )
+    );
   }
 
   private storageTransactionRecoveryPathFor(transactionId: string) {
@@ -2100,7 +2227,10 @@ export class FileStorage {
   }
 
   private recoverInterruptedStorageTransactionsOnce(): Promise<void> {
-    this.storageTransactionRecoveryPromise ??= this.recoverInterruptedStorageTransactions();
+    this.storageTransactionRecoveryPromise ??=
+      this.withStorageTransactionCoordinatorLock(() =>
+        this.recoverInterruptedStorageTransactions()
+      );
     return this.storageTransactionRecoveryPromise;
   }
 
@@ -2182,14 +2312,19 @@ export class FileStorage {
         candidates.push(restored.data);
         intended.set(restored.filePath, candidates);
       }
+      const rollbackOriginal =
+        await this.omitReferencedNewAssetsFromRollback(
+          original,
+          journal.fileIds
+        );
       const current = await captureStoragePathSnapshots(
-        original.map((snapshot) => snapshot.filePath)
+        rollbackOriginal.map((snapshot) => snapshot.filePath)
       );
       const currentByPath = new Map(
         current.map((snapshot) => [snapshot.filePath, snapshot.data])
       );
 
-      for (const snapshot of original) {
+      for (const snapshot of rollbackOriginal) {
         const currentData = currentByPath.get(snapshot.filePath) ?? null;
         const intendedData = intended.get(snapshot.filePath) ?? [];
         if (
@@ -2204,7 +2339,7 @@ export class FileStorage {
         }
       }
 
-      await restoreStoragePathSnapshots(original);
+      await restoreStoragePathSnapshots(rollbackOriginal);
       await rm(journalPath, { force: true });
       const recoveryDir = path.dirname(journalPath);
       if (await pathExists(recoveryDir)) {
@@ -2397,7 +2532,16 @@ export class FileStorage {
       this.libraryUpdateRecoveryDir()
     );
     for (const journalPath of updateJournalPaths) {
-      await this.recoverInterruptedLibraryUpdateJournal(journalPath);
+      const fileId = path.basename(journalPath, ".json");
+      assertSafeStorageId(fileId);
+      await withStoragePathMutationLock(
+        this.libraryRegistryTargetMutationPathFor(fileId),
+        () =>
+          this.withLibraryRegistryTargetMutationLocks(
+            fileId,
+            () => this.recoverInterruptedLibraryUpdateJournal(journalPath)
+          )
+      );
     }
 
     await withStoragePathMutationLock(
@@ -2652,6 +2796,11 @@ export class FileStorage {
     input: DuplicateProjectInput = {},
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.duplicateProject(sourceProjectId, input, options)
+      );
+    }
     await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const source = await this.withProjectMutationLock(
       sourceProjectId,
@@ -3038,6 +3187,11 @@ export class FileStorage {
     archive: Buffer,
     options: ImportFileArchiveOptions = {}
   ): Promise<ImportedFileArchive> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.importFileArchive(archive, options)
+      );
+    }
     await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const entries = readZipArchive(archive);
     const manifest = parseFileArchiveManifest(
@@ -3238,7 +3392,46 @@ export class FileStorage {
     archive: Buffer,
     options: ImportExternalMigrationArchiveOptions = {}
   ): Promise<ImportedExternalMigrationArchive> {
+    const receiptKind = "external-migration-import" as const;
+    const idempotencyKey = normalizeStorageImportIdempotencyKey(
+      options.idempotencyKey
+    );
+    const fingerprint = storageImportRequestFingerprint(
+      receiptKind,
+      archive,
+      {
+        projectId: options.projectId ?? null,
+        documentId: options.documentId ?? null,
+        name: options.name ?? null,
+        documentName: options.documentName ?? null,
+        fileName: options.fileName ?? null,
+        sourceHint: options.sourceHint ?? null
+      }
+    );
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      const run = () =>
+        this.withStorageTransactionCoordinatorLock(() =>
+          this.importExternalMigrationArchive(archive, options)
+        );
+      return idempotencyKey
+        ? withStoragePathMutationLock(
+            this.storageImportReceiptPathFor(receiptKind, idempotencyKey),
+            run
+          )
+        : run();
+    }
     await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    if (idempotencyKey) {
+      const replay = await this.readStorageImportReceipt(
+        receiptKind,
+        idempotencyKey,
+        fingerprint,
+        parseImportedExternalMigrationArchive
+      );
+      if (replay) {
+        return replay;
+      }
+    }
     const projectId = options.projectId ?? createStorageId("project");
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
@@ -3329,6 +3522,24 @@ export class FileStorage {
         metadata: parseStoredAsset(asset.metadata),
         data: asset.data
       }));
+      const importedResult: ImportedExternalMigrationArchive = {
+        project: nextProject,
+        file,
+        source: imported.source,
+        sourceLabel: imported.sourceLabel,
+        assetCount: imported.importedAssets.length,
+        mappedNodeCount: imported.mappedNodeCount,
+        skippedNodeCount: imported.skippedNodeCount,
+        warnings: imported.warnings
+      };
+      const receiptSnapshot = idempotencyKey
+        ? this.storageImportReceiptSnapshot(
+            receiptKind,
+            idempotencyKey,
+            fingerprint,
+            importedResult
+          )
+        : undefined;
       const libraryIds = libraryFiles.map(
         (library) => library.file.id
       );
@@ -3348,7 +3559,8 @@ export class FileStorage {
                 this.libraryArchivePathFor(libraryId)
               )
             ]
-          : [])
+          : []),
+        ...(receiptSnapshot ? [receiptSnapshot.filePath] : [])
       ];
       const initialIntended: StoragePathSnapshot[] = [
         {
@@ -3379,7 +3591,8 @@ export class FileStorage {
               "utf8"
             )
           }
-        ])
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot] : [])
       ];
       let appendImportIntended:
         | ((
@@ -3387,7 +3600,7 @@ export class FileStorage {
           ) => Promise<void>)
         | undefined;
 
-      const project = await this.withExternalMigrationRegistryTransaction(
+      const result = await this.withExternalMigrationRegistryTransaction(
         projectId,
         libraryIds,
         () =>
@@ -3403,8 +3616,7 @@ export class FileStorage {
                       "external migration recovery transaction is missing"
                     );
                   }
-                  const writtenProject =
-                    await this.writeProject(nextProject);
+                  await this.writeProject(nextProject);
 
                   for (const library of libraryFiles) {
                     const entry =
@@ -3446,7 +3658,10 @@ export class FileStorage {
                     );
                   }
 
-                  return writtenProject;
+                  if (receiptSnapshot) {
+                    await this.writeStorageImportReceipt(receiptSnapshot);
+                  }
+                  return importedResult;
                 }
               ),
             (writeOperation) =>
@@ -3468,16 +3683,7 @@ export class FileStorage {
           )
       );
 
-      return {
-        project,
-        file,
-        source: imported.source,
-        sourceLabel: imported.sourceLabel,
-        assetCount: imported.importedAssets.length,
-        mappedNodeCount: imported.mappedNodeCount,
-        skippedNodeCount: imported.skippedNodeCount,
-        warnings: imported.warnings
-      };
+      return result;
     });
   }
 
@@ -3485,7 +3691,43 @@ export class FileStorage {
     archive: Buffer,
     options: ImportProjectArchiveOptions = {}
   ): Promise<ImportedProjectArchive> {
+    const receiptKind = "project-archive-import" as const;
+    const idempotencyKey = normalizeStorageImportIdempotencyKey(
+      options.idempotencyKey
+    );
+    const fingerprint = storageImportRequestFingerprint(
+      receiptKind,
+      archive,
+      {
+        projectId: options.projectId ?? null,
+        name: options.name ?? null,
+        documentIdPrefix: options.documentIdPrefix ?? null
+      }
+    );
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      const run = () =>
+        this.withStorageTransactionCoordinatorLock(() =>
+          this.importProjectArchive(archive, options)
+        );
+      return idempotencyKey
+        ? withStoragePathMutationLock(
+            this.storageImportReceiptPathFor(receiptKind, idempotencyKey),
+            run
+          )
+        : run();
+    }
     await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    if (idempotencyKey) {
+      const replay = await this.readStorageImportReceipt(
+        receiptKind,
+        idempotencyKey,
+        fingerprint,
+        parseImportedProjectArchive
+      );
+      if (replay) {
+        return replay;
+      }
+    }
     const archiveProject = readProjectArchivePayload(readZipArchive(archive));
     const now = new Date().toISOString();
     const projectId = options.projectId ?? createStorageId("project");
@@ -3569,13 +3811,30 @@ export class FileStorage {
         metadata: parseStoredAsset(asset.metadata),
         data: asset.data
       }));
+      const importedResult: ImportedProjectArchive = {
+        project: nextProject,
+        originalProjectId: archiveProject.manifest.projectId,
+        originalName: archiveProject.manifest.name,
+        documentCount: archiveProject.documents.length,
+        assetCount: archiveProject.assetIds.length,
+        documentIdMap
+      };
+      const receiptSnapshot = idempotencyKey
+        ? this.storageImportReceiptSnapshot(
+            receiptKind,
+            idempotencyKey,
+            fingerprint,
+            importedResult
+          )
+        : undefined;
       const originalPaths = [
         this.projectPathFor(projectId),
         ...files.map((entry) => this.filePathFor(entry.fileId)),
         ...parsedAssets.flatMap((asset) => [
           this.assetPathFor(asset.metadata.assetId),
           this.assetMetadataPathFor(asset.metadata.assetId)
-        ])
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot.filePath] : [])
       ];
       const intended: StoragePathSnapshot[] = [
         {
@@ -3606,10 +3865,11 @@ export class FileStorage {
               "utf8"
             )
           }
-        ])
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot] : [])
       ];
 
-      const project = await this.withNewProjectRollback(
+      const result = await this.withNewProjectRollback(
         projectId,
         () =>
           this.withExclusiveProjectFiles(
@@ -3617,7 +3877,13 @@ export class FileStorage {
             () =>
               this.withImportedAssetWrites(
                 parsedAssets,
-                () => this.writeProject(nextProject)
+                async () => {
+                  await this.writeProject(nextProject);
+                  if (receiptSnapshot) {
+                    await this.writeStorageImportReceipt(receiptSnapshot);
+                  }
+                  return importedResult;
+                }
               ),
             (writeOperation) =>
               this.withStorageTransactionRecovery(
@@ -3631,14 +3897,7 @@ export class FileStorage {
           )
       );
 
-      return {
-        project,
-        originalProjectId: archiveProject.manifest.projectId,
-        originalName: archiveProject.manifest.name,
-        documentCount: archiveProject.documents.length,
-        assetCount: archiveProject.assetIds.length,
-        documentIdMap
-      };
+      return result;
     });
   }
 
@@ -3827,7 +4086,12 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
-    await this.recoverInterruptedLibraryUpdatesOnce();
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.publishLibraryToRegistry(fileId, options)
+      );
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
     return withStoragePathMutationLock(
       this.libraryRegistryPath(),
       () => this.publishLibraryToRegistryLocked(fileId, options)
@@ -4126,7 +4390,6 @@ export class FileStorage {
           await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
         return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          this.librarySubscriptionsPath(),
           async () => {
             const library = readLibraryArchivePayload(
               readZipArchive(archive)
@@ -4209,7 +4472,6 @@ export class FileStorage {
           await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
         return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          this.libraryTokenSubscriptionsPath(),
           async () => {
             return this.replaceAndSubscribeLibraryRegistryTokensLocked(
               fileId,
@@ -4237,7 +4499,6 @@ export class FileStorage {
           );
         return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          this.libraryTokenSubscriptionsPath(),
           async () => {
             const subscription = (
               await this.readLibraryRegistryTokenSubscriptions()
@@ -4371,7 +4632,6 @@ export class FileStorage {
           await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
         return this.withLibraryRegistryTargetMutationLocks(
           fileId,
-          this.librarySubscriptionsPath(),
           () =>
             this.updateLibraryRegistryItemLocked(
               fileId,
@@ -5408,16 +5668,90 @@ export class FileStorage {
     return { ...asset, data };
   }
 
-  private async isAssetReferenced(assetId: string): Promise<boolean> {
-    const files = await this.listFiles();
-    for (const file of files) {
-      const document = await this.readFile(file.id);
+  private assetIdForStoragePath(filePath: string): string | null {
+    const relativePath = path.relative(
+      path.resolve(this.assetsDir),
+      path.resolve(filePath)
+    );
+    if (
+      !relativePath
+      || relativePath.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativePath)
+      || path.dirname(relativePath) !== "."
+    ) {
+      return null;
+    }
+    const assetId = relativePath.endsWith(".json")
+      ? relativePath.slice(0, -".json".length)
+      : relativePath;
+    return /^[a-zA-Z0-9_-]+$/.test(assetId) ? assetId : null;
+  }
+
+  private async omitReferencedNewAssetsFromRollback(
+    snapshots: readonly StoragePathSnapshot[],
+    excludedFileIds: readonly string[]
+  ): Promise<StoragePathSnapshot[]> {
+    const candidateAssetIds = new Set(
+      snapshots.flatMap((snapshot) => {
+        if (snapshot.data !== null) {
+          return [];
+        }
+        const assetId = this.assetIdForStoragePath(snapshot.filePath);
+        return assetId ? [assetId] : [];
+      })
+    );
+    const retainedAssetIds = new Set<string>();
+    for (const assetId of candidateAssetIds) {
+      if (await this.isAssetReferenced(assetId, excludedFileIds)) {
+        retainedAssetIds.add(assetId);
+      }
+    }
+    return snapshots.filter((snapshot) => {
+      const assetId = this.assetIdForStoragePath(snapshot.filePath);
+      return !assetId || !retainedAssetIds.has(assetId);
+    });
+  }
+
+  private async isAssetReferenced(
+    assetId: string,
+    excludedFileIds: readonly string[] = []
+  ): Promise<boolean> {
+    await this.adoptPriorDefaultStoreIfNeeded();
+    const excluded = new Set(excludedFileIds.map(canonicalStorageId));
+    const fileIds = await this.storageIdsInDirectory(this.filesDir, ".json");
+    for (const fileId of fileIds) {
+      if (excluded.has(canonicalStorageId(fileId))) {
+        continue;
+      }
+      const document = JSON.parse(
+        await readFile(this.filePathFor(fileId), "utf8")
+      ) as DesignFile;
       if (collectImageAssetIds(document).includes(assetId)) {
         return true;
       }
-      const versions = await this.listFileVersions(file.id);
-      for (const version of versions) {
-        const snapshot = await this.readFileVersion(file.id, version.versionId);
+
+      let versionEntries: string[];
+      try {
+        versionEntries = await readdir(this.fileHistoryDirFor(fileId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+      for (const entry of versionEntries) {
+        if (!entry.endsWith(".json")) {
+          continue;
+        }
+        const snapshot = parseStoredFileVersion(
+          JSON.parse(
+            await readFile(
+              path.join(this.fileHistoryDirFor(fileId), entry),
+              "utf8"
+            )
+          ),
+          fileId
+        );
         if (collectImageAssetIds(snapshot.document).includes(assetId)) {
           return true;
         }
@@ -6266,6 +6600,40 @@ function normalizeLibraryRegistryId(value: string | undefined) {
   const libraryId = value?.trim() || "library";
   assertSafeStorageId(libraryId);
   return libraryId;
+}
+
+function normalizeStorageImportIdempotencyKey(
+  value: string | undefined
+): string | undefined {
+  const idempotencyKey = value?.trim();
+  if (!idempotencyKey) {
+    return undefined;
+  }
+  if (idempotencyKey.length > 128) {
+    throw inputValidationError(
+      "storage import idempotency key must be 128 characters or fewer"
+    );
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(idempotencyKey)) {
+    throw inputValidationError(
+      "storage import idempotency key may contain only letters, numbers, underscores, and hyphens"
+    );
+  }
+  return idempotencyKey;
+}
+
+function storageImportRequestFingerprint(
+  kind: StorageImportReceiptKind,
+  archive: Buffer,
+  options: Record<string, string | null>
+): string {
+  return createHash("sha256")
+    .update(kind)
+    .update("\0")
+    .update(archive)
+    .update("\0")
+    .update(JSON.stringify(options))
+    .digest("hex");
 }
 
 function normalizeLibraryPublicationIdempotencyKey(value: string | undefined) {
@@ -7405,6 +7773,118 @@ function parseStorageTransactionRecoveryJournal(value: unknown): StorageTransact
     fileIds,
     original: candidate.original.map(parseSerializedRecoverySnapshot),
     intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseStorageImportReceipt(
+  value: unknown,
+  expectedKind: StorageImportReceiptKind,
+  expectedIdempotencyKey: string
+): StorageImportReceipt {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid storage import receipt");
+  }
+  const candidate = value as Partial<StorageImportReceipt>;
+  if (
+    candidate.schemaVersion !== 1
+    || candidate.kind !== expectedKind
+    || candidate.idempotencyKey !== expectedIdempotencyKey
+    || typeof candidate.fingerprint !== "string"
+    || candidate.fingerprint.length !== 64
+    || candidate.result === undefined
+  ) {
+    throw new Error("invalid storage import receipt");
+  }
+  return {
+    schemaVersion: 1,
+    kind: expectedKind,
+    idempotencyKey: expectedIdempotencyKey,
+    fingerprint: candidate.fingerprint,
+    result: candidate.result
+  };
+}
+
+function parseImportedProjectArchive(value: unknown): ImportedProjectArchive {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid imported project archive receipt result");
+  }
+  const candidate = value as Partial<ImportedProjectArchive>;
+  if (
+    typeof candidate.originalProjectId !== "string"
+    || typeof candidate.originalName !== "string"
+    || typeof candidate.documentCount !== "number"
+    || !Number.isInteger(candidate.documentCount)
+    || candidate.documentCount < 0
+    || typeof candidate.assetCount !== "number"
+    || !Number.isInteger(candidate.assetCount)
+    || candidate.assetCount < 0
+    || !candidate.documentIdMap
+    || typeof candidate.documentIdMap !== "object"
+    || Array.isArray(candidate.documentIdMap)
+  ) {
+    throw new Error("invalid imported project archive receipt result");
+  }
+  const documentIdMap = Object.fromEntries(
+    Object.entries(candidate.documentIdMap).map(([sourceId, targetId]) => {
+      if (typeof targetId !== "string") {
+        throw new Error("invalid imported project archive document id map");
+      }
+      assertSafeStorageId(sourceId);
+      assertSafeStorageId(targetId);
+      return [sourceId, targetId];
+    })
+  );
+  return {
+    project: parseProjectManifest(candidate.project),
+    originalProjectId: candidate.originalProjectId,
+    originalName: candidate.originalName,
+    documentCount: candidate.documentCount,
+    assetCount: candidate.assetCount,
+    documentIdMap
+  };
+}
+
+function parseImportedExternalMigrationArchive(
+  value: unknown
+): ImportedExternalMigrationArchive {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid imported external migration receipt result");
+  }
+  const candidate = value as Partial<ImportedExternalMigrationArchive>;
+  if (
+    !candidate.file
+    || typeof candidate.file !== "object"
+    || typeof candidate.file.id !== "string"
+    || !Array.isArray(candidate.file.pages)
+    || typeof candidate.source !== "string"
+    || typeof candidate.sourceLabel !== "string"
+    || typeof candidate.assetCount !== "number"
+    || !Number.isInteger(candidate.assetCount)
+    || candidate.assetCount < 0
+    || typeof candidate.mappedNodeCount !== "number"
+    || !Number.isInteger(candidate.mappedNodeCount)
+    || candidate.mappedNodeCount < 0
+    || typeof candidate.skippedNodeCount !== "number"
+    || !Number.isInteger(candidate.skippedNodeCount)
+    || candidate.skippedNodeCount < 0
+    || !Array.isArray(candidate.warnings)
+    || candidate.warnings.some((warning) => typeof warning !== "string")
+  ) {
+    throw new Error("invalid imported external migration receipt result");
+  }
+  const project = parseProjectManifest(candidate.project);
+  if (project.currentDocumentId !== candidate.file.id) {
+    throw new Error("external migration receipt file does not match its project");
+  }
+  return {
+    project,
+    file: candidate.file,
+    source: candidate.source as ExternalMigrationSource,
+    sourceLabel: candidate.sourceLabel,
+    assetCount: candidate.assetCount,
+    mappedNodeCount: candidate.mappedNodeCount,
+    skippedNodeCount: candidate.skippedNodeCount,
+    warnings: [...candidate.warnings]
   };
 }
 
