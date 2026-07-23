@@ -25,6 +25,7 @@ import {
   LIBRARY_ARCHIVE_MIME_TYPE,
   PROJECT_ARCHIVE_MIME_TYPE,
   type CodeComponentMapping,
+  type CommentAuthorizationBoundary,
   type ComponentVariantArea,
   type CreateAssetInput,
   type StoredCommentMentionTarget,
@@ -158,37 +159,50 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return member;
   };
 
+  interface CommentAuthorization {
+    member?: AuthenticatedTeamMember;
+    authorizationBoundary?: CommentAuthorizationBoundary;
+  }
+
   const authorizeCommentRead = async (
     request: LibraryRequest,
     fileId: string
-  ): Promise<AuthenticatedTeamMember | undefined> => {
-    const teamId = await storage.getTeamIdForFile(fileId);
-    if (!teamId || !teamAuthorizationProvider) {
-      return undefined;
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
     }
     const member = await authenticateTeamMember(request);
-    if (!member) {
-      return undefined;
-    }
-    authorizeTeamLibraryRead(member, teamId);
-    return member;
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
   };
 
   const authorizeCommentWrite = async (
     request: LibraryRequest,
     fileId: string
-  ): Promise<AuthenticatedTeamMember | undefined> => {
-    const teamId = await storage.getTeamIdForFile(fileId);
-    if (!teamId || !teamAuthorizationProvider) {
-      return undefined;
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
     }
     const member = await authenticateTeamMember(request);
-    if (!member) {
-      return undefined;
-    }
     // Penpot permits file readers, including team viewers, to participate in comments.
-    authorizeTeamLibraryRead(member, teamId);
-    return member;
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
   };
 
   const visibleCommentProjectIds = async (member?: AuthenticatedTeamMember) => {
@@ -948,7 +962,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Params: { fileId: string }; Querystring: { includeResolved?: string; viewerId?: string } }>(
     "/files/:fileId/comments",
     async (request) => {
-      const member = await authorizeCommentRead(request, request.params.fileId);
+      const { member } = await authorizeCommentRead(request, request.params.fileId);
       return {
         threads: await storage.listCommentThreads(request.params.fileId, {
           includeResolved: request.query.includeResolved === "true",
@@ -1081,12 +1095,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       mentionTargets?: StoredCommentMentionTarget[];
     };
   }>("/files/:fileId/comments", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.createCommentThread(request.params.fileId, {
       ...request.body,
       authorId: member?.userId ?? request.body.authorId,
       authorName: member?.userId ?? request.body.authorName
-    });
+    }, { authorizationBoundary });
     return { thread };
   });
 
@@ -1099,7 +1114,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       mentionTargets?: StoredCommentMentionTarget[];
     };
   }>("/files/:fileId/comments/:threadId", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.updateCommentThread(
       request.params.fileId,
       request.params.threadId,
@@ -1108,7 +1124,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         actorId: member?.userId ?? request.body.actorId ?? "사용자",
         expectedModifiedAt: request.body.expectedModifiedAt,
         mentionTargets: request.body.mentionTargets
-      }
+      },
+      { authorizationBoundary }
     );
     return { thread };
   });
@@ -1117,14 +1134,16 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string; threadId: string };
     Body: { actorId?: string; expectedModifiedAt: string };
   }>("/files/:fileId/comments/:threadId", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const deleted = await storage.deleteCommentThread(
       request.params.fileId,
       request.params.threadId,
       {
         actorId: member?.userId ?? request.body.actorId ?? "사용자",
         expectedModifiedAt: request.body.expectedModifiedAt
-      }
+      },
+      { authorizationBoundary }
     );
     return { deleted };
   });
@@ -1160,10 +1179,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/read", async (request) => {
-    const member = await authorizeCommentRead(request, request.params.fileId);
-    const threads = await storage.markFileCommentsRead(request.params.fileId, {
-      viewerId: member?.userId ?? request.body.viewerId
-    });
+    const { member, authorizationBoundary } =
+      await authorizeCommentRead(request, request.params.fileId);
+    const threads = await storage.markFileCommentsRead(
+      request.params.fileId,
+      { viewerId: member?.userId ?? request.body.viewerId },
+      { authorizationBoundary }
+    );
     return { threads };
   });
 
@@ -1176,7 +1198,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       mentionTargets?: StoredCommentMentionTarget[];
     };
   }>("/files/:fileId/comments/:threadId/replies", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.addCommentReply(
       request.params.fileId,
       request.params.threadId,
@@ -1184,7 +1207,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         ...request.body,
         authorId: member?.userId ?? request.body.authorId,
         authorName: member?.userId ?? request.body.authorName
-      }
+      },
+      { authorizationBoundary }
     );
     return { thread };
   });
@@ -1198,7 +1222,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       mentionTargets?: StoredCommentMentionTarget[];
     };
   }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.updateCommentReply(
       request.params.fileId,
       request.params.threadId,
@@ -1208,7 +1233,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         actorId: member?.userId ?? request.body.actorId ?? "사용자",
         expectedModifiedAt: request.body.expectedModifiedAt,
         mentionTargets: request.body.mentionTargets
-      }
+      },
+      { authorizationBoundary }
     );
     return { thread };
   });
@@ -1217,7 +1243,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string; threadId: string; replyId: string };
     Body: { actorId?: string; expectedModifiedAt: string };
   }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
-    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.deleteCommentReply(
       request.params.fileId,
       request.params.threadId,
@@ -1225,7 +1252,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       {
         actorId: member?.userId ?? request.body.actorId ?? "사용자",
         expectedModifiedAt: request.body.expectedModifiedAt
-      }
+      },
+      { authorizationBoundary }
     );
     return { thread };
   });
@@ -1234,11 +1262,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string; threadId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/:threadId/read", async (request) => {
-    const member = await authorizeCommentRead(request, request.params.fileId);
+    const { member, authorizationBoundary } =
+      await authorizeCommentRead(request, request.params.fileId);
     const thread = await storage.markCommentThreadRead(
       request.params.fileId,
       request.params.threadId,
-      { viewerId: member?.userId ?? request.body.viewerId }
+      { viewerId: member?.userId ?? request.body.viewerId },
+      { authorizationBoundary }
     );
     return { thread };
   });
@@ -1246,11 +1276,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{ Params: { fileId: string; threadId: string } }>(
     "/files/:fileId/comments/:threadId/resolve",
     async (request) => {
-      const member = await authorizeCommentWrite(request, request.params.fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(request, request.params.fileId);
       const thread = await storage.resolveCommentThread(
         request.params.fileId,
         request.params.threadId,
-        member?.userId
+        member?.userId,
+        { authorizationBoundary }
       );
       return { thread };
     }
