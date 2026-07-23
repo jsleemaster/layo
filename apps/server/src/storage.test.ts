@@ -938,6 +938,93 @@ describe("FileStorage", () => {
     ).toBe(true);
   });
 
+  test("file archive import rejects a case-folded alias without replacing the existing document", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    await target.createProject({
+      projectId: "case-archive-project",
+      name: "대소문자 대상 프로젝트",
+      documentId: "Shared-File",
+      documentName: "보존할 문서"
+    });
+    const original = await target.readFile("Shared-File");
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "shared-file",
+        name: "덮어쓰면 안 되는 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect(await target.readFile("Shared-File")).toEqual(original);
+    expect((await target.listFiles()).map((file) => file.id)).toEqual([
+      "Shared-File"
+    ]);
+  });
+
+  test("file archive replacement rolls back the document and imported assets when commit fails", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "rollback.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "archive-rollback-image",
+      kind: "image",
+      name: "롤백 이미지",
+      transform: { x: 24, y: 36, rotation: 0 },
+      size: { width: 80, height: 60 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = await storageWithDocument(path.join(tempRoot, "target"));
+    const original = await target.readFile("sample-file");
+    const internals = target as unknown as {
+      writeFileDurablyWithoutMutationLock(
+        fileId: string,
+        document: unknown
+      ): Promise<unknown>;
+    };
+    const writeFileDurably = internals.writeFileDurablyWithoutMutationLock.bind(
+      target
+    );
+    internals.writeFileDurablyWithoutMutationLock = async (
+      fileId,
+      document
+    ) => {
+      await writeFileDurably(fileId, document);
+      throw new Error("injected file archive commit failure");
+    };
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "sample-file",
+        name: "실패할 가져오기"
+      })
+    ).rejects.toThrow("injected file archive commit failure");
+
+    expect(await target.readFile("sample-file")).toEqual(original);
+    await expect(target.readAsset(asset.assetId)).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   test("reviews a file archive without writing the imported file", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const source = await storageWithDocument(path.join(tempRoot, "source"));
