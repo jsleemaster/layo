@@ -906,6 +906,7 @@ describe("FileStorage", () => {
       transform: { x: 32, y: 48, rotation: 0 },
       size: { width: 120, height: 80 },
       style: { fill: "#22c55e", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
       children: []
     });
     const exported = await source.exportFileArchive("sample-file");
