@@ -2325,7 +2325,7 @@ describe("MCP AI editing workflow", () => {
     });
   });
 
-  test("blocks team viewers from MCP comment writes", async () => {
+  test("allows team viewers to own and manage MCP comments without design writes", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {
         members: [
@@ -2355,17 +2355,57 @@ describe("MCP AI editing workflow", () => {
       }
     });
 
-    const blocked = await client.callTool({
-      name: "create_comment_thread",
-      arguments: {
-        fileId: "comment-file",
-        nodeId: "text-1",
-        body: "viewer는 작성할 수 없음"
-      }
+    const created = parseToolJson(
+      await client.callTool({
+        name: "create_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          nodeId: "text-1",
+          body: "viewer도 피드백 가능",
+          authorId: "spoofed-viewer",
+          authorName: "위조된 이름"
+        }
+      })
+    );
+    expect(created.thread).toMatchObject({
+      authorId: "comment-viewer",
+      authorName: "comment-viewer",
+      body: "viewer도 피드백 가능"
     });
-    expect(blocked).toMatchObject({
-      isError: true,
-      content: [expect.objectContaining({ text: expect.stringMatching(/viewer cannot/) })]
+
+    const updated = parseToolJson(
+      await client.callTool({
+        name: "update_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          body: "viewer 피드백 수정",
+          expectedModifiedAt: created.thread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(updated).toMatchObject({
+      dryRun: false,
+      review: { canApply: true, reason: null },
+      thread: { body: "viewer 피드백 수정", authorId: "comment-viewer" }
+    });
+
+    const deleted = parseToolJson(
+      await client.callTool({
+        name: "delete_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          expectedModifiedAt: updated.thread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(deleted).toMatchObject({
+      dryRun: false,
+      review: { canApply: true, reason: null },
+      deleted: { threadId: created.thread.threadId, deleted: true }
     });
   });
 
