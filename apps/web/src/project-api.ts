@@ -11,6 +11,11 @@ export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
 
+export interface ProjectRequestCredentials {
+  userId: string;
+  memberToken: string;
+}
+
 export interface ProjectManifest {
   schemaVersion: 1;
   projectId: string;
@@ -92,9 +97,16 @@ export async function duplicateProject(
 export async function setProjectSharing(
   projectId: string,
   sharing: ProjectSharing,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}/sharing`), "PATCH", sharing, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}/sharing`),
+    "PATCH",
+    sharing,
+    fetcher,
+    credentials
+  );
 }
 
 export async function deleteProject(
@@ -153,11 +165,24 @@ async function writeProject(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
   body: unknown,
-  fetcher: typeof fetch
+  fetcher: typeof fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  const init: RequestInit = { method };
+  const headers: Record<string, string> = {};
   if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
+    headers["Content-Type"] = "application/json";
+  }
+  const userId = credentials?.userId.trim();
+  const memberToken = credentials?.memberToken.trim();
+  if (userId && memberToken) {
+    headers["x-layo-user-id"] = userId;
+    headers.Authorization = `Bearer ${memberToken}`;
+  }
+  const init: RequestInit = {
+    method,
+    ...(Object.keys(headers).length > 0 ? { headers } : {})
+  };
+  if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
   const response = await fetcher(url, init);

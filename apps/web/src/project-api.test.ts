@@ -56,7 +56,12 @@ describe("project api", () => {
       { projectId: "project-web-copy", name: "복제", documentIdPrefix: "web-copy" },
       fetcher as typeof fetch
     );
-    await setProjectSharing("project-web", { mode: "team", teamId: "team-web" }, fetcher as typeof fetch);
+    await setProjectSharing(
+      "project-web",
+      { mode: "team", teamId: "team-web" },
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
     await deleteProject("project-web-copy", fetcher as typeof fetch);
 
     expect(requests).toEqual([
@@ -81,7 +86,11 @@ describe("project api", () => {
       {
         url: "http://127.0.0.1:4317/projects/project-web/sharing",
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { mode: "team", teamId: "team-web" }
       },
       {

@@ -433,7 +433,41 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { projectId: string };
     Body: { mode: "private" } | { mode: "team"; teamId: string };
   }>("/projects/:projectId/sharing", async (request) => {
-    return { project: await storage.setProjectSharing(request.params.projectId, request.body) };
+    const project = await storage.readProject(request.params.projectId);
+    const unchanged =
+      project.sharing.mode === request.body.mode
+      && (
+        project.sharing.mode === "private"
+        || (
+          request.body.mode === "team"
+          && project.sharing.teamId === request.body.teamId
+        )
+      );
+    if (unchanged) {
+      return { project };
+    }
+
+    if (teamAuthorizationProvider) {
+      const member = await authenticateTeamMember(request);
+      if (project.sharing.mode === "team") {
+        authorizeTeamLibraryRead(member, project.sharing.teamId);
+        if (member.role !== "owner") {
+          throw Object.assign(
+            new Error("only a team owner can move a project out of its current team"),
+            { code: "EACCES", statusCode: 403 }
+          );
+        }
+      }
+      if (request.body.mode === "team") {
+        authorizeTeamLibraryWrite(member, request.body.teamId);
+      }
+    }
+
+    return {
+      project: await storage.setProjectSharing(request.params.projectId, request.body, {
+        expectedSharing: project.sharing
+      })
+    };
   });
 
   server.post<{
@@ -869,6 +903,10 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
           { code: "EINVAL", statusCode: 400 }
         );
       }
+      const authorizedTeamId =
+        request.query.fileId && teamAuthorizationProvider
+          ? await storage.getTeamIdForFile(request.query.fileId)
+          : undefined;
       if (request.query.fileId) {
         await authorizeCommentRead(request, request.query.fileId);
       }
@@ -915,6 +953,15 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         sending = true;
         try {
           if (request.query.fileId) {
+            if (
+              teamAuthorizationProvider
+              && await storage.getTeamIdForFile(request.query.fileId) !== authorizedTeamId
+            ) {
+              throw Object.assign(
+                new Error("comment stream team access changed"),
+                { code: "EACCES", statusCode: 403 }
+              );
+            }
             await authorizeCommentRead(request, request.query.fileId);
           }
           const events = await storage.listCommentLiveEvents({

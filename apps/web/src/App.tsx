@@ -6985,6 +6985,32 @@ function Inspector({
     }
   };
 
+  const commentEditThread = commentEditTarget
+    ? commentThreads.find((thread) => thread.threadId === commentEditTarget.threadId)
+    : undefined;
+  const commentEditSourceExists =
+    commentEditTarget?.kind === "thread"
+      ? Boolean(commentEditThread)
+      : Boolean(
+          commentEditThread?.replies.some(
+            (reply) => reply.replyId === commentEditTarget?.replyId
+          )
+        );
+  const commentEditRecoveryVisible =
+    commentEditTarget !== null && !commentEditSourceExists;
+
+  const moveDeletedCommentDraft = () => {
+    if (!commentEditTarget) {
+      return;
+    }
+    if (commentEditTarget.kind === "reply" && commentEditThread) {
+      onCommentReplyBodyChange(commentEditTarget.threadId, commentEditBody);
+    } else {
+      onCommentBodyChange(commentEditBody);
+    }
+    cancelCommentEdit();
+  };
+
   const tokenControls = (
     <InspectorTokenControls
       draft={tokenDtcgDraft}
@@ -8877,6 +8903,44 @@ function Inspector({
         <div className="comment-status" data-testid="comment-status" aria-live="polite">
           {commentStatus}
         </div>
+        {commentEditRecoveryVisible ? (
+          <section
+            className="comment-edit-recovery"
+            data-testid="comment-edit-recovery"
+            aria-label="삭제된 코멘트 초안 복구"
+          >
+            <span className="comment-edit-recovery-copy">
+              <strong>원본 코멘트가 삭제되었습니다</strong>
+              <span>작성 중인 초안을 보존했습니다.</span>
+            </span>
+            <textarea
+              className="comment-body-field"
+              data-testid="comment-edit-recovery-body"
+              aria-label="보존된 코멘트 초안"
+              value={commentEditBody}
+              onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+            />
+            <span className="comment-inline-actions">
+              <button
+                type="button"
+                aria-label={
+                  commentEditTarget?.kind === "reply" && commentEditThread
+                    ? "삭제된 초안 답글로 옮기기"
+                    : "삭제된 초안 새 코멘트로 옮기기"
+                }
+                onClick={moveDeletedCommentDraft}
+                disabled={!commentEditBody.trim()}
+              >
+                {commentEditTarget?.kind === "reply" && commentEditThread
+                  ? "답글로 옮기기"
+                  : "새 코멘트로 옮기기"}
+              </button>
+              <button type="button" onClick={cancelCommentEdit}>
+                초안 닫기
+              </button>
+            </span>
+          </section>
+        ) : null}
         <ul className="comment-list" data-testid="comment-list">
           {commentThreads.length === 0 ? (
             <li className="comment-empty">활성 코멘트 없음</li>
@@ -9822,6 +9886,13 @@ export function App() {
     activeTeamContext,
     activeMemberToken
   );
+  const projectSharingCredentials =
+    activeTeamContext && activeMemberToken.trim()
+      ? {
+          userId: activeTeamContext.currentUserId,
+          memberToken: activeMemberToken.trim()
+        }
+      : undefined;
   const commentActorId = activeProjectTeamContext?.currentUserId ?? LOCAL_COMMENT_VIEWER_ID;
   const commentAuthorNames = Object.fromEntries(
     (activeProjectTeamContext?.members ?? []).map((member) => [member.userId, member.displayName])
@@ -16075,10 +16146,15 @@ export function App() {
     }
 
     try {
-      const project = await setProjectSharing(currentProject.projectId, {
-        mode: "team",
-        teamId: activeTeamContext.teamId
-      });
+      const project = await setProjectSharing(
+        currentProject.projectId,
+        {
+          mode: "team",
+          teamId: activeTeamContext.teamId
+        },
+        fetch,
+        projectSharingCredentials
+      );
       const documentSummaries = project.documents.map((document) => ({
         documentId: document.documentId,
         name: document.name,

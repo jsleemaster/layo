@@ -939,6 +939,10 @@ export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
 
+export interface SetProjectSharingOptions {
+  expectedSharing?: ProjectSharing;
+}
+
 export interface ProjectManifest {
   schemaVersion: 1;
   projectId: string;
@@ -1455,6 +1459,13 @@ export class FileStorage {
     return path.join(this.filesDir, ".asset-references");
   }
 
+  private async withProjectMutationLock<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(this.projectPathFor(projectId), operation);
+  }
+
   private async withFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
@@ -1793,20 +1804,44 @@ export class FileStorage {
     });
   }
 
-  async setProjectSharing(projectId: string, sharing: ProjectSharing): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const nextSharing: ProjectSharing =
-      sharing.mode === "team"
-        ? { mode: "team", teamId: normalizeName(sharing.teamId, "") }
-        : { mode: "private" };
-    if (nextSharing.mode === "team" && !nextSharing.teamId) {
-      throw new Error("team id is required for project sharing");
-    }
+  async setProjectSharing(
+    projectId: string,
+    sharing: ProjectSharing,
+    options: SetProjectSharingOptions = {}
+  ): Promise<ProjectManifest> {
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      const expectedSharing = options.expectedSharing;
+      if (
+        expectedSharing
+        && (
+          project.sharing.mode !== expectedSharing.mode
+          || (
+            project.sharing.mode === "team"
+            && expectedSharing.mode === "team"
+            && project.sharing.teamId !== expectedSharing.teamId
+          )
+        )
+      ) {
+        throw Object.assign(new Error("project sharing changed before the update was applied"), {
+          code: "ECONFLICT",
+          statusCode: 409
+        });
+      }
 
-    return this.writeProject({
-      ...project,
-      sharing: nextSharing,
-      updatedAt: new Date().toISOString()
+      const nextSharing: ProjectSharing =
+        sharing.mode === "team"
+          ? { mode: "team", teamId: normalizeName(sharing.teamId, "") }
+          : { mode: "private" };
+      if (nextSharing.mode === "team" && !nextSharing.teamId) {
+        throw new Error("team id is required for project sharing");
+      }
+
+      return this.writeProject({
+        ...project,
+        sharing: nextSharing,
+        updatedAt: new Date().toISOString()
+      });
     });
   }
 
@@ -1978,7 +2013,7 @@ export class FileStorage {
       await this.readFile(options.fileId);
       const store = await this.readCommentThreadFile(options.fileId);
       const events = store.events.filter((event) => event.sequence > after);
-      return limit > 0 ? events.slice(-limit) : events;
+      return limit > 0 ? events.slice(0, limit) : events;
     }
 
     const projects = await this.listProjects();
@@ -1993,7 +2028,7 @@ export class FileStorage {
     const sorted = events.sort(
       (a, b) => a.createdAt.localeCompare(b.createdAt) || a.fileId.localeCompare(b.fileId) || a.sequence - b.sequence
     );
-    return limit > 0 ? sorted.slice(-limit) : sorted;
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
