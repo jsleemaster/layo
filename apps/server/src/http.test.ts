@@ -2634,7 +2634,7 @@ describe("HTTP server", () => {
 
     const anonymousActivity = await server.inject({
       method: "GET",
-      url: "/comments/activity?viewerId=observer"
+      url: "/comments/activity?viewerId=observer&limit=1"
     });
     expect(anonymousActivity.statusCode).toBe(200);
     expect(
