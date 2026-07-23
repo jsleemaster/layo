@@ -2094,6 +2094,277 @@ describe("MCP AI editing workflow", () => {
     expect(active.threads).toEqual([]);
   });
 
+  test("reviews and applies owner-safe comment edits and deletions through MCP", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-owner",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "owner-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-owner",
+        memberToken: "owner-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "comment-project",
+          name: "코멘트 프로젝트",
+          documentId: "comment-file",
+          documentName: "코멘트 문서"
+        });
+        await storage.setProjectSharing("comment-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+      }
+    });
+
+    const created = parseToolJson(
+      await client.callTool({
+        name: "create_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          nodeId: "text-1",
+          body: "MCP 검수 원문",
+          authorId: "spoofed-user",
+          authorName: "코멘트 작성자"
+        }
+      })
+    );
+    expect(created.thread).toMatchObject({
+      authorId: "comment-owner",
+      body: "MCP 검수 원문"
+    });
+
+    const reviewedUpdate = parseToolJson(
+      await client.callTool({
+        name: "update_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          body: "@peer MCP 수정 검수",
+          expectedModifiedAt: created.thread.modifiedAt
+        }
+      })
+    );
+    expect(reviewedUpdate).toMatchObject({
+      dryRun: true,
+      review: {
+        action: "update_thread",
+        canApply: true,
+        reason: null,
+        ownerId: "comment-owner",
+        currentModifiedAt: created.thread.modifiedAt
+      }
+    });
+    const unchanged = parseToolJson(
+      await client.callTool({
+        name: "list_comment_threads",
+        arguments: { fileId: "comment-file" }
+      })
+    );
+    expect(unchanged.threads[0].body).toBe("MCP 검수 원문");
+
+    const updated = parseToolJson(
+      await client.callTool({
+        name: "update_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          body: "@peer MCP 수정 검수",
+          expectedModifiedAt: created.thread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(updated).toMatchObject({
+      dryRun: false,
+      thread: {
+        authorId: "comment-owner",
+        body: "@peer MCP 수정 검수",
+        mentions: ["peer"]
+      }
+    });
+
+    const staleReview = parseToolJson(
+      await client.callTool({
+        name: "update_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          body: "오래된 MCP 수정",
+          expectedModifiedAt: created.thread.modifiedAt
+        }
+      })
+    );
+    expect(staleReview.review).toMatchObject({
+      canApply: false,
+      reason: "stale_version",
+      currentModifiedAt: updated.thread.modifiedAt
+    });
+
+    const replied = parseToolJson(
+      await client.callTool({
+        name: "add_comment_reply",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          body: "MCP 답글 원문",
+          authorName: "코멘트 작성자"
+        }
+      })
+    );
+    const reply = replied.thread.replies[0];
+    expect(reply.authorId).toBe("comment-owner");
+
+    const reviewedReply = parseToolJson(
+      await client.callTool({
+        name: "update_comment_reply",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          replyId: reply.replyId,
+          body: "MCP 수정 답글",
+          expectedModifiedAt: reply.modifiedAt
+        }
+      })
+    );
+    expect(reviewedReply).toMatchObject({
+      dryRun: true,
+      review: {
+        action: "update_reply",
+        canApply: true,
+        reason: null
+      }
+    });
+
+    const updatedReply = parseToolJson(
+      await client.callTool({
+        name: "update_comment_reply",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          replyId: reply.replyId,
+          body: "MCP 수정 답글",
+          expectedModifiedAt: reply.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    const currentReply = updatedReply.thread.replies[0];
+    expect(currentReply.body).toBe("MCP 수정 답글");
+
+    const reviewedReplyDelete = parseToolJson(
+      await client.callTool({
+        name: "delete_comment_reply",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          replyId: reply.replyId,
+          expectedModifiedAt: currentReply.modifiedAt
+        }
+      })
+    );
+    expect(reviewedReplyDelete).toMatchObject({
+      dryRun: true,
+      review: { action: "delete_reply", canApply: true }
+    });
+
+    const deletedReply = parseToolJson(
+      await client.callTool({
+        name: "delete_comment_reply",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          replyId: reply.replyId,
+          expectedModifiedAt: currentReply.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(deletedReply.thread.replies).toEqual([]);
+
+    const reviewedDelete = parseToolJson(
+      await client.callTool({
+        name: "delete_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          expectedModifiedAt: updated.thread.modifiedAt
+        }
+      })
+    );
+    expect(reviewedDelete).toMatchObject({
+      dryRun: true,
+      review: { action: "delete_thread", canApply: true }
+    });
+
+    const deleted = parseToolJson(
+      await client.callTool({
+        name: "delete_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId,
+          expectedModifiedAt: updated.thread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(deleted).toMatchObject({
+      dryRun: false,
+      deleted: { threadId: created.thread.threadId, deleted: true }
+    });
+  });
+
+  test("blocks team viewers from MCP comment writes", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "viewer-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-viewer",
+        memberToken: "viewer-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "comment-project",
+          name: "코멘트 프로젝트",
+          documentId: "comment-file",
+          documentName: "코멘트 문서"
+        });
+        await storage.setProjectSharing("comment-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+      }
+    });
+
+    const blocked = await client.callTool({
+      name: "create_comment_thread",
+      arguments: {
+        fileId: "comment-file",
+        nodeId: "text-1",
+        body: "viewer는 작성할 수 없음"
+      }
+    });
+    expect(blocked).toMatchObject({
+      isError: true,
+      content: [expect.objectContaining({ text: expect.stringMatching(/viewer cannot/) })]
+    });
+  });
+
   test("lists automatic file versions created by persisted MCP agent commands", async () => {
     const client = await connectMcpClient();
 
