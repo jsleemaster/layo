@@ -232,13 +232,16 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
 
     const code = (error as { code?: string }).code;
+    if (code === "EIDEMPOTENCY") {
+      const message = (error as Error).message;
+      return reply.code(409).send({ error: message, message });
+    }
     if (
       code === "EINVAL"
       || code === "EEXIST"
       || code === "EUNAVAILABLE"
       || code === "EACCES"
       || code === "ECONFLICT"
-      || code === "EIDEMPOTENCY"
     ) {
       const statusCode = (error as { statusCode?: number }).statusCode ?? 400;
       return reply.code(statusCode).send({ error: (error as Error).message });
