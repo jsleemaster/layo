@@ -3273,7 +3273,8 @@ export class FileStorage {
     const authorName = normalizeName(input.authorName, "사용자");
     const authorId = normalizeName(input.authorId, authorName);
     return this.withCommentMutationLock(fileId, async () => {
-      const now = createMonotonicCommentTimestamp();
+      const store = await this.readCommentThreadFile(fileId);
+      const now = createMonotonicCommentTimestamp(latestCommentStoreTimestamp(store));
       const thread: StoredCommentThread = {
         schemaVersion: 1,
         threadId: createStorageId("comment"),
@@ -3291,7 +3292,6 @@ export class FileStorage {
         readBy: [authorId],
         replies: []
       };
-      const store = await this.readCommentThreadFile(fileId);
       await this.writeCommentThreadFile({
         ...store,
         threads: [thread, ...store.threads],
@@ -3333,7 +3333,10 @@ export class FileStorage {
       assertCommentOwner(thread.authorId, actorId);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
 
-      const modifiedAt = createMonotonicCommentTimestamp(thread.modifiedAt);
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
       const mentions = extractCommentMentions(body);
       const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
       const updatedThread: StoredCommentThread = {
@@ -3392,7 +3395,10 @@ export class FileStorage {
       const thread = requireCommentThread(store, threadId);
       assertCommentOwner(thread.authorId, actorId);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
-      const deletedAt = createMonotonicCommentTimestamp(thread.modifiedAt);
+      const deletedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
 
       await this.writeCommentThreadFile({
         ...store,
@@ -3436,7 +3442,10 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      const createdAt = createMonotonicCommentTimestamp(thread.modifiedAt);
+      const createdAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
       const reply: StoredCommentReply = {
         schemaVersion: 1,
         replyId: createStorageId("reply"),
@@ -3502,7 +3511,11 @@ export class FileStorage {
       assertCommentOwner(reply.authorId, actorId);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
-      const modifiedAt = createMonotonicCommentTimestamp(thread.modifiedAt, reply.modifiedAt);
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt,
+        reply.modifiedAt
+      );
       const mentions = extractCommentMentions(body);
       const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
       const updatedReply: StoredCommentReply = {
@@ -3574,7 +3587,11 @@ export class FileStorage {
       assertCommentOwner(reply.authorId, actorId);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
-      const deletedAt = createMonotonicCommentTimestamp(thread.modifiedAt, reply.modifiedAt);
+      const deletedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt,
+        reply.modifiedAt
+      );
       const updatedThread: StoredCommentThread = {
         ...thread,
         modifiedAt: deletedAt,
@@ -3639,7 +3656,10 @@ export class FileStorage {
           fileId,
           threadId,
           viewerId,
-          createdAt: createMonotonicCommentTimestamp(thread.modifiedAt)
+          createdAt: createMonotonicCommentTimestamp(
+            latestCommentStoreTimestamp(store),
+            thread.modifiedAt
+          )
         })
       });
       return withViewerUnread(readThread, viewerId);
@@ -3669,7 +3689,10 @@ export class FileStorage {
           type: "read",
           fileId,
           viewerId,
-          createdAt: createMonotonicCommentTimestamp(...threads.map((thread) => thread.modifiedAt))
+          createdAt: createMonotonicCommentTimestamp(
+            latestCommentStoreTimestamp(store),
+            ...threads.map((thread) => thread.modifiedAt)
+          )
         })
       });
       return threads.map((thread) => withViewerUnread(thread, viewerId));
@@ -3687,7 +3710,13 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp(thread.modifiedAt);
+      if (thread.resolvedAt !== null) {
+        return thread;
+      }
+      const resolvedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
       const resolvedThread: StoredCommentThread = {
         ...thread,
         modifiedAt: resolvedAt,
@@ -4715,6 +4744,32 @@ function createStorageId(prefix: string) {
 }
 
 let lastCommentTimestampMs = 0;
+
+function latestCommentStoreTimestamp(store: StoredCommentThreadFile) {
+  const timestamps: Array<string | null | undefined> = [
+    ...store.threads.flatMap((thread) => [
+      thread.createdAt,
+      thread.modifiedAt,
+      thread.resolvedAt,
+      ...thread.replies.flatMap((reply) => [reply.createdAt, reply.modifiedAt])
+    ]),
+    ...store.activity.map((event) => event.createdAt),
+    ...store.events.map((event) => event.createdAt)
+  ];
+  let latestTimestamp: string | undefined;
+  let latestTimestampMs = 0;
+  for (const timestamp of timestamps) {
+    if (!timestamp) {
+      continue;
+    }
+    const parsed = Date.parse(timestamp);
+    if (Number.isFinite(parsed) && parsed > latestTimestampMs) {
+      latestTimestamp = timestamp;
+      latestTimestampMs = parsed;
+    }
+  }
+  return latestTimestamp;
+}
 
 function createMonotonicCommentTimestamp(
   ...previousTimestamps: Array<string | null | undefined>

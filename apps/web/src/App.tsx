@@ -6893,6 +6893,7 @@ function Inspector({
     expectedModifiedAt: string;
   } | null>(null);
   const [commentEditBody, setCommentEditBody] = useState("");
+  const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
   const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
@@ -6900,6 +6901,7 @@ function Inspector({
     setStyleNameDraft("");
     setCommentEditTarget(null);
     setCommentEditBody("");
+    setCommentEditRebasePending(false);
   }, [selectedNode?.id]);
 
   useEffect(() => {
@@ -6908,6 +6910,35 @@ function Inspector({
       ? { nodeId: selectedNode.id, style: selectedNode.style }
       : null;
   }, [selectedNode?.id, selectedNode?.style]);
+
+  useEffect(() => {
+    if (!commentEditRebasePending || !commentEditTarget) {
+      return;
+    }
+    const thread = commentThreads.find(
+      (candidate) => candidate.threadId === commentEditTarget.threadId
+    );
+    const latestModifiedAt =
+      commentEditTarget.kind === "thread"
+        ? thread?.modifiedAt
+        : thread?.replies.find((reply) => reply.replyId === commentEditTarget.replyId)
+            ?.modifiedAt;
+    if (!latestModifiedAt || latestModifiedAt === commentEditTarget.expectedModifiedAt) {
+      return;
+    }
+    setCommentEditTarget((current) => {
+      if (
+        !current
+        || current.kind !== commentEditTarget.kind
+        || current.threadId !== commentEditTarget.threadId
+        || current.replyId !== commentEditTarget.replyId
+      ) {
+        return current;
+      }
+      return { ...current, expectedModifiedAt: latestModifiedAt };
+    });
+    setCommentEditRebasePending(false);
+  }, [commentEditRebasePending, commentEditTarget, commentThreads]);
 
   const beginCommentEdit = (
     target: {
@@ -6920,11 +6951,13 @@ function Inspector({
   ) => {
     setCommentEditTarget(target);
     setCommentEditBody(body);
+    setCommentEditRebasePending(false);
   };
 
   const cancelCommentEdit = () => {
     setCommentEditTarget(null);
     setCommentEditBody("");
+    setCommentEditRebasePending(false);
   };
 
   const saveCommentEdit = async () => {
@@ -6945,8 +6978,10 @@ function Inspector({
             body,
             commentEditTarget.expectedModifiedAt
           );
-    if (result === "applied" || result === "stale") {
+    if (result === "applied") {
       cancelCommentEdit();
+    } else if (result === "stale") {
+      setCommentEditRebasePending(true);
     }
   };
 
