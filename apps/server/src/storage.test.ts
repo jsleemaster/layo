@@ -2444,7 +2444,7 @@ describe("FileStorage", () => {
     };
     internals.legacyCommentThreadsPathFor = () =>
       path.join(
-        tempRoot,
+        tempRoot!,
         "comments",
         "..",
         "comments",
