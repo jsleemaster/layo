@@ -2142,6 +2142,17 @@ describe("MCP AI editing workflow", () => {
       body: "MCP 검수 원문"
     });
 
+    const blankReview = await client.callTool({
+      name: "update_comment_thread",
+      arguments: {
+        fileId: "comment-file",
+        threadId: created.thread.threadId,
+        body: "   ",
+        expectedModifiedAt: created.thread.modifiedAt
+      }
+    });
+    expect(blankReview).toMatchObject({ isError: true });
+
     const reviewedUpdate = parseToolJson(
       await client.callTool({
         name: "update_comment_thread",
