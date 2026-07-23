@@ -3007,6 +3007,78 @@ describe("Penpot component instance migration", () => {
     }
   }, 20_000);
 
+  test("a pre-warmed general document edit recovers a later interrupted library update", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-prewarmed-general-edit-recovery-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "prewarmed-general-edit-project",
+          documentId: "prewarmed-general-edit-target",
+          documentName: "Prewarmed general edit target",
+          fileName: "prewarmed-general-edit.penpot"
+        }
+      );
+      const libraryId = `penpot-library-${libraryFileId}`;
+      const originalTarget = await storage.readFile(
+        "prewarmed-general-edit-target"
+      );
+      const publishedLibrary = await storage.readFile(libraryId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) =>
+          component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#f97316";
+      await storage.writeFile(libraryId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryId, {
+        libraryId,
+        name: "Shape library"
+      });
+
+      const prepared = new FileStorage(root);
+      await prepared.prepareFiles();
+      await expectStorageWorkerCrash(
+        root,
+        "library-update-crash-before-subscription",
+        ["prewarmed-general-edit-target", libraryId],
+        94,
+        "library-update-before-subscription-crashing"
+      );
+
+      const recovered = await prepared.readFile(
+        "prewarmed-general-edit-target"
+      );
+      expect(recovered.components).toEqual(originalTarget.components);
+      recovered.name = "Recovered general edit";
+      await prepared.writeFile("prewarmed-general-edit-target", recovered);
+
+      await expect(
+        prepared.updateLibraryRegistryItem(
+          "prewarmed-general-edit-target",
+          libraryId
+        )
+      ).resolves.toMatchObject({
+        fileId: "prewarmed-general-edit-target",
+        libraryId
+      });
+      const updated = await prepared.readFile(
+        "prewarmed-general-edit-target"
+      );
+      expect(updated.name).toBe("Recovered general edit");
+      expect(
+        updated.components?.find(
+          (component) =>
+            component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#f97316");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test("replays a committed project import after journal removal with the same idempotency key", async () => {
     const sourceRoot = await mkdtemp(
       path.join(tmpdir(), "layo-project-receipt-source-")
