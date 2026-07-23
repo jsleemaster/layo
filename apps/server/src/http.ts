@@ -80,16 +80,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   };
 
+  const teamPrincipalForRequest = (request: LibraryRequest) => ({
+    userId: Array.isArray(request.headers["x-layo-user-id"])
+      ? request.headers["x-layo-user-id"][0]
+      : request.headers["x-layo-user-id"],
+    memberToken: bearerToken(request.headers.authorization)
+  });
   const authenticateTeamMember = async (request: LibraryRequest) => {
     if (!teamAuthorizationProvider) {
       return undefined;
     }
-    return teamAuthorizationProvider.authenticate({
-      userId: Array.isArray(request.headers["x-layo-user-id"])
-        ? request.headers["x-layo-user-id"][0]
-        : request.headers["x-layo-user-id"],
-      memberToken: bearerToken(request.headers.authorization)
-    });
+    return teamAuthorizationProvider.authenticate(teamPrincipalForRequest(request));
+  };
+  const authenticateOptionalTeamMember = async (request: LibraryRequest) => {
+    if (!teamAuthorizationProvider) {
+      return undefined;
+    }
+    const principal = teamPrincipalForRequest(request);
+    if (!principal.userId && !principal.memberToken) {
+      return undefined;
+    }
+    return teamAuthorizationProvider.authenticate(principal);
   };
   const authenticateLibraryMember = authenticateTeamMember;
 
@@ -139,12 +150,15 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return member;
   };
 
-  const filterCommentProjectIds = async (member: AuthenticatedTeamMember) => {
+  const visibleCommentProjectIds = async (member?: AuthenticatedTeamMember) => {
     const projects = await storage.listProjects();
     return new Set(
       projects.flatMap((project) =>
-        project.sharing.mode === "team"
-        && member.teamIds.includes(project.sharing.teamId)
+        project.sharing.mode === "private"
+        || (
+          project.sharing.mode === "team"
+          && member?.teamIds.includes(project.sharing.teamId)
+        )
           ? [project.projectId]
           : []
       )
@@ -962,7 +976,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     const member = await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.createCommentThread(request.params.fileId, {
       ...request.body,
-      authorId: member?.userId ?? request.body.authorId
+      authorId: member?.userId ?? request.body.authorId,
+      authorName: member?.userId ?? request.body.authorName
     });
     return { thread };
   });
@@ -1007,19 +1022,19 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
-    const member = await authenticateTeamMember(request);
+    const member = await authenticateOptionalTeamMember(request);
     const summary = await storage.listCommentNotifications({
       viewerId: member?.userId ?? request.query.viewerId
     });
-    if (!member) {
+    if (!teamAuthorizationProvider) {
       return { summary };
     }
-    const visibleProjectIds = await filterCommentProjectIds(member);
+    const visibleProjectIds = await visibleCommentProjectIds(member);
     const projects = summary.projects.filter((project) => visibleProjectIds.has(project.projectId));
     return {
       summary: {
         ...summary,
-        viewerId: member.userId,
+        ...(member ? { viewerId: member.userId } : {}),
         totalUnread: projects.reduce((total, project) => total + project.unreadCount, 0),
         totalMentions: projects.reduce((total, project) => total + project.mentionCount, 0),
         projects
@@ -1028,19 +1043,19 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   });
 
   server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
-    const member = await authenticateTeamMember(request);
+    const member = await authenticateOptionalTeamMember(request);
     const feed = await storage.listCommentActivity({
       viewerId: member?.userId ?? request.query.viewerId,
       limit: request.query.limit ? Number(request.query.limit) : undefined
     });
-    if (!member) {
+    if (!teamAuthorizationProvider) {
       return { feed };
     }
-    const visibleProjectIds = await filterCommentProjectIds(member);
+    const visibleProjectIds = await visibleCommentProjectIds(member);
     return {
       feed: {
         ...feed,
-        viewerId: member.userId,
+        ...(member ? { viewerId: member.userId } : {}),
         events: feed.events.filter((event) => visibleProjectIds.has(event.projectId))
       }
     };
@@ -1072,7 +1087,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       request.params.threadId,
       {
         ...request.body,
-        authorId: member?.userId ?? request.body.authorId
+        authorId: member?.userId ?? request.body.authorId,
+        authorName: member?.userId ?? request.body.authorName
       }
     );
     return { thread };
