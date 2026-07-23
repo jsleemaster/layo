@@ -2037,6 +2037,14 @@ describe("FileStorage", () => {
     });
     const reply = replied.replies[0];
 
+    expect(replied.modifiedAt).not.toBe(created.modifiedAt);
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
     expect(reply).toMatchObject({
       authorId: "user-replier",
       modifiedAt: reply.createdAt
@@ -2060,6 +2068,7 @@ describe("FileStorage", () => {
       mentions: ["민지"],
       authorId: "user-replier"
     });
+    expect(edited.modifiedAt).not.toBe(replied.modifiedAt);
 
     await expect(
       storage.deleteCommentReply("sample-file", created.threadId, reply.replyId, {
@@ -2073,6 +2082,7 @@ describe("FileStorage", () => {
       expectedModifiedAt: edited.replies[0].modifiedAt
     });
     expect(deleted.replies).toEqual([]);
+    expect(deleted.modifiedAt).not.toBe(edited.modifiedAt);
 
     const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
     expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 원문");
