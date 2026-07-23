@@ -172,6 +172,33 @@ describe("FileStorage", () => {
     });
   });
 
+  test("document reservation rejects case-folded cross-project collisions", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-project-a",
+      name: "대소문자 프로젝트 A",
+      documentId: "Shared-File",
+      documentName: "대소문자 문서 A"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "case-project-b",
+        name: "대소문자 프로젝트 B",
+        documentId: "shared-file",
+        documentName: "대소문자 문서 B"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect((await storage.listProjects()).map((project) => project.projectId)).toEqual([
+      "case-project-a"
+    ]);
+    expect((await storage.listFiles()).map((file) => file.id)).toEqual([
+      "Shared-File"
+    ]);
+  });
+
   test("project duplication reserves every destination document before writing", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -963,6 +990,129 @@ describe("FileStorage", () => {
       name: "복원 프로젝트",
       sharing: { mode: "private" }
     });
+  });
+
+  test("project archive import preserves a conflicting global asset and leaves no partial project", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "archive.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "archive-conflict-image",
+      kind: "image",
+      name: "충돌 이미지",
+      transform: { x: 80, y: 120, rotation: 0 },
+      size: { width: 120, height: 90 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportProjectArchive("test-project");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    const conflictingData = Buffer.from(pixelPng, "base64");
+    const lastByteIndex = conflictingData.length - 1;
+    conflictingData[lastByteIndex] = conflictingData[lastByteIndex]! ^ 0xff;
+    const internals = target as unknown as {
+      writeAsset(
+        metadata: {
+          assetId: string;
+          name: string;
+          mimeType: string;
+          byteLength: number;
+          url: string;
+        },
+        data: Buffer
+      ): Promise<unknown>;
+    };
+    await internals.writeAsset(
+      {
+        assetId: asset.assetId,
+        name: "보존할 기존 이미지",
+        mimeType: "image/png",
+        byteLength: conflictingData.length,
+        url: `/assets/${asset.assetId}`
+      },
+      conflictingData
+    );
+
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "asset-conflict-project",
+        documentIdPrefix: "asset-conflict"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(target.readProject("asset-conflict-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(target.readFile("asset-conflict-sample-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    const retainedAsset = await target.readAsset(asset.assetId);
+    expect(retainedAsset.name).toBe("보존할 기존 이미지");
+    expect(retainedAsset.data.equals(conflictingData)).toBe(true);
+  });
+
+  test("project archive import reuses a byte-identical global asset across new projects", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "shared.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "shared-archive-image",
+      kind: "image",
+      name: "공유 이미지",
+      transform: { x: 80, y: 120, rotation: 0 },
+      size: { width: 120, height: 90 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportProjectArchive("test-project");
+    const target = new FileStorage(path.join(tempRoot, "target"));
+
+    await target.importProjectArchive(exported.archive, {
+      projectId: "asset-reuse-project-a",
+      documentIdPrefix: "asset-reuse-a"
+    });
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "asset-reuse-project-b",
+        documentIdPrefix: "asset-reuse-b"
+      })
+    ).resolves.toMatchObject({
+      project: { projectId: "asset-reuse-project-b" },
+      assetCount: 1
+    });
+
+    expect(
+      (await target.readAsset(asset.assetId)).data.equals(
+        Buffer.from(pixelPng, "base64")
+      )
+    ).toBe(true);
   });
 
   test("library archive exports reviews and imports components tokens and assets without overwriting ids", async () => {

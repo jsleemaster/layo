@@ -492,6 +492,110 @@ describe("Penpot component instance migration", () => {
     );
   });
 
+  test("rejects a conflicting global asset before external migration can replace it", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-asset-conflict-"));
+    try {
+      const storage = new FileStorage(root);
+      const assetId = `penpot-asset-${libraryMediaId}`;
+      const existingData = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#2563eb"/></svg>',
+        "utf8"
+      );
+      const internals = storage as unknown as {
+        writeAsset(
+          metadata: {
+            assetId: string;
+            name: string;
+            mimeType: string;
+            byteLength: number;
+            url: string;
+          },
+          data: Buffer
+        ): Promise<unknown>;
+      };
+      await internals.writeAsset(
+        {
+          assetId,
+          name: "existing-blue.svg",
+          mimeType: "image/svg+xml",
+          byteLength: existingData.length,
+          url: `/assets/${assetId}`
+        },
+        existingData
+      );
+
+      await expect(
+        storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+          projectId: "asset-conflict-project",
+          documentId: "asset-conflict-document",
+          fileName: "packaged-library-swap.penpot"
+        })
+      ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+      await expect(storage.readProject("asset-conflict-project")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(storage.readFile("asset-conflict-document")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      const retainedAsset = await storage.readAsset(assetId);
+      expect(retainedAsset.name).toBe("existing-blue.svg");
+      expect(retainedAsset.data.equals(existingData)).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rolls back external migration when library publication is rejected", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-conflict-"));
+    try {
+      const storage = new FileStorage(root);
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      await storage.createProject({
+        projectId: "registry-owner-project",
+        name: "기존 팀 라이브러리",
+        documentId: "registry-owner-file",
+        documentName: "기존 라이브러리 문서"
+      });
+      await storage.setProjectSharing("registry-owner-project", {
+        mode: "team",
+        teamId: "team-existing"
+      });
+      await storage.publishLibraryToRegistry("registry-owner-file", {
+        libraryId: libraryDocumentId,
+        name: "기존 팀 라이브러리"
+      });
+      const registryBefore = await storage.listLibraryRegistry("registry-owner-file");
+
+      await expect(
+        storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+          projectId: "publication-conflict-project",
+          documentId: "publication-conflict-document",
+          fileName: "packaged-library-swap.penpot"
+        })
+      ).rejects.toMatchObject({ code: "EACCES", statusCode: 403 });
+
+      await expect(storage.readProject("publication-conflict-project")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(storage.readFile("publication-conflict-document")).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(storage.readFile(libraryDocumentId)).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+      await expect(
+        storage.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await storage.listLibraryRegistry("registry-owner-file")).toEqual(
+        registryBefore
+      );
+      expect(await storage.listLibraryRegistrySubscriptions()).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("persists packaged libraries as registry-owned project documents and subscriptions", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-"));
     try {
