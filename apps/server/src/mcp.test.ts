@@ -2138,6 +2138,7 @@ describe("MCP AI editing workflow", () => {
     );
     expect(created.thread).toMatchObject({
       authorId: "comment-owner",
+      authorName: "comment-owner",
       body: "MCP 검수 원문"
     });
 
@@ -2220,7 +2221,10 @@ describe("MCP AI editing workflow", () => {
       })
     );
     const reply = replied.thread.replies[0];
-    expect(reply.authorId).toBe("comment-owner");
+    expect(reply).toMatchObject({
+      authorId: "comment-owner",
+      authorName: "comment-owner"
+    });
 
     const reviewedReply = parseToolJson(
       await client.callTool({
@@ -2310,7 +2314,7 @@ describe("MCP AI editing workflow", () => {
         arguments: {
           fileId: "comment-file",
           threadId: created.thread.threadId,
-          expectedModifiedAt: updated.thread.modifiedAt,
+          expectedModifiedAt: deletedReply.thread.modifiedAt,
           dryRun: false
         }
       })
@@ -2363,6 +2367,156 @@ describe("MCP AI editing workflow", () => {
       isError: true,
       content: [expect.objectContaining({ text: expect.stringMatching(/viewer cannot/) })]
     });
+  });
+
+  test("filters authenticated comment feeds to private and authorized team projects", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-owner",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "owner-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-owner",
+        memberToken: "owner-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "private-comment-project",
+          name: "개인 코멘트 프로젝트",
+          documentId: "private-comment-file",
+          documentName: "개인 코멘트 문서"
+        });
+        await storage.createCommentThread("private-comment-file", {
+          nodeId: "text-1",
+          body: "개인 검수",
+          authorId: "local-author",
+          authorName: "로컬 작성자"
+        });
+        await storage.createProject({
+          projectId: "team-comment-project",
+          name: "팀 코멘트 프로젝트",
+          documentId: "team-comment-file",
+          documentName: "팀 코멘트 문서"
+        });
+        await storage.setProjectSharing("team-comment-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        await storage.createCommentThread("team-comment-file", {
+          nodeId: "text-1",
+          body: "허용된 팀 검수",
+          authorId: "peer",
+          authorName: "동료"
+        });
+        await storage.createProject({
+          projectId: "other-team-comment-project",
+          name: "다른 팀 코멘트 프로젝트",
+          documentId: "other-team-comment-file",
+          documentName: "다른 팀 코멘트 문서"
+        });
+        await storage.setProjectSharing("other-team-comment-project", {
+          mode: "team",
+          teamId: "team-beta"
+        });
+        await storage.createCommentThread("other-team-comment-file", {
+          nodeId: "text-1",
+          body: "다른 팀 비공개 검수",
+          authorId: "outsider",
+          authorName: "외부 사용자"
+        });
+      }
+    });
+
+    const notifications = parseToolJson(
+      await client.callTool({
+        name: "list_comment_notifications",
+        arguments: {}
+      })
+    );
+    expect(
+      new Set(
+        notifications.summary.projects.map(
+          (project: { projectId: string }) => project.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project", "team-comment-project"]));
+
+    const activity = parseToolJson(
+      await client.callTool({
+        name: "list_comment_activity",
+        arguments: { limit: 10 }
+      })
+    );
+    expect(
+      new Set(
+        activity.feed.events.map(
+          (event: { projectId: string }) => event.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project", "team-comment-project"]));
+  });
+
+  test("keeps private comment feeds available without a team principal", async () => {
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "team-member",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "member-token"
+          }
+        ]
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "private-comment-project",
+          name: "개인 코멘트 프로젝트",
+          documentId: "private-comment-file",
+          documentName: "개인 코멘트 문서"
+        });
+        await storage.createCommentThread("private-comment-file", {
+          nodeId: "text-1",
+          body: "개인 검수",
+          authorId: "local-author",
+          authorName: "로컬 작성자"
+        });
+        await storage.createProject({
+          projectId: "team-comment-project",
+          name: "팀 코멘트 프로젝트",
+          documentId: "team-comment-file",
+          documentName: "팀 코멘트 문서"
+        });
+        await storage.setProjectSharing("team-comment-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        await storage.createCommentThread("team-comment-file", {
+          nodeId: "text-1",
+          body: "팀 비공개 검수",
+          authorId: "team-member",
+          authorName: "팀 사용자"
+        });
+      }
+    });
+
+    const notifications = parseToolJson(
+      await client.callTool({
+        name: "list_comment_notifications",
+        arguments: { viewerId: "observer" }
+      })
+    );
+    expect(
+      notifications.summary.projects.map(
+        (project: { projectId: string }) => project.projectId
+      )
+    ).toEqual(["private-comment-project"]);
   });
 
   test("lists automatic file versions created by persisted MCP agent commands", async () => {
