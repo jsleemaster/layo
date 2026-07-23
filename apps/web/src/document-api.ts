@@ -50,8 +50,10 @@ export interface CommentThread {
   nodeId: string;
   nodeName: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   resolvedAt: string | null;
   mentions: string[];
   mentionTargets: CommentMentionTarget[];
@@ -64,8 +66,10 @@ export interface CommentReply {
   schemaVersion: 1;
   replyId: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   mentions: string[];
   mentionTargets: CommentMentionTarget[];
 }
@@ -118,7 +122,13 @@ export interface CommentActivityFeed {
   events: CommentActivityEvent[];
 }
 
-export type CommentLiveEventType = "created" | "replied" | "resolved" | "read";
+export type CommentLiveEventType =
+  | "created"
+  | "replied"
+  | "resolved"
+  | "read"
+  | "edited"
+  | "deleted";
 
 export interface CommentLiveEvent {
   schemaVersion: 1;
@@ -127,29 +137,58 @@ export interface CommentLiveEvent {
   type: CommentLiveEventType;
   fileId: string;
   threadId?: string;
+  replyId?: string;
   viewerId?: string;
   createdAt: string;
 }
+
+export type CommentAuthorizationEndedCode =
+  | "credential_inactive"
+  | "team_access_revoked";
 
 export interface SubscribeToCommentEventsOptions {
   fileId?: string;
   viewerId?: string;
   after?: number;
+  credentials?: LibraryRegistryCredentials;
+  fetcher?: typeof fetch;
+  reconnectDelayMs?: number;
   onCommentEvent: (event: CommentLiveEvent) => void;
+  onReady?: () => void;
+  onAuthorizationEnded?: (code: CommentAuthorizationEndedCode) => void;
   onError?: () => void;
 }
 
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: CommentMentionTarget[];
 }
 
 export interface CreateCommentReplyInput {
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: CommentMentionTarget[];
+}
+
+export interface UpdateCommentInput {
+  body: string;
+  actorId: string;
+  expectedModifiedAt: string;
+  mentionTargets?: CommentMentionTarget[];
+}
+
+export interface DeleteCommentInput {
+  actorId: string;
+  expectedModifiedAt: string;
+}
+
+export interface DeleteCommentThreadResult {
+  threadId: string;
+  deleted: true;
 }
 
 export interface FileVersionChangeSummary {
@@ -1049,17 +1088,23 @@ export async function listCommentThreads(
   fileId: string,
   includeResolved = false,
   fetcher: typeof fetch = fetch,
-  viewerId?: string
+  viewerId?: string,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread[]> {
   const params = new URLSearchParams();
   if (includeResolved) {
     params.set("includeResolved", "true");
   }
-  if (viewerId?.trim()) {
-    params.set("viewerId", viewerId);
+  const resolvedViewerId = credentials?.userId.trim() || viewerId?.trim();
+  if (resolvedViewerId) {
+    params.set("viewerId", resolvedViewerId);
   }
   const query = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetcher(apiUrl(`/files/${fileId}/comments${query}`));
+  const headers = libraryRegistryWriteHeaders(credentials);
+  delete headers["Content-Type"];
+  const response = await fetcher(apiUrl(`/files/${fileId}/comments${query}`), {
+    headers
+  });
   const payload = await readDocumentJson(response);
   return (payload as { threads: CommentThread[] }).threads;
 }
@@ -1067,28 +1112,102 @@ export async function listCommentThreads(
 export async function createCommentThread(
   fileId: string,
   input: CreateCommentThreadInput,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread> {
   const response = await fetcher(apiUrl(`/files/${fileId}/comments`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify(input)
   });
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
 }
 
+export async function updateCommentThread(
+  fileId: string,
+  threadId: string,
+  input: UpdateCommentInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<CommentThread> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}`), {
+    method: "PATCH",
+    headers: libraryRegistryWriteHeaders(credentials),
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { thread: CommentThread }).thread;
+}
+
+export async function deleteCommentThread(
+  fileId: string,
+  threadId: string,
+  input: DeleteCommentInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<DeleteCommentThreadResult> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}`), {
+    method: "DELETE",
+    headers: libraryRegistryWriteHeaders(credentials),
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { deleted: DeleteCommentThreadResult }).deleted;
+}
+
 export async function addCommentReply(
   fileId: string,
   threadId: string,
   input: CreateCommentReplyInput,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread> {
   const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}/replies`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: libraryRegistryWriteHeaders(credentials),
     body: JSON.stringify(input)
   });
+  const payload = await readDocumentJson(response);
+  return (payload as { thread: CommentThread }).thread;
+}
+
+export async function updateCommentReply(
+  fileId: string,
+  threadId: string,
+  replyId: string,
+  input: UpdateCommentInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<CommentThread> {
+  const response = await fetcher(
+    apiUrl(`/files/${fileId}/comments/${threadId}/replies/${replyId}`),
+    {
+      method: "PATCH",
+      headers: libraryRegistryWriteHeaders(credentials),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await readDocumentJson(response);
+  return (payload as { thread: CommentThread }).thread;
+}
+
+export async function deleteCommentReply(
+  fileId: string,
+  threadId: string,
+  replyId: string,
+  input: DeleteCommentInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<CommentThread> {
+  const response = await fetcher(
+    apiUrl(`/files/${fileId}/comments/${threadId}/replies/${replyId}`),
+    {
+      method: "DELETE",
+      headers: libraryRegistryWriteHeaders(credentials),
+      body: JSON.stringify(input)
+    }
+  );
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
 }
@@ -1096,10 +1215,12 @@ export async function addCommentReply(
 export async function resolveCommentThread(
   fileId: string,
   threadId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread> {
   const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}/resolve`), {
-    method: "POST"
+    method: "POST",
+    headers: libraryRegistryWriteHeaders(credentials)
   });
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
@@ -1109,12 +1230,13 @@ export async function markCommentThreadRead(
   fileId: string,
   threadId: string,
   viewerId = "사용자",
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread> {
   const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}/read`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ viewerId })
+    headers: libraryRegistryWriteHeaders(credentials),
+    body: JSON.stringify({ viewerId: credentials?.userId.trim() || viewerId })
   });
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
@@ -1122,14 +1244,18 @@ export async function markCommentThreadRead(
 
 export async function listCommentNotifications(
   viewerId = "사용자",
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentNotificationSummary> {
   const params = new URLSearchParams();
-  if (viewerId.trim()) {
-    params.set("viewerId", viewerId);
+  const resolvedViewerId = credentials?.userId.trim() || viewerId.trim();
+  if (resolvedViewerId) {
+    params.set("viewerId", resolvedViewerId);
   }
   const query = params.toString() ? `?${params.toString()}` : "";
-  const response = await fetcher(apiUrl(`/comments/notifications${query}`));
+  const headers = libraryRegistryWriteHeaders(credentials);
+  delete headers["Content-Type"];
+  const response = await fetcher(apiUrl(`/comments/notifications${query}`), { headers });
   const payload = await readDocumentJson(response);
   return (payload as { summary: CommentNotificationSummary }).summary;
 }
@@ -1137,14 +1263,21 @@ export async function listCommentNotifications(
 export async function listCommentActivity(
   viewerId = "사용자",
   limit = 10,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentActivityFeed> {
   const params = new URLSearchParams();
-  if (viewerId.trim()) {
-    params.set("viewerId", viewerId);
+  const resolvedViewerId = credentials?.userId.trim() || viewerId.trim();
+  if (resolvedViewerId) {
+    params.set("viewerId", resolvedViewerId);
   }
-  params.set("limit", String(limit));
-  const response = await fetcher(apiUrl(`/comments/activity?${params.toString()}`));
+  if (Number.isFinite(limit) && limit > 0) {
+    params.set("limit", String(Math.floor(limit)));
+  }
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const headers = libraryRegistryWriteHeaders(credentials);
+  delete headers["Content-Type"];
+  const response = await fetcher(apiUrl(`/comments/activity${query}`), { headers });
   const payload = await readDocumentJson(response);
   return (payload as { feed: CommentActivityFeed }).feed;
 }
@@ -1152,57 +1285,206 @@ export async function listCommentActivity(
 export async function markFileCommentsRead(
   fileId: string,
   viewerId = "사용자",
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread[]> {
   const response = await fetcher(apiUrl(`/files/${fileId}/comments/read`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ viewerId })
+    headers: libraryRegistryWriteHeaders(credentials),
+    body: JSON.stringify({ viewerId: credentials?.userId.trim() || viewerId })
   });
   const payload = await readDocumentJson(response);
   return (payload as { threads: CommentThread[] }).threads;
 }
 
 export function subscribeToCommentEvents(options: SubscribeToCommentEventsOptions): () => void {
-  if (typeof EventSource === "undefined") {
+  const fetcher = options.fetcher ?? globalThis.fetch;
+  if (typeof fetcher !== "function") {
     return () => {};
   }
 
-  const params = new URLSearchParams();
-  if (options.viewerId?.trim()) {
-    params.set("viewerId", options.viewerId);
-  }
-  if (options.fileId?.trim()) {
-    params.set("fileId", options.fileId);
-  }
-  if (typeof options.after === "number" && Number.isFinite(options.after) && options.after > 0) {
-    params.set("after", String(Math.floor(options.after)));
-  }
-  const query = params.toString() ? `?${params.toString()}` : "";
-  const source = new EventSource(apiUrl(`/comments/events${query}`));
-  const handleComment = (message: MessageEvent<string>) => {
-    try {
-      const event = JSON.parse(message.data) as Partial<CommentLiveEvent>;
-      if (event.schemaVersion !== 1 || typeof event.fileId !== "string") {
-        return;
-      }
-      options.onCommentEvent(event as CommentLiveEvent);
-    } catch {
-      // Ignore malformed stream messages. EventSource will keep the connection alive.
+  const controller = new AbortController();
+  let closed = false;
+  let authorizationEnded = false;
+  let reconnectId: ReturnType<typeof setTimeout> | undefined;
+  let lastSequence =
+    typeof options.after === "number" && Number.isFinite(options.after)
+      ? Math.max(0, Math.floor(options.after))
+      : 0;
+
+  const streamUrl = () => {
+    const params = new URLSearchParams();
+    const viewerId = options.credentials?.userId.trim() || options.viewerId?.trim();
+    if (viewerId) {
+      params.set("viewerId", viewerId);
+    }
+    if (options.fileId?.trim()) {
+      params.set("fileId", options.fileId);
+    }
+    if (lastSequence > 0) {
+      params.set("after", String(lastSequence));
+    }
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return apiUrl(`/comments/events${query}`);
+  };
+
+  const endAuthorization = (code: CommentAuthorizationEndedCode) => {
+    if (closed || authorizationEnded) {
+      return;
+    }
+    authorizationEnded = true;
+    if (reconnectId !== undefined) {
+      clearTimeout(reconnectId);
+    }
+    options.onAuthorizationEnded?.(code);
+    controller.abort();
+  };
+
+  const reconnect = () => {
+    if (!closed && !authorizationEnded) {
+      reconnectId = setTimeout(() => {
+        void connect();
+      }, Math.max(0, options.reconnectDelayMs ?? 1_000));
     }
   };
 
-  source.addEventListener("comment", handleComment as EventListener);
-  if (options.onError) {
-    source.addEventListener("error", options.onError);
-  }
+  const dispatchBlock = (block: string) => {
+    let eventName = "message";
+    const data: string[] = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith(":")) {
+        continue;
+      }
+      const separator = line.indexOf(":");
+      const field = separator >= 0 ? line.slice(0, separator) : line;
+      const value =
+        separator >= 0
+          ? line.slice(separator + 1).replace(/^ /, "")
+          : "";
+      if (field === "event") {
+        eventName = value;
+      } else if (field === "data") {
+        data.push(value);
+      }
+    }
+    if (data.length === 0) {
+      return;
+    }
+    if (eventName === "ready") {
+      try {
+        const event = JSON.parse(data.join("\n")) as { ok?: boolean; lastSequence?: number };
+        if (event.ok === true) {
+          if (typeof event.lastSequence === "number") {
+            lastSequence = Math.max(lastSequence, event.lastSequence);
+          }
+          options.onReady?.();
+        }
+      } catch {
+        // Ignore malformed readiness records while keeping the stream alive.
+      }
+      return;
+    }
+    if (eventName === "comment-authorization-ended") {
+      try {
+        const event = JSON.parse(data.join("\n")) as {
+          code?: CommentAuthorizationEndedCode;
+        };
+        if (
+          event.code === "credential_inactive"
+          || event.code === "team_access_revoked"
+        ) {
+          endAuthorization(event.code);
+        }
+      } catch {
+        // Ignore malformed terminal records and let normal reconnect handling apply.
+      }
+      return;
+    }
+    if (eventName !== "comment") {
+      return;
+    }
+
+    try {
+      const event = JSON.parse(data.join("\n")) as Partial<CommentLiveEvent>;
+      if (event.schemaVersion !== 1 || typeof event.fileId !== "string") {
+        return;
+      }
+      if (typeof event.sequence === "number") {
+        lastSequence = Math.max(lastSequence, event.sequence);
+      }
+      options.onCommentEvent(event as CommentLiveEvent);
+    } catch {
+      // Ignore malformed comment records while keeping the stream alive.
+    }
+  };
+
+  const connect = async () => {
+    try {
+      const authHeaders = libraryRegistryWriteHeaders(options.credentials);
+      delete authHeaders["Content-Type"];
+      const response = await fetcher(streamUrl(), {
+        headers: {
+          Accept: "text/event-stream",
+          ...authHeaders
+        },
+        signal: controller.signal
+      });
+      if (response.status === 401 || response.status === 403) {
+        endAuthorization(
+          response.status === 401 ? "credential_inactive" : "team_access_revoked"
+        );
+        return;
+      }
+      if (!response.ok) {
+        throw new DocumentRequestError(response.status, response.statusText);
+      }
+      if (!response.body) {
+        throw new Error("코멘트 이벤트 스트림 본문이 없습니다");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      try {
+        while (!closed && !authorizationEnded) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.match(/\r?\n\r?\n/);
+          while (boundary?.index !== undefined) {
+            const block = buffer.slice(0, boundary.index);
+            buffer = buffer.slice(boundary.index + boundary[0].length);
+            dispatchBlock(block);
+            boundary = buffer.match(/\r?\n\r?\n/);
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      reconnect();
+    } catch (error) {
+      if (
+        closed
+        || authorizationEnded
+        || (error instanceof DOMException && error.name === "AbortError")
+      ) {
+        return;
+      }
+      options.onError?.();
+      reconnect();
+    }
+  };
+
+  void connect();
 
   return () => {
-    source.removeEventListener("comment", handleComment as EventListener);
-    if (options.onError) {
-      source.removeEventListener("error", options.onError);
+    closed = true;
+    if (reconnectId !== undefined) {
+      clearTimeout(reconnectId);
     }
-    source.close();
+    controller.abort();
   };
 }
 
@@ -1413,9 +1695,30 @@ export async function summarizeDocumentChanges(
   return (payload as { summary: FileVersionChangeSummary }).summary;
 }
 
+export class DocumentRequestError extends Error {
+  readonly name = "DocumentRequestError";
+
+  constructor(
+    readonly status: number,
+    statusText: string,
+    readonly detail?: string
+  ) {
+    super(`문서 요청 실패: ${status} ${detail || statusText}`.trim());
+  }
+}
+
 async function readDocumentJson(response: Response): Promise<unknown> {
   if (!response.ok) {
-    throw new Error(`문서 요청 실패: ${response.status} ${response.statusText}`.trim());
+    let detail: string | undefined;
+    try {
+      const payload = await response.clone().json() as { error?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) {
+        detail = payload.error.trim();
+      }
+    } catch {
+      // Preserve the status when an error response is not JSON.
+    }
+    throw new DocumentRequestError(response.status, response.statusText, detail);
   }
   return response.json();
 }
