@@ -2103,7 +2103,7 @@ describe("FileStorage", () => {
       authorId: "user-owner",
       authorName: "소유자"
     });
-    await storage.addCommentReply("sample-file", created.threadId, {
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
       body: "삭제될 답글 본문",
       authorId: "user-replier",
       authorName: "답글 작성자"
@@ -2125,7 +2125,7 @@ describe("FileStorage", () => {
     await expect(
       storage.deleteCommentThread("sample-file", created.threadId, {
         actorId: "user-owner",
-        expectedModifiedAt: created.modifiedAt
+        expectedModifiedAt: replied.modifiedAt
       })
     ).resolves.toEqual({ threadId: created.threadId, deleted: true });
     await expect(storage.listCommentThreads("sample-file", { includeResolved: true })).resolves.toEqual([]);
