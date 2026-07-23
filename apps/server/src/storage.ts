@@ -57,7 +57,6 @@ export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+z
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
-const storagePathMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
@@ -284,11 +283,6 @@ async function withStoragePathMutationLock<T>(
   operation: () => Promise<T>
 ): Promise<T> {
   const normalizedPath = path.resolve(storagePath);
-  const activePaths = storagePathMutationContext.getStore();
-  if (activePaths?.has(normalizedPath)) {
-    return operation();
-  }
-
   const previous =
     storagePathMutationTails.get(normalizedPath) ?? Promise.resolve();
   let releaseInProcess!: () => void;
@@ -300,10 +294,7 @@ async function withStoragePathMutationLock<T>(
   let releaseProcessLock: (() => Promise<void>) | null = null;
   try {
     releaseProcessLock = await acquireStorageProcessMutationLock(normalizedPath);
-    return await storagePathMutationContext.run(
-      new Set([...(activePaths ?? []), normalizedPath]),
-      operation
-    );
+    return await operation();
   } finally {
     try {
       await releaseProcessLock?.();
@@ -2808,20 +2799,21 @@ export class FileStorage {
                   });
 
                   for (const library of libraryFiles) {
-                    const entry = await this.publishLibraryToRegistry(
-                      library.file.id,
-                      {
-                        libraryId: library.file.id,
-                        name: library.file.name
-                      }
-                    );
+                    const entry =
+                      await this.publishLibraryToRegistryLocked(
+                        library.file.id,
+                        {
+                          libraryId: library.file.id,
+                          name: library.file.name
+                        }
+                      );
                     const componentIdMap = Object.fromEntries(
                       (library.file.components ?? []).map((component) => [
                         component.id,
                         component.id
                       ])
                     );
-                    await this.upsertLibraryRegistrySubscription(
+                    await this.upsertLibraryRegistrySubscriptionLocked(
                       documentId,
                       entry,
                       {
@@ -3138,111 +3130,92 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
+    return withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      () => this.publishLibraryToRegistryLocked(fileId, options)
+    );
+  }
+
+  // Caller must hold the registry path lock.
+  private async publishLibraryToRegistryLocked(
+    fileId: string,
+    options: PublishLibraryRegistryOptions = {}
+  ): Promise<LibraryRegistryEntry> {
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
     const name = normalizeName(options.name, exported.name);
     const idempotencyKey = normalizeLibraryPublicationIdempotencyKey(options.idempotencyKey);
     const teamId = await this.findTeamIdForFile(fileId);
     const fingerprint = JSON.stringify({ fileId, libraryId, name, teamId: teamId ?? null });
-    return withStoragePathMutationLock(this.libraryRegistryPath(), async () => {
-      const existingEntries = await this.readLibraryRegistryEntries();
-      const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
-      if (existing?.teamId && existing.teamId !== teamId) {
-        throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
-      }
-      const receiptPath = idempotencyKey
-        ? this.libraryPublicationReceiptPathFor(libraryId, idempotencyKey)
-        : undefined;
-      if (receiptPath && await pathExists(receiptPath)) {
-        const receipt = parseLibraryPublicationReceipt(
-          JSON.parse(await readFile(receiptPath, "utf8"))
-        );
-        if (receipt.fingerprint !== fingerprint) {
-          throw idempotencyConflictError(
-            `library publication idempotency key was already used with another request: ${idempotencyKey}`
-          );
-        }
-        return receipt.entry;
-      }
-      const now = nextIsoTimestamp(existing?.updatedAt);
-      const entry: LibraryRegistryEntry = {
-        libraryId,
-        name,
-        sourceFileId: exported.fileId,
-        sourceName: exported.name,
-        teamId,
-        componentCount: exported.componentCount,
-        tokenCount: exported.tokenCount,
-        assetCount: exported.assetCount,
-        publishedAt: existing?.publishedAt ?? now,
-        updatedAt: now
-      };
-      const nextEntries = [
-        entry,
-        ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
-      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-
-      const existingEvents = await this.readLibraryRegistryEvents();
-      const nextEvent = this.createLibraryRegistryEvent(entry, exported, existingEvents);
-      const nextEvents = [...existingEvents, nextEvent];
-      const archivePath = this.libraryArchivePathFor(libraryId);
-      const registryPath = this.libraryRegistryPath();
-      const eventsPath = this.libraryRegistryEventsPath();
-      const original = await captureStoragePathSnapshots([
-        archivePath,
-        registryPath,
-        eventsPath,
-        ...(receiptPath ? [receiptPath] : [])
-      ]);
-      const intended: StoragePathSnapshot[] = [
-        { filePath: archivePath, data: exported.archive },
-        {
-          filePath: registryPath,
-          data: Buffer.from(
-            `${JSON.stringify({ schemaVersion: 1, libraries: nextEntries }, null, 2)}\n`,
-            "utf8"
-          )
-        },
-        {
-          filePath: eventsPath,
-          data: Buffer.from(
-            `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
-            "utf8"
-          )
-        },
-        ...(receiptPath && idempotencyKey
-          ? [{
-              filePath: receiptPath,
-              data: Buffer.from(
-                `${JSON.stringify({
-                  schemaVersion: 1,
-                  idempotencyKey,
-                  fingerprint,
-                  entry
-                } satisfies LibraryPublicationReceipt, null, 2)}\n`,
-                "utf8"
-              )
-            }]
-          : [])
-      ];
-      const recoveryId = libraryId;
-
-      await this.persistLibraryUpdateRecoveryJournal(
-        recoveryId,
-        original,
-        intended,
-        "library-registry-publication"
+    const existingEntries = await this.readLibraryRegistryEntries();
+    const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+    if (existing?.teamId && existing.teamId !== teamId) {
+      throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
+    }
+    const receiptPath = idempotencyKey
+      ? this.libraryPublicationReceiptPathFor(libraryId, idempotencyKey)
+      : undefined;
+    if (receiptPath && await pathExists(receiptPath)) {
+      const receipt = parseLibraryPublicationReceipt(
+        JSON.parse(await readFile(receiptPath, "utf8"))
       );
-      try {
-        await mkdir(this.librariesDir, { recursive: true });
-        await durablyReplaceFile(archivePath, exported.archive);
-        await this.writeLibraryRegistryEntries(nextEntries);
-        await this.writeLibraryRegistryEvents(nextEvents);
-        if (receiptPath && idempotencyKey) {
-          await mkdir(path.dirname(receiptPath), { recursive: true });
-          await durablyReplaceFile(
-            receiptPath,
-            Buffer.from(
+      if (receipt.fingerprint !== fingerprint) {
+        throw idempotencyConflictError(
+          `library publication idempotency key was already used with another request: ${idempotencyKey}`
+        );
+      }
+      return receipt.entry;
+    }
+    const now = nextIsoTimestamp(existing?.updatedAt);
+    const entry: LibraryRegistryEntry = {
+      libraryId,
+      name,
+      sourceFileId: exported.fileId,
+      sourceName: exported.name,
+      teamId,
+      componentCount: exported.componentCount,
+      tokenCount: exported.tokenCount,
+      assetCount: exported.assetCount,
+      publishedAt: existing?.publishedAt ?? now,
+      updatedAt: now
+    };
+    const nextEntries = [
+      entry,
+      ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
+    ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    const existingEvents = await this.readLibraryRegistryEvents();
+    const nextEvent = this.createLibraryRegistryEvent(entry, exported, existingEvents);
+    const nextEvents = [...existingEvents, nextEvent];
+    const archivePath = this.libraryArchivePathFor(libraryId);
+    const registryPath = this.libraryRegistryPath();
+    const eventsPath = this.libraryRegistryEventsPath();
+    const original = await captureStoragePathSnapshots([
+      archivePath,
+      registryPath,
+      eventsPath,
+      ...(receiptPath ? [receiptPath] : [])
+    ]);
+    const intended: StoragePathSnapshot[] = [
+      { filePath: archivePath, data: exported.archive },
+      {
+        filePath: registryPath,
+        data: Buffer.from(
+          `${JSON.stringify({ schemaVersion: 1, libraries: nextEntries }, null, 2)}\n`,
+          "utf8"
+        )
+      },
+      {
+        filePath: eventsPath,
+        data: Buffer.from(
+          `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
+          "utf8"
+        )
+      },
+      ...(receiptPath && idempotencyKey
+        ? [{
+            filePath: receiptPath,
+            data: Buffer.from(
               `${JSON.stringify({
                 schemaVersion: 1,
                 idempotencyKey,
@@ -3251,29 +3224,57 @@ export class FileStorage {
               } satisfies LibraryPublicationReceipt, null, 2)}\n`,
               "utf8"
             )
-          );
-        }
+          }]
+        : [])
+    ];
+    const recoveryId = libraryId;
+
+    await this.persistLibraryUpdateRecoveryJournal(
+      recoveryId,
+      original,
+      intended,
+      "library-registry-publication"
+    );
+    try {
+      await mkdir(this.librariesDir, { recursive: true });
+      await durablyReplaceFile(archivePath, exported.archive);
+      await this.writeLibraryRegistryEntries(nextEntries);
+      await this.writeLibraryRegistryEvents(nextEvents);
+      if (receiptPath && idempotencyKey) {
+        await mkdir(path.dirname(receiptPath), { recursive: true });
+        await durablyReplaceFile(
+          receiptPath,
+          Buffer.from(
+            `${JSON.stringify({
+              schemaVersion: 1,
+              idempotencyKey,
+              fingerprint,
+              entry
+            } satisfies LibraryPublicationReceipt, null, 2)}\n`,
+            "utf8"
+          )
+        );
+      }
+      await this.removeLibraryUpdateRecoveryJournal(
+        recoveryId,
+        "library-registry-publication"
+      );
+      return entry;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
         await this.removeLibraryUpdateRecoveryJournal(
           recoveryId,
           "library-registry-publication"
         );
-        return entry;
-      } catch (error) {
-        try {
-          await restoreStoragePathSnapshots(original);
-          await this.removeLibraryUpdateRecoveryJournal(
-            recoveryId,
-            "library-registry-publication"
-          );
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            "library registry publication failed and rollback failed"
-          );
-        }
-        throw error;
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "library registry publication failed and rollback failed"
+        );
       }
-    });
+      throw error;
+    }
   }
 
   async listLibraryRegistry(): Promise<LibraryRegistryEntry[]>;
@@ -3675,7 +3676,7 @@ export class FileStorage {
         libraryId: entry.libraryId,
         libraryName: entry.name
       };
-      await this.upsertLibraryRegistrySubscription(
+      await this.upsertLibraryRegistrySubscriptionLocked(
         fileId,
         entry,
         imported,
@@ -5084,45 +5085,63 @@ export class FileStorage {
     onCommitted?: (snapshot: StoragePathSnapshot) => void,
     onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
-    assertSafeStorageId(fileId);
     return withStoragePathMutationLock(
       this.librarySubscriptionsPath(),
-      async () => {
-        const subscriptions = await this.readLibraryRegistrySubscriptions();
-        const subscription: LibraryRegistrySubscription = {
+      () =>
+        this.upsertLibraryRegistrySubscriptionLocked(
           fileId,
-          libraryId: entry.libraryId,
-          libraryName: entry.name,
-          sourceFileId: entry.sourceFileId,
-          sourceName: entry.sourceName,
+          entry,
+          imported,
           idPrefix,
-          componentCount: imported.componentCount,
-          tokenCount: imported.tokenCount,
-          assetCount: imported.assetCount,
-          componentIdMap: imported.componentIdMap,
-          tokenIdMap: imported.tokenIdMap,
-          importedAt: new Date().toISOString(),
-          importedRegistryUpdatedAt: entry.updatedAt
-        };
-        const nextSubscriptions = [
-          subscription,
-          ...subscriptions.filter(
-            (candidate) =>
-              candidate.fileId !== fileId
-              || candidate.libraryId !== entry.libraryId
-          )
-        ].sort(
-          (a, b) =>
-            a.fileId.localeCompare(b.fileId)
-            || a.libraryName.localeCompare(b.libraryName)
-            || a.libraryId.localeCompare(b.libraryId)
-        );
-        await this.writeLibraryRegistrySubscriptions(
-          nextSubscriptions,
           onCommitted,
           onPrepared
-        );
-      }
+        )
+    );
+  }
+
+  // Caller must hold the subscription path lock.
+  private async upsertLibraryRegistrySubscriptionLocked(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    imported: ImportedLibraryRegistryItem,
+    idPrefix: string | undefined,
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
+  ): Promise<void> {
+    assertSafeStorageId(fileId);
+    const subscriptions = await this.readLibraryRegistrySubscriptions();
+    const subscription: LibraryRegistrySubscription = {
+      fileId,
+      libraryId: entry.libraryId,
+      libraryName: entry.name,
+      sourceFileId: entry.sourceFileId,
+      sourceName: entry.sourceName,
+      idPrefix,
+      componentCount: imported.componentCount,
+      tokenCount: imported.tokenCount,
+      assetCount: imported.assetCount,
+      componentIdMap: imported.componentIdMap,
+      tokenIdMap: imported.tokenIdMap,
+      importedAt: new Date().toISOString(),
+      importedRegistryUpdatedAt: entry.updatedAt
+    };
+    const nextSubscriptions = [
+      subscription,
+      ...subscriptions.filter(
+        (candidate) =>
+          candidate.fileId !== fileId
+          || candidate.libraryId !== entry.libraryId
+      )
+    ].sort(
+      (a, b) =>
+        a.fileId.localeCompare(b.fileId)
+        || a.libraryName.localeCompare(b.libraryName)
+        || a.libraryId.localeCompare(b.libraryId)
+    );
+    await this.writeLibraryRegistrySubscriptions(
+      nextSubscriptions,
+      onCommitted,
+      onPrepared
     );
   }
 
