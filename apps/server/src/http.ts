@@ -238,6 +238,7 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       || code === "EUNAVAILABLE"
       || code === "EACCES"
       || code === "ECONFLICT"
+      || code === "EIDEMPOTENCY"
     ) {
       const statusCode = (error as { statusCode?: number }).statusCode ?? 400;
       return reply.code(statusCode).send({ error: (error as Error).message });
@@ -397,6 +398,18 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       documentName?: string;
     };
   }>("/migrations/external/import", async (request) => {
+    const idempotencyHeader = request.headers["idempotency-key"];
+    const idempotencyKey = (
+      Array.isArray(idempotencyHeader)
+        ? idempotencyHeader[0]
+        : idempotencyHeader
+    )?.trim();
+    if (!idempotencyKey) {
+      throw Object.assign(
+        new Error("Idempotency-Key header is required for external migration imports"),
+        { code: "EINVAL", statusCode: 400 }
+      );
+    }
     return {
       imported: await storage.importExternalMigrationArchive(Buffer.from(request.body.archiveBase64, "base64"), {
         fileName: request.body.fileName,
@@ -404,7 +417,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         projectId: request.body.projectId,
         documentId: request.body.documentId,
         name: request.body.name,
-        documentName: request.body.documentName
+        documentName: request.body.documentName,
+        idempotencyKey
       })
     };
   });
@@ -454,11 +468,24 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Body: { archiveBase64: string; projectId?: string; name?: string; documentIdPrefix?: string };
   }>("/projects/import/archive", async (request) => {
+    const idempotencyHeader = request.headers["idempotency-key"];
+    const idempotencyKey = (
+      Array.isArray(idempotencyHeader)
+        ? idempotencyHeader[0]
+        : idempotencyHeader
+    )?.trim();
+    if (!idempotencyKey) {
+      throw Object.assign(
+        new Error("Idempotency-Key header is required for project archive imports"),
+        { code: "EINVAL", statusCode: 400 }
+      );
+    }
     return {
       imported: await storage.importProjectArchive(Buffer.from(request.body.archiveBase64, "base64"), {
         projectId: request.body.projectId,
         name: request.body.name,
-        documentIdPrefix: request.body.documentIdPrefix
+        documentIdPrefix: request.body.documentIdPrefix,
+        idempotencyKey
       })
     };
   });
