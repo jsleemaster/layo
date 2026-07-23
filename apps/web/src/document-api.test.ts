@@ -795,7 +795,10 @@ describe("file version API helpers", () => {
       const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
 
       if (pathname === "/migrations/external/import" && init?.method === "POST") {
-        expect(init.headers).toEqual({ "Content-Type": "application/json" });
+        expect(init.headers).toEqual({
+          "Content-Type": "application/json",
+          "Idempotency-Key": "external-web-import-v1"
+        });
         expect(JSON.parse(String(init.body))).toEqual({
           archiveBase64: "eyJkb2N1bWVudCI6e319",
           fileName: "landing.figma.json",
@@ -845,7 +848,10 @@ describe("file version API helpers", () => {
           archiveBase64: "eyJkb2N1bWVudCI6e319",
           fileName: "landing.figma.json",
           sourceHint: "figma",
-          name: "Figma landing"
+          name: "Figma landing",
+          idempotencyKey: "external-web-import-v1"
+        } as Parameters<typeof importExternalMigrationArchive>[0] & {
+          idempotencyKey: string;
         },
         fetcher as typeof fetch
       )
