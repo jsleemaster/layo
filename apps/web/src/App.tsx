@@ -6738,6 +6738,7 @@ function Inspector({
   commentStatus,
   canComment,
   commentActorId,
+  commentAuthorNames,
   onTokenDtcgDraftChange,
   onExportTokensDtcg,
   onImportTokensDtcg,
@@ -6823,6 +6824,7 @@ function Inspector({
   commentStatus: string;
   canComment: boolean;
   commentActorId: string;
+  commentAuthorNames: Record<string, string>;
   onTokenDtcgDraftChange: (value: string) => void;
   onExportTokensDtcg: () => void;
   onImportTokensDtcg: () => void;
@@ -6840,14 +6842,14 @@ function Inspector({
     threadId: string,
     body: string,
     expectedModifiedAt: string
-  ) => Promise<boolean>;
+  ) => Promise<"applied" | "stale" | "failed">;
   onDeleteComment: (threadId: string, expectedModifiedAt: string) => Promise<boolean>;
   onUpdateCommentReply: (
     threadId: string,
     replyId: string,
     body: string,
     expectedModifiedAt: string
-  ) => Promise<boolean>;
+  ) => Promise<"applied" | "stale" | "failed">;
   onDeleteCommentReply: (
     threadId: string,
     replyId: string,
@@ -6926,7 +6928,7 @@ function Inspector({
     if (!commentEditTarget || !body) {
       return;
     }
-    const saved =
+    const result =
       commentEditTarget.kind === "thread"
         ? await onUpdateComment(
             commentEditTarget.threadId,
@@ -6939,7 +6941,7 @@ function Inspector({
             body,
             commentEditTarget.expectedModifiedAt
           );
-    if (saved) {
+    if (result === "applied" || result === "stale") {
       cancelCommentEdit();
     }
   };
@@ -8853,6 +8855,8 @@ function Inspector({
                           <textarea
                             className="comment-body-field"
                             data-testid="comment-thread-edit-body"
+                            aria-label="코멘트 내용 수정"
+                            autoFocus
                             value={commentEditBody}
                             onChange={(event) => setCommentEditBody(event.currentTarget.value)}
                           />
@@ -8868,7 +8872,9 @@ function Inspector({
                       ) : (
                         <strong>{thread.body}</strong>
                       )}
-                      <span>{thread.nodeId} · {thread.authorName}</span>
+                      <span>
+                        {thread.nodeId} · {commentAuthorNames[thread.authorId] ?? thread.authorName}
+                      </span>
                       <CommentMentionChips mentions={thread.mentions} mentionTargets={thread.mentionTargets} />
                       {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
                     </div>
@@ -8926,6 +8932,8 @@ function Inspector({
                                     <textarea
                                       className="comment-body-field comment-reply-body-field"
                                       data-testid="comment-reply-edit-body"
+                                      aria-label="답글 내용 수정"
+                                      autoFocus
                                       value={commentEditBody}
                                       onChange={(event) => setCommentEditBody(event.currentTarget.value)}
                                     />
@@ -8941,7 +8949,7 @@ function Inspector({
                                 ) : (
                                   <strong>{reply.body}</strong>
                                 )}
-                                <span>{reply.authorName}</span>
+                                <span>{commentAuthorNames[reply.authorId] ?? reply.authorName}</span>
                               </div>
                               {reply.authorId === commentActorId && !editingReply ? (
                                 <span className="comment-inline-actions">
@@ -9776,9 +9784,10 @@ export function App() {
     activeMemberToken
   );
   const commentActorId = activeProjectTeamContext?.currentUserId ?? LOCAL_COMMENT_VIEWER_ID;
-  const commentAuthorName =
-    activeProjectTeamContext?.members.find((member) => member.userId === commentActorId)?.displayName
-    ?? "사용자";
+  const commentAuthorNames = Object.fromEntries(
+    (activeProjectTeamContext?.members ?? []).map((member) => [member.userId, member.displayName])
+  );
+  const commentAuthorName = commentAuthorNames[commentActorId] ?? "사용자";
   const libraryRegistryAccessScopeKey = JSON.stringify([
     currentProject?.currentDocumentId ?? null,
     currentProject?.sharing.mode ?? null,
@@ -16707,32 +16716,32 @@ export function App() {
     error: unknown,
     fileId: string,
     fallback: string
-  ): Promise<false> => {
+  ): Promise<"stale" | "failed"> => {
     if (error instanceof DocumentRequestError && error.status === 409) {
       await refreshCommentThreads(
         fileId,
         "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
       );
-      return false;
+      return "stale";
     }
     const message = error instanceof Error ? error.message : fallback;
     setCommentStatus(message);
-    return false;
+    return "failed";
   };
 
   const updateSelectedNodeComment = async (
     threadId: string,
     bodyValue: string,
     expectedModifiedAt: string
-  ): Promise<boolean> => {
+  ): Promise<"applied" | "stale" | "failed"> => {
     if (!currentProject) {
       setCommentStatus("프로젝트 없음");
-      return false;
+      return "failed";
     }
     const body = bodyValue.trim();
     if (!body) {
       setCommentStatus("코멘트 내용을 입력하세요");
-      return false;
+      return "failed";
     }
     const fileId = currentProject.currentDocumentId;
     try {
@@ -16753,7 +16762,7 @@ export function App() {
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return true;
+      return "applied";
     } catch (error) {
       return handleCommentMutationError(error, fileId, "코멘트를 수정하지 못했습니다");
     }
@@ -16783,7 +16792,8 @@ export function App() {
       ]);
       return true;
     } catch (error) {
-      return handleCommentMutationError(error, fileId, "코멘트를 삭제하지 못했습니다");
+      await handleCommentMutationError(error, fileId, "코멘트를 삭제하지 못했습니다");
+      return false;
     }
   };
 
@@ -16792,15 +16802,15 @@ export function App() {
     replyId: string,
     bodyValue: string,
     expectedModifiedAt: string
-  ): Promise<boolean> => {
+  ): Promise<"applied" | "stale" | "failed"> => {
     if (!currentProject) {
       setCommentStatus("프로젝트 없음");
-      return false;
+      return "failed";
     }
     const body = bodyValue.trim();
     if (!body) {
       setCommentStatus("답글 내용을 입력하세요");
-      return false;
+      return "failed";
     }
     const fileId = currentProject.currentDocumentId;
     try {
@@ -16822,7 +16832,7 @@ export function App() {
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return true;
+      return "applied";
     } catch (error) {
       return handleCommentMutationError(error, fileId, "답글을 수정하지 못했습니다");
     }
@@ -16854,7 +16864,8 @@ export function App() {
       ]);
       return true;
     } catch (error) {
-      return handleCommentMutationError(error, fileId, "답글을 삭제하지 못했습니다");
+      await handleCommentMutationError(error, fileId, "답글을 삭제하지 못했습니다");
+      return false;
     }
   };
 
@@ -20262,6 +20273,7 @@ export function App() {
         commentStatus={commentStatus}
         canComment={Boolean(currentProject && editor && selectedNode)}
         commentActorId={commentActorId}
+        commentAuthorNames={commentAuthorNames}
         onTokenDtcgDraftChange={setTokenDtcgDraft}
         onExportTokensDtcg={() => void exportCurrentDocumentTokensDtcg()}
         onImportTokensDtcg={() => void importCurrentDocumentTokensDtcg()}
