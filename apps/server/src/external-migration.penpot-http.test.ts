@@ -125,6 +125,7 @@ describe("Penpot external migration HTTP routes", () => {
     const imported = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: { "idempotency-key": "external-migration-penpot-http-1" },
       payload: {
         archiveBase64: archive.toString("base64"),
         fileName: "landing.penpot"
