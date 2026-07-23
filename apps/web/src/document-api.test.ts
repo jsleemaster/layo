@@ -1585,6 +1585,8 @@ describe("comment API helpers", () => {
         });
       }
       if (pathname === "/files/sample-file/comments/comment-1/resolve" && init?.method === "POST") {
+        expect(init.headers).toEqual({});
+        expect(init.body).toBeUndefined();
         return jsonResponse({
           thread: {
             threadId: "comment-1",
