@@ -50,11 +50,17 @@ describe("project api", () => {
     };
 
     await createProject({ name: "새 프로젝트" }, fetcher as typeof fetch);
-    await updateProject("project-web", { name: "리네임" }, fetcher as typeof fetch);
+    await updateProject(
+      "project-web",
+      { name: "리네임" },
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
     await duplicateProject(
       "project-web",
       { projectId: "project-web-copy", name: "복제", documentIdPrefix: "web-copy" },
-      fetcher as typeof fetch
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
     );
     await setProjectSharing(
       "project-web",
@@ -62,7 +68,11 @@ describe("project api", () => {
       fetcher as typeof fetch,
       { userId: "team-owner", memberToken: "owner-token" }
     );
-    await deleteProject("project-web-copy", fetcher as typeof fetch);
+    await deleteProject(
+      "project-web-copy",
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
 
     expect(requests).toEqual([
       {
@@ -74,13 +84,21 @@ describe("project api", () => {
       {
         url: "http://127.0.0.1:4317/projects/project-web",
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { name: "리네임" }
       },
       {
         url: "http://127.0.0.1:4317/projects/project-web/duplicate",
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { projectId: "project-web-copy", name: "복제", documentIdPrefix: "web-copy" }
       },
       {
@@ -96,7 +114,10 @@ describe("project api", () => {
       {
         url: "http://127.0.0.1:4317/projects/project-web-copy",
         method: "DELETE",
-        headers: undefined,
+        headers: {
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: null
       }
     ]);

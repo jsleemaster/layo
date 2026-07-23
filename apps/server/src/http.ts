@@ -30,7 +30,8 @@ import {
   type StoredCommentMentionTarget,
   type DesignNode,
   type DesignFile,
-  type GeometryPatch
+  type GeometryPatch,
+  type ProjectManifest
 } from "./storage.js";
 
 export function canWriteEventStream(
@@ -116,6 +117,45 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     if (member) {
       authorizeTeamLibraryWrite(member, await storage.getTeamIdForFile(fileId));
     }
+  };
+
+  const authorizeProjectRead = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    if (project.sharing.mode !== "team" || !teamAuthorizationProvider) {
+      return undefined;
+    }
+    const member = await teamAuthorizationProvider.authenticate(
+      teamPrincipalForRequest(request)
+    );
+    authorizeTeamLibraryRead(member, project.sharing.teamId);
+    return member;
+  };
+
+  const authorizeProjectWrite = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const member = await authorizeProjectRead(request, project);
+    if (member && project.sharing.mode === "team") {
+      authorizeTeamLibraryWrite(member, project.sharing.teamId);
+    }
+    return member;
+  };
+
+  const authorizeProjectOwner = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const member = await authorizeProjectRead(request, project);
+    if (member && member.role !== "owner") {
+      throw Object.assign(new Error("only a team owner can delete a shared project"), {
+        code: "EACCES",
+        statusCode: 403
+      });
+    }
+    return member;
   };
 
   const authorizeCommentRead = async (
@@ -418,14 +458,26 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.patch<{ Params: { projectId: string }; Body: { name?: string; currentDocumentId?: string } }>(
     "/projects/:projectId",
     async (request) => {
-      return { project: await storage.updateProject(request.params.projectId, request.body) };
+      const project = await storage.readProject(request.params.projectId);
+      await authorizeProjectWrite(request, project);
+      return {
+        project: await storage.updateProject(request.params.projectId, request.body, {
+          expectedSharing: project.sharing
+        })
+      };
     }
   );
 
   server.post<{ Params: { projectId: string }; Body: { documentId?: string; name?: string } }>(
     "/projects/:projectId/documents",
     async (request) => {
-      return { project: await storage.createProjectDocument(request.params.projectId, request.body) };
+      const project = await storage.readProject(request.params.projectId);
+      await authorizeProjectWrite(request, project);
+      return {
+        project: await storage.createProjectDocument(request.params.projectId, request.body, {
+          expectedSharing: project.sharing
+        })
+      };
     }
   );
 
@@ -476,13 +528,23 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { projectId: string };
     Body: { projectId?: string; name?: string; documentIdPrefix?: string };
   }>("/projects/:projectId/duplicate", async (request) => {
+    const project = await storage.readProject(request.params.projectId);
+    await authorizeProjectRead(request, project);
     return {
-      project: await storage.duplicateProject(request.params.projectId, request.body)
+      project: await storage.duplicateProject(request.params.projectId, request.body, {
+        expectedSharing: project.sharing
+      })
     };
   });
 
   server.delete<{ Params: { projectId: string } }>("/projects/:projectId", async (request) => {
-    return { project: await storage.deleteProject(request.params.projectId) };
+    const project = await storage.readProject(request.params.projectId);
+    await authorizeProjectOwner(request, project);
+    return {
+      project: await storage.deleteProject(request.params.projectId, {
+        expectedSharing: project.sharing
+      })
+    };
   });
 
   server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
@@ -899,19 +961,17 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
-      if (teamAuthorizationProvider && !request.query.fileId) {
+      const fileId = request.query.fileId;
+      if (!fileId) {
         throw Object.assign(
-          new Error("team comment event stream requires a file id"),
+          new Error("comment event stream requires a file id"),
           { code: "EINVAL", statusCode: 400 }
         );
       }
-      const authorizedTeamId =
-        request.query.fileId && teamAuthorizationProvider
-          ? await storage.getTeamIdForFile(request.query.fileId)
-          : undefined;
-      if (request.query.fileId) {
-        await authorizeCommentRead(request, request.query.fileId);
-      }
+      const authorizedTeamId = teamAuthorizationProvider
+        ? await storage.getTeamIdForFile(fileId)
+        : undefined;
+      await authorizeCommentRead(request, fileId);
       if (eventStreamsClosing) {
         return reply.code(503).send({ error: "server is closing" });
       }
@@ -954,21 +1014,19 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         }
         sending = true;
         try {
-          if (request.query.fileId) {
-            if (
-              teamAuthorizationProvider
-              && await storage.getTeamIdForFile(request.query.fileId) !== authorizedTeamId
-            ) {
-              throw Object.assign(
-                new Error("comment stream team access changed"),
-                { code: "EACCES", statusCode: 403 }
-              );
-            }
-            await authorizeCommentRead(request, request.query.fileId);
+          if (
+            teamAuthorizationProvider
+            && await storage.getTeamIdForFile(fileId) !== authorizedTeamId
+          ) {
+            throw Object.assign(
+              new Error("comment stream team access changed"),
+              { code: "EACCES", statusCode: 403 }
+            );
           }
+          await authorizeCommentRead(request, fileId);
           const events = await storage.listCommentLiveEvents({
             after: lastSequence,
-            fileId: request.query.fileId,
+            fileId,
             limit: 100
           });
           for (const event of events) {

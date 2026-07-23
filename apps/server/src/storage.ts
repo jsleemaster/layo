@@ -939,9 +939,11 @@ export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
 
-export interface SetProjectSharingOptions {
+export interface ProjectMutationOptions {
   expectedSharing?: ProjectSharing;
 }
+
+export type SetProjectSharingOptions = ProjectMutationOptions;
 
 export interface ProjectManifest {
   schemaVersion: 1;
@@ -1466,6 +1468,28 @@ export class FileStorage {
     return withStoragePathMutationLock(this.projectPathFor(projectId), operation);
   }
 
+  private assertExpectedProjectSharing(
+    project: ProjectManifest,
+    expectedSharing?: ProjectSharing
+  ): void {
+    if (
+      expectedSharing
+      && (
+        project.sharing.mode !== expectedSharing.mode
+        || (
+          project.sharing.mode === "team"
+          && expectedSharing.mode === "team"
+          && project.sharing.teamId !== expectedSharing.teamId
+        )
+      )
+    ) {
+      throw Object.assign(new Error("project sharing changed before the update was applied"), {
+        code: "ECONFLICT",
+        statusCode: 409
+      });
+    }
+  }
+
   private async withFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
@@ -1754,53 +1778,84 @@ export class FileStorage {
     const projectName = normalizeName(input.name, "새 프로젝트");
     const documentName = normalizeName(input.documentName, `${projectName} 문서`);
 
-    await this.writeFile(documentId, createInitialDesignFile(documentId, documentName));
-    return this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: projectName,
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
-      sharing: { mode: "private" }
+    return this.withProjectMutationLock(projectId, async () => {
+      if (await pathExists(this.projectPathFor(projectId))) {
+        throw Object.assign(new Error(`project already exists: ${projectId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
+      if (await pathExists(this.filePathFor(documentId))) {
+        throw Object.assign(new Error(`project document already exists: ${documentId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
+      await this.writeFile(documentId, createInitialDesignFile(documentId, documentName));
+      return this.writeProject({
+        schemaVersion: 1,
+        projectId,
+        name: projectName,
+        createdAt: now,
+        updatedAt: now,
+        currentDocumentId: documentId,
+        documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
+        sharing: { mode: "private" }
+      });
     });
   }
 
-  async updateProject(projectId: string, input: UpdateProjectInput): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const currentDocumentId = input.currentDocumentId ?? project.currentDocumentId;
-    if (!project.documents.some((document) => document.documentId === currentDocumentId)) {
-      throw new Error(`project document not found: ${currentDocumentId}`);
-    }
+  async updateProject(
+    projectId: string,
+    input: UpdateProjectInput,
+    options: ProjectMutationOptions = {}
+  ): Promise<ProjectManifest> {
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      const currentDocumentId = input.currentDocumentId ?? project.currentDocumentId;
+      if (!project.documents.some((document) => document.documentId === currentDocumentId)) {
+        throw new Error(`project document not found: ${currentDocumentId}`);
+      }
 
-    return this.writeProject({
-      ...project,
-      name: input.name === undefined ? project.name : normalizeName(input.name, project.name),
-      currentDocumentId,
-      updatedAt: new Date().toISOString()
+      return this.writeProject({
+        ...project,
+        name: input.name === undefined ? project.name : normalizeName(input.name, project.name),
+        currentDocumentId,
+        updatedAt: new Date().toISOString()
+      });
     });
   }
 
   async createProjectDocument(
     projectId: string,
-    input: CreateProjectDocumentInput = {}
+    input: CreateProjectDocumentInput = {},
+    options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const now = new Date().toISOString();
-    const documentId = input.documentId ?? createStorageId("document");
-    assertSafeStorageId(documentId);
-    if (project.documents.some((document) => document.documentId === documentId)) {
-      throw new Error(`project document already exists: ${documentId}`);
-    }
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      const now = new Date().toISOString();
+      const documentId = input.documentId ?? createStorageId("document");
+      assertSafeStorageId(documentId);
+      if (
+        project.documents.some((document) => document.documentId === documentId)
+        || await pathExists(this.filePathFor(documentId))
+      ) {
+        throw Object.assign(new Error(`project document already exists: ${documentId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
 
-    const name = normalizeName(input.name, "새 문서");
-    await this.writeFile(documentId, createInitialDesignFile(documentId, name));
-    return this.writeProject({
-      ...project,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents: [...project.documents, { documentId, name, createdAt: now, updatedAt: now }]
+      const name = normalizeName(input.name, "새 문서");
+      await this.writeFile(documentId, createInitialDesignFile(documentId, name));
+      return this.writeProject({
+        ...project,
+        updatedAt: now,
+        currentDocumentId: documentId,
+        documents: [...project.documents, { documentId, name, createdAt: now, updatedAt: now }]
+      });
     });
   }
 
@@ -1811,23 +1866,7 @@ export class FileStorage {
   ): Promise<ProjectManifest> {
     return this.withProjectMutationLock(projectId, async () => {
       const project = await this.readProject(projectId);
-      const expectedSharing = options.expectedSharing;
-      if (
-        expectedSharing
-        && (
-          project.sharing.mode !== expectedSharing.mode
-          || (
-            project.sharing.mode === "team"
-            && expectedSharing.mode === "team"
-            && project.sharing.teamId !== expectedSharing.teamId
-          )
-        )
-      ) {
-        throw Object.assign(new Error("project sharing changed before the update was applied"), {
-          code: "ECONFLICT",
-          statusCode: 409
-        });
-      }
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
 
       const nextSharing: ProjectSharing =
         sharing.mode === "team"
@@ -1847,79 +1886,99 @@ export class FileStorage {
 
   async duplicateProject(
     sourceProjectId: string,
-    input: DuplicateProjectInput = {}
+    input: DuplicateProjectInput = {},
+    options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    const source = await this.readProject(sourceProjectId);
+    const source = await this.withProjectMutationLock(sourceProjectId, async () => {
+      const project = await this.readProject(sourceProjectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      return project;
+    });
     const now = new Date().toISOString();
     const projectId = input.projectId ?? createStorageId("project");
     assertSafeStorageId(projectId);
     if (input.documentIdPrefix !== undefined) {
       assertSafeStorageId(input.documentIdPrefix);
     }
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw new Error(`project already exists: ${projectId}`);
-    }
 
-    const documents: ProjectDocumentSummary[] = [];
-    let currentDocumentId = "";
-    for (const sourceDocument of source.documents) {
-      const documentId = input.documentIdPrefix
-        ? `${input.documentIdPrefix}-${sourceDocument.documentId}`
-        : createStorageId("document");
-      assertSafeStorageId(documentId);
-      if (await pathExists(this.filePathFor(documentId))) {
-        throw new Error(`document already exists: ${documentId}`);
+    return this.withProjectMutationLock(projectId, async () => {
+      if (await pathExists(this.projectPathFor(projectId))) {
+        throw Object.assign(new Error(`project already exists: ${projectId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
       }
 
-      const document = await this.readFile(sourceDocument.documentId);
-      const name = `${sourceDocument.name} 사본`;
-      await this.writeFile(documentId, { ...structuredClone(document), id: documentId, name });
-      documents.push({
-        documentId,
-        name,
+      const documents: ProjectDocumentSummary[] = [];
+      let currentDocumentId = "";
+      for (const sourceDocument of source.documents) {
+        const documentId = input.documentIdPrefix
+          ? `${input.documentIdPrefix}-${sourceDocument.documentId}`
+          : createStorageId("document");
+        assertSafeStorageId(documentId);
+        if (await pathExists(this.filePathFor(documentId))) {
+          throw Object.assign(new Error(`document already exists: ${documentId}`), {
+            code: "EEXIST",
+            statusCode: 409
+          });
+        }
+
+        const document = await this.readFile(sourceDocument.documentId);
+        const name = `${sourceDocument.name} 사본`;
+        await this.writeFile(documentId, { ...structuredClone(document), id: documentId, name });
+        documents.push({
+          documentId,
+          name,
+          createdAt: now,
+          updatedAt: now
+        });
+        if (sourceDocument.documentId === source.currentDocumentId) {
+          currentDocumentId = documentId;
+        }
+      }
+
+      return this.writeProject({
+        schemaVersion: 1,
+        projectId,
+        name: normalizeName(input.name, `${source.name} 사본`),
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        currentDocumentId: currentDocumentId || documents[0].documentId,
+        documents,
+        sharing: { mode: "private" }
       });
-      if (sourceDocument.documentId === source.currentDocumentId) {
-        currentDocumentId = documentId;
-      }
-    }
-
-    return this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: normalizeName(input.name, `${source.name} 사본`),
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: currentDocumentId || documents[0].documentId,
-      documents,
-      sharing: { mode: "private" }
     });
   }
 
-  async deleteProject(projectId: string): Promise<ProjectManifest> {
-    const projects = await this.listProjects();
-    const project = projects.find((candidate) => candidate.projectId === projectId);
-    if (!project) {
-      throw new Error(`project not found: ${projectId}`);
-    }
-    if (projects.length <= 1) {
-      throw new Error("cannot delete last project");
-    }
+  async deleteProject(
+    projectId: string,
+    options: ProjectMutationOptions = {}
+  ): Promise<ProjectManifest> {
+    return this.withProjectMutationLock(projectId, async () => {
+      const projects = await this.listProjects();
+      const project = projects.find((candidate) => candidate.projectId === projectId);
+      if (!project) {
+        throw new Error(`project not found: ${projectId}`);
+      }
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      if (projects.length <= 1) {
+        throw new Error("cannot delete last project");
+      }
 
-    const otherDocumentIds = new Set(
-      projects
-        .filter((candidate) => candidate.projectId !== projectId)
-        .flatMap((candidate) => candidate.documents.map((document) => document.documentId))
-    );
-    await rm(this.projectPathFor(project.projectId), { force: true });
-    await Promise.all(
-      project.documents
-        .filter((document) => !otherDocumentIds.has(document.documentId))
-        .map((document) => rm(this.filePathFor(document.documentId), { force: true }))
-    );
+      const otherDocumentIds = new Set(
+        projects
+          .filter((candidate) => candidate.projectId !== projectId)
+          .flatMap((candidate) => candidate.documents.map((document) => document.documentId))
+      );
+      await rm(this.projectPathFor(project.projectId), { force: true });
+      await Promise.all(
+        project.documents
+          .filter((document) => !otherDocumentIds.has(document.documentId))
+          .map((document) => rm(this.filePathFor(document.documentId), { force: true }))
+      );
 
-    return project;
+      return project;
+    });
   }
 
   async listCommentNotifications(
@@ -2006,29 +2065,16 @@ export class FileStorage {
   async listCommentLiveEvents(
     options: ListCommentLiveEventsOptions = {}
   ): Promise<StoredCommentLiveEvent[]> {
+    const fileId = options.fileId;
+    if (!fileId) {
+      throw inputValidationError("comment live event replay requires a file id");
+    }
     const after = Math.max(0, Math.floor(Number(options.after) || 0));
     const limit = Math.max(0, Math.floor(Number(options.limit) || 0));
-
-    if (options.fileId) {
-      await this.readFile(options.fileId);
-      const store = await this.readCommentThreadFile(options.fileId);
-      const events = store.events.filter((event) => event.sequence > after);
-      return limit > 0 ? events.slice(0, limit) : events;
-    }
-
-    const projects = await this.listProjects();
-    const fileIds = new Set(
-      projects.flatMap((project) => project.documents.map((document) => document.documentId))
-    );
-    const events: StoredCommentLiveEvent[] = [];
-    for (const fileId of fileIds) {
-      const store = await this.readCommentThreadFile(fileId);
-      events.push(...store.events.filter((event) => event.sequence > after));
-    }
-    const sorted = events.sort(
-      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.fileId.localeCompare(b.fileId) || a.sequence - b.sequence
-    );
-    return limit > 0 ? sorted.slice(0, limit) : sorted;
+    await this.readFile(fileId);
+    const store = await this.readCommentThreadFile(fileId);
+    const events = store.events.filter((event) => event.sequence > after);
+    return limit > 0 ? events.slice(0, limit) : events;
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
@@ -2290,9 +2336,13 @@ export class FileStorage {
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
     assertSafeStorageId(documentId);
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw inputValidationError(`project already exists: ${projectId}`);
-    }
+    return this.withProjectMutationLock(projectId, async () => {
+      if (await pathExists(this.projectPathFor(projectId))) {
+        throw Object.assign(new Error(`project already exists: ${projectId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
     if (await pathExists(this.filePathFor(documentId))) {
       throw inputValidationError(`document already exists: ${documentId}`);
     }
@@ -2390,6 +2440,7 @@ export class FileStorage {
       skippedNodeCount: imported.skippedNodeCount,
       warnings: imported.warnings
     };
+    });
   }
 
   async importProjectArchive(
@@ -2403,9 +2454,13 @@ export class FileStorage {
     if (options.documentIdPrefix !== undefined) {
       assertSafeStorageId(options.documentIdPrefix);
     }
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw new Error(`project already exists: ${projectId}`);
-    }
+    return this.withProjectMutationLock(projectId, async () => {
+      if (await pathExists(this.projectPathFor(projectId))) {
+        throw Object.assign(new Error(`project already exists: ${projectId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
 
     const documentIdMap: Record<string, string> = {};
     for (const document of archiveProject.documents) {
@@ -2462,6 +2517,7 @@ export class FileStorage {
       assetCount: archiveProject.assetIds.length,
       documentIdMap
     };
+    });
   }
 
   async exportLibraryArchive(fileId: string): Promise<ExportedLibraryArchive> {

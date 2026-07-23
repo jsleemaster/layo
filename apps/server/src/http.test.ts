@@ -2736,6 +2736,190 @@ describe("HTTP server", () => {
     });
   });
 
+  test("authorizes shared project mutations by team role", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "team-project",
+      name: "팀 프로젝트",
+      documentId: "team-file",
+      documentName: "팀 문서"
+    });
+    await storage.setProjectSharing("team-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" },
+          { userId: "team-viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" }
+        ]
+      }
+    });
+    const ownerHeaders = {
+      authorization: "Bearer owner-token",
+      "x-layo-user-id": "team-owner"
+    };
+    const editorHeaders = {
+      authorization: "Bearer editor-token",
+      "x-layo-user-id": "team-editor"
+    };
+    const viewerHeaders = {
+      authorization: "Bearer viewer-token",
+      "x-layo-user-id": "team-viewer"
+    };
+
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          payload: { name: "익명 변경" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          headers: viewerHeaders,
+          payload: { name: "뷰어 변경" }
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          headers: editorHeaders,
+          payload: { name: "에디터 변경" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          payload: { documentId: "anonymous-file", name: "익명 문서" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          headers: viewerHeaders,
+          payload: { documentId: "viewer-file", name: "뷰어 문서" }
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          headers: editorHeaders,
+          payload: { documentId: "editor-file", name: "에디터 문서" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/duplicate",
+          payload: { projectId: "anonymous-copy", documentIdPrefix: "anonymous-copy" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/duplicate",
+          headers: viewerHeaders,
+          payload: { projectId: "viewer-copy", documentIdPrefix: "viewer-copy" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "DELETE",
+          url: "/projects/team-project",
+          headers: editorHeaders
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "DELETE",
+          url: "/projects/team-project",
+          headers: ownerHeaders
+        })
+      ).statusCode
+    ).toBe(200);
+    await expect(storage.readProject("team-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  test("rejects a shared project mutation when its team changes after authorization", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "authorization-race-project",
+      name: "권한 경쟁 프로젝트",
+      documentId: "authorization-race-file",
+      documentName: "권한 경쟁 문서"
+    });
+    await storage.setProjectSharing("authorization-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const updateProject = storage.updateProject.bind(storage);
+    storage.updateProject = async (projectId, input, options) => {
+      await storage.setProjectSharing(projectId, {
+        mode: "team",
+        teamId: "team-beta"
+      });
+      return updateProject(projectId, input, options);
+    };
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" }
+        ]
+      }
+    });
+
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/projects/authorization-race-project",
+      headers: {
+        authorization: "Bearer editor-token",
+        "x-layo-user-id": "team-editor"
+      },
+      payload: { name: "오래된 권한 변경" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(storage.readProject("authorization-race-project")).resolves.toMatchObject({
+      name: "권한 경쟁 프로젝트",
+      sharing: { mode: "team", teamId: "team-beta" }
+    });
+  });
+
   test("closes a team comment SSE stream when its owner makes the project private", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
@@ -2830,6 +3014,22 @@ describe("HTTP server", () => {
       await expect(
         readSseEvent(stream, "comment-authorization-ended")
       ).resolves.toEqual({ code: "credential_inactive" });
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  });
+
+  test("requires a file id for comment event streams", async () => {
+    const server = await createServerWithDocument();
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const response = await fetch(`${address}/comments/events?after=0`, {
+        signal: controller.signal
+      });
+      expect(response.status).toBe(400);
     } finally {
       controller.abort();
       await server.close();

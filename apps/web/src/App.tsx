@@ -7010,15 +7010,37 @@ function Inspector({
         );
   const commentEditRecoveryVisible =
     commentEditTarget !== null && !commentEditSourceExists;
+  const commentEditRecoveryTargetsReply =
+    commentEditTarget?.kind === "reply" && Boolean(commentEditThread);
+  const commentEditRecoveryDestinationDraft =
+    commentEditRecoveryTargetsReply && commentEditTarget
+      ? commentReplyBodies[commentEditTarget.threadId] ?? ""
+      : commentBody;
+  const commentEditRecoveryMergesDraft =
+    Boolean(commentEditRecoveryDestinationDraft.trim());
+
+  const mergeRecoveredCommentDraft = (destinationDraft: string) => {
+    const recoveredDraft = commentEditBody.trim();
+    if (!destinationDraft.trim()) {
+      return recoveredDraft;
+    }
+    if (!recoveredDraft || destinationDraft.trim() === recoveredDraft) {
+      return destinationDraft;
+    }
+    return `${destinationDraft.trimEnd()}\n\n${recoveredDraft}`;
+  };
 
   const moveDeletedCommentDraft = () => {
     if (!commentEditTarget) {
       return;
     }
-    if (commentEditTarget.kind === "reply" && commentEditThread) {
-      onCommentReplyBodyChange(commentEditTarget.threadId, commentEditBody);
+    const mergedDraft = mergeRecoveredCommentDraft(
+      commentEditRecoveryDestinationDraft
+    );
+    if (commentEditRecoveryTargetsReply) {
+      onCommentReplyBodyChange(commentEditTarget.threadId, mergedDraft);
     } else {
-      onCommentBodyChange(commentEditBody);
+      onCommentBodyChange(mergedDraft);
     }
     cancelCommentEdit();
   };
@@ -8931,7 +8953,11 @@ function Inspector({
                   ? "원본 답글이 삭제되었습니다"
                   : "원본 코멘트가 삭제되었습니다"}
               </strong>
-              <span>작성 중인 초안을 보존했습니다.</span>
+              <span>
+                {commentEditRecoveryMergesDraft
+                  ? "기존 작성 초안과 합쳐 두 내용을 모두 보존합니다."
+                  : "작성 중인 초안을 보존했습니다."}
+              </span>
             </span>
             <textarea
               className="comment-body-field"
@@ -8948,16 +8974,22 @@ function Inspector({
               <button
                 type="button"
                 aria-label={
-                  commentEditTarget?.kind === "reply" && commentEditThread
-                    ? "삭제된 초안 답글로 옮기기"
-                    : "삭제된 초안 새 코멘트로 옮기기"
+                  commentEditRecoveryMergesDraft
+                    ? commentEditRecoveryTargetsReply
+                      ? "삭제된 초안 기존 답글 초안과 합치기"
+                      : "삭제된 초안 기존 코멘트 초안과 합치기"
+                    : commentEditRecoveryTargetsReply
+                      ? "삭제된 초안 답글로 옮기기"
+                      : "삭제된 초안 새 코멘트로 옮기기"
                 }
                 onClick={moveDeletedCommentDraft}
                 disabled={!commentEditBody.trim()}
               >
-                {commentEditTarget?.kind === "reply" && commentEditThread
-                  ? "답글로 옮기기"
-                  : "새 코멘트로 옮기기"}
+                {commentEditRecoveryMergesDraft
+                  ? "기존 초안과 합치기"
+                  : commentEditRecoveryTargetsReply
+                    ? "답글로 옮기기"
+                    : "새 코멘트로 옮기기"}
               </button>
               <button type="button" onClick={cancelCommentEdit}>
                 초안 닫기
@@ -16101,7 +16133,12 @@ export function App() {
     }
 
     try {
-      const project = await updateProject(currentProject.projectId, { name: projectNameDraft });
+      const project = await updateProject(
+        currentProject.projectId,
+        { name: projectNameDraft },
+        fetch,
+        activeLibraryRegistryCredentials
+      );
       setCurrentProject(project);
       setProjects((current) =>
         current.map((candidate) => (candidate.projectId === project.projectId ? project : candidate))
@@ -16125,9 +16162,14 @@ export function App() {
       await runProjectDocumentTransition(async (transitionToken) => {
         const project = await enqueueDocumentSnapshotBarrier(
           sourceProject.currentDocumentId,
-          () => duplicateProject(sourceProject.projectId, {
-            name: `${sourceProject.name} 사본`
-          })
+          () => duplicateProject(
+            sourceProject.projectId,
+            {
+              name: `${sourceProject.name} 사본`
+            },
+            fetch,
+            activeLibraryRegistryCredentials
+          )
         );
         const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
         await requireProjectDocumentLoad(project, nextProjects, transitionToken);
@@ -16154,7 +16196,11 @@ export function App() {
     try {
       const deletedProject = currentProject;
       await runProjectDocumentTransition(async (transitionToken) => {
-        await deleteProject(currentProject.projectId);
+        await deleteProject(
+          currentProject.projectId,
+          fetch,
+          activeLibraryRegistryCredentials
+        );
         const nextProjects = projects.filter((candidate) => candidate.projectId !== deletedProject.projectId);
         const nextProject = nextProjects[0] ?? null;
         if (nextProject) {

@@ -81,17 +81,31 @@ export async function createProject(
 export async function updateProject(
   projectId: string,
   input: { name?: string; currentDocumentId?: string },
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}`), "PATCH", input, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}`),
+    "PATCH",
+    input,
+    fetcher,
+    credentials
+  );
 }
 
 export async function duplicateProject(
   projectId: string,
   input: { projectId?: string; name?: string; documentIdPrefix?: string },
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}/duplicate`), "POST", input, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}/duplicate`),
+    "POST",
+    input,
+    fetcher,
+    credentials
+  );
 }
 
 export async function setProjectSharing(
@@ -111,9 +125,16 @@ export async function setProjectSharing(
 
 export async function deleteProject(
   projectId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}`), "DELETE", undefined, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}`),
+    "DELETE",
+    undefined,
+    fetcher,
+    credentials
+  );
 }
 
 export async function reviewProjectArchive(

@@ -76,6 +76,39 @@ describe("FileStorage", () => {
     expect(projects).toEqual([]);
   });
 
+  test("cannot replace an existing shared project through project creation", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "existing-project",
+      name: "기존 프로젝트",
+      documentId: "existing-file",
+      documentName: "기존 문서"
+    });
+    await storage.setProjectSharing("existing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "existing-project",
+        name: "덮어쓴 프로젝트",
+        documentId: "replacement-file",
+        documentName: "덮어쓴 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(storage.readProject("existing-project")).resolves.toMatchObject({
+      name: "기존 프로젝트",
+      sharing: { mode: "team", teamId: "team-alpha" },
+      documents: [expect.objectContaining({ documentId: "existing-file" })]
+    });
+    await expect(storage.readFile("replacement-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   test("serializes project sharing compare-and-set across storage instances", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const firstStorage = new FileStorage(tempRoot);
@@ -116,6 +149,114 @@ describe("FileStorage", () => {
         teamId: expect.stringMatching(/^team-(beta|gamma)$/)
       })
     );
+  });
+
+  test("project mutations reject a sharing boundary that changed after authorization", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "guarded-project",
+      name: "보호 프로젝트",
+      documentId: "guarded-file",
+      documentName: "보호 문서"
+    });
+    await storage.createProject({
+      projectId: "retained-project",
+      name: "유지 프로젝트",
+      documentId: "retained-file",
+      documentName: "유지 문서"
+    });
+    await storage.setProjectSharing("guarded-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const expectedSharing = { mode: "team", teamId: "team-alpha" } as const;
+    await storage.setProjectSharing("guarded-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+
+    await expect(
+      storage.updateProject(
+        "guarded-project",
+        { name: "오래된 권한 변경" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.createProjectDocument(
+        "guarded-project",
+        { documentId: "stale-file", name: "오래된 권한 문서" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.duplicateProject(
+        "guarded-project",
+        { projectId: "stale-copy", documentIdPrefix: "stale-copy" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.deleteProject("guarded-project", { expectedSharing })
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+
+    await expect(storage.readProject("guarded-project")).resolves.toMatchObject({
+      name: "보호 프로젝트",
+      sharing: { mode: "team", teamId: "team-beta" }
+    });
+    await expect(storage.readFile("stale-file")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(storage.readProject("stale-copy")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("project document creation cannot restore stale private sharing after an owner shares it", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const ownerStorage = new FileStorage(tempRoot);
+    await ownerStorage.createProject({
+      projectId: "sharing-race-project",
+      name: "공유 경계 경쟁 프로젝트",
+      documentId: "sharing-race-file",
+      documentName: "기존 문서"
+    });
+    const staleWriter = new FileStorage(tempRoot);
+    const originalWriteFile = staleWriter.writeFile.bind(staleWriter);
+    let signalWriteStarted!: () => void;
+    let releaseWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve;
+    });
+    const writeRelease = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    staleWriter.writeFile = async (fileId, document) => {
+      signalWriteStarted();
+      await writeRelease;
+      return originalWriteFile(fileId, document);
+    };
+
+    const documentCreation = staleWriter.createProjectDocument("sharing-race-project", {
+      documentId: "sharing-race-new-file",
+      name: "새 문서"
+    });
+    await writeStarted;
+    const sharing = ownerStorage.setProjectSharing("sharing-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const sharingFinishedBeforeRelease = await Promise.race([
+      sharing.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))
+    ]);
+    releaseWrite();
+    await Promise.all([documentCreation, sharing]);
+
+    expect(sharingFinishedBeforeRelease).toBe(false);
+    await expect(ownerStorage.readProject("sharing-race-project")).resolves.toMatchObject({
+      sharing: { mode: "team", teamId: "team-alpha" },
+      documents: expect.arrayContaining([
+        expect.objectContaining({ documentId: "sharing-race-new-file" })
+      ])
+    });
   });
 
   test("merges independent stale document snapshots without losing either browser edit", async () => {
@@ -621,6 +762,18 @@ describe("FileStorage", () => {
       }
     );
     expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "imported-project",
+        name: "덮어쓴 복원 프로젝트",
+        documentIdPrefix: "replacement"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+    await expect(target.readProject("imported-project")).resolves.toMatchObject({
+      name: "복원 프로젝트",
+      sharing: { mode: "private" }
+    });
   });
 
   test("library archive exports reviews and imports components tokens and assets without overwriting ids", async () => {
@@ -2016,6 +2169,9 @@ describe("FileStorage", () => {
     expect(secondBatch.map((event) => event.sequence)).toEqual(
       Array.from({ length: 50 }, (_, index) => index + 101)
     );
+    await expect(storage.listCommentLiveEvents({})).rejects.toMatchObject({
+      statusCode: 400
+    });
   });
 
   test("comment mutations preserve concurrent writers across FileStorage instances", async () => {

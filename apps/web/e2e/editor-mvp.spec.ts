@@ -6245,7 +6245,10 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
     "원격 삭제에도 보존할 초안"
   );
-  await page.getByRole("button", { name: "삭제된 초안 새 코멘트로 옮기기" }).click();
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 코멘트 초안과 합치기" })
+    .click();
   const mergedRecoveredThreadBody = "기존 새 코멘트 초안\n\n원격 삭제에도 보존할 초안";
   await expect(page.getByTestId("comment-body")).toHaveValue(mergedRecoveredThreadBody);
   await page.getByRole("button", { name: "코멘트 추가" }).click();
@@ -6306,7 +6309,10 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
     "원격 삭제에도 보존할 답글 초안"
   );
-  await page.getByRole("button", { name: "삭제된 초안 답글로 옮기기" }).click();
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 답글 초안과 합치기" })
+    .click();
 
   await expect(recoveredThreadRow.getByTestId("comment-reply-body")).toHaveValue(
     "기존 새 답글 초안\n\n원격 삭제에도 보존할 답글 초안"
