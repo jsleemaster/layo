@@ -54,6 +54,7 @@ export interface ImportedProjectArchive {
 
 export interface ImportProjectArchiveInput {
   archiveBase64: string;
+  idempotencyKey?: string;
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
@@ -154,10 +155,14 @@ export async function importProjectArchive(
   input: ImportProjectArchiveInput,
   fetcher: typeof fetch = fetch
 ): Promise<ImportedProjectArchive> {
+  const { idempotencyKey, ...body } = input;
   const response = await fetcher(apiUrl("/projects/import/archive"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
+    headers: {
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
+    },
+    body: JSON.stringify(body)
   });
   const payload = await readJson(response);
   return (payload as { imported: ImportedProjectArchive }).imported;
