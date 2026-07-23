@@ -2439,18 +2439,23 @@ describe("HTTP server", () => {
       ).statusCode
     ).toBe(200);
 
-    const blockedViewerWrite = await server.inject({
+    const viewerWrite = await server.inject({
       method: "POST",
       url: "/files/team-comment-file/comments",
       headers: headers("viewer", "viewer-token"),
       payload: {
         nodeId: "text-1",
-        body: "viewer가 쓰면 안 됨",
-        authorId: "viewer",
-        authorName: "뷰어"
+        body: "viewer도 피드백 가능",
+        authorId: "spoofed-viewer",
+        authorName: "위조된 이름"
       }
     });
-    expect(blockedViewerWrite.statusCode).toBe(403);
+    expect(viewerWrite.statusCode).toBe(200);
+    expect(viewerWrite.json().thread).toMatchObject({
+      authorId: "viewer",
+      authorName: "viewer",
+      body: "viewer도 피드백 가능"
+    });
 
     const created = await server.inject({
       method: "POST",
