@@ -404,7 +404,11 @@ describe("FileStorage", () => {
       documentName: "기존 문서"
     });
     const staleWriter = new FileStorage(tempRoot);
-    const originalWriteFile = staleWriter.writeFile.bind(staleWriter);
+    const internalStaleWriter = staleWriter as unknown as {
+      writeFileWithoutMutationLock: FileStorage["writeFile"];
+    };
+    const originalWriteFile =
+      internalStaleWriter.writeFileWithoutMutationLock.bind(staleWriter);
     let signalWriteStarted!: () => void;
     let releaseWrite!: () => void;
     const writeStarted = new Promise<void>((resolve) => {
@@ -413,7 +417,7 @@ describe("FileStorage", () => {
     const writeRelease = new Promise<void>((resolve) => {
       releaseWrite = resolve;
     });
-    staleWriter.writeFile = async (fileId, document) => {
+    internalStaleWriter.writeFileWithoutMutationLock = async (fileId, document) => {
       signalWriteStarted();
       await writeRelease;
       return originalWriteFile(fileId, document);
