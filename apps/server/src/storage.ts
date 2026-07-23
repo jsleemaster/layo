@@ -860,6 +860,7 @@ export interface MarkCommentThreadReadInput {
 
 export interface ListCommentNotificationsOptions {
   viewerId?: string;
+  projectIds?: ReadonlySet<string>;
 }
 
 export interface MarkFileCommentsReadInput {
@@ -869,6 +870,7 @@ export interface MarkFileCommentsReadInput {
 export interface ListCommentActivityOptions {
   viewerId?: string;
   limit?: number;
+  projectIds?: ReadonlySet<string>;
 }
 
 export interface ListCommentLiveEventsOptions {
@@ -1889,7 +1891,9 @@ export class FileStorage {
     options: ListCommentNotificationsOptions = {}
   ): Promise<CommentNotificationSummary> {
     const viewerId = normalizeName(options.viewerId, "사용자");
-    const projects = await this.listProjects();
+    const projects = (await this.listProjects()).filter(
+      (project) => !options.projectIds || options.projectIds.has(project.projectId)
+    );
     const projectSummaries: Array<CommentNotificationProjectSummary & { latestUnreadAt: string }> = [];
 
     for (const project of projects) {
@@ -1937,7 +1941,9 @@ export class FileStorage {
   async listCommentActivity(options: ListCommentActivityOptions = {}): Promise<CommentActivityFeed> {
     const viewerId = normalizeName(options.viewerId, "사용자");
     const limit = normalizeListLimit(options.limit, COMMENT_ACTIVITY_RETENTION_LIMIT);
-    const projects = await this.listProjects();
+    const projects = (await this.listProjects()).filter(
+      (project) => !options.projectIds || options.projectIds.has(project.projectId)
+    );
     const events: CommentActivityEvent[] = [];
 
     for (const project of projects) {
