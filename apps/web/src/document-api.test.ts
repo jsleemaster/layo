@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 import {
   addCommentReply,
   createCommentThread,
+  deleteCommentReply,
+  deleteCommentThread,
   deleteFileVersion,
+  DocumentRequestError,
   exportCode,
   exportFileArchive,
   exportLibraryArchive,
@@ -39,6 +42,8 @@ import {
   subscribeToCommentEvents,
   subscribeToLibraryRegistryEvents,
   summarizeDocumentChanges,
+  updateCommentReply,
+  updateCommentThread,
   updateLibraryRegistryItem,
   updateLibraryRegistryTokens
 } from "./document-api";
@@ -231,72 +236,105 @@ describe("parseDocumentPayload", () => {
     ]);
   });
 
-  test("subscribes to live comment events with EventSource", () => {
-    const originalEventSource = globalThis.EventSource;
-    const createdSources: FakeEventSource[] = [];
-    class FakeEventSource extends EventTarget {
-      closed = false;
-
-      constructor(readonly url: string) {
-        super();
-        createdSources.push(this);
-      }
-
-      close() {
-        this.closed = true;
-      }
-    }
-    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
-
-    try {
-      const events: unknown[] = [];
-      const unsubscribe = subscribeToCommentEvents({
-        fileId: "sample-file",
-        viewerId: "사용자",
-        after: 7,
-        onCommentEvent: (event) => events.push(event)
-      });
-
-      expect(createdSources).toHaveLength(1);
-      const source = createdSources[0];
-      const url = new URL(source.url, "http://127.0.0.1:4317");
-      expect(url.pathname).toBe("/comments/events");
-      expect(url.searchParams.get("fileId")).toBe("sample-file");
-      expect(url.searchParams.get("viewerId")).toBe("사용자");
-      expect(url.searchParams.get("after")).toBe("7");
-
-      source.dispatchEvent(
-        new MessageEvent("comment", {
-          data: JSON.stringify({
-            schemaVersion: 1,
-            eventId: "comment-event-1",
-            sequence: 8,
-            type: "created",
-            fileId: "sample-file",
-            threadId: "comment-1",
-            viewerId: "사용자",
-            createdAt: "2026-06-27T00:00:00.000Z"
-          })
-        })
-      );
-      expect(events).toEqual([
+  test("subscribes to authenticated comment events with fetch streaming and handles authorization end", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            controller.enqueue(
+              new TextEncoder().encode(
+                [
+                  "event: ready",
+                  'data: {"ok":true,"lastSequence":7}',
+                  "",
+                  "event: comment",
+                  `data: ${JSON.stringify({
+                    schemaVersion: 1,
+                    eventId: "comment-event-8",
+                    sequence: 8,
+                    type: "edited",
+                    fileId: "sample-file",
+                    threadId: "comment-1",
+                    createdAt: "2026-06-27T00:00:08.000Z"
+                  })}`,
+                  "",
+                  ""
+                ].join("\n")
+              )
+            );
+          }
+        }),
         {
-          schemaVersion: 1,
-          eventId: "comment-event-1",
-          sequence: 8,
-          type: "created",
-          fileId: "sample-file",
-          threadId: "comment-1",
-          viewerId: "사용자",
-          createdAt: "2026-06-27T00:00:00.000Z"
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" }
         }
-      ]);
+      );
+    };
+    const events: unknown[] = [];
+    const ready: boolean[] = [];
+    const ended: string[] = [];
+    const unsubscribe = subscribeToCommentEvents({
+      fileId: "sample-file",
+      viewerId: "comment-owner",
+      after: 7,
+      credentials: {
+        userId: "comment-owner",
+        memberToken: "owner-token"
+      },
+      fetcher: fetcher as typeof fetch,
+      onCommentEvent: (event) => events.push(event),
+      onReady: () => ready.push(true),
+      onAuthorizationEnded: (code) => ended.push(code)
+    });
 
-      unsubscribe();
-      expect(source.closed).toBe(true);
-    } finally {
-      globalThis.EventSource = originalEventSource;
+    for (let attempt = 0; attempt < 10 && events.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     }
+
+    expect(calls).toHaveLength(1);
+    const url = new URL(calls[0].url, "http://127.0.0.1:4317");
+    expect(url.pathname).toBe("/comments/events");
+    expect(url.searchParams.get("fileId")).toBe("sample-file");
+    expect(url.searchParams.get("viewerId")).toBe("comment-owner");
+    expect(url.searchParams.get("after")).toBe("7");
+    expect(url.searchParams.has("token")).toBe(false);
+    expect(calls[0].init?.headers).toEqual({
+      Accept: "text/event-stream",
+      Authorization: "Bearer owner-token",
+      "X-Layo-User-Id": "comment-owner"
+    });
+    expect(ready).toEqual([true]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        sequence: 8,
+        type: "edited",
+        fileId: "sample-file",
+        threadId: "comment-1"
+      })
+    ]);
+
+    streamController?.enqueue(
+      new TextEncoder().encode(
+        [
+          "event: comment-authorization-ended",
+          'data: {"code":"credential_inactive"}',
+          "",
+          ""
+        ].join("\n")
+      )
+    );
+    for (let attempt = 0; attempt < 10 && ended.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(ended).toEqual(["credential_inactive"]);
+    expect((calls[0].init?.signal as AbortSignal).aborted).toBe(true);
+
+    unsubscribe();
+    streamController?.close();
   });
 
   test("subscribes to authenticated library registry events with fetch streaming", async () => {
@@ -1684,6 +1722,178 @@ describe("comment API helpers", () => {
       [expect.stringContaining("/files/sample-file/comments/comment-1/resolve"), "POST"],
       [expect.stringContaining("/files/sample-file/comments/comment-1/replies"), "POST"],
       [expect.stringContaining("/files/sample-file/comments/comment-1/read"), "POST"]
+    ]);
+  });
+  test("updates and deletes owned comment threads and replies with credentials and versions", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const credentials = {
+      userId: "comment-owner",
+      memberToken: "owner-token"
+    };
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      const pathname = new URL(String(url), "http://127.0.0.1:4317").pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+
+      expect(init?.headers).toEqual({
+        Authorization: "Bearer owner-token",
+        "Content-Type": "application/json",
+        "X-Layo-User-Id": "comment-owner"
+      });
+
+      if (
+        pathname === "/files/sample-file/comments/comment-1"
+        && init?.method === "PATCH"
+        && body.body === "오래된 수정"
+      ) {
+        return new Response(JSON.stringify({ error: "comment was modified by another writer" }), {
+          status: 409,
+          statusText: "Conflict",
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      if (pathname === "/files/sample-file/comments/comment-1" && init?.method === "PATCH") {
+        expect(body).toEqual({
+          body: "@peer 수정된 검수",
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:00:00.000Z",
+          mentionTargets: []
+        });
+        return jsonResponse({
+          thread: {
+            threadId: "comment-1",
+            authorId: "comment-owner",
+            body: "@peer 수정된 검수",
+            modifiedAt: "2026-06-27T00:01:00.000Z",
+            replies: []
+          }
+        });
+      }
+      if (pathname === "/files/sample-file/comments/comment-1/replies/reply-1" && init?.method === "PATCH") {
+        expect(body).toEqual({
+          body: "수정된 답글",
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:02:00.000Z",
+          mentionTargets: []
+        });
+        return jsonResponse({
+          thread: {
+            threadId: "comment-1",
+            replies: [
+              {
+                replyId: "reply-1",
+                authorId: "comment-owner",
+                body: "수정된 답글",
+                modifiedAt: "2026-06-27T00:03:00.000Z"
+              }
+            ]
+          }
+        });
+      }
+      if (pathname === "/files/sample-file/comments/comment-1/replies/reply-1" && init?.method === "DELETE") {
+        expect(body).toEqual({
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:03:00.000Z"
+        });
+        return jsonResponse({ thread: { threadId: "comment-1", replies: [] } });
+      }
+      if (pathname === "/files/sample-file/comments/comment-1" && init?.method === "DELETE") {
+        expect(body).toEqual({
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:01:00.000Z"
+        });
+        return jsonResponse({
+          deleted: { threadId: "comment-1", deleted: true }
+        });
+      }
+      return new Response("not found", { status: 404 });
+    };
+
+    const updated = await updateCommentThread(
+      "sample-file",
+      "comment-1",
+      {
+        body: "@peer 수정된 검수",
+        actorId: "comment-owner",
+        expectedModifiedAt: "2026-06-27T00:00:00.000Z",
+        mentionTargets: []
+      },
+      fetcher as typeof fetch,
+      credentials
+    );
+    expect(updated).toMatchObject({
+      body: "@peer 수정된 검수",
+      modifiedAt: "2026-06-27T00:01:00.000Z"
+    });
+
+    const updatedReply = await updateCommentReply(
+      "sample-file",
+      "comment-1",
+      "reply-1",
+      {
+        body: "수정된 답글",
+        actorId: "comment-owner",
+        expectedModifiedAt: "2026-06-27T00:02:00.000Z",
+        mentionTargets: []
+      },
+      fetcher as typeof fetch,
+      credentials
+    );
+    expect(updatedReply.replies[0]).toMatchObject({
+      body: "수정된 답글",
+      modifiedAt: "2026-06-27T00:03:00.000Z"
+    });
+
+    await expect(
+      deleteCommentReply(
+        "sample-file",
+        "comment-1",
+        "reply-1",
+        {
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:03:00.000Z"
+        },
+        fetcher as typeof fetch,
+        credentials
+      )
+    ).resolves.toMatchObject({ replies: [] });
+
+    await expect(
+      deleteCommentThread(
+        "sample-file",
+        "comment-1",
+        {
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:01:00.000Z"
+        },
+        fetcher as typeof fetch,
+        credentials
+      )
+    ).resolves.toEqual({ threadId: "comment-1", deleted: true });
+
+    await expect(
+      updateCommentThread(
+        "sample-file",
+        "comment-1",
+        {
+          body: "오래된 수정",
+          actorId: "comment-owner",
+          expectedModifiedAt: "2026-06-27T00:00:00.000Z"
+        },
+        fetcher as typeof fetch,
+        credentials
+      )
+    ).rejects.toMatchObject<DocumentRequestError>({
+      name: "DocumentRequestError",
+      status: 409
+    });
+
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      [expect.stringContaining("/files/sample-file/comments/comment-1"), "PATCH"],
+      [expect.stringContaining("/files/sample-file/comments/comment-1/replies/reply-1"), "PATCH"],
+      [expect.stringContaining("/files/sample-file/comments/comment-1/replies/reply-1"), "DELETE"],
+      [expect.stringContaining("/files/sample-file/comments/comment-1"), "DELETE"],
+      [expect.stringContaining("/files/sample-file/comments/comment-1"), "PATCH"]
     ]);
   });
 });
