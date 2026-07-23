@@ -1715,12 +1715,6 @@ export class FileStorage {
     }
   }
 
-  private isLibraryRegistryTargetMutationLockHeld(fileId: string): boolean {
-    return libraryTargetMutationContext.getStore()?.has(
-      path.resolve(this.libraryRegistryTargetMutationPathFor(fileId))
-    ) ?? false;
-  }
-
   private async withLibraryRegistryTargetMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
@@ -3103,21 +3097,6 @@ export class FileStorage {
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
-    if (this.isLibraryRegistryTargetMutationLockHeld(fileId)) {
-      return this.readFileWithoutLibraryTargetRecovery(fileId);
-    }
-    return this.withLibraryRegistryTargetMutationLock(
-      fileId,
-      async () => {
-        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
-        return this.readFileWithoutLibraryTargetRecovery(fileId);
-      }
-    );
-  }
-
-  private async readFileWithoutLibraryTargetRecovery(
-    fileId: string
-  ): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const filePath = this.filePathFor(fileId);
     const raw = await readFile(filePath, "utf8");
