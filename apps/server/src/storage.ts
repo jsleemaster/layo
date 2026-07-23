@@ -1366,6 +1366,7 @@ export interface ImportedLibraryRegistryTokens {
 export class FileStorage {
   private readonly priorRootDir: string | null;
   private libraryUpdateRecoveryPromise: Promise<void> | null = null;
+  private importRecoveryPromise: Promise<void> | null = null;
 
   constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
     const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
@@ -1631,7 +1632,10 @@ export class FileStorage {
 
   private async withExclusiveProjectFiles<T>(
     files: Array<{ fileId: string; document: DesignFile }>,
-    operation: () => Promise<T>
+    operation: () => Promise<T>,
+    transaction: (
+      writeOperation: () => Promise<T>
+    ) => Promise<T> = (writeOperation) => writeOperation()
   ): Promise<T> {
     const entries = [...files].sort(
       (first, second) =>
@@ -1665,29 +1669,35 @@ export class FileStorage {
           }
         }
 
-        try {
-          for (const entry of entries) {
-            await this.writeFileWithoutMutationLock(
-              entry.fileId,
-              entry.document
+        const writeOperation = async (): Promise<T> => {
+          try {
+            for (const entry of entries) {
+              await this.writeFileWithoutMutationLock(
+                entry.fileId,
+                entry.document
+              );
+            }
+            return await operation();
+          } catch (error) {
+            await Promise.all(
+              entries.map((entry) =>
+                rm(this.filePathFor(entry.fileId), { force: true })
+              )
             );
+            throw error;
           }
-          return await operation();
-        } catch (error) {
-          await Promise.all(
-            entries.map((entry) =>
-              rm(this.filePathFor(entry.fileId), { force: true })
-            )
-          );
-          throw error;
-        }
+        };
+        return transaction(writeOperation);
       }
     );
   }
 
   private async withImportedAssetWrites<T>(
     assets: Array<{ metadata: StoredAsset; data: Buffer }>,
-    operation: () => Promise<T>
+    operation: () => Promise<T>,
+    transaction: (
+      writeOperation: () => Promise<T>
+    ) => Promise<T> = (writeOperation) => writeOperation()
   ): Promise<T> {
     return withAssetReferenceMutationLock(
       this.assetReferenceMutationPath(),
@@ -1763,15 +1773,18 @@ export class FileStorage {
             this.assetMetadataPathFor(entry.metadata.assetId)
           ])
         );
-        try {
-          for (const entry of writes) {
-            await this.writeAssetDurably(entry.metadata, entry.data);
+        const writeOperation = async (): Promise<T> => {
+          try {
+            for (const entry of writes) {
+              await this.writeAssetDurably(entry.metadata, entry.data);
+            }
+            return await operation();
+          } catch (error) {
+            await restoreStoragePathSnapshots(snapshots);
+            throw error;
           }
-          return await operation();
-        } catch (error) {
-          await restoreStoragePathSnapshots(snapshots);
-          throw error;
-        }
+        };
+        return transaction(writeOperation);
       }
     );
   }
@@ -1864,6 +1877,7 @@ export class FileStorage {
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedImportsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
@@ -1871,10 +1885,303 @@ export class FileStorage {
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedImportsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
     await this.removeUnreferencedLegacySampleDocument();
+  }
+
+  private importRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "imports");
+  }
+
+  private importRecoveryPathFor(transactionId: string) {
+    assertSafeStorageId(transactionId);
+    return path.join(this.importRecoveryDir(), `${transactionId}.json`);
+  }
+
+  private async persistImportRecoveryJournal(
+    transactionId: string,
+    kind: ImportRecoveryKind,
+    projectId: string | undefined,
+    fileIds: readonly string[],
+    original: readonly StoragePathSnapshot[],
+    intended: readonly StoragePathSnapshot[]
+  ): Promise<void> {
+    const journal: ImportRecoveryJournal = {
+      schemaVersion: 1,
+      kind,
+      transactionId,
+      ...(projectId ? { projectId } : {}),
+      fileIds: [...fileIds],
+      original: original.map((snapshot) =>
+        serializeRecoverySnapshot(this.rootDir, snapshot)
+      ),
+      intended: intended.map((snapshot) =>
+        serializeRecoverySnapshot(this.rootDir, snapshot)
+      )
+    };
+    const journalPath = this.importRecoveryPathFor(transactionId);
+    await mkdir(path.dirname(journalPath), { recursive: true });
+    await durablyReplaceFile(
+      journalPath,
+      Buffer.from(`${JSON.stringify(journal, null, 2)}\n`, "utf8")
+    );
+  }
+
+  private async removeImportRecoveryJournal(
+    transactionId: string
+  ): Promise<void> {
+    const journalPath = this.importRecoveryPathFor(transactionId);
+    await rm(journalPath, { force: true });
+    const recoveryDir = path.dirname(journalPath);
+    if (await pathExists(recoveryDir)) {
+      await syncDirectory(recoveryDir);
+    }
+  }
+
+  private async withImportRecoveryTransaction<T>(
+    kind: ImportRecoveryKind,
+    projectId: string | undefined,
+    fileIds: readonly string[],
+    originalPaths: readonly string[],
+    initialIntended: readonly StoragePathSnapshot[],
+    operation: (
+      appendIntended: (
+        snapshots: readonly StoragePathSnapshot[]
+      ) => Promise<void>
+    ) => Promise<T>
+  ): Promise<T> {
+    const transactionId = randomUUID();
+    const orderedFileIds = [...fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    if (
+      orderedFileIds.length === 0
+      || new Set(orderedFileIds.map(canonicalStorageId)).size
+        !== orderedFileIds.length
+    ) {
+      throw inputValidationError(
+        "import recovery file ids must be unique ignoring case"
+      );
+    }
+    const orderedOriginalPaths = [
+      ...new Set(originalPaths.map((filePath) => path.resolve(filePath)))
+    ];
+    const original = await captureStoragePathSnapshots(
+      orderedOriginalPaths
+    );
+    const originalPathSet = new Set(
+      original.map((snapshot) => snapshot.filePath)
+    );
+    const intended = [...initialIntended];
+    const assertIntendedPaths = (
+      snapshots: readonly StoragePathSnapshot[]
+    ) => {
+      for (const snapshot of snapshots) {
+        if (!originalPathSet.has(path.resolve(snapshot.filePath))) {
+          throw new Error(
+            `import recovery intent is outside original paths: ${snapshot.filePath}`
+          );
+        }
+      }
+    };
+    assertIntendedPaths(intended);
+    await this.persistImportRecoveryJournal(
+      transactionId,
+      kind,
+      projectId,
+      orderedFileIds,
+      original,
+      intended
+    );
+
+    const appendIntended = async (
+      snapshots: readonly StoragePathSnapshot[]
+    ): Promise<void> => {
+      assertIntendedPaths(snapshots);
+      intended.push(...snapshots);
+      await this.persistImportRecoveryJournal(
+        transactionId,
+        kind,
+        projectId,
+        orderedFileIds,
+        original,
+        intended
+      );
+    };
+
+    try {
+      const result = await operation(appendIntended);
+      await this.removeImportRecoveryJournal(transactionId);
+      return result;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
+        await this.removeImportRecoveryJournal(transactionId);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "import transaction failed and rollback failed"
+        );
+      }
+      throw error;
+    }
+  }
+
+  private recoverInterruptedImportsOnce(): Promise<void> {
+    this.importRecoveryPromise ??= this.recoverInterruptedImports();
+    return this.importRecoveryPromise;
+  }
+
+  private async recoverInterruptedImportsBeforeMutation(): Promise<void> {
+    await this.recoverInterruptedLibraryUpdates();
+    await this.recoverInterruptedImports();
+  }
+
+  private async recoverInterruptedImports(): Promise<void> {
+    const journalPaths = await this.listLibraryRecoveryJournalPaths(
+      this.importRecoveryDir()
+    );
+    for (const journalPath of journalPaths) {
+      await this.recoverInterruptedImportJournal(journalPath);
+    }
+  }
+
+  private async recoverInterruptedImportJournal(
+    journalPath: string
+  ): Promise<void> {
+    let expected: ImportRecoveryJournal;
+    try {
+      expected = parseImportRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    const recover = async (): Promise<void> => {
+      let journal: ImportRecoveryJournal;
+      try {
+        journal = parseImportRecoveryJournal(
+          JSON.parse(await readFile(journalPath, "utf8"))
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === "ENOENT") {
+          return;
+        }
+        throw error;
+      }
+      if (
+        journal.transactionId !== expected.transactionId
+        || journal.kind !== expected.kind
+        || journal.projectId !== expected.projectId
+        || journal.fileIds.length !== expected.fileIds.length
+        || journal.fileIds.some(
+          (fileId, index) => fileId !== expected.fileIds[index]
+        )
+      ) {
+        throw new StorageRollbackConflictError(
+          `import recovery journal changed while waiting: ${journalPath}`
+        );
+      }
+
+      const original = journal.original.map((snapshot) =>
+        deserializeRecoverySnapshot(this.rootDir, snapshot)
+      );
+      const originalPathSet = new Set(
+        original.map((snapshot) => snapshot.filePath)
+      );
+      const intended = new Map<string, Array<Buffer | null>>();
+      for (const snapshot of journal.intended) {
+        const restored = deserializeRecoverySnapshot(
+          this.rootDir,
+          snapshot
+        );
+        if (!originalPathSet.has(restored.filePath)) {
+          throw new Error(
+            `import recovery intent is outside original paths: ${restored.filePath}`
+          );
+        }
+        const candidates = intended.get(restored.filePath) ?? [];
+        candidates.push(restored.data);
+        intended.set(restored.filePath, candidates);
+      }
+      const current = await captureStoragePathSnapshots(
+        original.map((snapshot) => snapshot.filePath)
+      );
+      const currentByPath = new Map(
+        current.map((snapshot) => [snapshot.filePath, snapshot.data])
+      );
+
+      for (const snapshot of original) {
+        const currentData = currentByPath.get(snapshot.filePath) ?? null;
+        const intendedData = intended.get(snapshot.filePath) ?? [];
+        if (
+          !storageSnapshotDataEquals(currentData, snapshot.data)
+          && !intendedData.some((candidate) =>
+            storageSnapshotDataEquals(currentData, candidate)
+          )
+        ) {
+          throw new StorageRollbackConflictError(
+            `interrupted ${journal.kind} path changed outside journal: ${snapshot.filePath}`
+          );
+        }
+      }
+
+      await restoreStoragePathSnapshots(original);
+      await rm(journalPath, { force: true });
+      const recoveryDir = path.dirname(journalPath);
+      if (await pathExists(recoveryDir)) {
+        await syncDirectory(recoveryDir);
+      }
+    };
+
+    const orderedFileIds = [...expected.fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    if (expected.kind === "file-archive-import") {
+      return withStoragePathMutationLock(
+        this.fileMutationPathFor(orderedFileIds[0]),
+        () =>
+          withAssetReferenceMutationLock(
+            this.assetReferenceMutationPath(),
+            recover
+          )
+      );
+    }
+
+    const projectId = expected.projectId;
+    if (!projectId) {
+      throw new Error("import recovery project id is required");
+    }
+    return this.withProjectMutationLock(projectId, () => {
+      if (expected.kind === "external-migration-import") {
+        return withOrderedStoragePathMutationLocks(
+          [
+            this.libraryRegistryPath(),
+            this.librarySubscriptionsPath()
+          ],
+          () =>
+            this.withOrderedFileMutationLocks(
+              orderedFileIds,
+              recover
+            )
+        );
+      }
+      return this.withOrderedFileMutationLocks(
+        orderedFileIds,
+        recover
+      );
+    });
   }
 
   private libraryUpdateRecoveryDir() {
@@ -2619,6 +2926,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportFileArchiveOptions = {}
   ): Promise<ImportedFileArchive> {
+    await this.recoverInterruptedImportsBeforeMutation();
     const entries = readZipArchive(archive);
     const manifest = parseFileArchiveManifest(
       readJsonArchiveEntry(entries, "manifest.json")
@@ -2662,12 +2970,49 @@ export class FileStorage {
           );
         }
 
-        const original = await captureStoragePathSnapshots([
-          this.filePathFor(fileId)
-        ]);
-        try {
-          return await this.withImportedAssetWrites(assets, async () => {
-            await this.writeFileDurablyWithoutMutationLock(fileId, document);
+        const parsedAssets = assets.map((asset) => ({
+          metadata: parseStoredAsset(asset.metadata),
+          data: asset.data
+        }));
+        const originalPaths = [
+          this.filePathFor(fileId),
+          ...parsedAssets.flatMap((asset) => [
+            this.assetPathFor(asset.metadata.assetId),
+            this.assetMetadataPathFor(asset.metadata.assetId)
+          ])
+        ];
+        const intended: StoragePathSnapshot[] = [
+          {
+            filePath: this.filePathFor(fileId),
+            data: Buffer.from(
+              `${JSON.stringify(document, null, 2)}\n`,
+              "utf8"
+            )
+          },
+          ...parsedAssets.flatMap((asset) => [
+            {
+              filePath: this.assetPathFor(asset.metadata.assetId),
+              data: Buffer.from(asset.data)
+            },
+            {
+              filePath: this.assetMetadataPathFor(
+                asset.metadata.assetId
+              ),
+              data: Buffer.from(
+                `${JSON.stringify(asset.metadata, null, 2)}\n`,
+                "utf8"
+              )
+            }
+          ])
+        ];
+
+        return this.withImportedAssetWrites(
+          parsedAssets,
+          async () => {
+            await this.writeFileDurablyWithoutMutationLock(
+              fileId,
+              document
+            );
             return {
               fileId,
               name: document.name,
@@ -2675,18 +3020,17 @@ export class FileStorage {
               originalName: manifest.name,
               assetCount: assetIds.length
             };
-          });
-        } catch (error) {
-          try {
-            await restoreStoragePathSnapshots(original);
-          } catch (rollbackError) {
-            throw new AggregateError(
-              [error, rollbackError],
-              "file archive import failed and rollback failed"
-            );
-          }
-          throw error;
-        }
+          },
+          (writeOperation) =>
+            this.withImportRecoveryTransaction(
+              "file-archive-import",
+              undefined,
+              [fileId],
+              originalPaths,
+              intended,
+              () => writeOperation()
+            )
+        );
       }
     );
   }
@@ -2782,6 +3126,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportExternalMigrationArchiveOptions = {}
   ): Promise<ImportedExternalMigrationArchive> {
+    await this.recoverInterruptedImportsBeforeMutation();
     const projectId = options.projectId ?? createStorageId("project");
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
@@ -2851,32 +3196,103 @@ export class FileStorage {
           updatedAt: now
         }))
       ];
+      const files = [
+        { fileId: documentId, document: file },
+        ...libraryFiles.map((library) => ({
+          fileId: library.file.id,
+          document: library.file
+        }))
+      ];
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: projectName,
+        createdAt: now,
+        updatedAt: now,
+        currentDocumentId: documentId,
+        documents,
+        sharing: { mode: "private" }
+      });
+      const parsedAssets = imported.importedAssets.map((asset) => ({
+        metadata: parseStoredAsset(asset.metadata),
+        data: asset.data
+      }));
+      const libraryIds = libraryFiles.map(
+        (library) => library.file.id
+      );
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId)),
+        ...parsedAssets.flatMap((asset) => [
+          this.assetPathFor(asset.metadata.assetId),
+          this.assetMetadataPathFor(asset.metadata.assetId)
+        ]),
+        ...(libraryIds.length > 0
+          ? [
+              this.libraryRegistryPath(),
+              this.libraryRegistryEventsPath(),
+              this.librarySubscriptionsPath(),
+              ...libraryIds.map((libraryId) =>
+                this.libraryArchivePathFor(libraryId)
+              )
+            ]
+          : [])
+      ];
+      const initialIntended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        })),
+        ...parsedAssets.flatMap((asset) => [
+          {
+            filePath: this.assetPathFor(asset.metadata.assetId),
+            data: Buffer.from(asset.data)
+          },
+          {
+            filePath: this.assetMetadataPathFor(
+              asset.metadata.assetId
+            ),
+            data: Buffer.from(
+              `${JSON.stringify(asset.metadata, null, 2)}\n`,
+              "utf8"
+            )
+          }
+        ])
+      ];
+      let appendImportIntended:
+        | ((
+            snapshots: readonly StoragePathSnapshot[]
+          ) => Promise<void>)
+        | undefined;
+
       const project = await this.withExternalMigrationRegistryTransaction(
         projectId,
-        libraryFiles.map((library) => library.file.id),
+        libraryIds,
         () =>
           this.withExclusiveProjectFiles(
-            [
-              { fileId: documentId, document: file },
-              ...libraryFiles.map((library) => ({
-                fileId: library.file.id,
-                document: library.file
-              }))
-            ],
+            files,
             () =>
               this.withImportedAssetWrites(
-                imported.importedAssets,
+                parsedAssets,
                 async () => {
-                  const nextProject = await this.writeProject({
-                    schemaVersion: 1,
-                    projectId,
-                    name: projectName,
-                    createdAt: now,
-                    updatedAt: now,
-                    currentDocumentId: documentId,
-                    documents,
-                    sharing: { mode: "private" }
-                  });
+                  const appendIntended = appendImportIntended;
+                  if (!appendIntended) {
+                    throw new Error(
+                      "external migration recovery transaction is missing"
+                    );
+                  }
+                  const writtenProject =
+                    await this.writeProject(nextProject);
 
                   for (const library of libraryFiles) {
                     const entry =
@@ -2885,7 +3301,8 @@ export class FileStorage {
                         {
                           libraryId: library.file.id,
                           name: library.file.name
-                        }
+                        },
+                        appendIntended
                       );
                     const componentIdMap = Object.fromEntries(
                       (library.file.components ?? []).map((component) => [
@@ -2911,11 +3328,29 @@ export class FileStorage {
                         libraryId: entry.libraryId,
                         libraryName: entry.name
                       },
-                      undefined
+                      undefined,
+                      undefined,
+                      (snapshot) => appendIntended([snapshot])
                     );
                   }
 
-                  return nextProject;
+                  return writtenProject;
+                }
+              ),
+            (writeOperation) =>
+              this.withImportRecoveryTransaction(
+                "external-migration-import",
+                projectId,
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                initialIntended,
+                async (appendIntended) => {
+                  appendImportIntended = appendIntended;
+                  try {
+                    return await writeOperation();
+                  } finally {
+                    appendImportIntended = undefined;
+                  }
                 }
               )
           )
@@ -2938,6 +3373,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportProjectArchiveOptions = {}
   ): Promise<ImportedProjectArchive> {
+    await this.recoverInterruptedImportsBeforeMutation();
     const archiveProject = readProjectArchivePayload(readZipArchive(archive));
     const now = new Date().toISOString();
     const projectId = options.projectId ?? createStorageId("project");
@@ -2954,10 +3390,13 @@ export class FileStorage {
           projectId
         )
       ) {
-        throw Object.assign(new Error(`project already exists: ${projectId}`), {
-          code: "EEXIST",
-          statusCode: 409
-        });
+        throw Object.assign(
+          new Error(`project already exists: ${projectId}`),
+          {
+            code: "EEXIST",
+            statusCode: 409
+          }
+        );
       }
 
       const documentIdMap: Record<string, string> = {};
@@ -2984,7 +3423,10 @@ export class FileStorage {
         const document: DesignFile = {
           ...structuredClone(archivedDocument),
           id: documentId,
-          name: normalizeName(archivedDocument.name, archivedSummary.name)
+          name: normalizeName(
+            archivedDocument.name,
+            archivedSummary.name
+          )
         };
         files.push({ fileId: documentId, document });
         documents.push({
@@ -2998,6 +3440,63 @@ export class FileStorage {
       const currentDocumentId =
         documentIdMap[archiveProject.project.currentDocumentId]
         ?? documents[0].documentId;
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: normalizeName(
+          options.name,
+          archiveProject.project.name
+        ),
+        createdAt: now,
+        updatedAt: now,
+        currentDocumentId,
+        documents,
+        sharing: { mode: "private" }
+      });
+      const parsedAssets = archiveProject.assets.map((asset) => ({
+        metadata: parseStoredAsset(asset.metadata),
+        data: asset.data
+      }));
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId)),
+        ...parsedAssets.flatMap((asset) => [
+          this.assetPathFor(asset.metadata.assetId),
+          this.assetMetadataPathFor(asset.metadata.assetId)
+        ])
+      ];
+      const intended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        })),
+        ...parsedAssets.flatMap((asset) => [
+          {
+            filePath: this.assetPathFor(asset.metadata.assetId),
+            data: Buffer.from(asset.data)
+          },
+          {
+            filePath: this.assetMetadataPathFor(
+              asset.metadata.assetId
+            ),
+            data: Buffer.from(
+              `${JSON.stringify(asset.metadata, null, 2)}\n`,
+              "utf8"
+            )
+          }
+        ])
+      ];
+
       const project = await this.withNewProjectRollback(
         projectId,
         () =>
@@ -3005,21 +3504,17 @@ export class FileStorage {
             files,
             () =>
               this.withImportedAssetWrites(
-                archiveProject.assets,
-                () =>
-                  this.writeProject({
-                    schemaVersion: 1,
-                    projectId,
-                    name: normalizeName(
-                      options.name,
-                      archiveProject.project.name
-                    ),
-                    createdAt: now,
-                    updatedAt: now,
-                    currentDocumentId,
-                    documents,
-                    sharing: { mode: "private" }
-                  })
+                parsedAssets,
+                () => this.writeProject(nextProject)
+              ),
+            (writeOperation) =>
+              this.withImportRecoveryTransaction(
+                "project-archive-import",
+                projectId,
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                intended,
+                () => writeOperation()
               )
           )
       );
@@ -3230,7 +3725,10 @@ export class FileStorage {
   // Caller must hold the registry path lock.
   private async publishLibraryToRegistryLocked(
     fileId: string,
-    options: PublishLibraryRegistryOptions = {}
+    options: PublishLibraryRegistryOptions = {},
+    onPrepared?: (
+      snapshots: readonly StoragePathSnapshot[]
+    ) => Promise<void>
   ): Promise<LibraryRegistryEntry> {
     await this.recoverInterruptedLibraryPublicationsLocked();
     const exported = await this.exportLibraryArchive(fileId);
@@ -3339,6 +3837,7 @@ export class FileStorage {
     ];
     const recoveryId = libraryId;
 
+    await onPrepared?.(intended);
     await this.persistLibraryUpdateRecoveryJournal(
       recoveryId,
       original,
@@ -6611,6 +7110,21 @@ interface LibraryUpdateRecoveryJournal {
   intended: SerializedRecoverySnapshot[];
 }
 
+type ImportRecoveryKind =
+  | "file-archive-import"
+  | "project-archive-import"
+  | "external-migration-import";
+
+interface ImportRecoveryJournal {
+  schemaVersion: 1;
+  kind: ImportRecoveryKind;
+  transactionId: string;
+  projectId?: string;
+  fileIds: string[];
+  original: SerializedRecoverySnapshot[];
+  intended: SerializedRecoverySnapshot[];
+}
+
 function serializeRecoverySnapshot(
   rootDir: string,
   snapshot: StoragePathSnapshot
@@ -6670,6 +7184,69 @@ function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecover
     schemaVersion: 1,
     kind: candidate.kind,
     fileId: candidate.fileId,
+    original: candidate.original.map(parseSerializedRecoverySnapshot),
+    intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseImportRecoveryJournal(value: unknown): ImportRecoveryJournal {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid import recovery journal");
+  }
+  const candidate = value as Partial<ImportRecoveryJournal>;
+  if (
+    candidate.schemaVersion !== 1
+    || (
+      candidate.kind !== "file-archive-import"
+      && candidate.kind !== "project-archive-import"
+      && candidate.kind !== "external-migration-import"
+    )
+    || typeof candidate.transactionId !== "string"
+    || !Array.isArray(candidate.fileIds)
+    || !Array.isArray(candidate.original)
+    || !Array.isArray(candidate.intended)
+  ) {
+    throw new Error("invalid import recovery journal");
+  }
+
+  assertSafeStorageId(candidate.transactionId);
+  const fileIds = candidate.fileIds.map((fileId) => {
+    if (typeof fileId !== "string") {
+      throw new Error("invalid import recovery file id");
+    }
+    assertSafeStorageId(fileId);
+    return fileId;
+  });
+  if (
+    fileIds.length === 0
+    || new Set(fileIds.map(canonicalStorageId)).size !== fileIds.length
+  ) {
+    throw new Error("invalid import recovery file ids");
+  }
+
+  const projectId =
+    typeof candidate.projectId === "string"
+      ? candidate.projectId
+      : undefined;
+  if (projectId) {
+    assertSafeStorageId(projectId);
+  }
+  if (
+    (candidate.kind === "file-archive-import" && projectId !== undefined)
+    || (
+      candidate.kind !== "file-archive-import"
+      && projectId === undefined
+    )
+  ) {
+    throw new Error("invalid import recovery project id");
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: candidate.kind,
+    transactionId: candidate.transactionId,
+    ...(projectId ? { projectId } : {}),
+    fileIds,
     original: candidate.original.map(parseSerializedRecoverySnapshot),
     intended: candidate.intended.map(parseSerializedRecoverySnapshot)
   };
