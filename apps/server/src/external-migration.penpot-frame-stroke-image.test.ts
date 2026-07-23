@@ -357,6 +357,7 @@ test("reviews imports and persists Penpot frame stroke-image records through HTT
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-frame-stroke-image-1" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "frame-stroke-images.penpot"
@@ -429,6 +430,7 @@ test("reviews imports and persists Penpot frame fill-image plus stroke-image rec
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-frame-stroke-image-2" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "frame-dual-image-paints.penpot"
