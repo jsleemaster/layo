@@ -2036,6 +2036,30 @@ describe("FileStorage", () => {
     });
   });
 
+  test("comment versions advance past a sidecar timestamp written by another process", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "프로세스 경계 버전",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalModifiedAt = "2099-01-01T00:00:00.000Z";
+    sidecar.threads[0].modifiedAt = externalModifiedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "프로세스 경계 이후 수정",
+      actorId: "user-owner",
+      expectedModifiedAt: externalModifiedAt
+    });
+
+    expect(updated.modifiedAt > externalModifiedAt).toBe(true);
+  });
+
   test("comment reply owners can edit and delete replies without leaking deleted content", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
