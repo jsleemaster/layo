@@ -96,7 +96,7 @@ export interface CommentNotificationSummary {
   projects: CommentNotificationProjectSummary[];
 }
 
-export type CommentActivityType = "created" | "replied" | "resolved";
+export type CommentActivityType = "created" | "replied" | "resolved" | "edited" | "deleted";
 
 export interface CommentActivityEvent {
   schemaVersion: 1;

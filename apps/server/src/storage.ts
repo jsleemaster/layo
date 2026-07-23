@@ -775,8 +775,8 @@ export interface StoredCommentReply {
   mentionTargets: StoredCommentMentionTarget[];
 }
 
-export type CommentActivityType = "created" | "replied" | "resolved";
-export type CommentLiveEventType = CommentActivityType | "read" | "edited" | "deleted";
+export type CommentActivityType = "created" | "replied" | "resolved" | "edited" | "deleted";
+export type CommentLiveEventType = CommentActivityType | "read";
 export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
 
 export interface StoredCommentMentionTarget {
@@ -3349,10 +3349,24 @@ export class FileStorage {
         threads: store.threads.map((candidate) =>
           candidate.threadId === threadId ? updatedThread : candidate
         ),
-        activity: store.activity.map((event) =>
-          event.threadId === threadId && !event.replyId
-            ? { ...event, body, mentions, mentionTargets }
-            : event
+        activity: prependCommentActivity(
+          store.activity.map((event) =>
+            event.threadId === threadId && !event.replyId
+              ? { ...event, body, mentions, mentionTargets }
+              : event
+          ),
+          {
+            type: "edited",
+            fileId,
+            threadId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: thread.authorName,
+            body,
+            mentions,
+            mentionTargets,
+            createdAt: modifiedAt
+          }
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "edited",
@@ -3383,7 +3397,21 @@ export class FileStorage {
       await this.writeCommentThreadFile({
         ...store,
         threads: store.threads.filter((candidate) => candidate.threadId !== threadId),
-        activity: store.activity.filter((event) => event.threadId !== threadId),
+        activity: prependCommentActivity(
+          store.activity.filter((event) => event.threadId !== threadId),
+          {
+            type: "deleted",
+            fileId,
+            threadId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: thread.authorName,
+            body: "코멘트가 삭제되었습니다",
+            mentions: [],
+            mentionTargets: [],
+            createdAt: deletedAt
+          }
+        ),
         events: appendCommentLiveEvent(store.events, {
           type: "deleted",
           fileId,
@@ -3497,10 +3525,25 @@ export class FileStorage {
         threads: store.threads.map((candidate) =>
           candidate.threadId === threadId ? updatedThread : candidate
         ),
-        activity: store.activity.map((event) =>
-          event.replyId === replyId
-            ? { ...event, body, mentions, mentionTargets }
-            : event
+        activity: prependCommentActivity(
+          store.activity.map((event) =>
+            event.replyId === replyId
+              ? { ...event, body, mentions, mentionTargets }
+              : event
+          ),
+          {
+            type: "edited",
+            fileId,
+            threadId,
+            replyId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: reply.authorName,
+            body,
+            mentions,
+            mentionTargets,
+            createdAt: modifiedAt
+          }
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "edited",
@@ -3543,7 +3586,22 @@ export class FileStorage {
         threads: store.threads.map((candidate) =>
           candidate.threadId === threadId ? updatedThread : candidate
         ),
-        activity: store.activity.filter((event) => event.replyId !== replyId),
+        activity: prependCommentActivity(
+          store.activity.filter((event) => event.replyId !== replyId),
+          {
+            type: "deleted",
+            fileId,
+            threadId,
+            replyId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: reply.authorName,
+            body: "답글이 삭제되었습니다",
+            mentions: [],
+            mentionTargets: [],
+            createdAt: deletedAt
+          }
+        ),
         events: appendCommentLiveEvent(store.events, {
           type: "deleted",
           fileId,
@@ -6190,7 +6248,7 @@ function parseStoredCommentActivityEvent(
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment activity file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "edited", "deleted"].includes(candidate.type)) {
     throw new Error(`unsupported comment activity type: ${String(candidate.type)}`);
   }
 

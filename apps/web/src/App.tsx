@@ -272,6 +272,10 @@ function formatCommentActivityType(type: CommentActivityFeed["events"][number]["
       return "답글";
     case "resolved":
       return "해결";
+    case "edited":
+      return "수정";
+    case "deleted":
+      return "삭제";
   }
 }
 
@@ -9858,6 +9862,7 @@ export function App() {
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
+  const commentAccessGenerationRef = useRef(0);
   const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
@@ -10132,19 +10137,33 @@ export function App() {
   };
 
   const refreshCommentNotifications = async () => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       const summary = await listCommentNotifications(
         commentActorId,
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentNotificationSummary(summary);
     } catch {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentNotificationSummary(null);
     }
   };
 
   const refreshCommentActivity = async () => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       const feed = await listCommentActivity(
         commentActorId,
@@ -10152,8 +10171,20 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentActivityFeed(feed);
     } catch {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentActivityFeed(null);
     }
   };
@@ -10163,6 +10194,7 @@ export function App() {
     status?: string,
     options: { preserveStatus?: boolean } = {}
   ) => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       const threads = await listCommentThreads(
         fileId,
@@ -10171,6 +10203,12 @@ export function App() {
         commentActorId,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       const unreadCount = threads.filter((thread) => thread.unread).length;
       setCommentThreads(threads);
       if (!options.preserveStatus) {
@@ -10184,6 +10222,12 @@ export function App() {
         );
       }
     } catch (error) {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "코멘트를 불러오지 못했습니다";
       setCommentThreads([]);
       setCommentReplyBodies({});
@@ -10199,9 +10243,14 @@ export function App() {
       return;
     }
 
+    commentAccessGenerationRef.current += 1;
+    const accessGeneration = commentAccessGenerationRef.current;
     commentAuthorizationEndedRef.current = false;
     const intervalId = window.setInterval(() => {
-      if (commentAuthorizationEndedRef.current) {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
         return;
       }
       void Promise.all([
@@ -10242,6 +10291,7 @@ export function App() {
         ]);
       },
       onAuthorizationEnded: () => {
+        commentAccessGenerationRef.current += 1;
         commentAuthorizationEndedRef.current = true;
         commentEventSequenceByFileRef.current.delete(fileId);
         resetCommentThreads("팀 코멘트 접근 권한이 해제되었습니다");
