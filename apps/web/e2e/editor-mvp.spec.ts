@@ -591,8 +591,20 @@ test("file panel sends active team member credentials for library publish and im
       url.searchParams.get("fileId") === documentId
     );
   });
+  const sharingRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "PATCH" &&
+      url.pathname === `/projects/${sourceProjectId}/sharing`
+    );
+  });
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  const shared = await sharingRequest;
+  expect(shared.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
   const streamed = await eventStreamRequest;
   expect(streamed.headers()).toMatchObject({
     authorization: "Bearer editor-member-token",
@@ -6199,6 +6211,41 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await page.getByRole("button", { name: "코멘트 저장" }).click();
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
   await expect(page.getByTestId("comment-list")).toContainText("내 충돌 후 수정");
+
+  const latestThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(latestThreadsResponse.ok()).toBeTruthy();
+  const latestConcurrentThread = ((await latestThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "내 충돌 후 수정");
+  expect(latestConcurrentThread).toBeDefined();
+
+  await page.getByRole("button", { name: "내 충돌 후 수정 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("원격 삭제에도 보존할 초안");
+  const externalDelete = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${latestConcurrentThread!.threadId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: latestConcurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalDelete.ok()).toBeTruthy();
+
+  const recovery = page.getByTestId("comment-edit-recovery");
+  await expect(recovery).toContainText("원본 코멘트가 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 초안"
+  );
+  await page.getByRole("button", { name: "삭제된 초안 새 코멘트로 옮기기" }).click();
+  await expect(page.getByTestId("comment-body")).toHaveValue("원격 삭제에도 보존할 초안");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("원격 삭제에도 보존할 초안");
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();

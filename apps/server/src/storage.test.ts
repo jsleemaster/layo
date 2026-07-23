@@ -1936,6 +1936,46 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment live event pagination returns the oldest retained events before newer events", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "백로그 기준 이벤트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const firstEvent = sidecar.events[0];
+    const firstCreatedAt = Date.parse(firstEvent.createdAt);
+    sidecar.events = Array.from({ length: 150 }, (_, index) => ({
+      ...firstEvent,
+      eventId: `event-${index + 1}`,
+      sequence: index + 1,
+      createdAt: new Date(firstCreatedAt + index).toISOString()
+    }));
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const firstBatch = await storage.listCommentLiveEvents({
+      fileId: "sample-file",
+      after: 0,
+      limit: 100
+    });
+    expect(firstBatch.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1)
+    );
+
+    const secondBatch = await storage.listCommentLiveEvents({
+      fileId: "sample-file",
+      after: firstBatch[firstBatch.length - 1].sequence,
+      limit: 100
+    });
+    expect(secondBatch.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 50 }, (_, index) => index + 101)
+    );
+  });
+
   test("comment mutations preserve concurrent writers across FileStorage instances", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const creator = await storageWithDocument(tempRoot);

@@ -2676,6 +2676,115 @@ describe("HTTP server", () => {
     ).toEqual(new Set(["private-comment-project"]));
   });
 
+  test("requires a team owner to change a team project's sharing boundary", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "sharing-project",
+      name: "공유 경계 프로젝트",
+      documentId: "sharing-file",
+      documentName: "공유 경계 문서"
+    });
+    await storage.setProjectSharing("sharing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" },
+          { userId: "team-viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" }
+        ]
+      }
+    });
+    const changeSharing = (headers?: Record<string, string>) =>
+      server.inject({
+        method: "PATCH",
+        url: "/projects/sharing-project/sharing",
+        headers,
+        payload: { mode: "private" }
+      });
+
+    expect((await changeSharing()).statusCode).toBe(401);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer viewer-token",
+          "x-layo-user-id": "team-viewer"
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer editor-token",
+          "x-layo-user-id": "team-editor"
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer owner-token",
+          "x-layo-user-id": "team-owner"
+        })
+      ).statusCode
+    ).toBe(200);
+    await expect(storage.readProject("sharing-project")).resolves.toMatchObject({
+      sharing: { mode: "private" }
+    });
+  });
+
+  test("closes a team comment SSE stream when its owner makes the project private", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "sharing-project",
+      name: "공유 경계 프로젝트",
+      documentId: "sharing-file",
+      documentName: "공유 경계 문서"
+    });
+    await storage.setProjectSharing("sharing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" }
+        ]
+      }
+    });
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const headers = {
+      authorization: "Bearer owner-token",
+      "x-layo-user-id": "team-owner"
+    };
+
+    try {
+      const stream = await fetch(
+        `${address}/comments/events?fileId=sharing-file`,
+        { headers, signal: controller.signal }
+      );
+      expect(stream.status).toBe(200);
+
+      const changed = await fetch(`${address}/projects/sharing-project/sharing`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "private" })
+      });
+      expect(changed.status).toBe(200);
+      await expect(
+        readSseEvent(stream, "comment-authorization-ended")
+      ).resolves.toEqual({ code: "team_access_revoked" });
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  });
+
   test("re-authenticates a team comment SSE stream and closes it after credential revocation", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
