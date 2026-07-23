@@ -6095,6 +6095,95 @@ test("comments panel adds replies to a selected-layer thread", async ({ page }) 
     .toBe("문구를 더 짧게 줄였어요");
 });
 
+test("comments panel lets owners edit and delete threads and replies with stale-write recovery", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("수정 전 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await page.getByRole("button", { name: "수정 전 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("수정된 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 코멘트");
+
+  await page.getByTestId("comment-reply-body").fill("수정 전 답글");
+  await page.getByRole("button", { name: "답글 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+  await page.getByRole("button", { name: "수정 전 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("수정된 답글");
+  await page.getByRole("button", { name: "답글 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 답글");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 답글 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 답글");
+
+  const foreignResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "외부 소유 코멘트",
+        authorId: "reviewer",
+        authorName: "리뷰어"
+      }
+    }
+  );
+  expect(foreignResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("외부 소유 코멘트");
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 수정" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 삭제" })).toHaveCount(0);
+
+  await page.getByTestId("comment-body").fill("동시 수정 전");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(threadsResponse.ok()).toBeTruthy();
+  const concurrentThread = ((await threadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "동시 수정 전");
+  expect(concurrentThread).toBeDefined();
+
+  await page.getByRole("button", { name: "동시 수정 전 수정" }).click();
+  const externalUpdate = await page.request.patch(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${concurrentThread!.threadId}`,
+    {
+      data: {
+        body: "외부 최신 코멘트",
+        actorId: "사용자",
+        expectedModifiedAt: concurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalUpdate.ok()).toBeTruthy();
+
+  await page.getByTestId("comment-thread-edit-body").fill("내 오래된 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
+  );
+  await expect(page.getByTestId("comment-list")).toContainText("외부 최신 코멘트");
+  await expect(page.getByTestId("comment-list")).not.toContainText("내 오래된 수정");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
+});
+
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
