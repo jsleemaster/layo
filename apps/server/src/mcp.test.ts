@@ -2446,6 +2446,79 @@ describe("MCP AI editing workflow", () => {
     });
   });
 
+  test("rejects an MCP comment write when the project changes teams after authorization", async () => {
+    let storageRef!: FileStorage;
+    let markMutationReached!: () => void;
+    const mutationReached = new Promise<void>((resolve) => {
+      markMutationReached = resolve;
+    });
+    let releaseMutation!: () => void;
+    const mutationReleased = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-viewer",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "viewer-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-viewer",
+        memberToken: "viewer-token"
+      },
+      setupStorage: async (storage) => {
+        storageRef = storage;
+        await storage.createProject({
+          projectId: "comment-team-race-project",
+          name: "MCP 코멘트 팀 경쟁",
+          documentId: "comment-team-race-file",
+          documentName: "MCP 코멘트 팀 경쟁 문서"
+        });
+        await storage.setProjectSharing("comment-team-race-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        const internals = storage as unknown as {
+          createCommentThread: FileStorage["createCommentThread"];
+        };
+        const originalCreate = internals.createCommentThread.bind(storage);
+        internals.createCommentThread = async (...args) => {
+          markMutationReached();
+          await mutationReleased;
+          return originalCreate(...args);
+        };
+      }
+    });
+
+    const pending = client.callTool({
+      name: "create_comment_thread",
+      arguments: {
+        fileId: "comment-team-race-file",
+        nodeId: "text-1",
+        body: "이동 전 MCP 권한으로 쓰면 안 됨"
+      }
+    });
+    await mutationReached;
+    await storageRef.setProjectSharing("comment-team-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    releaseMutation();
+
+    await expect(pending).resolves.toMatchObject({ isError: true });
+    await expect(
+      storageRef.listCommentThreads("comment-team-race-file", {
+        includeResolved: true
+      })
+    ).resolves.toEqual([]);
+  });
+
   test("filters authenticated comment feeds to private and authorized team projects", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {
