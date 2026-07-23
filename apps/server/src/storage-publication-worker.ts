@@ -101,6 +101,23 @@ if (
     projectId,
     documentIdPrefix
   });
+} else if (mode === "project-duplicate-crash-after-project") {
+  const sourceProjectId = requiredArg(firstArg, "sourceProjectId");
+  const projectId = requiredArg(secondArg, "projectId");
+  const documentIdPrefix = requiredArg(thirdArg, "documentIdPrefix");
+  const internals = storage as unknown as {
+    writeProject(project: unknown): Promise<unknown>;
+  };
+  const originalWriteProject = internals.writeProject.bind(storage);
+  internals.writeProject = async (project) => {
+    const result = await originalWriteProject(project);
+    await crash("project-duplicate-crashing", 90);
+    return result;
+  };
+  await storage.duplicateProject(sourceProjectId, {
+    projectId,
+    documentIdPrefix
+  });
 } else if (mode === "external-import-crash-after-publication") {
   const archivePath = requiredArg(firstArg, "archivePath");
   const projectId = requiredArg(secondArg, "projectId");
