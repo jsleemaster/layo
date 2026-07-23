@@ -1023,41 +1023,28 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
     const member = await authenticateOptionalTeamMember(request);
-    const summary = await storage.listCommentNotifications({
-      viewerId: member?.userId ?? request.query.viewerId
-    });
-    if (!teamAuthorizationProvider) {
-      return { summary };
-    }
-    const visibleProjectIds = await visibleCommentProjectIds(member);
-    const projects = summary.projects.filter((project) => visibleProjectIds.has(project.projectId));
+    const projectIds = teamAuthorizationProvider
+      ? await visibleCommentProjectIds(member)
+      : undefined;
     return {
-      summary: {
-        ...summary,
-        ...(member ? { viewerId: member.userId } : {}),
-        totalUnread: projects.reduce((total, project) => total + project.unreadCount, 0),
-        totalMentions: projects.reduce((total, project) => total + project.mentionCount, 0),
-        projects
-      }
+      summary: await storage.listCommentNotifications({
+        viewerId: member?.userId ?? request.query.viewerId,
+        projectIds
+      })
     };
   });
 
   server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
     const member = await authenticateOptionalTeamMember(request);
-    const feed = await storage.listCommentActivity({
-      viewerId: member?.userId ?? request.query.viewerId,
-      limit: request.query.limit ? Number(request.query.limit) : undefined
-    });
-    if (!teamAuthorizationProvider) {
-      return { feed };
-    }
-    const visibleProjectIds = await visibleCommentProjectIds(member);
+    const projectIds = teamAuthorizationProvider
+      ? await visibleCommentProjectIds(member)
+      : undefined;
     return {
-      feed: {
-        ...feed,
-        ...(member ? { viewerId: member.userId } : {}),
-        events: feed.events.filter((event) => visibleProjectIds.has(event.projectId))
-      }
+      feed: await storage.listCommentActivity({
+        viewerId: member?.userId ?? request.query.viewerId,
+        limit: request.query.limit ? Number(request.query.limit) : undefined,
+        projectIds
+      })
     };
   });
 
