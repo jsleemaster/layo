@@ -1663,6 +1663,44 @@ describe("Penpot component instance migration", () => {
     }
   }, 10_000);
 
+  test("rejects case-folded library ids before replacing registry archives", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-library-casefold-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-case-a-project",
+        documentId: "publication-case-a",
+        documentName: "Publication Case A",
+        fileName: "publication-case-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-case-b-project",
+        documentId: "publication-case-b",
+        documentName: "Publication Case B",
+        fileName: "publication-case-b.penpot"
+      });
+      await storage.publishLibraryToRegistry("publication-case-a", {
+        libraryId: "CaseFoldLibrary"
+      });
+      const registryBefore = await storage.listLibraryRegistry();
+
+      await expect(
+        storage.publishLibraryToRegistry("publication-case-b", {
+          libraryId: "casefoldlibrary"
+        })
+      ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+      expect(await storage.listLibraryRegistry()).toEqual(registryBefore);
+      const review = await storage.reviewLibraryRegistryItem(
+        "publication-case-a",
+        "CaseFoldLibrary"
+      );
+      expect(review.originalFileId).toBe("publication-case-a");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("keeps registry metadata and archive from the same competing publication", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-library-publication-race-"));
     const releasePath = path.join(root, "release-publisher");
