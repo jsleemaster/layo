@@ -2565,6 +2565,66 @@ describe("Penpot component instance migration", () => {
     }
   }, 15_000);
 
+  test("recovers a project duplicate after the process exits after the project commit", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-duplicate-crash-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      const source = await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "duplicate-crash-source",
+          documentId: "duplicate-crash-source-document",
+          documentName: "Duplicate crash source",
+          fileName: "duplicate-crash-source.penpot"
+        }
+      );
+      const documentIdPrefix = "duplicate-crash-doc";
+      const expectedDocumentIds = source.project.documents.map(
+        (document) => `${documentIdPrefix}-${document.documentId}`
+      );
+
+      await expectStorageWorkerCrash(
+        root,
+        "project-duplicate-crash-after-project",
+        [
+          source.project.projectId,
+          "duplicate-crash-target",
+          documentIdPrefix
+        ],
+        90,
+        "project-duplicate-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareProjects();
+      await expect(
+        restarted.readProject("duplicate-crash-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      for (const documentId of expectedDocumentIds) {
+        await expect(restarted.readFile(documentId)).rejects.toMatchObject({
+          code: "ENOENT"
+        });
+      }
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).resolves.toMatchObject({
+        assetId: `penpot-asset-${libraryMediaId}`
+      });
+      await expect(
+        restarted.duplicateProject(source.project.projectId, {
+          projectId: "duplicate-crash-target",
+          documentIdPrefix
+        })
+      ).resolves.toMatchObject({
+        projectId: "duplicate-crash-target"
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   test("recovers an external migration after the process exits after library publication", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "layo-external-import-crash-")
