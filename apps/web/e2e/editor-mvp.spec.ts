@@ -6184,6 +6184,63 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
 });
 
+test("comments panel keeps team viewers read-only across every comment mutation control", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const teamManifest = {
+    schemaVersion: 1,
+    teamId: "team-comment-viewers",
+    name: "코멘트 검수 팀",
+    createdAt: "2026-07-23T00:00:00.000Z",
+    currentUserId: "team-viewer",
+    members: [
+      {
+        userId: "team-viewer",
+        displayName: "팀 뷰어",
+        color: "#2563eb",
+        role: "viewer"
+      }
+    ],
+    documents: [],
+    sync: { mode: "local", roomPrefix: "layo" },
+    permissions: { canEdit: false, canInvite: false },
+    auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
+    encryption: { mode: "none" }
+  };
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("코멘트 검수 팀");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("코멘트 검수 팀");
+
+  const created = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "뷰어 소유 코멘트",
+        authorId: "team-viewer",
+        authorName: "팀 뷰어"
+      }
+    }
+  );
+  expect(created.ok()).toBeTruthy();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("뷰어 소유 코멘트");
+  await expect(page.getByTestId("comment-body")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeDisabled();
+  await expect(page.getByTestId("comment-reply-body")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "답글 추가" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(0);
+});
+
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
