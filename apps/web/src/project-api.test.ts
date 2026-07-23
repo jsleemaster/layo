@@ -199,8 +199,6 @@ describe("project api", () => {
           archiveBase64: "UEs=",
           name: "복원 프로젝트",
           idempotencyKey: "project-web-import-v1"
-        } as Parameters<typeof importProjectArchive>[0] & {
-          idempotencyKey: string;
         },
         fetcher as typeof fetch
       )
