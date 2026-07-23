@@ -139,6 +139,15 @@ if (
     projectId,
     documentIdPrefix
   });
+} else if (mode === "library-update-crash-before-subscription") {
+  const fileId = requiredArg(firstArg, "fileId");
+  const libraryId = requiredArg(secondArg, "libraryId");
+  const internals = storage as unknown as {
+    writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+  };
+  internals.writeLibraryRegistrySubscriptions = () =>
+    crash("library-update-before-subscription-crashing", 94);
+  await storage.updateLibraryRegistryItem(fileId, libraryId);
 } else if (mode === "library-update-crash-after-commit") {
   const fileId = requiredArg(firstArg, "fileId");
   const libraryId = requiredArg(secondArg, "libraryId");
