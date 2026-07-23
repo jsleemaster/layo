@@ -2598,16 +2598,49 @@ export class FileStorage {
     }
 
     const assets = readFileArchiveAssets(entries, assetIds);
-    return this.withExclusiveProjectFiles(
-      [{ fileId, document }],
-      () =>
-        this.withImportedAssetWrites(assets, async () => ({
-          fileId,
-          name: document.name,
-          originalFileId: manifest.fileId,
-          originalName: manifest.name,
-          assetCount: assetIds.length
-        }))
+    return withStoragePathMutationLock(
+      this.fileMutationPathFor(fileId),
+      async () => {
+        const canonicalFileId = canonicalStorageId(fileId);
+        const casingConflict = (
+          await this.storageIdsInDirectory(this.filesDir, ".json")
+        ).find(
+          (entry) =>
+            canonicalStorageId(entry) === canonicalFileId
+            && entry !== fileId
+        );
+        if (casingConflict) {
+          throw storageIdentityConflictError(
+            `file archive target already exists with another casing: ${fileId}`
+          );
+        }
+
+        const original = await captureStoragePathSnapshots([
+          this.filePathFor(fileId)
+        ]);
+        try {
+          return await this.withImportedAssetWrites(assets, async () => {
+            await this.writeFileDurablyWithoutMutationLock(fileId, document);
+            return {
+              fileId,
+              name: document.name,
+              originalFileId: manifest.fileId,
+              originalName: manifest.name,
+              assetCount: assetIds.length
+            };
+          });
+        } catch (error) {
+          try {
+            await restoreStoragePathSnapshots(original);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [error, rollbackError],
+              "file archive import failed and rollback failed"
+            );
+          }
+          throw error;
+        }
+      }
     );
   }
 
