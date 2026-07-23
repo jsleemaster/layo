@@ -10238,15 +10238,16 @@ export function App() {
   };
 
   useEffect(() => {
+    commentAccessGenerationRef.current += 1;
+    const accessGeneration = commentAccessGenerationRef.current;
+    commentAuthorizationEndedRef.current = false;
+
     const fileId = currentProject?.currentDocumentId;
     if (!fileId) {
       return;
     }
 
-    commentAccessGenerationRef.current += 1;
-    const accessGeneration = commentAccessGenerationRef.current;
-    commentAuthorizationEndedRef.current = false;
-    const intervalId = window.setInterval(() => {
+    const refreshCurrentCommentScope = () => {
       if (
         commentAuthorizationEndedRef.current
         || commentAccessGenerationRef.current !== accessGeneration
@@ -10258,7 +10259,13 @@ export function App() {
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-    }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
+    };
+
+    refreshCurrentCommentScope();
+    const intervalId = window.setInterval(
+      refreshCurrentCommentScope,
+      COMMENT_LIVE_REFRESH_INTERVAL_MS
+    );
 
     return () => window.clearInterval(intervalId);
   }, [currentProject?.currentDocumentId, libraryRegistryAccessScopeKey]);
@@ -10268,6 +10275,7 @@ export function App() {
     if (!fileId) {
       return;
     }
+    const accessGeneration = commentAccessGenerationRef.current;
 
     return subscribeToCommentEvents({
       fileId,
@@ -10275,7 +10283,11 @@ export function App() {
       credentials: activeLibraryRegistryCredentials ?? undefined,
       after: commentEventSequenceByFileRef.current.get(fileId) ?? 0,
       onCommentEvent: (event) => {
-        if (event.fileId !== fileId) {
+        if (
+          event.fileId !== fileId
+          || commentAuthorizationEndedRef.current
+          || commentAccessGenerationRef.current !== accessGeneration
+        ) {
           return;
         }
         if (typeof event.sequence === "number") {
@@ -10291,6 +10303,9 @@ export function App() {
         ]);
       },
       onAuthorizationEnded: () => {
+        if (commentAccessGenerationRef.current !== accessGeneration) {
+          return;
+        }
         commentAccessGenerationRef.current += 1;
         commentAuthorizationEndedRef.current = true;
         commentEventSequenceByFileRef.current.delete(fileId);
