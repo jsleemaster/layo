@@ -6406,6 +6406,69 @@ test("file panel shows mention-targeted comment notifications", async ({ page })
   await expect(summary).toContainText("멘션 1개");
 });
 
+test("comment authorization end stops fallback polling and preserves the recovery state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoCommentListRequestCount?: number;
+      __layoCommentTerminalStreamCount?: number;
+    };
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const parsedUrl = new URL(url, window.location.href);
+      if (
+        method === "GET"
+        && /^\/files\/[^/]+\/comments$/.test(parsedUrl.pathname)
+      ) {
+        instrumentedWindow.__layoCommentListRequestCount =
+          (instrumentedWindow.__layoCommentListRequestCount ?? 0) + 1;
+      }
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentTerminalStreamCount =
+          (instrumentedWindow.__layoCommentTerminalStreamCount ?? 0) + 1;
+        return new Response(
+          'event: comment-authorization-ended\ndata: {"code":"credential_inactive"}\n\n',
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          }
+        );
+      }
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+  });
+
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+
+  await page.waitForTimeout(100);
+  const requestCountAfterTerminal = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+  await page.waitForTimeout(2_300);
+  const requestCountAfterFallbackWindow = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+
+  expect(requestCountAfterFallbackWindow).toBe(requestCountAfterTerminal);
+  await expect.poll(
+    () => page.evaluate(
+      () => (window as Window & { __layoCommentTerminalStreamCount?: number })
+        .__layoCommentTerminalStreamCount ?? 0
+    )
+  ).toBe(1);
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+});
+
 test("file panel receives externally created comment notifications without reload", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
