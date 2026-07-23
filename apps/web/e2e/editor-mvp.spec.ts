@@ -6224,7 +6224,7 @@ test("comments panel keeps team viewers read-only across every comment mutation 
         nodeId: "text-1",
         body: "뷰어 소유 코멘트",
         authorId: "team-viewer",
-        authorName: "팀 뷰어"
+        authorName: "team-viewer"
       }
     }
   );
@@ -6239,6 +6239,10 @@ test("comments panel keeps team viewers read-only across every comment mutation 
   await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(0);
+
+  await openFilePanel(page);
+  await expect(page.getByTestId("comment-activity-feed")).toContainText("팀 뷰어");
+  await expect(page.getByTestId("comment-activity-feed")).not.toContainText("team-viewer");
 });
 
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {
