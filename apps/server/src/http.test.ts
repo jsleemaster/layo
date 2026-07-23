@@ -2366,6 +2366,49 @@ describe("HTTP server", () => {
     });
   });
 
+  test("requires team authorization before resolving a case-folded comment file alias", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-comment-auth-project",
+      name: "대소문자 코멘트 인증 프로젝트",
+      documentId: "Shared-Comment-File",
+      documentName: "대소문자 코멘트 인증 문서"
+    });
+    await storage.setProjectSharing("case-comment-auth-project", {
+      mode: "team",
+      teamId: "team-case"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "owner",
+            role: "editor",
+            teamIds: ["team-case"],
+            token: "owner-token"
+          }
+        ]
+      }
+    });
+
+    const anonymous = await server.inject({
+      method: "GET",
+      url: "/files/shared-comment-file/comments"
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const authorizedExact = await server.inject({
+      method: "GET",
+      url: "/files/Shared-Comment-File/comments",
+      headers: {
+        authorization: "Bearer owner-token",
+        "x-layo-user-id": "owner"
+      }
+    });
+    expect(authorizedExact.statusCode).toBe(200);
+  });
+
   test("authorizes team comment management and derives stable actors from credentials", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
