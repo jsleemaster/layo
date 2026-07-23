@@ -2087,37 +2087,15 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     },
     async ({ viewerId }) => {
       const member = await authenticateOptionalTeamMember();
+      const projectIds = teamAuthorizationProvider
+        ? await visibleCommentProjectIds(member)
+        : undefined;
       const summary = await storage.listCommentNotifications({
-        viewerId: member?.userId ?? viewerId
+        viewerId: member?.userId ?? viewerId,
+        projectIds
       });
-      if (!teamAuthorizationProvider) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ summary }, null, 2) }]
-        };
-      }
-      const visibleProjectIds = await visibleCommentProjectIds(member);
-      const projects = summary.projects.filter((project) =>
-        visibleProjectIds.has(project.projectId)
-      );
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                summary: {
-                  ...summary,
-                  ...(member ? { viewerId: member.userId } : {}),
-                  totalUnread: projects.reduce((total, project) => total + project.unreadCount, 0),
-                  totalMentions: projects.reduce((total, project) => total + project.mentionCount, 0),
-                  projects
-                }
-              },
-              null,
-              2
-            )
-          }
-        ]
+        content: [{ type: "text", text: JSON.stringify({ summary }, null, 2) }]
       };
     }
   );
@@ -2134,33 +2112,16 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     },
     async ({ viewerId, limit }) => {
       const member = await authenticateOptionalTeamMember();
+      const projectIds = teamAuthorizationProvider
+        ? await visibleCommentProjectIds(member)
+        : undefined;
       const feed = await storage.listCommentActivity({
         viewerId: member?.userId ?? viewerId,
-        limit
+        limit,
+        projectIds
       });
-      if (!teamAuthorizationProvider) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ feed }, null, 2) }]
-        };
-      }
-      const visibleProjectIds = await visibleCommentProjectIds(member);
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(
-              {
-                feed: {
-                  ...feed,
-                  ...(member ? { viewerId: member.userId } : {}),
-                  events: feed.events.filter((event) => visibleProjectIds.has(event.projectId))
-                }
-              },
-              null,
-              2
-            )
-          }
-        ]
+        content: [{ type: "text", text: JSON.stringify({ feed }, null, 2) }]
       };
     }
   );
