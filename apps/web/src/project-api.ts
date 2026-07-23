@@ -54,7 +54,7 @@ export interface ImportedProjectArchive {
 
 export interface ImportProjectArchiveInput {
   archiveBase64: string;
-  idempotencyKey?: string;
+  idempotencyKey: string;
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
@@ -160,7 +160,7 @@ export async function importProjectArchive(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
+      "Idempotency-Key": idempotencyKey
     },
     body: JSON.stringify(body)
   });
