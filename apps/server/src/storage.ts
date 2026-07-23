@@ -1789,13 +1789,9 @@ export class FileStorage {
     operation: () => Promise<T>
   ): Promise<T> {
     await this.recoverInterruptedLibraryUpdatesOnce();
-    return withOrderedStoragePathMutationLocks(
-      [this.libraryRegistryPath(), subscriptionPath],
-      () =>
-        this.withFileMutationLock(fileId, async () => {
-          await this.recoverInterruptedLibraryPublicationsLocked();
-          return operation();
-        })
+    return withStoragePathMutationLock(
+      subscriptionPath,
+      () => this.withFileMutationLock(fileId, operation)
     );
   }
 
@@ -3493,15 +3489,12 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
+    const { entry, archive } =
+      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     return this.withLibraryRegistryTargetMutationLocks(
       fileId,
       this.librarySubscriptionsPath(),
       async () => {
-        const { entry, archive } =
-          await this.readAccessibleLibraryRegistryArchive(
-            fileId,
-            libraryId
-          );
         const library = readLibraryArchivePayload(
           readZipArchive(archive)
         );
@@ -3574,15 +3567,12 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
+    const { entry, archive } =
+      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     return this.withLibraryRegistryTargetMutationLocks(
       fileId,
       this.libraryTokenSubscriptionsPath(),
       async () => {
-        const { entry, archive } =
-          await this.readAccessibleLibraryRegistryArchive(
-            fileId,
-            libraryId
-          );
         return this.replaceAndSubscribeLibraryRegistryTokensLocked(
           fileId,
           entry,
@@ -3596,12 +3586,16 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
+    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+    const { entry, archive } =
+      await this.readAccessibleLibraryRegistryArchive(
+        fileId,
+        normalizedLibraryId
+      );
     return this.withLibraryRegistryTargetMutationLocks(
       fileId,
       this.libraryTokenSubscriptionsPath(),
       async () => {
-        const normalizedLibraryId =
-          normalizeLibraryRegistryId(libraryId);
         const subscription = (
           await this.readLibraryRegistryTokenSubscriptions()
         ).find(
@@ -3614,11 +3608,6 @@ export class FileStorage {
             `library registry token subscription not found: ${normalizedLibraryId}`
           );
         }
-        const { entry, archive } =
-          await this.readAccessibleLibraryRegistryArchive(
-            fileId,
-            normalizedLibraryId
-          );
         return this.replaceAndSubscribeLibraryRegistryTokensLocked(
           fileId,
           entry,
@@ -3628,7 +3617,7 @@ export class FileStorage {
     );
   }
 
-  // Caller must hold registry, token-subscription, file, and asset locks.
+  // Caller must hold token-subscription, file, and asset locks.
   private async replaceAndSubscribeLibraryRegistryTokensLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
@@ -3703,8 +3692,12 @@ export class FileStorage {
     libraryId: string
   ): Promise<LibraryRegistryItemUpdatePreview> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    const subscription = (
+      await this.readLibraryRegistrySubscriptions()
+    ).find(
+      (candidate) =>
+        candidate.fileId === fileId
+        && candidate.libraryId === normalizedLibraryId
     );
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
@@ -3726,28 +3719,38 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
+    const { entry, archive } =
+      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
     return this.withLibraryRegistryTargetMutationLocks(
       fileId,
       this.librarySubscriptionsPath(),
-      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
+      () =>
+        this.updateLibraryRegistryItemLocked(
+          fileId,
+          libraryId,
+          entry,
+          archive
+        )
     );
   }
 
   private async updateLibraryRegistryItemLocked(
     fileId: string,
-    libraryId: string
+    libraryId: string,
+    entry: LibraryRegistryEntry,
+    archive: Buffer
   ): Promise<ImportedLibraryRegistryItem> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    const subscription = (
+      await this.readLibraryRegistrySubscriptions()
+    ).find(
+      (candidate) =>
+        candidate.fileId === fileId
+        && candidate.libraryId === normalizedLibraryId
     );
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
     }
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(
-      fileId,
-      normalizedLibraryId
-    );
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const preview = reviewLibraryRegistryComponentUpdate(
@@ -5521,18 +5524,31 @@ export class FileStorage {
     return result;
   }
 
-  private async readLibraryRegistryArchive(libraryId: string): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
+  private async readLibraryRegistryArchive(
+    libraryId: string
+  ): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const entry = (await this.readLibraryRegistryEntries()).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    return withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      async () => {
+        await this.recoverInterruptedLibraryPublicationsLocked();
+        const entry = (await this.readLibraryRegistryEntries()).find(
+          (candidate) => candidate.libraryId === normalizedLibraryId
+        );
+        if (!entry) {
+          throw notFoundError(
+            `library registry item not found: ${normalizedLibraryId}`
+          );
+        }
+        return {
+          entry,
+          archive: await readFile(
+            this.libraryArchivePathFor(entry.libraryId)
+          )
+        };
+      }
     );
-    if (!entry) {
-      throw notFoundError(`library registry item not found: ${normalizedLibraryId}`);
-    }
-    return {
-      entry,
-      archive: await readFile(this.libraryArchivePathFor(entry.libraryId))
-    };
   }
 }
 
