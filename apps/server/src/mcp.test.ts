@@ -2299,7 +2299,7 @@ describe("MCP AI editing workflow", () => {
         arguments: {
           fileId: "comment-file",
           threadId: created.thread.threadId,
-          expectedModifiedAt: updated.thread.modifiedAt
+          expectedModifiedAt: deletedReply.thread.modifiedAt
         }
       })
     );
