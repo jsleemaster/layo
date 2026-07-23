@@ -108,13 +108,22 @@ if (
   const internals = storage as unknown as {
     publishLibraryToRegistryLocked(
       fileId: string,
-      options?: unknown
+      options?: unknown,
+      onPrepared?: (snapshots: readonly unknown[]) => Promise<void>
     ): Promise<unknown>;
   };
   const originalPublish =
     internals.publishLibraryToRegistryLocked.bind(storage);
-  internals.publishLibraryToRegistryLocked = async (fileId, options) => {
-    const result = await originalPublish(fileId, options);
+  internals.publishLibraryToRegistryLocked = async (
+    fileId,
+    options,
+    onPrepared
+  ) => {
+    const result = await originalPublish(
+      fileId,
+      options,
+      onPrepared
+    );
     await crash("external-import-crashing", 89);
     return result;
   };
