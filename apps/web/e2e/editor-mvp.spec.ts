@@ -6371,11 +6371,10 @@ test("file panel receives externally created comment notifications through the e
 }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
-      __layoCommentEventCount?: number;
-      __layoEventSourceUrls?: string[];
+      __layoCommentStreamUrls?: string[];
       __layoSuppressedCommentPolling?: boolean;
     };
-    const NativeEventSource = window.EventSource;
+    const nativeFetch = window.fetch.bind(window);
     const nativeSetInterval = window.setInterval.bind(window);
 
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
@@ -6386,21 +6385,17 @@ test("file panel receives externally created comment notifications through the e
       return nativeSetInterval(handler, timeout, ...args);
     }) as typeof window.setInterval;
 
-    class InstrumentedEventSource extends NativeEventSource {
-      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-        super(url, eventSourceInitDict);
-        instrumentedWindow.__layoEventSourceUrls = [
-          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
-          String(url)
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentStreamUrls = [
+          ...(instrumentedWindow.__layoCommentStreamUrls ?? []),
+          parsedUrl.toString()
         ];
-        this.addEventListener("comment", () => {
-          instrumentedWindow.__layoCommentEventCount =
-            (instrumentedWindow.__layoCommentEventCount ?? 0) + 1;
-        });
       }
-    }
-
-    window.EventSource = InstrumentedEventSource;
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
   });
 
   const { documentId } = await createProjectFromEmptyState(page);
@@ -6413,12 +6408,12 @@ test("file panel receives externally created comment notifications through the e
   await page.waitForFunction(
     ({ documentId: expectedDocumentId }) => {
       const instrumentedWindow = window as Window & {
-        __layoEventSourceUrls?: string[];
+        __layoCommentStreamUrls?: string[];
         __layoSuppressedCommentPolling?: boolean;
       };
       return (
         instrumentedWindow.__layoSuppressedCommentPolling === true &&
-        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+        (instrumentedWindow.__layoCommentStreamUrls ?? []).some((url) => {
           const parsedUrl = new URL(url, window.location.href);
           return (
             parsedUrl.pathname === "/comments/events" &&
@@ -6440,10 +6435,6 @@ test("file panel receives externally created comment notifications through the e
   });
   expect(created.ok()).toBeTruthy();
 
-  await page.waitForFunction(() => {
-    const instrumentedWindow = window as Window & { __layoCommentEventCount?: number };
-    return (instrumentedWindow.__layoCommentEventCount ?? 0) > 0;
-  });
   await expect(summary).toContainText("읽지 않은 코멘트 1개", { timeout: 1_200 });
   await expect(summary).toContainText("나를 멘션 1개");
   await expect(feed).toContainText("@사용자 이벤트 스트림 확인", { timeout: 1_200 });
