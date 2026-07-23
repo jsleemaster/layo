@@ -1783,6 +1783,7 @@ export class FileStorage {
     libraryIds: readonly string[],
     operation: () => Promise<T>
   ): Promise<T> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
     if (libraryIds.length === 0) {
       return this.withNewProjectRollback(projectId, operation);
     }
@@ -3183,6 +3184,7 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
     return withStoragePathMutationLock(
       this.libraryRegistryPath(),
       () => this.publishLibraryToRegistryLocked(fileId, options)
