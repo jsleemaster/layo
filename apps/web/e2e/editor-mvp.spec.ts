@@ -6204,6 +6204,9 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-status")).toContainText(
     "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
   );
+  const latestConflict = page.getByTestId("comment-edit-latest");
+  await expect(latestConflict).toContainText("최신 서버 코멘트");
+  await expect(latestConflict).toContainText("외부 최신 코멘트");
   await expect(page.getByTestId("comment-list")).toContainText("외부 최신 코멘트");
   await expect(threadDraft).toHaveValue("내 오래된 수정");
 
@@ -6246,6 +6249,65 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await page.getByRole("button", { name: "코멘트 추가" }).click();
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
   await expect(page.getByTestId("comment-list")).toContainText("원격 삭제에도 보존할 초안");
+
+  const recoveredThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(recoveredThreadsResponse.ok()).toBeTruthy();
+  const recoveredThread = ((await recoveredThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+  }>).find((thread) => thread.body === "원격 삭제에도 보존할 초안");
+  expect(recoveredThread).toBeDefined();
+
+  const createdRemoteReply = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies`,
+    {
+      data: {
+        body: "원격 삭제할 답글",
+        authorId: "사용자",
+        authorName: "사용자"
+      }
+    }
+  );
+  expect(createdRemoteReply.ok()).toBeTruthy();
+  const createdRemoteReplyPayload = await createdRemoteReply.json();
+  const remoteReply = (createdRemoteReplyPayload.thread.replies as Array<{
+    replyId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((reply) => reply.body === "원격 삭제할 답글");
+  expect(remoteReply).toBeDefined();
+
+  await page.getByRole("button", { name: "원격 삭제할 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("원격 삭제에도 보존할 답글 초안");
+  const deletedRemoteReply = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies/${remoteReply!.replyId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: remoteReply!.modifiedAt
+      }
+    }
+  );
+  expect(deletedRemoteReply.ok()).toBeTruthy();
+
+  await expect(recovery).toContainText("원본 답글이 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 답글 초안"
+  );
+  await page.getByRole("button", { name: "삭제된 초안 답글로 옮기기" }).click();
+
+  const recoveredThreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "원격 삭제에도 보존할 초안" });
+  await expect(recoveredThreadRow).toHaveCount(1);
+  await expect(recoveredThreadRow.getByTestId("comment-reply-body")).toHaveValue(
+    "원격 삭제에도 보존할 답글 초안"
+  );
+  await recoveredThreadRow.getByRole("button", { name: "답글 추가" }).click();
+  await expect(recoveredThreadRow).toContainText("원격 삭제에도 보존할 답글 초안");
 
   page.once("dialog", (dialog) => void dialog.accept());
   await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();

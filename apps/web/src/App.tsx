@@ -6894,6 +6894,7 @@ function Inspector({
   } | null>(null);
   const [commentEditBody, setCommentEditBody] = useState("");
   const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
+  const [commentEditLatestBody, setCommentEditLatestBody] = useState<string | null>(null);
   const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
@@ -6902,6 +6903,7 @@ function Inspector({
     setCommentEditTarget(null);
     setCommentEditBody("");
     setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
   }, [selectedNode?.id]);
 
   useEffect(() => {
@@ -6918,11 +6920,18 @@ function Inspector({
     const thread = commentThreads.find(
       (candidate) => candidate.threadId === commentEditTarget.threadId
     );
+    const latestReply =
+      commentEditTarget.kind === "reply"
+        ? thread?.replies.find((reply) => reply.replyId === commentEditTarget.replyId)
+        : undefined;
     const latestModifiedAt =
       commentEditTarget.kind === "thread"
         ? thread?.modifiedAt
-        : thread?.replies.find((reply) => reply.replyId === commentEditTarget.replyId)
-            ?.modifiedAt;
+        : latestReply?.modifiedAt;
+    const latestBody =
+      commentEditTarget.kind === "thread"
+        ? thread?.body
+        : latestReply?.body;
     if (!latestModifiedAt || latestModifiedAt === commentEditTarget.expectedModifiedAt) {
       return;
     }
@@ -6937,6 +6946,7 @@ function Inspector({
       }
       return { ...current, expectedModifiedAt: latestModifiedAt };
     });
+    setCommentEditLatestBody(latestBody ?? null);
     setCommentEditRebasePending(false);
   }, [commentEditRebasePending, commentEditTarget, commentThreads]);
 
@@ -6952,12 +6962,14 @@ function Inspector({
     setCommentEditTarget(target);
     setCommentEditBody(body);
     setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
   };
 
   const cancelCommentEdit = () => {
     setCommentEditTarget(null);
     setCommentEditBody("");
     setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
   };
 
   const saveCommentEdit = async () => {
@@ -8907,16 +8919,28 @@ function Inspector({
           <section
             className="comment-edit-recovery"
             data-testid="comment-edit-recovery"
-            aria-label="삭제된 코멘트 초안 복구"
+            aria-label={
+              commentEditTarget?.kind === "reply"
+                ? "삭제된 답글 초안 복구"
+                : "삭제된 코멘트 초안 복구"
+            }
           >
             <span className="comment-edit-recovery-copy">
-              <strong>원본 코멘트가 삭제되었습니다</strong>
+              <strong>
+                {commentEditTarget?.kind === "reply"
+                  ? "원본 답글이 삭제되었습니다"
+                  : "원본 코멘트가 삭제되었습니다"}
+              </strong>
               <span>작성 중인 초안을 보존했습니다.</span>
             </span>
             <textarea
               className="comment-body-field"
               data-testid="comment-edit-recovery-body"
-              aria-label="보존된 코멘트 초안"
+              aria-label={
+                commentEditTarget?.kind === "reply"
+                  ? "보존된 답글 초안"
+                  : "보존된 코멘트 초안"
+              }
               value={commentEditBody}
               onChange={(event) => setCommentEditBody(event.currentTarget.value)}
             />
@@ -8963,6 +8987,12 @@ function Inspector({
                             value={commentEditBody}
                             onChange={(event) => setCommentEditBody(event.currentTarget.value)}
                           />
+                          {commentEditLatestBody !== null ? (
+                            <span className="comment-edit-latest" data-testid="comment-edit-latest">
+                              <strong>최신 서버 코멘트</strong>
+                              <span>{commentEditLatestBody}</span>
+                            </span>
+                          ) : null}
                           <span className="comment-inline-actions">
                             <button type="button" aria-label="코멘트 저장" onClick={() => void saveCommentEdit()} disabled={!commentEditBody.trim()}>
                               저장
@@ -9040,6 +9070,12 @@ function Inspector({
                                       value={commentEditBody}
                                       onChange={(event) => setCommentEditBody(event.currentTarget.value)}
                                     />
+                                    {commentEditLatestBody !== null ? (
+                                      <span className="comment-edit-latest" data-testid="comment-edit-latest">
+                                        <strong>최신 서버 답글</strong>
+                                        <span>{commentEditLatestBody}</span>
+                                      </span>
+                                    ) : null}
                                     <span className="comment-inline-actions">
                                       <button type="button" aria-label="답글 저장" onClick={() => void saveCommentEdit()} disabled={!commentEditBody.trim()}>
                                         저장

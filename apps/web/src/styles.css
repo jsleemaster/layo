@@ -2367,6 +2367,25 @@ button:disabled {
   gap: var(--editor-space-xxs);
 }
 
+.comment-edit-latest {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+  padding-inline-start: var(--editor-space-xs);
+  border-inline-start: 2px solid var(--editor-color-accent);
+  color: var(--editor-color-text-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.comment-edit-latest strong {
+  color: var(--editor-color-text);
+}
+
+.comment-edit-latest span {
+  overflow-wrap: anywhere;
+}
+
 .comment-edit-recovery {
   display: grid;
   gap: var(--editor-space-xs);

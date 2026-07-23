@@ -76,6 +76,48 @@ describe("FileStorage", () => {
     expect(projects).toEqual([]);
   });
 
+  test("serializes project sharing compare-and-set across storage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const firstStorage = new FileStorage(tempRoot);
+    await firstStorage.createProject({
+      projectId: "shared-project",
+      name: "공유 프로젝트",
+      documentId: "shared-file",
+      documentName: "공유 문서"
+    });
+    await firstStorage.setProjectSharing("shared-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const secondStorage = new FileStorage(tempRoot);
+    const expectedSharing = { mode: "team", teamId: "team-alpha" } as const;
+
+    const results = await Promise.allSettled([
+      firstStorage.setProjectSharing(
+        "shared-project",
+        { mode: "team", teamId: "team-beta" },
+        { expectedSharing }
+      ),
+      secondStorage.setProjectSharing(
+        "shared-project",
+        { mode: "team", teamId: "team-gamma" },
+        { expectedSharing }
+      )
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(rejected?.reason).toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    expect((await firstStorage.readProject("shared-project")).sharing).toEqual(
+      expect.objectContaining({
+        mode: "team",
+        teamId: expect.stringMatching(/^team-(beta|gamma)$/)
+      })
+    );
+  });
+
   test("merges independent stale document snapshots without losing either browser edit", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
