@@ -59,6 +59,57 @@ async function expectStorageWorkerCrash(
   });
 }
 
+async function expectStorageWorkerSuccess(
+  root: string,
+  mode: string,
+  args: string[],
+  expectedMarker: string,
+  timeoutMs = 4_000
+): Promise<void> {
+  const workerPath = fileURLToPath(
+    new URL("./storage-publication-worker.ts", import.meta.url)
+  );
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", workerPath, mode, root, ...args],
+    { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+  );
+  await new Promise<void>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(
+        new Error(
+          `storage worker timed out in ${mode}: ${stdout} ${stderr}`
+        )
+      );
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0 && stdout.includes(expectedMarker)) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `storage worker exited ${code}; expected success and ${expectedMarker}: ${stderr}`
+        )
+      );
+    });
+  });
+}
+
 function componentArchive(options: { copyShapeRef?: string; copyLabelShapeRef?: string } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
   return createZipArchive([
@@ -2741,6 +2792,349 @@ describe("Penpot component instance migration", () => {
       ).resolves.toMatchObject({
         project: { projectId: "external-crash-project" }
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test("keeps a successfully imported shared asset when an earlier import is recovered", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-shared-asset-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-shared-asset-target-")
+    );
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      const source = await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "shared-asset-source",
+          documentId: "shared-asset-source-file",
+          fileName: "shared-asset-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportProjectArchive(
+        source.project.projectId
+      );
+      const archivePath = path.join(root, "shared-asset-input.layo-project.zip");
+      await writeRawFile(archivePath, archive.archive);
+
+      const waitingStorage = new FileStorage(root);
+      const internals = waitingStorage as unknown as {
+        withProjectMutationLock<T>(
+          projectId: string,
+          operation: () => Promise<T>
+        ): Promise<T>;
+      };
+      const originalProjectLock =
+        internals.withProjectMutationLock.bind(waitingStorage);
+      let markWaiting!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        markWaiting = resolve;
+      });
+      let releaseWaiting!: () => void;
+      const released = new Promise<void>((resolve) => {
+        releaseWaiting = resolve;
+      });
+      let pauseWaitingImport = true;
+      internals.withProjectMutationLock = async (projectId, operation) => {
+        if (
+          pauseWaitingImport
+          && projectId === "shared-asset-success-project"
+        ) {
+          pauseWaitingImport = false;
+          markWaiting();
+          await released;
+        }
+        return originalProjectLock(projectId, operation);
+      };
+
+      const successfulImport = waitingStorage.importProjectArchive(
+        archive.archive,
+        {
+          projectId: "shared-asset-success-project",
+          documentIdPrefix: "shared-asset-success"
+        }
+      );
+      await waiting;
+
+      await expectStorageWorkerCrash(
+        root,
+        "project-import-crash-after-project",
+        [
+          archivePath,
+          "shared-asset-crashed-project",
+          "shared-asset-crashed"
+        ],
+        88,
+        "project-import-crashing"
+      );
+
+      releaseWaiting();
+      await expect(successfulImport).resolves.toMatchObject({
+        project: { projectId: "shared-asset-success-project" }
+      });
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareProjects();
+      await expect(
+        restarted.readProject("shared-asset-success-project")
+      ).resolves.toMatchObject({
+        projectId: "shared-asset-success-project"
+      });
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).resolves.toMatchObject({
+        assetId: `penpot-asset-${libraryMediaId}`
+      });
+    } finally {
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 25_000);
+
+  test("recovers an external migration journal before the first registry publish", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-publish-after-external-journal-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "stable-publish-project",
+        documentId: "stable-publish-file",
+        documentName: "Stable publish source",
+        fileName: "stable-publish-source.penpot"
+      });
+      const archivePath = path.join(root, "failed-external-import.penpot");
+      await writeRawFile(archivePath, packagedLibrarySwapArchive());
+
+      await expectStorageWorkerCrash(
+        root,
+        "external-import-crash-after-publication",
+        [
+          archivePath,
+          "failed-external-project",
+          "failed-external-file"
+        ],
+        89,
+        "external-import-crashing"
+      );
+
+      await expectStorageWorkerSuccess(
+        root,
+        "publish",
+        [
+          "stable-publish-file",
+          "post-recovery-kit",
+          path.join(root, "unused-release")
+        ],
+        "publish-done"
+      );
+
+      const restarted = new FileStorage(root);
+      await expect(
+        restarted.readProject("failed-external-project")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(restarted.listLibraryRegistry()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            libraryId: "post-recovery-kit",
+            sourceFileId: "stable-publish-file"
+          })
+        ])
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test("a pre-warmed target writer recovers a later interrupted library update before snapshotting", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-prewarmed-library-target-recovery-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "prewarmed-update-project",
+          documentId: "prewarmed-update-target",
+          documentName: "Prewarmed target",
+          fileName: "prewarmed-update.penpot"
+        }
+      );
+      const libraryId = `penpot-library-${libraryFileId}`;
+      const originalTarget = await storage.readFile(
+        "prewarmed-update-target"
+      );
+      const publishedLibrary = await storage.readFile(libraryId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) =>
+          component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0ea5e9";
+      await storage.writeFile(libraryId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryId, {
+        libraryId,
+        name: "Shape library"
+      });
+
+      const prepared = new FileStorage(root);
+      await prepared.prepareFiles();
+      await expectStorageWorkerCrash(
+        root,
+        "library-update-crash-after-commit",
+        ["prewarmed-update-target", libraryId],
+        93,
+        "library-update-crashing"
+      );
+
+      const internals = prepared as unknown as {
+        persistLibraryUpdateRecoveryJournal(
+          fileId: string,
+          original: Array<{ filePath: string; data: Buffer | null }>,
+          intended: Array<{ filePath: string; data: Buffer | null }>
+        ): Promise<void>;
+      };
+      const originalPersist =
+        internals.persistLibraryUpdateRecoveryJournal.bind(prepared);
+      let capturedTarget: unknown;
+      internals.persistLibraryUpdateRecoveryJournal = async (
+        fileId,
+        original,
+        intended
+      ) => {
+        const targetSnapshot = original.find((snapshot) =>
+          snapshot.filePath.endsWith(
+            path.join("files", "prewarmed-update-target.json")
+          )
+        );
+        if (targetSnapshot?.data) {
+          capturedTarget = JSON.parse(targetSnapshot.data.toString("utf8"));
+        }
+        await originalPersist(fileId, original, intended);
+      };
+
+      await prepared.updateLibraryRegistryItem(
+        "prewarmed-update-target",
+        libraryId
+      );
+      expect(capturedTarget).toEqual(originalTarget);
+      expect(
+        (await prepared.readFile("prewarmed-update-target")).components?.find(
+          (component) =>
+            component.id === `penpot-component-${circleComponentId}`
+        )?.source_node.style.fill
+      ).toBe("#0ea5e9");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test("replays a committed project import after journal removal with the same idempotency key", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-project-receipt-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-receipt-target-")
+    );
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      const source = await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "project-receipt-source",
+          documentId: "project-receipt-source-file",
+          fileName: "project-receipt-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportProjectArchive(
+        source.project.projectId
+      );
+      const archivePath = path.join(root, "project-receipt-input.zip");
+      await writeRawFile(archivePath, archive.archive);
+      const idempotencyKey = "project-import-response-loss-v1";
+
+      await expectStorageWorkerCrash(
+        root,
+        "project-import-crash-after-journal-remove",
+        [
+          archivePath,
+          "project-receipt-target",
+          "project-receipt-file",
+          idempotencyKey
+        ],
+        91,
+        "project-import-response-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      const retried = await restarted.importProjectArchive(
+        archive.archive,
+        {
+          projectId: "project-receipt-target",
+          documentIdPrefix: "project-receipt-file",
+          idempotencyKey
+        } as Parameters<FileStorage["importProjectArchive"]>[1]
+      );
+      expect(retried.project.projectId).toBe("project-receipt-target");
+      expect(
+        (await restarted.listProjects()).filter(
+          (project) => project.projectId === "project-receipt-target"
+        )
+      ).toHaveLength(1);
+    } finally {
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 20_000);
+
+  test("replays a committed external migration after journal removal with the same idempotency key", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-external-receipt-target-")
+    );
+    try {
+      const archive = packagedLibrarySwapArchive();
+      const archivePath = path.join(root, "external-receipt-input.penpot");
+      await writeRawFile(archivePath, archive);
+      const idempotencyKey = "external-import-response-loss-v1";
+
+      await expectStorageWorkerCrash(
+        root,
+        "external-import-crash-after-journal-remove",
+        [
+          archivePath,
+          "external-receipt-project",
+          "external-receipt-file",
+          idempotencyKey
+        ],
+        92,
+        "external-import-response-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      const retried = await restarted.importExternalMigrationArchive(
+        archive,
+        {
+          projectId: "external-receipt-project",
+          documentId: "external-receipt-file",
+          fileName: "external-receipt-input.penpot",
+          idempotencyKey
+        } as Parameters<FileStorage["importExternalMigrationArchive"]>[1]
+      );
+      expect(retried.project.projectId).toBe(
+        "external-receipt-project"
+      );
+      expect(
+        (await restarted.listProjects()).filter(
+          (project) => project.projectId === "external-receipt-project"
+        )
+      ).toHaveLength(1);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
