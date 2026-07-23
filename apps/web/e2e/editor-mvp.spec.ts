@@ -6184,7 +6184,7 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
 });
 
-test("comments panel keeps team viewers read-only across every comment mutation control", async ({ page }) => {
+test("comments panel keeps feedback controls available to team viewers and maps trusted actor names", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const teamManifest = {
     schemaVersion: 1,
@@ -6232,13 +6232,18 @@ test("comments panel keeps team viewers read-only across every comment mutation 
 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await expect(page.getByTestId("comment-list")).toContainText("뷰어 소유 코멘트");
-  await expect(page.getByTestId("comment-body")).toBeDisabled();
+  await expect(page.getByTestId("comment-body")).toBeEnabled();
   await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeDisabled();
-  await expect(page.getByTestId("comment-reply-body")).toBeDisabled();
+  await expect(page.getByTestId("comment-reply-body")).toBeEnabled();
   await expect(page.getByRole("button", { name: "답글 추가" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(1);
+
+  await page.getByTestId("comment-body").fill("뷰어가 추가한 피드백");
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeEnabled();
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
 
   await openFilePanel(page);
   await expect(page.getByTestId("comment-activity-feed")).toContainText("팀 뷰어");
