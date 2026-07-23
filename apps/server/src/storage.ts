@@ -3333,7 +3333,7 @@ export class FileStorage {
       assertCommentOwner(thread.authorId, actorId);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
 
-      const modifiedAt = createMonotonicCommentTimestamp();
+      const modifiedAt = createMonotonicCommentTimestamp(thread.modifiedAt);
       const mentions = extractCommentMentions(body);
       const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
       const updatedThread: StoredCommentThread = {
@@ -3392,7 +3392,7 @@ export class FileStorage {
       const thread = requireCommentThread(store, threadId);
       assertCommentOwner(thread.authorId, actorId);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
-      const deletedAt = createMonotonicCommentTimestamp();
+      const deletedAt = createMonotonicCommentTimestamp(thread.modifiedAt);
 
       await this.writeCommentThreadFile({
         ...store,
@@ -3436,7 +3436,7 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      const createdAt = createMonotonicCommentTimestamp();
+      const createdAt = createMonotonicCommentTimestamp(thread.modifiedAt);
       const reply: StoredCommentReply = {
         schemaVersion: 1,
         replyId: createStorageId("reply"),
@@ -3502,7 +3502,7 @@ export class FileStorage {
       assertCommentOwner(reply.authorId, actorId);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
-      const modifiedAt = createMonotonicCommentTimestamp();
+      const modifiedAt = createMonotonicCommentTimestamp(thread.modifiedAt, reply.modifiedAt);
       const mentions = extractCommentMentions(body);
       const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
       const updatedReply: StoredCommentReply = {
@@ -3574,7 +3574,7 @@ export class FileStorage {
       assertCommentOwner(reply.authorId, actorId);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
-      const deletedAt = createMonotonicCommentTimestamp();
+      const deletedAt = createMonotonicCommentTimestamp(thread.modifiedAt, reply.modifiedAt);
       const updatedThread: StoredCommentThread = {
         ...thread,
         modifiedAt: deletedAt,
@@ -3639,7 +3639,7 @@ export class FileStorage {
           fileId,
           threadId,
           viewerId,
-          createdAt: createMonotonicCommentTimestamp()
+          createdAt: createMonotonicCommentTimestamp(thread.modifiedAt)
         })
       });
       return withViewerUnread(readThread, viewerId);
@@ -3669,7 +3669,7 @@ export class FileStorage {
           type: "read",
           fileId,
           viewerId,
-          createdAt: createMonotonicCommentTimestamp()
+          createdAt: createMonotonicCommentTimestamp(...threads.map((thread) => thread.modifiedAt))
         })
       });
       return threads.map((thread) => withViewerUnread(thread, viewerId));
@@ -3687,7 +3687,7 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
+      const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp(thread.modifiedAt);
       const resolvedThread: StoredCommentThread = {
         ...thread,
         modifiedAt: resolvedAt,
@@ -4716,9 +4716,17 @@ function createStorageId(prefix: string) {
 
 let lastCommentTimestampMs = 0;
 
-function createMonotonicCommentTimestamp() {
-  const now = Date.now();
-  const next = now <= lastCommentTimestampMs ? lastCommentTimestampMs + 1 : now;
+function createMonotonicCommentTimestamp(
+  ...previousTimestamps: Array<string | null | undefined>
+) {
+  const previousTimestampMs = previousTimestamps.reduce((latest, timestamp) => {
+    if (!timestamp) {
+      return latest;
+    }
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, 0);
+  const next = Math.max(Date.now(), lastCommentTimestampMs + 1, previousTimestampMs + 1);
   lastCommentTimestampMs = next;
   return new Date(next).toISOString();
 }

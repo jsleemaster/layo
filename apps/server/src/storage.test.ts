@@ -2047,7 +2047,7 @@ describe("FileStorage", () => {
     });
     const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
     const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
-    const externalModifiedAt = "2099-01-01T00:00:00.000Z";
+    const externalModifiedAt = new Date(Date.now() + 60_000).toISOString();
     sidecar.threads[0].modifiedAt = externalModifiedAt;
     await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
 
