@@ -2537,18 +2537,6 @@ describe("Penpot component instance migration", () => {
       );
 
       const restarted = new FileStorage(root);
-      await restarted.prepareProjects();
-      await expect(
-        restarted.readProject("project-crash-target")
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      for (const documentId of expectedDocumentIds) {
-        await expect(restarted.readFile(documentId)).rejects.toMatchObject({
-          code: "ENOENT"
-        });
-      }
-      await expect(
-        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
-      ).rejects.toMatchObject({ code: "ENOENT" });
       await expect(
         restarted.importProjectArchive(await readRawFile(archivePath), {
           projectId: "project-crash-target",
@@ -2556,6 +2544,16 @@ describe("Penpot component instance migration", () => {
         })
       ).resolves.toMatchObject({
         project: { projectId: "project-crash-target" }
+      });
+      for (const documentId of expectedDocumentIds) {
+        await expect(restarted.readFile(documentId)).resolves.toMatchObject({
+          id: documentId
+        });
+      }
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).resolves.toMatchObject({
+        assetId: `penpot-asset-${libraryMediaId}`
       });
     } finally {
       await Promise.all([
@@ -2620,6 +2618,55 @@ describe("Penpot component instance migration", () => {
       ).resolves.toMatchObject({
         projectId: "duplicate-crash-target"
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test("refuses transaction recovery over a project changed outside journal intent", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-duplicate-recovery-conflict-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      const source = await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "duplicate-conflict-source",
+          documentId: "duplicate-conflict-source-document",
+          documentName: "Duplicate conflict source",
+          fileName: "duplicate-conflict-source.penpot"
+        }
+      );
+
+      await expectStorageWorkerCrash(
+        root,
+        "project-duplicate-crash-after-project",
+        [
+          source.project.projectId,
+          "duplicate-conflict-target",
+          "duplicate-conflict-doc"
+        ],
+        90,
+        "project-duplicate-crashing"
+      );
+
+      const targetPath = path.join(
+        root,
+        "projects",
+        "duplicate-conflict-target.json"
+      );
+      const externalValue = Buffer.from(
+        '{"changedOutsideRecovery":true}\n',
+        "utf8"
+      );
+      await writeRawFile(targetPath, externalValue);
+
+      const restarted = new FileStorage(root);
+      await expect(restarted.prepareProjects()).rejects.toThrow(
+        "changed outside journal"
+      );
+      expect(await readRawFile(targetPath)).toEqual(externalValue);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
