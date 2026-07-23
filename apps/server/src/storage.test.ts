@@ -118,6 +118,56 @@ describe("FileStorage", () => {
     );
   });
 
+  test("project document creation cannot restore stale private sharing after an owner shares it", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const ownerStorage = new FileStorage(tempRoot);
+    await ownerStorage.createProject({
+      projectId: "sharing-race-project",
+      name: "공유 경계 경쟁 프로젝트",
+      documentId: "sharing-race-file",
+      documentName: "기존 문서"
+    });
+    const staleWriter = new FileStorage(tempRoot);
+    const originalWriteFile = staleWriter.writeFile.bind(staleWriter);
+    let signalWriteStarted!: () => void;
+    let releaseWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve;
+    });
+    const writeRelease = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    staleWriter.writeFile = async (fileId, document) => {
+      signalWriteStarted();
+      await writeRelease;
+      return originalWriteFile(fileId, document);
+    };
+
+    const documentCreation = staleWriter.createProjectDocument("sharing-race-project", {
+      documentId: "sharing-race-new-file",
+      name: "새 문서"
+    });
+    await writeStarted;
+    const sharing = ownerStorage.setProjectSharing("sharing-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const sharingFinishedBeforeRelease = await Promise.race([
+      sharing.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))
+    ]);
+    releaseWrite();
+    await Promise.all([documentCreation, sharing]);
+
+    expect(sharingFinishedBeforeRelease).toBe(false);
+    await expect(ownerStorage.readProject("sharing-race-project")).resolves.toMatchObject({
+      sharing: { mode: "team", teamId: "team-alpha" },
+      documents: expect.arrayContaining([
+        expect.objectContaining({ documentId: "sharing-race-new-file" })
+      ])
+    });
+  });
+
   test("merges independent stale document snapshots without losing either browser edit", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -2016,6 +2066,9 @@ describe("FileStorage", () => {
     expect(secondBatch.map((event) => event.sequence)).toEqual(
       Array.from({ length: 50 }, (_, index) => index + 101)
     );
+    await expect(storage.listCommentLiveEvents({})).rejects.toMatchObject({
+      statusCode: 400
+    });
   });
 
   test("comment mutations preserve concurrent writers across FileStorage instances", async () => {

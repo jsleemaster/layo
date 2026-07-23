@@ -6226,6 +6226,7 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   }>).find((thread) => thread.body === "내 충돌 후 수정");
   expect(latestConcurrentThread).toBeDefined();
 
+  await page.getByTestId("comment-body").fill("기존 새 코멘트 초안");
   await page.getByRole("button", { name: "내 충돌 후 수정 수정" }).click();
   await page.getByTestId("comment-thread-edit-body").fill("원격 삭제에도 보존할 초안");
   const externalDelete = await page.request.delete(
@@ -6245,9 +6246,11 @@ test("comments panel lets owners edit and delete threads and replies with stale-
     "원격 삭제에도 보존할 초안"
   );
   await page.getByRole("button", { name: "삭제된 초안 새 코멘트로 옮기기" }).click();
-  await expect(page.getByTestId("comment-body")).toHaveValue("원격 삭제에도 보존할 초안");
+  const mergedRecoveredThreadBody = "기존 새 코멘트 초안\n\n원격 삭제에도 보존할 초안";
+  await expect(page.getByTestId("comment-body")).toHaveValue(mergedRecoveredThreadBody);
   await page.getByRole("button", { name: "코멘트 추가" }).click();
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("기존 새 코멘트 초안");
   await expect(page.getByTestId("comment-list")).toContainText("원격 삭제에도 보존할 초안");
 
   const recoveredThreadsResponse = await page.request.get(
@@ -6257,7 +6260,7 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   const recoveredThread = ((await recoveredThreadsResponse.json()).threads as Array<{
     threadId: string;
     body: string;
-  }>).find((thread) => thread.body === "원격 삭제에도 보존할 초안");
+  }>).find((thread) => thread.body === mergedRecoveredThreadBody);
   expect(recoveredThread).toBeDefined();
 
   const createdRemoteReply = await page.request.post(
@@ -6279,6 +6282,13 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   }>).find((reply) => reply.body === "원격 삭제할 답글");
   expect(remoteReply).toBeDefined();
 
+  const recoveredThreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "기존 새 코멘트 초안" });
+  await expect(recoveredThreadRow).toHaveCount(1);
+  await recoveredThreadRow.getByTestId("comment-reply-body").fill("기존 새 답글 초안");
+
   await page.getByRole("button", { name: "원격 삭제할 답글 수정" }).click();
   await page.getByTestId("comment-reply-edit-body").fill("원격 삭제에도 보존할 답글 초안");
   const deletedRemoteReply = await page.request.delete(
@@ -6298,13 +6308,8 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   );
   await page.getByRole("button", { name: "삭제된 초안 답글로 옮기기" }).click();
 
-  const recoveredThreadRow = page
-    .getByTestId("comment-list")
-    .locator("li.comment-row")
-    .filter({ hasText: "원격 삭제에도 보존할 초안" });
-  await expect(recoveredThreadRow).toHaveCount(1);
   await expect(recoveredThreadRow.getByTestId("comment-reply-body")).toHaveValue(
-    "원격 삭제에도 보존할 답글 초안"
+    "기존 새 답글 초안\n\n원격 삭제에도 보존할 답글 초안"
   );
   await recoveredThreadRow.getByRole("button", { name: "답글 추가" }).click();
   await expect(recoveredThreadRow).toContainText("원격 삭제에도 보존할 답글 초안");
