@@ -2385,6 +2385,22 @@ describe("HTTP server", () => {
       documentId: "private-comment-file",
       documentName: "개인 코멘트 문서"
     });
+    await storage.createProject({
+      projectId: "other-team-comment-project",
+      name: "다른 팀 코멘트 프로젝트",
+      documentId: "other-team-comment-file",
+      documentName: "다른 팀 코멘트 문서"
+    });
+    await storage.setProjectSharing("other-team-comment-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("other-team-comment-file", {
+      nodeId: "text-1",
+      body: "다른 팀 비공개 코멘트",
+      authorId: "outsider",
+      authorName: "외부 사용자"
+    });
 
     const server = createHttpServer(storage, {
       libraryRegistryAuth: {
@@ -2451,7 +2467,7 @@ describe("HTTP server", () => {
     expect(created.statusCode).toBe(200);
     expect(created.json().thread).toMatchObject({
       authorId: "owner",
-      authorName: "작성자",
+      authorName: "owner",
       modifiedAt: created.json().thread.createdAt,
       readBy: ["owner"]
     });
@@ -2514,6 +2530,7 @@ describe("HTTP server", () => {
     const reply = replied.json().thread.replies[0];
     expect(reply).toMatchObject({
       authorId: "peer",
+      authorName: "peer",
       modifiedAt: reply.createdAt
     });
 
@@ -2552,7 +2569,7 @@ describe("HTTP server", () => {
       method: "DELETE",
       url: `/files/team-comment-file/comments/${thread.threadId}`,
       headers: headers("owner", "owner-token"),
-      payload: { expectedModifiedAt: edited.json().thread.modifiedAt }
+      payload: { expectedModifiedAt: deletedReply.json().thread.modifiedAt }
     });
     expect(deletedThread.statusCode).toBe(200);
     expect(deletedThread.json()).toEqual({
@@ -2573,6 +2590,60 @@ describe("HTTP server", () => {
       authorId: "로컬 사용자",
       authorName: "로컬 사용자"
     });
+
+    const visibleTeam = await server.inject({
+      method: "POST",
+      url: "/files/team-comment-file/comments",
+      headers: headers("peer", "peer-token"),
+      payload: {
+        nodeId: "text-1",
+        body: "팀 검수 알림",
+        authorName: "위조된 이름"
+      }
+    });
+    expect(visibleTeam.statusCode).toBe(200);
+    expect(visibleTeam.json().thread).toMatchObject({
+      authorId: "peer",
+      authorName: "peer"
+    });
+
+    const anonymousNotifications = await server.inject({
+      method: "GET",
+      url: "/comments/notifications?viewerId=observer"
+    });
+    expect(anonymousNotifications.statusCode).toBe(200);
+    expect(
+      anonymousNotifications.json().summary.projects.map(
+        (project: { projectId: string }) => project.projectId
+      )
+    ).toEqual(["private-comment-project"]);
+
+    const ownerNotifications = await server.inject({
+      method: "GET",
+      url: "/comments/notifications",
+      headers: headers("owner", "owner-token")
+    });
+    expect(ownerNotifications.statusCode).toBe(200);
+    expect(
+      new Set(
+        ownerNotifications.json().summary.projects.map(
+          (project: { projectId: string }) => project.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project", "team-comment-project"]));
+
+    const anonymousActivity = await server.inject({
+      method: "GET",
+      url: "/comments/activity?viewerId=observer"
+    });
+    expect(anonymousActivity.statusCode).toBe(200);
+    expect(
+      new Set(
+        anonymousActivity.json().feed.events.map(
+          (event: { projectId: string }) => event.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project"]));
   });
 
   test("re-authenticates a team comment SSE stream and closes it after credential revocation", async () => {
