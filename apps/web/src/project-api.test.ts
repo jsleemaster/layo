@@ -123,6 +123,13 @@ describe("project api", () => {
     ]);
   });
 
+  test("requires an idempotency key at the project import API boundary", () => {
+    const requiresKey: Parameters<
+      typeof importProjectArchive
+    >[0] extends { idempotencyKey: string } ? true : false = true;
+    expect(requiresKey).toBe(true);
+  });
+
   test("reviews imports and exports project archives", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
