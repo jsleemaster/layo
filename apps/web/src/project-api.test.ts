@@ -146,6 +146,14 @@ describe("project api", () => {
       }
 
       if (pathname === "/projects/import/archive") {
+        expect(init?.headers).toEqual({
+          "Content-Type": "application/json",
+          "Idempotency-Key": "project-web-import-v1"
+        });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          archiveBase64: "UEs=",
+          name: "복원 프로젝트"
+        });
         return new Response(
           JSON.stringify({
             imported: {
@@ -178,8 +186,18 @@ describe("project api", () => {
       originalProjectId: "project-web",
       documentCount: 2
     });
-    await expect(importProjectArchive({ archiveBase64: "UEs=", name: "복원 프로젝트" }, fetcher as typeof fetch)).resolves
-      .toMatchObject({ originalProjectId: "project-web", project });
+    await expect(
+      importProjectArchive(
+        {
+          archiveBase64: "UEs=",
+          name: "복원 프로젝트",
+          idempotencyKey: "project-web-import-v1"
+        } as Parameters<typeof importProjectArchive>[0] & {
+          idempotencyKey: string;
+        },
+        fetcher as typeof fetch
+      )
+    ).resolves.toMatchObject({ originalProjectId: "project-web", project });
     await expect(exportProjectArchive("project-web", fetcher as typeof fetch)).resolves.toMatchObject({
       fileName: "project-web.layo-project.zip",
       mimeType: "application/vnd.layo.project-archive+zip"
