@@ -2457,6 +2457,29 @@ describe("HTTP server", () => {
       body: "viewer도 피드백 가능"
     });
 
+    const viewerResolved = await server.inject({
+      method: "POST",
+      url: `/files/team-comment-file/comments/${viewerWrite.json().thread.threadId}/resolve`,
+      headers: headers("viewer", "viewer-token")
+    });
+    expect(viewerResolved.statusCode).toBe(200);
+    const viewerActivity = await server.inject({
+      method: "GET",
+      url: "/comments/activity?limit=8",
+      headers: headers("viewer", "viewer-token")
+    });
+    expect(viewerActivity.statusCode).toBe(200);
+    expect(
+      viewerActivity.json().feed.events.find(
+        (event: { type: string; threadId: string }) =>
+          event.type === "resolved"
+          && event.threadId === viewerWrite.json().thread.threadId
+      )
+    ).toMatchObject({
+      actorName: "viewer",
+      body: "viewer도 피드백 가능"
+    });
+
     const created = await server.inject({
       method: "POST",
       url: "/files/team-comment-file/comments",
