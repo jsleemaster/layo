@@ -58,6 +58,7 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
 const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
+const libraryTargetMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const storageTransactionCoordinatorContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
@@ -1714,7 +1715,32 @@ export class FileStorage {
     }
   }
 
-  private async withFileMutationLock<T>(
+  private isLibraryRegistryTargetMutationLockHeld(fileId: string): boolean {
+    return libraryTargetMutationContext.getStore()?.has(
+      path.resolve(this.libraryRegistryTargetMutationPathFor(fileId))
+    ) ?? false;
+  }
+
+  private async withLibraryRegistryTargetMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const targetPath = path.resolve(
+      this.libraryRegistryTargetMutationPathFor(fileId)
+    );
+    const activePaths = libraryTargetMutationContext.getStore();
+    if (activePaths?.has(targetPath)) {
+      return operation();
+    }
+    return withStoragePathMutationLock(targetPath, () =>
+      libraryTargetMutationContext.run(
+        new Set([...(activePaths ?? []), targetPath]),
+        operation
+      )
+    );
+  }
+
+  private async withRawFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
   ): Promise<T> {
@@ -1725,6 +1751,25 @@ export class FileStorage {
           this.assetReferenceMutationPath(),
           operation
         )
+    );
+  }
+
+  private async withFileMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.withLibraryRegistryTargetMutationLock(
+      fileId,
+      async () => {
+        await this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          () =>
+            this.recoverInterruptedLibraryUpdateJournal(
+              this.libraryUpdateRecoveryPathFor(fileId)
+            )
+        );
+        return this.withRawFileMutationLock(fileId, operation);
+      }
     );
   }
 
@@ -1926,8 +1971,8 @@ export class FileStorage {
     operation: () => Promise<T>
   ): Promise<T> {
     await this.recoverInterruptedLibraryUpdatesOnce();
-    return withStoragePathMutationLock(
-      this.libraryRegistryTargetMutationPathFor(fileId),
+    return this.withLibraryRegistryTargetMutationLock(
+      fileId,
       async () => {
         await this.withLibraryRegistryTargetMutationLocks(
           fileId,
@@ -1950,7 +1995,7 @@ export class FileStorage {
         this.librarySubscriptionsPath(),
         this.libraryTokenSubscriptionsPath()
       ],
-      () => this.withFileMutationLock(fileId, operation)
+      () => this.withRawFileMutationLock(fileId, operation)
     );
   }
 
@@ -2535,8 +2580,8 @@ export class FileStorage {
     for (const journalPath of updateJournalPaths) {
       const fileId = path.basename(journalPath, ".json");
       assertSafeStorageId(fileId);
-      await withStoragePathMutationLock(
-        this.libraryRegistryTargetMutationPathFor(fileId),
+      await this.withLibraryRegistryTargetMutationLock(
+        fileId,
         () =>
           this.withLibraryRegistryTargetMutationLocks(
             fileId,
@@ -3056,6 +3101,27 @@ export class FileStorage {
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
+    if (this.isLibraryRegistryTargetMutationLockHeld(fileId)) {
+      return this.readFileWithoutLibraryTargetRecovery(fileId);
+    }
+    return this.withLibraryRegistryTargetMutationLock(
+      fileId,
+      async () => {
+        await this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          () =>
+            this.recoverInterruptedLibraryUpdateJournal(
+              this.libraryUpdateRecoveryPathFor(fileId)
+            )
+        );
+        return this.readFileWithoutLibraryTargetRecovery(fileId);
+      }
+    );
+  }
+
+  private async readFileWithoutLibraryTargetRecovery(
+    fileId: string
+  ): Promise<DesignFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
     const filePath = this.filePathFor(fileId);
     const raw = await readFile(filePath, "utf8");
