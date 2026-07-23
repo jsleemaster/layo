@@ -896,6 +896,47 @@ describe("FileStorage", () => {
     expect(importedAsset.data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
   });
 
+  test("file archive import atomically replaces an explicitly targeted project placeholder", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    await source.createNode("sample-file", "page-1", {
+      id: "imported-placeholder-replacement",
+      kind: "rectangle",
+      name: "가져온 레이어",
+      transform: { x: 32, y: 48, rotation: 0 },
+      size: { width: 120, height: 80 },
+      style: { fill: "#22c55e", stroke: null, stroke_width: 0, opacity: 1 },
+      children: []
+    });
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = await storageWithDocument(path.join(tempRoot, "target"));
+    expect(
+      (await target.readFile("sample-file")).pages[0].children.some(
+        (node) => node.id === "imported-placeholder-replacement"
+      )
+    ).toBe(false);
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "sample-file",
+        name: "가져온 placeholder"
+      })
+    ).resolves.toMatchObject({
+      fileId: "sample-file",
+      name: "가져온 placeholder",
+      originalFileId: "sample-file"
+    });
+
+    const replaced = await target.readFile("sample-file");
+    expect(replaced.name).toBe("가져온 placeholder");
+    expect(
+      replaced.pages[0].children.some(
+        (node) => node.id === "imported-placeholder-replacement"
+      )
+    ).toBe(true);
+  });
+
   test("reviews a file archive without writing the imported file", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const source = await storageWithDocument(path.join(tempRoot, "source"));
