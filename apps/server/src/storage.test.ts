@@ -1815,6 +1815,85 @@ describe("FileStorage", () => {
     expect(targetDocument.components ?? []).toEqual([]);
   });
 
+  test("library registry token import rolls back when subscription persistence fails", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.importTokensDtcg("sample-file", {
+      source: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#2563eb"
+          }
+        }
+      }
+    });
+    await storage.publishLibraryToRegistry("sample-file", {
+      libraryId: "token-rollback-kit",
+      name: "Token Rollback Kit"
+    });
+
+    const target = await storage.createProject({
+      projectId: "token-rollback-project",
+      name: "토큰 롤백 프로젝트",
+      documentId: "token-rollback-file",
+      documentName: "토큰 롤백 문서"
+    });
+    await storage.importTokensDtcg(target.currentDocumentId, {
+      legacy: {
+        Surface: {
+          $type: "color",
+          $value: "#111827"
+        }
+      }
+    });
+    const beforeTarget = await storage.readFile(target.currentDocumentId);
+    const beforeSubscriptions =
+      await storage.listLibraryRegistryTokenSubscriptions();
+    const internals = storage as unknown as {
+      writeLibraryRegistryTokenSubscriptions(
+        subscriptions: unknown[]
+      ): Promise<void>;
+    };
+    const writeSubscriptions =
+      internals.writeLibraryRegistryTokenSubscriptions.bind(storage);
+    let failAfterSubscriptionWrite = true;
+    internals.writeLibraryRegistryTokenSubscriptions = async (
+      subscriptions
+    ) => {
+      await writeSubscriptions(subscriptions);
+      if (failAfterSubscriptionWrite) {
+        failAfterSubscriptionWrite = false;
+        throw new Error("injected token subscription commit failure");
+      }
+    };
+
+    await expect(
+      storage.importLibraryRegistryTokens(
+        target.currentDocumentId,
+        "token-rollback-kit"
+      )
+    ).rejects.toThrow("injected token subscription commit failure");
+
+    expect(await storage.readFile(target.currentDocumentId)).toEqual(
+      beforeTarget
+    );
+    expect(
+      await storage.listLibraryRegistryTokenSubscriptions()
+    ).toEqual(beforeSubscriptions);
+
+    await expect(
+      storage.importLibraryRegistryTokens(
+        target.currentDocumentId,
+        "token-rollback-kit"
+      )
+    ).resolves.toMatchObject({
+      fileId: target.currentDocumentId,
+      libraryId: "token-rollback-kit",
+      tokenCount: 1
+    });
+  });
+
   test("library registry token bundle subscriptions report and apply republished token updates", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -2299,6 +2378,55 @@ describe("FileStorage", () => {
     await expect(
       readFile(path.join(tempRoot, "comments", "Shared-File.json"), "utf8")
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("comment sidecars migrate a legacy case-sensitive path without losing threads", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "legacy-comment-project",
+      name: "기존 코멘트 프로젝트",
+      documentId: "Legacy-File",
+      documentName: "기존 코멘트 문서"
+    });
+    await storage.createCommentThread("Legacy-File", {
+      nodeId: "text-1",
+      body: "보존할 기존 코멘트",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    const canonicalPath = path.join(
+      tempRoot,
+      "comments",
+      "legacy-file.json"
+    );
+    const legacyPath = path.join(
+      tempRoot,
+      "comments",
+      "Legacy-File.json"
+    );
+    await writeFile(legacyPath, await readFile(canonicalPath));
+    await rm(canonicalPath);
+
+    const reloaded = new FileStorage(tempRoot);
+    await expect(
+      reloaded.listCommentThreads("Legacy-File")
+    ).resolves.toEqual([
+      expect.objectContaining({ body: "보존할 기존 코멘트" })
+    ]);
+    await reloaded.createCommentThread("Legacy-File", {
+      nodeId: "text-1",
+      body: "마이그레이션 뒤 코멘트",
+      authorId: "reviewer",
+      authorName: "reviewer"
+    });
+
+    const migrated = JSON.parse(await readFile(canonicalPath, "utf8"));
+    expect(migrated.threads).toHaveLength(2);
+    await expect(readFile(legacyPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   test("comment threads keep replies in the sidecar store", async () => {
