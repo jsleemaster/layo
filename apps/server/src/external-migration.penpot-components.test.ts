@@ -20,6 +20,45 @@ const mainLabelId = "55555555-5555-5555-5555-555555555555";
 const copyId = "66666666-6666-6666-6666-666666666666";
 const copyLabelId = "77777777-7777-7777-7777-777777777777";
 
+async function expectStorageWorkerCrash(
+  root: string,
+  mode: string,
+  args: string[],
+  expectedExitCode: number,
+  expectedMarker: string
+): Promise<void> {
+  const workerPath = fileURLToPath(
+    new URL("./storage-publication-worker.ts", import.meta.url)
+  );
+  const child = spawn(
+    process.execPath,
+    ["--import", "tsx", workerPath, mode, root, ...args],
+    { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+  );
+  await new Promise<void>((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === expectedExitCode && stdout.includes(expectedMarker)) {
+        resolve();
+        return;
+      }
+      reject(
+        new Error(
+          `storage worker exited ${code}; expected ${expectedExitCode} and ${expectedMarker}: ${stderr}`
+        )
+      );
+    });
+  });
+}
+
 function componentArchive(options: { copyShapeRef?: string; copyLabelShapeRef?: string } = {}) {
   const json = (value: unknown) => Buffer.from(JSON.stringify(value), "utf8");
   return createZipArchive([
@@ -2394,6 +2433,211 @@ describe("Penpot component instance migration", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("recovers a file archive import after the process exits after the target commit", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-file-import-crash-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-file-import-crash-target-")
+    );
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "file-crash-source-project",
+          documentId: "file-crash-source",
+          documentName: "File crash source",
+          fileName: "file-crash-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportFileArchive(
+        `penpot-library-${libraryFileId}`
+      );
+      expect(archive.assetCount).toBeGreaterThan(0);
+
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "file-crash-target-project",
+        documentId: "file-crash-target",
+        documentName: "File crash target",
+        fileName: "file-crash-target.penpot"
+      });
+      const originalTarget = await storage.readFile("file-crash-target");
+      const archivePath = path.join(root, "file-crash-input.layo.zip");
+      await writeRawFile(archivePath, archive.archive);
+
+      await expectStorageWorkerCrash(
+        root,
+        "file-import-crash-after-file",
+        [archivePath, "file-crash-target"],
+        87,
+        "file-import-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareFiles();
+      expect(await restarted.readFile("file-crash-target")).toEqual(
+        originalTarget
+      );
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.importFileArchive(await readRawFile(archivePath), {
+          fileId: "file-crash-target"
+        })
+      ).resolves.toMatchObject({ fileId: "file-crash-target" });
+    } finally {
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 15_000);
+
+  test("recovers a project archive import after the process exits after the project commit", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-project-import-crash-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-import-crash-target-")
+    );
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      const source = await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "project-crash-source-project",
+          documentId: "project-crash-source",
+          documentName: "Project crash source",
+          fileName: "project-crash-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportProjectArchive(
+        source.project.projectId
+      );
+      const archivePath = path.join(
+        root,
+        "project-crash-input.layo-project.zip"
+      );
+      await writeRawFile(archivePath, archive.archive);
+      const documentIdPrefix = "project-crash-doc";
+      const expectedDocumentIds = source.project.documents.map(
+        (document) => `${documentIdPrefix}-${document.documentId}`
+      );
+
+      await expectStorageWorkerCrash(
+        root,
+        "project-import-crash-after-project",
+        [archivePath, "project-crash-target", documentIdPrefix],
+        88,
+        "project-import-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareProjects();
+      await expect(
+        restarted.readProject("project-crash-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      for (const documentId of expectedDocumentIds) {
+        await expect(restarted.readFile(documentId)).rejects.toMatchObject({
+          code: "ENOENT"
+        });
+      }
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.importProjectArchive(await readRawFile(archivePath), {
+          projectId: "project-crash-target",
+          documentIdPrefix
+        })
+      ).resolves.toMatchObject({
+        project: { projectId: "project-crash-target" }
+      });
+    } finally {
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 15_000);
+
+  test("recovers an external migration after the process exits after library publication", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-external-import-crash-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      const registryBefore = await storage.listLibraryRegistry();
+      const eventsBefore = await storage.listLibraryRegistryEvents();
+      const subscriptionsBefore =
+        await storage.listLibraryRegistrySubscriptions();
+      const archivePath = path.join(root, "external-crash-input.penpot");
+      await writeRawFile(archivePath, packagedLibrarySwapArchive());
+
+      await expectStorageWorkerCrash(
+        root,
+        "external-import-crash-after-publication",
+        [
+          archivePath,
+          "external-crash-project",
+          "external-crash-target"
+        ],
+        89,
+        "external-import-crashing"
+      );
+
+      const restarted = new FileStorage(root);
+      await restarted.prepareProjects();
+      await expect(
+        restarted.readProject("external-crash-project")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.readFile("external-crash-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.readFile(`penpot-library-${libraryFileId}`)
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.readAsset(`penpot-asset-${libraryMediaId}`)
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await restarted.listLibraryRegistry()).toEqual(registryBefore);
+      expect(await restarted.listLibraryRegistryEvents()).toEqual(
+        eventsBefore
+      );
+      expect(
+        await restarted.listLibraryRegistrySubscriptions()
+      ).toEqual(subscriptionsBefore);
+      await expect(
+        readRawFile(
+          path.join(
+            root,
+            "libraries",
+            `penpot-library-${libraryFileId}.layo-library.zip`
+          )
+        )
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
+      await expect(
+        restarted.importExternalMigrationArchive(
+          await readRawFile(archivePath),
+          {
+            projectId: "external-crash-project",
+            documentId: "external-crash-target",
+            documentName: "External crash retry",
+            fileName: "external-crash-input.penpot"
+          }
+        )
+      ).resolves.toMatchObject({
+        project: { projectId: "external-crash-project" }
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   test("blocks a missing external library before writing project or document state", async () => {
     const archive = packagedLibrarySwapArchive({ includeLibrary: false });
