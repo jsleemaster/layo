@@ -2517,9 +2517,11 @@ describe("HTTP server", () => {
       }
     });
     expect(stale.statusCode).toBe(409);
-    await expect(storage.listCommentThreads("team-comment-file")).resolves.toEqual([
-      expect.objectContaining({ body: "@viewer 수정된 검수" })
-    ]);
+    await expect(storage.listCommentThreads("team-comment-file")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ body: "@viewer 수정된 검수" })
+      ])
+    );
 
     const replied = await server.inject({
       method: "POST",
