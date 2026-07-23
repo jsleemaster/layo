@@ -2859,7 +2859,7 @@ describe("Penpot component instance migration", () => {
       );
       await waiting;
 
-      await expectStorageWorkerCrash(
+      const crashPromise = expectStorageWorkerCrash(
         root,
         "project-import-crash-after-project",
         [
@@ -2871,10 +2871,14 @@ describe("Penpot component instance migration", () => {
         "project-import-crashing"
       );
 
+      await delay(200);
       releaseWaiting();
-      await expect(successfulImport).resolves.toMatchObject({
-        project: { projectId: "shared-asset-success-project" }
-      });
+      await Promise.all([
+        crashPromise,
+        expect(successfulImport).resolves.toMatchObject({
+          project: { projectId: "shared-asset-success-project" }
+        })
+      ]);
 
       const restarted = new FileStorage(root);
       await restarted.prepareProjects();
