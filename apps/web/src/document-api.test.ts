@@ -788,6 +788,13 @@ describe("file version API helpers", () => {
     ]);
   });
 
+  test("requires an idempotency key at the external import API boundary", () => {
+    const requiresKey: Parameters<
+      typeof importExternalMigrationArchive
+    >[0] extends { idempotencyKey: string } ? true : false = true;
+    expect(requiresKey).toBe(true);
+  });
+
   test("imports external migration archives through the write route", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
