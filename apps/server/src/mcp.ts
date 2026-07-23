@@ -657,6 +657,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       return { authorizationBoundary };
     }
     const member = await authenticateTeamMember();
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
     authorizeTeamLibraryRead(
       member,
       authorizationBoundary.expectedSharing.teamId
@@ -676,6 +679,9 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       return { authorizationBoundary };
     }
     const member = await authenticateTeamMember();
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
     // Penpot permits file readers, including team viewers, to participate in comments.
     authorizeTeamLibraryRead(
       member,
