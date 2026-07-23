@@ -1616,6 +1616,125 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("serializes project deletion behind an active library update and removes subscriptions", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-delete-library-update-")
+    );
+    let releaseSubscriptionWrite: () => void = () => undefined;
+    let activeUpdate: Promise<unknown> | null = null;
+    let pendingDeletion: Promise<unknown> | null = null;
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "delete-library-owner-project",
+          documentId: "delete-library-owner-file",
+          documentName: "Library owner file",
+          fileName: "delete-library-owner.penpot"
+        }
+      );
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      await storage.createProject({
+        projectId: "delete-active-project",
+        name: "Delete active project",
+        documentId: "delete-active-target",
+        documentName: "Delete active target"
+      });
+      await storage.importLibraryRegistryItem(
+        "delete-active-target",
+        libraryDocumentId,
+        { idPrefix: "delete-active" }
+      );
+      await storage.importLibraryRegistryTokens(
+        "delete-active-target",
+        libraryDocumentId
+      );
+      expect(
+        (await storage.listLibraryRegistrySubscriptions()).some(
+          (subscription) => subscription.fileId === "delete-active-target"
+        )
+      ).toBe(true);
+      expect(
+        (await storage.listLibraryRegistryTokenSubscriptions()).some(
+          (subscription) => subscription.fileId === "delete-active-target"
+        )
+      ).toBe(true);
+
+      const publishedLibrary = await storage.readFile(libraryDocumentId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) =>
+          component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0891b2";
+      await storage.writeFile(libraryDocumentId, publishedLibrary);
+      await storage.publishLibraryToRegistry(libraryDocumentId, {
+        libraryId: libraryDocumentId,
+        name: "Shape library"
+      });
+
+      const internals = storage as unknown as {
+        writeLibraryRegistrySubscriptions(
+          subscriptions: unknown[]
+        ): Promise<void>;
+      };
+      const originalWriteSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let markSubscriptionReached!: () => void;
+      const subscriptionReached = new Promise<void>((resolve) => {
+        markSubscriptionReached = resolve;
+      });
+      const subscriptionReleased = new Promise<void>((resolve) => {
+        releaseSubscriptionWrite = resolve;
+      });
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        markSubscriptionReached();
+        await subscriptionReleased;
+        await originalWriteSubscriptions(subscriptions);
+      };
+
+      activeUpdate = storage.updateLibraryRegistryItem(
+        "delete-active-target",
+        libraryDocumentId
+      );
+      await subscriptionReached;
+      pendingDeletion = storage.deleteProject("delete-active-project");
+      const deletionState = await Promise.race([
+        pendingDeletion.then(() => "completed" as const),
+        delay(150).then(() => "blocked" as const)
+      ]);
+      expect(deletionState).toBe("blocked");
+
+      releaseSubscriptionWrite();
+      await activeUpdate;
+      await pendingDeletion;
+
+      await expect(
+        storage.readProject("delete-active-project")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        storage.readFile("delete-active-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(
+        (await storage.listLibraryRegistrySubscriptions()).some(
+          (subscription) => subscription.fileId === "delete-active-target"
+        )
+      ).toBe(false);
+      expect(
+        (await storage.listLibraryRegistryTokenSubscriptions()).some(
+          (subscription) => subscription.fileId === "delete-active-target"
+        )
+      ).toBe(false);
+    } finally {
+      releaseSubscriptionWrite();
+      await Promise.allSettled([
+        activeUpdate ?? Promise.resolve(),
+        pendingDeletion ?? Promise.resolve()
+      ]);
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test("serializes a library update and product write across processes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-process-lock-"));
     const releasePath = path.join(root, "release-update");
@@ -2516,6 +2635,76 @@ describe("Penpot component instance migration", () => {
       ]);
     }
   }, 15_000);
+
+  test("a pre-warmed ordinary mutation recovers an interrupted file archive transaction", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-file-import-mutation-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-file-import-mutation-target-")
+    );
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "file-mutation-source-project",
+          documentId: "file-mutation-source",
+          documentName: "File mutation source",
+          fileName: "file-mutation-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportFileArchive(
+        `penpot-library-${libraryFileId}`
+      );
+
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "file-mutation-target-project",
+        documentId: "file-mutation-target",
+        documentName: "File mutation target",
+        fileName: "file-mutation-target.penpot"
+      });
+      const originalTarget = await storage.readFile("file-mutation-target");
+      const prepared = new FileStorage(root);
+      await prepared.prepareFiles();
+      const archivePath = path.join(root, "file-mutation-input.layo.zip");
+      await writeRawFile(archivePath, archive.archive);
+
+      await expectStorageWorkerCrash(
+        root,
+        "file-import-crash-after-file",
+        [archivePath, "file-mutation-target"],
+        87,
+        "file-import-crashing"
+      );
+
+      const edited = await prepared.updateNodeGeometry(
+        "file-mutation-target",
+        `penpot-${mainId}`,
+        { x: 187, y: 193 }
+      );
+      expect(edited.transform).toMatchObject({ x: 187, y: 193 });
+      const recovered = await prepared.readFile("file-mutation-target");
+      expect(recovered.components).toEqual(originalTarget.components);
+      expect(
+        recovered.pages[0].children.find(
+          (node) => node.id === `penpot-${mainId}`
+        )?.transform
+      ).toMatchObject({ x: 187, y: 193 });
+
+      await expect(
+        prepared.importFileArchive(await readRawFile(archivePath), {
+          fileId: "file-mutation-target"
+        })
+      ).resolves.toMatchObject({ fileId: "file-mutation-target" });
+    } finally {
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 20_000);
 
   test("recovers a project archive import after the process exits after the project commit", async () => {
     const sourceRoot = await mkdtemp(

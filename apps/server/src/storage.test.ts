@@ -2835,6 +2835,65 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment reads reject stale project authorization boundaries", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.setProjectSharing("test-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "alpha 검수 내용",
+      authorId: "alpha-author",
+      authorName: "Alpha author"
+    });
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary("sample-file");
+    expect(authorizationBoundary).toBeDefined();
+    if (!authorizationBoundary) {
+      throw new Error("comment authorization boundary is required");
+    }
+
+    await storage.setProjectSharing("test-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    const results = await Promise.allSettled([
+      storage.listCommentThreads("sample-file", {
+        includeResolved: true,
+        authorizationBoundary
+      } as Parameters<FileStorage["listCommentThreads"]>[1]),
+      storage.listCommentNotifications({
+        viewerId: "alpha-viewer",
+        authorizationBoundaries: [authorizationBoundary]
+      } as Parameters<FileStorage["listCommentNotifications"]>[0]),
+      storage.listCommentActivity({
+        viewerId: "alpha-viewer",
+        authorizationBoundaries: [authorizationBoundary]
+      } as Parameters<FileStorage["listCommentActivity"]>[0]),
+      storage.listCommentLiveEvents({
+        fileId: "sample-file",
+        authorizationBoundary
+      } as Parameters<FileStorage["listCommentLiveEvents"]>[0])
+    ]);
+
+    expect(results.map((result) => result.status)).toEqual([
+      "rejected",
+      "rejected",
+      "rejected",
+      "rejected"
+    ]);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        expect(result.reason).toMatchObject({
+          code: "ECONFLICT",
+          statusCode: 409
+        });
+      }
+    }
+  });
+
   test("comment live event pagination returns the oldest retained events before newer events", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

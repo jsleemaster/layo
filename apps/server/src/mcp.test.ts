@@ -2519,6 +2519,204 @@ describe("MCP AI editing workflow", () => {
     ).resolves.toEqual([]);
   });
 
+  test("rejects an MCP comment read when the project changes teams after authorization", async () => {
+    let storageRef!: FileStorage;
+    let markReadReached!: () => void;
+    const readReached = new Promise<void>((resolve) => {
+      markReadReached = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "reader-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-reader",
+        memberToken: "reader-token"
+      },
+      setupStorage: async (storage) => {
+        storageRef = storage;
+        await storage.createProject({
+          projectId: "comment-read-race-project",
+          name: "MCP 코멘트 읽기 경쟁",
+          documentId: "comment-read-race-file",
+          documentName: "MCP 코멘트 읽기 경쟁 문서"
+        });
+        await storage.setProjectSharing("comment-read-race-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        await storage.createCommentThread("comment-read-race-file", {
+          nodeId: "text-1",
+          body: "alpha MCP 검수 내용",
+          authorId: "alpha-author",
+          authorName: "Alpha author"
+        });
+        const internals = storage as unknown as {
+          listCommentThreads: FileStorage["listCommentThreads"];
+        };
+        const originalList = internals.listCommentThreads.bind(storage);
+        internals.listCommentThreads = async (...args) => {
+          markReadReached();
+          await readReleased;
+          return originalList(...args);
+        };
+      }
+    });
+
+    const pending = client.callTool({
+      name: "list_comment_threads",
+      arguments: {
+        fileId: "comment-read-race-file",
+        includeResolved: true
+      }
+    });
+    await readReached;
+    await storageRef.setProjectSharing("comment-read-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storageRef.createCommentThread("comment-read-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 MCP 검수 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    releaseRead();
+
+    const result = await pending;
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.stringify(result)).not.toContain("beta 전용 MCP 검수 내용");
+  });
+
+  test("rejects MCP comment feeds when project authorization changes before sidecar access", async () => {
+    let storageRef!: FileStorage;
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-feed-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "feed-reader-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "comment-feed-reader",
+        memberToken: "feed-reader-token"
+      },
+      setupStorage: async (storage) => {
+        storageRef = storage;
+        await storage.createProject({
+          projectId: "comment-feed-race-project",
+          name: "MCP 코멘트 피드 경쟁",
+          documentId: "comment-feed-race-file",
+          documentName: "MCP 코멘트 피드 경쟁 문서"
+        });
+        await storage.setProjectSharing("comment-feed-race-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        await storage.createCommentThread("comment-feed-race-file", {
+          nodeId: "text-1",
+          body: "alpha MCP 피드 내용",
+          authorId: "alpha-author",
+          authorName: "Alpha author"
+        });
+      }
+    });
+
+    const pauseFeed = <T extends (...args: any[]) => Promise<any>>(
+      method: T,
+      assign: (replacement: T) => void
+    ) => {
+      let markReached!: () => void;
+      const reached = new Promise<void>((resolve) => {
+        markReached = resolve;
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      assign((async (...args: Parameters<T>) => {
+        markReached();
+        await released;
+        return method(...args);
+      }) as T);
+      return { reached, release };
+    };
+
+    const internals = storageRef as unknown as {
+      listCommentNotifications: FileStorage["listCommentNotifications"];
+      listCommentActivity: FileStorage["listCommentActivity"];
+    };
+    const originalNotifications =
+      internals.listCommentNotifications.bind(storageRef);
+    const notificationGate = pauseFeed(
+      originalNotifications,
+      (replacement) => {
+        internals.listCommentNotifications = replacement;
+      }
+    );
+    const pendingNotifications = client.callTool({
+      name: "list_comment_notifications",
+      arguments: {}
+    });
+    await notificationGate.reached;
+    await storageRef.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storageRef.createCommentThread("comment-feed-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 MCP 피드 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    notificationGate.release();
+    const notifications = await pendingNotifications;
+    expect(notifications).toMatchObject({ isError: true });
+    expect(JSON.stringify(notifications)).not.toContain(
+      "beta 전용 MCP 피드 내용"
+    );
+
+    await storageRef.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const originalActivity = internals.listCommentActivity.bind(storageRef);
+    const activityGate = pauseFeed(originalActivity, (replacement) => {
+      internals.listCommentActivity = replacement;
+    });
+    const pendingActivity = client.callTool({
+      name: "list_comment_activity",
+      arguments: {}
+    });
+    await activityGate.reached;
+    await storageRef.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    activityGate.release();
+    const activity = await pendingActivity;
+    expect(activity).toMatchObject({ isError: true });
+    expect(JSON.stringify(activity)).not.toContain(
+      "beta 전용 MCP 피드 내용"
+    );
+  });
+
   test("filters authenticated comment feeds to private and authorized team projects", async () => {
     const client = await connectMcpClient({
       libraryRegistryAuth: {

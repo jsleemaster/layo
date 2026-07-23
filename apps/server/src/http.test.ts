@@ -3083,6 +3083,186 @@ describe("HTTP server", () => {
     ).resolves.toEqual([]);
   });
 
+  test("rejects a comment read when the authorized project moves to another team before sidecar access", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-read-race-project",
+      name: "코멘트 읽기 경쟁 프로젝트",
+      documentId: "comment-read-race-file",
+      documentName: "코멘트 읽기 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-read-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createCommentThread("comment-read-race-file", {
+      nodeId: "text-1",
+      body: "alpha 검수 내용",
+      authorId: "alpha-author",
+      authorName: "Alpha author"
+    });
+
+    const internals = storage as unknown as {
+      listCommentThreads: FileStorage["listCommentThreads"];
+    };
+    const originalList = internals.listCommentThreads.bind(storage);
+    let markReadReached!: () => void;
+    const readReached = new Promise<void>((resolve) => {
+      markReadReached = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    internals.listCommentThreads = async (...args) => {
+      markReadReached();
+      await readReleased;
+      return originalList(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-read-token"
+          }
+        ]
+      }
+    });
+
+    const pending = server.inject({
+      method: "GET",
+      url: "/files/comment-read-race-file/comments",
+      headers: {
+        authorization: "Bearer comment-read-token",
+        "x-layo-user-id": "comment-reader"
+      }
+    });
+    await readReached;
+    await storage.setProjectSharing("comment-read-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("comment-read-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 검수 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    releaseRead();
+
+    const response = await pending;
+    expect(response.statusCode).toBe(409);
+    expect(response.body).not.toContain("beta 전용 검수 내용");
+    await server.close();
+  });
+
+  test("rejects comment feeds when visible project authorization changes before sidecar access", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-feed-race-project",
+      name: "코멘트 피드 경쟁 프로젝트",
+      documentId: "comment-feed-race-file",
+      documentName: "코멘트 피드 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createCommentThread("comment-feed-race-file", {
+      nodeId: "text-1",
+      body: "alpha 피드 내용",
+      authorId: "alpha-author",
+      authorName: "Alpha author"
+    });
+
+    const internals = storage as unknown as {
+      listCommentNotifications: FileStorage["listCommentNotifications"];
+      listCommentActivity: FileStorage["listCommentActivity"];
+    };
+    const originalNotifications =
+      internals.listCommentNotifications.bind(storage);
+    const originalActivity = internals.listCommentActivity.bind(storage);
+    let reachedCount = 0;
+    let markReadsReached!: () => void;
+    const readsReached = new Promise<void>((resolve) => {
+      markReadsReached = resolve;
+    });
+    const markReached = () => {
+      reachedCount += 1;
+      if (reachedCount === 2) {
+        markReadsReached();
+      }
+    };
+    let releaseReads!: () => void;
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    internals.listCommentNotifications = async (...args) => {
+      markReached();
+      await readsReleased;
+      return originalNotifications(...args);
+    };
+    internals.listCommentActivity = async (...args) => {
+      markReached();
+      await readsReleased;
+      return originalActivity(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-feed-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-feed-token"
+          }
+        ]
+      }
+    });
+    const headers = {
+      authorization: "Bearer comment-feed-token",
+      "x-layo-user-id": "comment-feed-reader"
+    };
+    const pendingNotifications = server.inject({
+      method: "GET",
+      url: "/comments/notifications",
+      headers
+    });
+    const pendingActivity = server.inject({
+      method: "GET",
+      url: "/comments/activity",
+      headers
+    });
+    await readsReached;
+    await storage.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("comment-feed-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 피드 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    releaseReads();
+
+    const [notifications, activity] = await Promise.all([
+      pendingNotifications,
+      pendingActivity
+    ]);
+    expect([notifications.statusCode, activity.statusCode]).toEqual([409, 409]);
+    expect(notifications.body).not.toContain("beta 전용 피드 내용");
+    expect(activity.body).not.toContain("beta 전용 피드 내용");
+    await server.close();
+  });
+
   test("closes a team comment SSE stream when its owner makes the project private", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
