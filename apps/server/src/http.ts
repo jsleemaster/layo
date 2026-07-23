@@ -448,7 +448,9 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
 
     if (teamAuthorizationProvider) {
-      const member = await authenticateTeamMember(request);
+      const member = await teamAuthorizationProvider.authenticate(
+        teamPrincipalForRequest(request)
+      );
       if (project.sharing.mode === "team") {
         authorizeTeamLibraryRead(member, project.sharing.teamId);
         if (member.role !== "owner") {
