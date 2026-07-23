@@ -9858,6 +9858,7 @@ export function App() {
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
+  const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAccessScopeRef = useRef(libraryRegistryAccessScopeKey);
@@ -10198,7 +10199,11 @@ export function App() {
       return;
     }
 
+    commentAuthorizationEndedRef.current = false;
     const intervalId = window.setInterval(() => {
+      if (commentAuthorizationEndedRef.current) {
+        return;
+      }
       void Promise.all([
         refreshCommentThreads(fileId),
         refreshCommentNotifications(),
@@ -10237,6 +10242,7 @@ export function App() {
         ]);
       },
       onAuthorizationEnded: () => {
+        commentAuthorizationEndedRef.current = true;
         commentEventSequenceByFileRef.current.delete(fileId);
         resetCommentThreads("팀 코멘트 접근 권한이 해제되었습니다");
         resetCommentNotifications();
