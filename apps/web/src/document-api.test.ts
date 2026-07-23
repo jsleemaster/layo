@@ -857,8 +857,6 @@ describe("file version API helpers", () => {
           sourceHint: "figma",
           name: "Figma landing",
           idempotencyKey: "external-web-import-v1"
-        } as Parameters<typeof importExternalMigrationArchive>[0] & {
-          idempotencyKey: string;
         },
         fetcher as typeof fetch
       )
