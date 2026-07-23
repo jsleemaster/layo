@@ -587,6 +587,15 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
           memberToken: teamPrincipal?.memberToken
         })
       : undefined;
+  const authenticateOptionalTeamMember = async () => {
+    if (!teamAuthorizationProvider || (!teamPrincipal?.userId && !teamPrincipal?.memberToken)) {
+      return undefined;
+    }
+    return teamAuthorizationProvider.authenticate({
+      userId: teamPrincipal.userId,
+      memberToken: teamPrincipal.memberToken
+    });
+  };
   const authenticateLibraryMember = authenticateTeamMember;
 
   const authorizeLibraryRead = async (fileId: string) => {
@@ -678,12 +687,15 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     return thread;
   };
 
-  const filterCommentProjectIds = async (member: AuthenticatedTeamMember) => {
+  const visibleCommentProjectIds = async (member?: AuthenticatedTeamMember) => {
     const projects = await storage.listProjects();
     return new Set(
       projects.flatMap((project) =>
-        project.sharing.mode === "team"
-        && member.teamIds.includes(project.sharing.teamId)
+        project.sharing.mode === "private"
+        || (
+          project.sharing.mode === "team"
+          && member?.teamIds.includes(project.sharing.teamId)
+        )
           ? [project.projectId]
           : []
       )
@@ -1946,7 +1958,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                   nodeId,
                   body,
                   authorId: member?.userId ?? authorId,
-                  authorName,
+                  authorName: member?.userId ?? authorName,
                   mentionTargets
                 })
               },
@@ -2074,16 +2086,16 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ viewerId }) => {
-      const member = await authenticateTeamMember();
+      const member = await authenticateOptionalTeamMember();
       const summary = await storage.listCommentNotifications({
         viewerId: member?.userId ?? viewerId
       });
-      if (!member) {
+      if (!teamAuthorizationProvider) {
         return {
           content: [{ type: "text", text: JSON.stringify({ summary }, null, 2) }]
         };
       }
-      const visibleProjectIds = await filterCommentProjectIds(member);
+      const visibleProjectIds = await visibleCommentProjectIds(member);
       const projects = summary.projects.filter((project) =>
         visibleProjectIds.has(project.projectId)
       );
@@ -2095,7 +2107,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
               {
                 summary: {
                   ...summary,
-                  viewerId: member.userId,
+                  ...(member ? { viewerId: member.userId } : {}),
                   totalUnread: projects.reduce((total, project) => total + project.unreadCount, 0),
                   totalMentions: projects.reduce((total, project) => total + project.mentionCount, 0),
                   projects
@@ -2121,17 +2133,17 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ viewerId, limit }) => {
-      const member = await authenticateTeamMember();
+      const member = await authenticateOptionalTeamMember();
       const feed = await storage.listCommentActivity({
         viewerId: member?.userId ?? viewerId,
         limit
       });
-      if (!member) {
+      if (!teamAuthorizationProvider) {
         return {
           content: [{ type: "text", text: JSON.stringify({ feed }, null, 2) }]
         };
       }
-      const visibleProjectIds = await filterCommentProjectIds(member);
+      const visibleProjectIds = await visibleCommentProjectIds(member);
       return {
         content: [
           {
@@ -2140,7 +2152,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
               {
                 feed: {
                   ...feed,
-                  viewerId: member.userId,
+                  ...(member ? { viewerId: member.userId } : {}),
                   events: feed.events.filter((event) => visibleProjectIds.has(event.projectId))
                 }
               },
@@ -2274,7 +2286,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                 thread: await storage.addCommentReply(fileId, threadId, {
                   body,
                   authorId: member?.userId ?? authorId,
-                  authorName,
+                  authorName: member?.userId ?? authorName,
                   mentionTargets
                 })
               },
