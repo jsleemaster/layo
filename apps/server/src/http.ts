@@ -11,6 +11,7 @@ import {
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
+  type AuthenticatedTeamMember,
   type TeamAccessTokenExpiryDays,
   type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
@@ -26,6 +27,7 @@ import {
   type CodeComponentMapping,
   type ComponentVariantArea,
   type CreateAssetInput,
+  type StoredCommentMentionTarget,
   type DesignNode,
   type DesignFile,
   type GeometryPatch
@@ -42,6 +44,7 @@ export interface HttpServerOptions {
   webDistDir?: string | null;
   libraryRegistryAuth?: TeamAuthorizationConfig;
   libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
+  teamAuthorizationProvider?: TeamAuthorizationProvider;
   teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
@@ -61,11 +64,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     eventStreamsClosing = true;
     return args.length === 0 ? closeServer() : closeServer(args[0]);
   }) as FastifyInstance["close"];
-  const libraryRegistryAuthorizationProvider =
-    options.libraryRegistryAuthorizationProvider
+  const teamAuthorizationProvider =
+    options.teamAuthorizationProvider
+    ?? options.libraryRegistryAuthorizationProvider
     ?? (options.libraryRegistryAuth
       ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
       : undefined);
+  const libraryRegistryAuthorizationProvider = teamAuthorizationProvider;
 
   type LibraryRequest = {
     id: string;
@@ -75,17 +80,18 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   };
 
-  const authenticateLibraryMember = async (request: LibraryRequest) => {
-    if (!libraryRegistryAuthorizationProvider) {
+  const authenticateTeamMember = async (request: LibraryRequest) => {
+    if (!teamAuthorizationProvider) {
       return undefined;
     }
-    return libraryRegistryAuthorizationProvider.authenticate({
+    return teamAuthorizationProvider.authenticate({
       userId: Array.isArray(request.headers["x-layo-user-id"])
         ? request.headers["x-layo-user-id"][0]
         : request.headers["x-layo-user-id"],
       memberToken: bearerToken(request.headers.authorization)
     });
   };
+  const authenticateLibraryMember = authenticateTeamMember;
 
   const authorizeLibraryRead = async (request: LibraryRequest, fileId: string) => {
     const member = await authenticateLibraryMember(request);
@@ -101,13 +107,63 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
   };
 
+  const authorizeCommentRead = async (
+    request: LibraryRequest,
+    fileId: string
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const teamId = await storage.getTeamIdForFile(fileId);
+    if (!teamId || !teamAuthorizationProvider) {
+      return undefined;
+    }
+    const member = await authenticateTeamMember(request);
+    if (!member) {
+      return undefined;
+    }
+    authorizeTeamLibraryRead(member, teamId);
+    return member;
+  };
+
+  const authorizeCommentWrite = async (
+    request: LibraryRequest,
+    fileId: string
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const teamId = await storage.getTeamIdForFile(fileId);
+    if (!teamId || !teamAuthorizationProvider) {
+      return undefined;
+    }
+    const member = await authenticateTeamMember(request);
+    if (!member) {
+      return undefined;
+    }
+    authorizeTeamLibraryWrite(member, teamId);
+    return member;
+  };
+
+  const filterCommentProjectIds = async (member: AuthenticatedTeamMember) => {
+    const projects = await storage.listProjects();
+    return new Set(
+      projects.flatMap((project) =>
+        project.sharing.mode === "team"
+        && member.teamIds.includes(project.sharing.teamId)
+          ? [project.projectId]
+          : []
+      )
+    );
+  };
+
   server.setErrorHandler((error, _request, reply) => {
     if ((error as { code?: string }).code === INPUT_VALIDATION_ERROR_CODE) {
       return reply.code(400).send({ error: (error as Error).message });
     }
 
     const code = (error as { code?: string }).code;
-    if (code === "EINVAL" || code === "EEXIST" || code === "EUNAVAILABLE") {
+    if (
+      code === "EINVAL"
+      || code === "EEXIST"
+      || code === "EUNAVAILABLE"
+      || code === "EACCES"
+      || code === "ECONFLICT"
+    ) {
       const statusCode = (error as { statusCode?: number }).statusCode ?? 400;
       return reply.code(statusCode).send({ error: (error as Error).message });
     }
@@ -779,10 +835,11 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Params: { fileId: string }; Querystring: { includeResolved?: string; viewerId?: string } }>(
     "/files/:fileId/comments",
     async (request) => {
+      const member = await authorizeCommentRead(request, request.params.fileId);
       return {
         threads: await storage.listCommentThreads(request.params.fileId, {
           includeResolved: request.query.includeResolved === "true",
-          viewerId: request.query.viewerId
+          viewerId: member?.userId ?? request.query.viewerId
         })
       };
     }
@@ -791,6 +848,15 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
+      if (teamAuthorizationProvider && !request.query.fileId) {
+        throw Object.assign(
+          new Error("team comment event stream requires a file id"),
+          { code: "EINVAL", statusCode: 400 }
+        );
+      }
+      if (request.query.fileId) {
+        await authorizeCommentRead(request, request.query.fileId);
+      }
       if (eventStreamsClosing) {
         return reply.code(503).send({ error: "server is closing" });
       }
@@ -813,12 +879,29 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
+      let heartbeatId: ReturnType<typeof setInterval> | undefined;
+      let pollId: ReturnType<typeof setInterval> | undefined;
+      const close = () => {
+        if (heartbeatId !== undefined) {
+          clearInterval(heartbeatId);
+        }
+        if (pollId !== undefined) {
+          clearInterval(pollId);
+        }
+        commentEventStreamClosers.delete(close);
+        if (canWriteEventStream(reply.raw)) {
+          reply.raw.end();
+        }
+      };
       const sendPendingEvents = async () => {
         if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
         try {
+          if (request.query.fileId) {
+            await authorizeCommentRead(request, request.query.fileId);
+          }
           const events = await storage.listCommentLiveEvents({
             after: lastSequence,
             fileId: request.query.fileId,
@@ -828,10 +911,20 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
             lastSequence = Math.max(lastSequence, event.sequence);
             sendBlock("comment", {
               ...event,
-              viewerId: request.query.viewerId ?? event.viewerId
+              viewerId: Array.isArray(request.headers["x-layo-user-id"])
+                ? request.headers["x-layo-user-id"][0] ?? request.query.viewerId ?? event.viewerId
+                : request.headers["x-layo-user-id"] ?? request.query.viewerId ?? event.viewerId
             });
           }
         } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 401 || statusCode === 403) {
+            sendBlock("comment-authorization-ended", {
+              code: statusCode === 401 ? "credential_inactive" : "team_access_revoked"
+            });
+            close();
+            return;
+          }
           sendBlock("comment-error", {
             message: error instanceof Error ? error.message : "comment event stream failed"
           });
@@ -840,23 +933,14 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         }
       };
 
-      const heartbeatId = setInterval(() => {
+      heartbeatId = setInterval(() => {
         if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
-      const pollId = setInterval(() => {
+      pollId = setInterval(() => {
         void sendPendingEvents();
       }, 250);
-
-      const close = () => {
-        clearInterval(heartbeatId);
-        clearInterval(pollId);
-        commentEventStreamClosers.delete(close);
-        if (canWriteEventStream(reply.raw)) {
-          reply.raw.end();
-        }
-      };
 
       commentEventStreamClosers.add(close);
       sendBlock("ready", { ok: true, lastSequence });
@@ -867,26 +951,98 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.post<{
     Params: { fileId: string };
-    Body: { nodeId: string; body: string; authorName?: string };
-  }>("/files/:fileId/comments", async (request) => {
-    const thread = await storage.createCommentThread(request.params.fileId, request.body);
-    return {
-      thread
+    Body: {
+      nodeId: string;
+      body: string;
+      authorId?: string;
+      authorName?: string;
+      mentionTargets?: StoredCommentMentionTarget[];
     };
+  }>("/files/:fileId/comments", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.createCommentThread(request.params.fileId, {
+      ...request.body,
+      authorId: member?.userId ?? request.body.authorId
+    });
+    return { thread };
+  });
+
+  server.patch<{
+    Params: { fileId: string; threadId: string };
+    Body: {
+      body: string;
+      actorId?: string;
+      expectedModifiedAt: string;
+      mentionTargets?: StoredCommentMentionTarget[];
+    };
+  }>("/files/:fileId/comments/:threadId", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.updateCommentThread(
+      request.params.fileId,
+      request.params.threadId,
+      {
+        body: request.body.body,
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt,
+        mentionTargets: request.body.mentionTargets
+      }
+    );
+    return { thread };
+  });
+
+  server.delete<{
+    Params: { fileId: string; threadId: string };
+    Body: { actorId?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const deleted = await storage.deleteCommentThread(
+      request.params.fileId,
+      request.params.threadId,
+      {
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
+      }
+    );
+    return { deleted };
   });
 
   server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
+    const member = await authenticateTeamMember(request);
+    const summary = await storage.listCommentNotifications({
+      viewerId: member?.userId ?? request.query.viewerId
+    });
+    if (!member) {
+      return { summary };
+    }
+    const visibleProjectIds = await filterCommentProjectIds(member);
+    const projects = summary.projects.filter((project) => visibleProjectIds.has(project.projectId));
     return {
-      summary: await storage.listCommentNotifications({ viewerId: request.query.viewerId })
+      summary: {
+        ...summary,
+        viewerId: member.userId,
+        totalUnread: projects.reduce((total, project) => total + project.unreadCount, 0),
+        totalMentions: projects.reduce((total, project) => total + project.mentionCount, 0),
+        projects
+      }
     };
   });
 
   server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
+    const member = await authenticateTeamMember(request);
+    const feed = await storage.listCommentActivity({
+      viewerId: member?.userId ?? request.query.viewerId,
+      limit: request.query.limit ? Number(request.query.limit) : undefined
+    });
+    if (!member) {
+      return { feed };
+    }
+    const visibleProjectIds = await filterCommentProjectIds(member);
     return {
-      feed: await storage.listCommentActivity({
-        viewerId: request.query.viewerId,
-        limit: request.query.limit ? Number(request.query.limit) : undefined
-      })
+      feed: {
+        ...feed,
+        viewerId: member.userId,
+        events: feed.events.filter((event) => visibleProjectIds.has(event.projectId))
+      }
     };
   });
 
@@ -894,47 +1050,97 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/read", async (request) => {
-    const threads = await storage.markFileCommentsRead(request.params.fileId, request.body);
-    return {
-      threads
-    };
+    const member = await authorizeCommentRead(request, request.params.fileId);
+    const threads = await storage.markFileCommentsRead(request.params.fileId, {
+      viewerId: member?.userId ?? request.body.viewerId
+    });
+    return { threads };
   });
 
   server.post<{
     Params: { fileId: string; threadId: string };
-    Body: { body: string; authorName?: string };
+    Body: {
+      body: string;
+      authorId?: string;
+      authorName?: string;
+      mentionTargets?: StoredCommentMentionTarget[];
+    };
   }>("/files/:fileId/comments/:threadId/replies", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.addCommentReply(
       request.params.fileId,
       request.params.threadId,
-      request.body
+      {
+        ...request.body,
+        authorId: member?.userId ?? request.body.authorId
+      }
     );
-    return {
-      thread
+    return { thread };
+  });
+
+  server.patch<{
+    Params: { fileId: string; threadId: string; replyId: string };
+    Body: {
+      body: string;
+      actorId?: string;
+      expectedModifiedAt: string;
+      mentionTargets?: StoredCommentMentionTarget[];
     };
+  }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.updateCommentReply(
+      request.params.fileId,
+      request.params.threadId,
+      request.params.replyId,
+      {
+        body: request.body.body,
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt,
+        mentionTargets: request.body.mentionTargets
+      }
+    );
+    return { thread };
+  });
+
+  server.delete<{
+    Params: { fileId: string; threadId: string; replyId: string };
+    Body: { actorId?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
+    const member = await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.deleteCommentReply(
+      request.params.fileId,
+      request.params.threadId,
+      request.params.replyId,
+      {
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
+      }
+    );
+    return { thread };
   });
 
   server.post<{
     Params: { fileId: string; threadId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/:threadId/read", async (request) => {
+    const member = await authorizeCommentRead(request, request.params.fileId);
     const thread = await storage.markCommentThreadRead(
       request.params.fileId,
       request.params.threadId,
-      request.body
+      { viewerId: member?.userId ?? request.body.viewerId }
     );
-    return {
-      thread
-    };
+    return { thread };
   });
 
   server.post<{ Params: { fileId: string; threadId: string } }>(
     "/files/:fileId/comments/:threadId/resolve",
     async (request) => {
-      const thread = await storage.resolveCommentThread(request.params.fileId, request.params.threadId);
-      return {
-        thread
-      };
+      await authorizeCommentWrite(request, request.params.fileId);
+      const thread = await storage.resolveCommentThread(
+        request.params.fileId,
+        request.params.threadId
+      );
+      return { thread };
     }
   );
 
