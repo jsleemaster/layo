@@ -3149,6 +3149,24 @@ export class FileStorage {
     const teamId = await this.findTeamIdForFile(fileId);
     const fingerprint = JSON.stringify({ fileId, libraryId, name, teamId: teamId ?? null });
     const existingEntries = await this.readLibraryRegistryEntries();
+    const canonicalLibraryId = canonicalStorageId(libraryId);
+    const registryCasingConflict = existingEntries.find(
+      (entry) =>
+        canonicalStorageId(entry.libraryId) === canonicalLibraryId
+        && entry.libraryId !== libraryId
+    );
+    const archiveCasingConflict = (
+      await this.storageIdsInDirectory(this.librariesDir, ".layo-library.zip")
+    ).find(
+      (entry) =>
+        canonicalStorageId(entry) === canonicalLibraryId
+        && entry !== libraryId
+    );
+    if (registryCasingConflict || archiveCasingConflict) {
+      throw storageIdentityConflictError(
+        `library registry item already exists with another casing: ${libraryId}`
+      );
+    }
     const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
     if (existing?.teamId && existing.teamId !== teamId) {
       throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
