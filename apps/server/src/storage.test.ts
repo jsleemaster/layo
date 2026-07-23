@@ -172,6 +172,33 @@ describe("FileStorage", () => {
     });
   });
 
+  test("project reservation rejects case-folded manifest collisions", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "Shared-Project",
+      name: "대소문자 프로젝트 원본",
+      documentId: "project-case-file-a",
+      documentName: "원본 문서"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "shared-project",
+        name: "대소문자 프로젝트 충돌",
+        documentId: "project-case-file-b",
+        documentName: "충돌 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect((await storage.listProjects()).map((project) => project.projectId)).toEqual([
+      "Shared-Project"
+    ]);
+    await expect(storage.readFile("project-case-file-b")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   test("document reservation rejects case-folded cross-project collisions", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);

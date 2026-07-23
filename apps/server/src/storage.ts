@@ -57,6 +57,7 @@ export const LIBRARY_ARCHIVE_MIME_TYPE = "application/vnd.layo.library-archive+z
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
+const storagePathMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
@@ -282,27 +283,53 @@ async function withStoragePathMutationLock<T>(
   storagePath: string,
   operation: () => Promise<T>
 ): Promise<T> {
-  const previous = storagePathMutationTails.get(storagePath) ?? Promise.resolve();
+  const normalizedPath = path.resolve(storagePath);
+  const activePaths = storagePathMutationContext.getStore();
+  if (activePaths?.has(normalizedPath)) {
+    return operation();
+  }
+
+  const previous =
+    storagePathMutationTails.get(normalizedPath) ?? Promise.resolve();
   let releaseInProcess!: () => void;
   const current = new Promise<void>((resolve) => {
     releaseInProcess = resolve;
   });
-  storagePathMutationTails.set(storagePath, current);
+  storagePathMutationTails.set(normalizedPath, current);
   await previous;
   let releaseProcessLock: (() => Promise<void>) | null = null;
   try {
-    releaseProcessLock = await acquireStorageProcessMutationLock(storagePath);
-    return await operation();
+    releaseProcessLock = await acquireStorageProcessMutationLock(normalizedPath);
+    return await storagePathMutationContext.run(
+      new Set([...(activePaths ?? []), normalizedPath]),
+      operation
+    );
   } finally {
     try {
       await releaseProcessLock?.();
     } finally {
       releaseInProcess();
-      if (storagePathMutationTails.get(storagePath) === current) {
-        storagePathMutationTails.delete(storagePath);
+      if (storagePathMutationTails.get(normalizedPath) === current) {
+        storagePathMutationTails.delete(normalizedPath);
       }
     }
   }
+}
+
+async function withOrderedStoragePathMutationLocks<T>(
+  storagePaths: readonly string[],
+  operation: () => Promise<T>
+): Promise<T> {
+  const orderedPaths = [...new Set(storagePaths.map((entry) => path.resolve(entry)))]
+    .sort((first, second) => first.localeCompare(second));
+  const acquire = (index: number): Promise<T> => {
+    const storagePath = orderedPaths[index];
+    if (!storagePath) {
+      return operation();
+    }
+    return withStoragePathMutationLock(storagePath, () => acquire(index + 1));
+  };
+  return acquire(0);
 }
 
 async function withAssetReferenceMutationLock<T>(
@@ -1390,6 +1417,10 @@ export class FileStorage {
     return path.join(this.filesDir, `${safeFileId}.json`);
   }
 
+  private fileMutationPathFor(fileId: string) {
+    return this.filePathFor(canonicalStorageId(fileId));
+  }
+
   private fileHistoryDirFor(fileId: string) {
     assertSafeStorageId(fileId);
     return path.join(this.historyDir, fileId);
@@ -1447,6 +1478,10 @@ export class FileStorage {
     return path.join(this.projectsDir, `${projectId}.json`);
   }
 
+  private projectMutationPathFor(projectId: string) {
+    return this.projectPathFor(canonicalStorageId(projectId));
+  }
+
   private assetPathFor(assetId: string) {
     assertSafeStorageId(assetId);
     return path.join(this.assetsDir, assetId);
@@ -1459,6 +1494,55 @@ export class FileStorage {
 
   private assetReferenceMutationPath() {
     return path.join(this.filesDir, ".asset-references");
+  }
+
+  private async storageIdsInDirectory(
+    directory: string,
+    suffix: string
+  ): Promise<string[]> {
+    try {
+      const entries = await readdir(directory);
+      return entries
+        .filter((entry) => entry.endsWith(suffix))
+        .map((entry) => entry.slice(0, -suffix.length))
+        .filter((entry) => /^[a-zA-Z0-9_-]+$/.test(entry));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async canonicalStorageIdExists(
+    directory: string,
+    suffix: string,
+    storageId: string
+  ): Promise<boolean> {
+    const canonicalId = canonicalStorageId(storageId);
+    return (await this.storageIdsInDirectory(directory, suffix)).some(
+      (entry) => canonicalStorageId(entry) === canonicalId
+    );
+  }
+
+  private async listAssetStorageIds(): Promise<string[]> {
+    try {
+      const entries = await readdir(this.assetsDir);
+      return [
+        ...new Set(
+          entries
+            .map((entry) =>
+              entry.endsWith(".json") ? entry.slice(0, -".json".length) : entry
+            )
+            .filter((entry) => /^[a-zA-Z0-9_-]+$/.test(entry))
+        )
+      ];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
   }
 
   private projectCollectionMutationPath() {
@@ -1478,7 +1562,10 @@ export class FileStorage {
     projectId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    return withStoragePathMutationLock(this.projectPathFor(projectId), operation);
+    return withStoragePathMutationLock(
+      this.projectMutationPathFor(projectId),
+      operation
+    );
   }
 
   private assertExpectedProjectSharing(
@@ -1508,8 +1595,12 @@ export class FileStorage {
     operation: () => Promise<T>
   ): Promise<T> {
     return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
+      this.fileMutationPathFor(fileId),
+      () =>
+        withAssetReferenceMutationLock(
+          this.assetReferenceMutationPath(),
+          operation
+        )
     );
   }
 
@@ -1527,7 +1618,7 @@ export class FileStorage {
       );
     }
     return withStoragePathMutationLock(
-      this.filePathFor(fileId),
+      this.fileMutationPathFor(fileId),
       () => this.withOrderedFileMutationLocks(fileIds, operation, index + 1)
     );
   }
@@ -1536,24 +1627,34 @@ export class FileStorage {
     files: Array<{ fileId: string; document: DesignFile }>,
     operation: () => Promise<T>
   ): Promise<T> {
-    const entries = [...files].sort((first, second) =>
-      first.fileId.localeCompare(second.fileId)
+    const entries = [...files].sort(
+      (first, second) =>
+        canonicalStorageId(first.fileId).localeCompare(
+          canonicalStorageId(second.fileId)
+        )
+        || first.fileId.localeCompare(second.fileId)
     );
-    if (new Set(entries.map((entry) => entry.fileId)).size !== entries.length) {
-      throw inputValidationError("project document ids must be unique");
-    }
-    for (const entry of entries) {
-      assertSafeStorageId(entry.fileId);
+    const canonicalFileIds = entries.map((entry) =>
+      canonicalStorageId(entry.fileId)
+    );
+    if (new Set(canonicalFileIds).size !== entries.length) {
+      throw inputValidationError(
+        "project document ids must be unique ignoring case"
+      );
     }
 
     return this.withOrderedFileMutationLocks(
       entries.map((entry) => entry.fileId),
       async () => {
+        const existingFileIds = new Set(
+          (await this.storageIdsInDirectory(this.filesDir, ".json")).map(
+            canonicalStorageId
+          )
+        );
         for (const entry of entries) {
-          if (await pathExists(this.filePathFor(entry.fileId))) {
-            throw Object.assign(
-              new Error(`project document already exists: ${entry.fileId}`),
-              { code: "EEXIST", statusCode: 409 }
+          if (existingFileIds.has(canonicalStorageId(entry.fileId))) {
+            throw storageIdentityConflictError(
+              `project document already exists: ${entry.fileId}`
             );
           }
         }
@@ -1572,6 +1673,143 @@ export class FileStorage {
               rm(this.filePathFor(entry.fileId), { force: true })
             )
           );
+          throw error;
+        }
+      }
+    );
+  }
+
+  private async withImportedAssetWrites<T>(
+    assets: Array<{ metadata: StoredAsset; data: Buffer }>,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withAssetReferenceMutationLock(
+      this.assetReferenceMutationPath(),
+      async () => {
+        const entries = assets.map((asset) => {
+          const metadata = parseStoredAsset(asset.metadata);
+          if (asset.data.length !== metadata.byteLength) {
+            throw new Error(
+              `asset byte length mismatch: ${metadata.assetId}`
+            );
+          }
+          assertImageBytesMatchMimeType(asset.data, metadata.mimeType);
+          return { metadata, data: asset.data };
+        });
+        const canonicalAssetIds = entries.map((entry) =>
+          canonicalStorageId(entry.metadata.assetId)
+        );
+        if (new Set(canonicalAssetIds).size !== entries.length) {
+          throw inputValidationError(
+            "import asset ids must be unique ignoring case"
+          );
+        }
+
+        const existingIdsByCanonical = new Map<string, Set<string>>();
+        for (const assetId of await this.listAssetStorageIds()) {
+          const canonicalId = canonicalStorageId(assetId);
+          const existingIds =
+            existingIdsByCanonical.get(canonicalId) ?? new Set<string>();
+          existingIds.add(assetId);
+          existingIdsByCanonical.set(canonicalId, existingIds);
+        }
+
+        const writes: typeof entries = [];
+        for (const entry of entries) {
+          const assetId = entry.metadata.assetId;
+          const existingIds = existingIdsByCanonical.get(
+            canonicalStorageId(assetId)
+          );
+          if (!existingIds) {
+            writes.push(entry);
+            continue;
+          }
+          if (existingIds.size !== 1 || !existingIds.has(assetId)) {
+            throw storageIdentityConflictError(
+              `asset id collides by case: ${assetId}`
+            );
+          }
+
+          let existing: StoredAssetData;
+          try {
+            existing = await this.readAsset(assetId);
+          } catch {
+            throw storageIdentityConflictError(
+              `asset storage is incomplete: ${assetId}`
+            );
+          }
+          const metadataMatches =
+            existing.assetId === entry.metadata.assetId
+            && existing.name === entry.metadata.name
+            && existing.mimeType === entry.metadata.mimeType
+            && existing.byteLength === entry.metadata.byteLength
+            && existing.url === entry.metadata.url;
+          if (!metadataMatches || !existing.data.equals(entry.data)) {
+            throw storageIdentityConflictError(
+              `asset already exists with different content: ${assetId}`
+            );
+          }
+        }
+
+        const snapshots = await captureStoragePathSnapshots(
+          writes.flatMap((entry) => [
+            this.assetPathFor(entry.metadata.assetId),
+            this.assetMetadataPathFor(entry.metadata.assetId)
+          ])
+        );
+        try {
+          for (const entry of writes) {
+            await this.writeAssetDurably(entry.metadata, entry.data);
+          }
+          return await operation();
+        } catch (error) {
+          await restoreStoragePathSnapshots(snapshots);
+          throw error;
+        }
+      }
+    );
+  }
+
+  private async withNewProjectRollback<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const snapshots = await captureStoragePathSnapshots([
+      this.projectPathFor(projectId)
+    ]);
+    try {
+      return await operation();
+    } catch (error) {
+      await restoreStoragePathSnapshots(snapshots);
+      throw error;
+    }
+  }
+
+  private async withExternalMigrationRegistryTransaction<T>(
+    projectId: string,
+    libraryIds: readonly string[],
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (libraryIds.length === 0) {
+      return this.withNewProjectRollback(projectId, operation);
+    }
+
+    return withOrderedStoragePathMutationLocks(
+      [this.libraryRegistryPath(), this.librarySubscriptionsPath()],
+      async () => {
+        const snapshots = await captureStoragePathSnapshots([
+          this.projectPathFor(projectId),
+          this.libraryRegistryPath(),
+          this.libraryRegistryEventsPath(),
+          this.librarySubscriptionsPath(),
+          ...libraryIds.map((libraryId) =>
+            this.libraryArchivePathFor(libraryId)
+          )
+        ]);
+        try {
+          return await operation();
+        } catch (error) {
+          await restoreStoragePathSnapshots(snapshots);
           throw error;
         }
       }
@@ -1857,37 +2095,47 @@ export class FileStorage {
     const documentName = normalizeName(input.documentName, `${projectName} 문서`);
 
     return this.withProjectMutationLock(projectId, async () => {
-      if (await pathExists(this.projectPathFor(projectId))) {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
         throw Object.assign(new Error(`project already exists: ${projectId}`), {
           code: "EEXIST",
           statusCode: 409
         });
       }
-      return this.withExclusiveProjectFiles(
-        [
-          {
-            fileId: documentId,
-            document: createInitialDesignFile(documentId, documentName)
-          }
-        ],
+      return this.withNewProjectRollback(
+        projectId,
         () =>
-          this.writeProject({
-            schemaVersion: 1,
-            projectId,
-            name: projectName,
-            createdAt: now,
-            updatedAt: now,
-            currentDocumentId: documentId,
-            documents: [
+          this.withExclusiveProjectFiles(
+            [
               {
-                documentId,
-                name: documentName,
-                createdAt: now,
-                updatedAt: now
+                fileId: documentId,
+                document: createInitialDesignFile(documentId, documentName)
               }
             ],
-            sharing: { mode: "private" }
-          })
+            () =>
+              this.writeProject({
+                schemaVersion: 1,
+                projectId,
+                name: projectName,
+                createdAt: now,
+                updatedAt: now,
+                currentDocumentId: documentId,
+                documents: [
+                  {
+                    documentId,
+                    name: documentName,
+                    createdAt: now,
+                    updatedAt: now
+                  }
+                ],
+                sharing: { mode: "private" }
+              })
+          )
       );
     });
   }
@@ -1925,7 +2173,13 @@ export class FileStorage {
       const now = new Date().toISOString();
       const documentId = input.documentId ?? createStorageId("document");
       assertSafeStorageId(documentId);
-      if (project.documents.some((document) => document.documentId === documentId)) {
+      if (
+        project.documents.some(
+          (document) =>
+            canonicalStorageId(document.documentId)
+            === canonicalStorageId(documentId)
+        )
+      ) {
         throw Object.assign(new Error(`project document already exists: ${documentId}`), {
           code: "EEXIST",
           statusCode: 409
@@ -1997,7 +2251,13 @@ export class FileStorage {
     }
 
     return this.withProjectMutationLock(projectId, async () => {
-      if (await pathExists(this.projectPathFor(projectId))) {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
         throw Object.assign(new Error(`project already exists: ${projectId}`), {
           code: "EEXIST",
           statusCode: 409
@@ -2034,19 +2294,23 @@ export class FileStorage {
         }
       }
 
-      return this.withExclusiveProjectFiles(
-        files,
+      return this.withNewProjectRollback(
+        projectId,
         () =>
-          this.writeProject({
-            schemaVersion: 1,
-            projectId,
-            name: normalizeName(input.name, `${source.name} 사본`),
-            createdAt: now,
-            updatedAt: now,
-            currentDocumentId: currentDocumentId || documents[0].documentId,
-            documents,
-            sharing: { mode: "private" }
-          })
+          this.withExclusiveProjectFiles(
+            files,
+            () =>
+              this.writeProject({
+                schemaVersion: 1,
+                projectId,
+                name: normalizeName(input.name, `${source.name} 사본`),
+                createdAt: now,
+                updatedAt: now,
+                currentDocumentId: currentDocumentId || documents[0].documentId,
+                documents,
+                sharing: { mode: "private" }
+              })
+          )
       );
     });
   }
@@ -2318,10 +2582,16 @@ export class FileStorage {
     options: ImportFileArchiveOptions = {}
   ): Promise<ImportedFileArchive> {
     const entries = readZipArchive(archive);
-    const manifest = parseFileArchiveManifest(readJsonArchiveEntry(entries, "manifest.json"));
-    const archivedDocument = parseDesignFileArchiveDocument(readJsonArchiveEntry(entries, "document.json"));
+    const manifest = parseFileArchiveManifest(
+      readJsonArchiveEntry(entries, "manifest.json")
+    );
+    const archivedDocument = parseDesignFileArchiveDocument(
+      readJsonArchiveEntry(entries, "document.json")
+    );
     if (archivedDocument.id !== manifest.fileId) {
-      throw new Error(`file archive document mismatch: ${archivedDocument.id}`);
+      throw new Error(
+        `file archive document mismatch: ${archivedDocument.id}`
+      );
     }
 
     const fileId = options.fileId ?? archivedDocument.id;
@@ -2337,15 +2607,17 @@ export class FileStorage {
     }
 
     const assets = readFileArchiveAssets(entries, assetIds);
-    await Promise.all(assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-    await this.writeFile(fileId, document);
-    return {
-      fileId,
-      name: document.name,
-      originalFileId: manifest.fileId,
-      originalName: manifest.name,
-      assetCount: assetIds.length
-    };
+    return this.withExclusiveProjectFiles(
+      [{ fileId, document }],
+      () =>
+        this.withImportedAssetWrites(assets, async () => ({
+          fileId,
+          name: document.name,
+          originalFileId: manifest.fileId,
+          originalName: manifest.name,
+          assetCount: assetIds.length
+        }))
+    );
   }
 
   async reviewFileArchive(archive: Buffer): Promise<ReviewedFileArchive> {
@@ -2445,11 +2717,16 @@ export class FileStorage {
     assertSafeStorageId(documentId);
 
     return this.withProjectMutationLock(projectId, async () => {
-      if (await pathExists(this.projectPathFor(projectId))) {
-        throw Object.assign(new Error(`project already exists: ${projectId}`), {
-          code: "EEXIST",
-          statusCode: 409
-        });
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
+        throw storageIdentityConflictError(
+          `project already exists: ${projectId}`
+        );
       }
 
       const imported = importExternalMigrationDesignArchive(archive, {
@@ -2475,17 +2752,18 @@ export class FileStorage {
         file: structuredClone(library.file)
       }));
       const libraryFileIds = new Set<string>();
+      const canonicalDocumentId = canonicalStorageId(documentId);
       for (const library of libraryFiles) {
-        assertSafeStorageId(library.file.id);
+        const canonicalLibraryId = canonicalStorageId(library.file.id);
         if (
-          library.file.id === documentId
-          || libraryFileIds.has(library.file.id)
+          canonicalLibraryId === canonicalDocumentId
+          || libraryFileIds.has(canonicalLibraryId)
         ) {
           throw inputValidationError(
             `external migration library document id is ambiguous: ${library.file.id}`
           );
         }
-        libraryFileIds.add(library.file.id);
+        libraryFileIds.add(canonicalLibraryId);
       }
 
       const documents: ProjectDocumentSummary[] = [
@@ -2502,64 +2780,74 @@ export class FileStorage {
           updatedAt: now
         }))
       ];
-      const project = await this.withExclusiveProjectFiles(
-        [
-          { fileId: documentId, document: file },
-          ...libraryFiles.map((library) => ({
-            fileId: library.file.id,
-            document: library.file
-          }))
-        ],
-        async () => {
-          await Promise.all(
-            imported.importedAssets.map((asset) =>
-              this.writeAsset(asset.metadata, asset.data)
-            )
-          );
-          return this.writeProject({
-            schemaVersion: 1,
-            projectId,
-            name: projectName,
-            createdAt: now,
-            updatedAt: now,
-            currentDocumentId: documentId,
-            documents,
-            sharing: { mode: "private" }
-          });
-        }
-      );
+      const project = await this.withExternalMigrationRegistryTransaction(
+        projectId,
+        libraryFiles.map((library) => library.file.id),
+        () =>
+          this.withExclusiveProjectFiles(
+            [
+              { fileId: documentId, document: file },
+              ...libraryFiles.map((library) => ({
+                fileId: library.file.id,
+                document: library.file
+              }))
+            ],
+            () =>
+              this.withImportedAssetWrites(
+                imported.importedAssets,
+                async () => {
+                  const nextProject = await this.writeProject({
+                    schemaVersion: 1,
+                    projectId,
+                    name: projectName,
+                    createdAt: now,
+                    updatedAt: now,
+                    currentDocumentId: documentId,
+                    documents,
+                    sharing: { mode: "private" }
+                  });
 
-      for (const library of libraryFiles) {
-        const entry = await this.publishLibraryToRegistry(library.file.id, {
-          libraryId: library.file.id,
-          name: library.file.name
-        });
-        const componentIdMap = Object.fromEntries(
-          (library.file.components ?? []).map((component) => [
-            component.id,
-            component.id
-          ])
-        );
-        await this.upsertLibraryRegistrySubscription(
-          documentId,
-          entry,
-          {
-            fileId: documentId,
-            originalFileId: library.sourceFileId,
-            originalName: library.file.name,
-            componentCount: library.file.components?.length ?? 0,
-            tokenCount: library.file.tokens?.length ?? 0,
-            assetCount: collectComponentImageAssetIds(
-              library.file.components ?? []
-            ).length,
-            componentIdMap,
-            tokenIdMap: {},
-            libraryId: entry.libraryId,
-            libraryName: entry.name
-          },
-          undefined
-        );
-      }
+                  for (const library of libraryFiles) {
+                    const entry = await this.publishLibraryToRegistry(
+                      library.file.id,
+                      {
+                        libraryId: library.file.id,
+                        name: library.file.name
+                      }
+                    );
+                    const componentIdMap = Object.fromEntries(
+                      (library.file.components ?? []).map((component) => [
+                        component.id,
+                        component.id
+                      ])
+                    );
+                    await this.upsertLibraryRegistrySubscription(
+                      documentId,
+                      entry,
+                      {
+                        fileId: documentId,
+                        originalFileId: library.sourceFileId,
+                        originalName: library.file.name,
+                        componentCount:
+                          library.file.components?.length ?? 0,
+                        tokenCount: library.file.tokens?.length ?? 0,
+                        assetCount: collectComponentImageAssetIds(
+                          library.file.components ?? []
+                        ).length,
+                        componentIdMap,
+                        tokenIdMap: {},
+                        libraryId: entry.libraryId,
+                        libraryName: entry.name
+                      },
+                      undefined
+                    );
+                  }
+
+                  return nextProject;
+                }
+              )
+          )
+      );
 
       return {
         project,
@@ -2587,7 +2875,13 @@ export class FileStorage {
     }
 
     return this.withProjectMutationLock(projectId, async () => {
-      if (await pathExists(this.projectPathFor(projectId))) {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
         throw Object.assign(new Error(`project already exists: ${projectId}`), {
           code: "EEXIST",
           statusCode: 409
@@ -2632,25 +2926,30 @@ export class FileStorage {
       const currentDocumentId =
         documentIdMap[archiveProject.project.currentDocumentId]
         ?? documents[0].documentId;
-      const project = await this.withExclusiveProjectFiles(
-        files,
-        async () => {
-          await Promise.all(
-            archiveProject.assets.map((asset) =>
-              this.writeAsset(asset.metadata, asset.data)
-            )
-          );
-          return this.writeProject({
-            schemaVersion: 1,
-            projectId,
-            name: normalizeName(options.name, archiveProject.project.name),
-            createdAt: now,
-            updatedAt: now,
-            currentDocumentId,
-            documents,
-            sharing: { mode: "private" }
-          });
-        }
+      const project = await this.withNewProjectRollback(
+        projectId,
+        () =>
+          this.withExclusiveProjectFiles(
+            files,
+            () =>
+              this.withImportedAssetWrites(
+                archiveProject.assets,
+                () =>
+                  this.writeProject({
+                    schemaVersion: 1,
+                    projectId,
+                    name: normalizeName(
+                      options.name,
+                      archiveProject.project.name
+                    ),
+                    createdAt: now,
+                    updatedAt: now,
+                    currentDocumentId,
+                    documents,
+                    sharing: { mode: "private" }
+                  })
+              )
+          )
       );
 
       return {
@@ -2760,50 +3059,79 @@ export class FileStorage {
     archive: Buffer,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryArchive> {
-    return this.mutateFile(fileId, async (target) => {
-    const library = readLibraryArchivePayload(readZipArchive(archive));
-    const idPrefix = options.idPrefix?.trim() ? normalizeLibraryIdPrefix(options.idPrefix) : undefined;
-    const tokenIdMap = createLibraryTokenIdMap(target, library.library.tokens, idPrefix);
-    const componentIdMap = createLibraryComponentIdMap(target, library.library.components, idPrefix);
+    return this.withFileMutationLock(fileId, async () => {
+      const target = await this.readFile(fileId);
+      const library = readLibraryArchivePayload(readZipArchive(archive));
+      const idPrefix = options.idPrefix?.trim()
+        ? normalizeLibraryIdPrefix(options.idPrefix)
+        : undefined;
+      const tokenIdMap = createLibraryTokenIdMap(
+        target,
+        library.library.tokens,
+        idPrefix
+      );
+      const componentIdMap = createLibraryComponentIdMap(
+        target,
+        library.library.components,
+        idPrefix
+      );
 
-    await Promise.all(library.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
+      const targetTokens = [...(target.tokens ?? [])];
+      for (const token of library.library.tokens) {
+        const nextTokenId = tokenIdMap[token.id];
+        if (!nextTokenId) {
+          throw new Error(
+            `library token missing from id map: ${token.id}`
+          );
+        }
+        const existing = targetTokens.find(
+          (candidate) => candidate.id === nextTokenId
+        );
+        if (!existing) {
+          targetTokens.push({
+            ...structuredClone(token),
+            id: nextTokenId
+          });
+        }
+      }
 
-    const targetTokens = [...(target.tokens ?? [])];
-    for (const token of library.library.tokens) {
-      const nextTokenId = tokenIdMap[token.id];
-      if (!nextTokenId) {
-        throw new Error(`library token missing from id map: ${token.id}`);
-      }
-      const existing = targetTokens.find((candidate) => candidate.id === nextTokenId);
-      if (!existing) {
-        targetTokens.push({ ...structuredClone(token), id: nextTokenId });
-      }
-    }
+      const importedComponents = library.library.components.map((component) => {
+        const nextComponentId = componentIdMap[component.id];
+        if (!nextComponentId) {
+          throw new Error(
+            `library component missing from id map: ${component.id}`
+          );
+        }
+        return remapLibraryComponent(
+          component,
+          nextComponentId,
+          componentIdMap,
+          tokenIdMap
+        );
+      });
 
-    const importedComponents = library.library.components.map((component) => {
-      const nextComponentId = componentIdMap[component.id];
-      if (!nextComponentId) {
-        throw new Error(`library component missing from id map: ${component.id}`);
-      }
-      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+      target.tokens = targetTokens;
+      target.components = [
+        ...(target.components ?? []),
+        ...importedComponents
+      ];
+
+      return this.withImportedAssetWrites(library.assets, async () => {
+        await this.writeFileWithoutMutationLock(fileId, target);
+        return {
+          fileId,
+          originalFileId: library.manifest.fileId,
+          originalName: library.manifest.name,
+          componentCount: importedComponents.length,
+          tokenCount: library.library.tokens.length,
+          tokenSetCount: library.library.token_sets.length,
+          tokenThemeCount: library.library.token_themes.length,
+          assetCount: library.assetIds.length,
+          componentIdMap,
+          tokenIdMap
+        };
+      });
     });
-
-    target.tokens = targetTokens;
-    target.components = [...(target.components ?? []), ...importedComponents];
-
-      return {
-      fileId,
-      originalFileId: library.manifest.fileId,
-      originalName: library.manifest.name,
-      componentCount: importedComponents.length,
-      tokenCount: library.library.tokens.length,
-      tokenSetCount: library.library.token_sets.length,
-      tokenThemeCount: library.library.token_themes.length,
-      assetCount: library.assetIds.length,
-      componentIdMap,
-      tokenIdMap
-    };
-    }, false);
   }
 
   async publishLibraryToRegistry(
@@ -4757,34 +5085,45 @@ export class FileStorage {
     onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
   ): Promise<void> {
     assertSafeStorageId(fileId);
-    const subscriptions = await this.readLibraryRegistrySubscriptions();
-    const subscription: LibraryRegistrySubscription = {
-      fileId,
-      libraryId: entry.libraryId,
-      libraryName: entry.name,
-      sourceFileId: entry.sourceFileId,
-      sourceName: entry.sourceName,
-      idPrefix,
-      componentCount: imported.componentCount,
-      tokenCount: imported.tokenCount,
-      assetCount: imported.assetCount,
-      componentIdMap: imported.componentIdMap,
-      tokenIdMap: imported.tokenIdMap,
-      importedAt: new Date().toISOString(),
-      importedRegistryUpdatedAt: entry.updatedAt
-    };
-    const nextSubscriptions = [
-      subscription,
-      ...subscriptions.filter(
-        (candidate) => candidate.fileId !== fileId || candidate.libraryId !== entry.libraryId
-      )
-    ].sort(
-      (a, b) =>
-        a.fileId.localeCompare(b.fileId) ||
-        a.libraryName.localeCompare(b.libraryName) ||
-        a.libraryId.localeCompare(b.libraryId)
+    return withStoragePathMutationLock(
+      this.librarySubscriptionsPath(),
+      async () => {
+        const subscriptions = await this.readLibraryRegistrySubscriptions();
+        const subscription: LibraryRegistrySubscription = {
+          fileId,
+          libraryId: entry.libraryId,
+          libraryName: entry.name,
+          sourceFileId: entry.sourceFileId,
+          sourceName: entry.sourceName,
+          idPrefix,
+          componentCount: imported.componentCount,
+          tokenCount: imported.tokenCount,
+          assetCount: imported.assetCount,
+          componentIdMap: imported.componentIdMap,
+          tokenIdMap: imported.tokenIdMap,
+          importedAt: new Date().toISOString(),
+          importedRegistryUpdatedAt: entry.updatedAt
+        };
+        const nextSubscriptions = [
+          subscription,
+          ...subscriptions.filter(
+            (candidate) =>
+              candidate.fileId !== fileId
+              || candidate.libraryId !== entry.libraryId
+          )
+        ].sort(
+          (a, b) =>
+            a.fileId.localeCompare(b.fileId)
+            || a.libraryName.localeCompare(b.libraryName)
+            || a.libraryId.localeCompare(b.libraryId)
+        );
+        await this.writeLibraryRegistrySubscriptions(
+          nextSubscriptions,
+          onCommitted,
+          onPrepared
+        );
+      }
     );
-    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted, onPrepared);
   }
 
   private async upsertLibraryRegistryTokenSubscription(
@@ -4912,6 +5251,18 @@ export class FileStorage {
       archive: await readFile(this.libraryArchivePathFor(entry.libraryId))
     };
   }
+}
+
+function canonicalStorageId(value: string) {
+  assertSafeStorageId(value);
+  return value.toLowerCase();
+}
+
+function storageIdentityConflictError(message: string) {
+  return Object.assign(new Error(message), {
+    code: "EEXIST",
+    statusCode: 409
+  });
 }
 
 function assertSafeStorageId(value: string) {
