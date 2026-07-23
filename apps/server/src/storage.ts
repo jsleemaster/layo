@@ -1434,6 +1434,11 @@ export class FileStorage {
     );
   }
 
+  private legacyCommentThreadsPathFor(fileId: string) {
+    assertSafeStorageId(fileId);
+    return path.join(this.commentsDir, `${fileId}.json`);
+  }
+
   private libraryRegistryPath() {
     return path.join(this.librariesDir, "registry.json");
   }
@@ -1776,6 +1781,22 @@ export class FileStorage {
       await restoreStoragePathSnapshots(snapshots);
       throw error;
     }
+  }
+
+  private async withLibraryRegistryTargetMutationLocks<T>(
+    fileId: string,
+    subscriptionPath: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    return withOrderedStoragePathMutationLocks(
+      [this.libraryRegistryPath(), subscriptionPath],
+      () =>
+        this.withFileMutationLock(fileId, async () => {
+          await this.recoverInterruptedLibraryPublicationsLocked();
+          return operation();
+        })
+    );
   }
 
   private async withExternalMigrationRegistryTransaction<T>(
@@ -3472,52 +3493,56 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } =
-      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    const library = readLibraryArchivePayload(readZipArchive(archive));
-
-    return withStoragePathMutationLock(
+    return this.withLibraryRegistryTargetMutationLocks(
+      fileId,
       this.librarySubscriptionsPath(),
-      () =>
-        this.withFileMutationLock(fileId, async () => {
-          const original = await captureStoragePathSnapshots([
-            this.filePathFor(fileId),
-            this.librarySubscriptionsPath(),
-            ...library.assets.flatMap((asset) => [
-              this.assetPathFor(asset.metadata.assetId),
-              this.assetMetadataPathFor(asset.metadata.assetId)
-            ])
-          ]);
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(
+            fileId,
+            libraryId
+          );
+        const library = readLibraryArchivePayload(
+          readZipArchive(archive)
+        );
+        const original = await captureStoragePathSnapshots([
+          this.filePathFor(fileId),
+          this.librarySubscriptionsPath(),
+          ...library.assets.flatMap((asset) => [
+            this.assetPathFor(asset.metadata.assetId),
+            this.assetMetadataPathFor(asset.metadata.assetId)
+          ])
+        ]);
+        try {
+          const imported = await this.importLibraryArchiveLocked(
+            fileId,
+            archive,
+            options
+          );
+          const registryImport: ImportedLibraryRegistryItem = {
+            ...imported,
+            libraryId: entry.libraryId,
+            libraryName: entry.name
+          };
+          await this.upsertLibraryRegistrySubscriptionLocked(
+            fileId,
+            entry,
+            registryImport,
+            options.idPrefix
+          );
+          return registryImport;
+        } catch (error) {
           try {
-            const imported = await this.importLibraryArchiveLocked(
-              fileId,
-              archive,
-              options
+            await restoreStoragePathSnapshots(original);
+          } catch (rollbackError) {
+            throw new AggregateError(
+              [error, rollbackError],
+              "library registry import failed and rollback failed"
             );
-            const registryImport: ImportedLibraryRegistryItem = {
-              ...imported,
-              libraryId: entry.libraryId,
-              libraryName: entry.name
-            };
-            await this.upsertLibraryRegistrySubscriptionLocked(
-              fileId,
-              entry,
-              registryImport,
-              options.idPrefix
-            );
-            return registryImport;
-          } catch (error) {
-            try {
-              await restoreStoragePathSnapshots(original);
-            } catch (rollbackError) {
-              throw new AggregateError(
-                [error, rollbackError],
-                "library registry import failed and rollback failed"
-              );
-            }
-            throw error;
           }
-        })
+          throw error;
+        }
+      }
     );
   }
 
@@ -3549,35 +3574,103 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
-    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
-    return imported;
+    return this.withLibraryRegistryTargetMutationLocks(
+      fileId,
+      this.libraryTokenSubscriptionsPath(),
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(
+            fileId,
+            libraryId
+          );
+        return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+          fileId,
+          entry,
+          archive
+        );
+      }
+    );
   }
 
   async updateLibraryRegistryTokens(
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistryTokenSubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    return this.withLibraryRegistryTargetMutationLocks(
+      fileId,
+      this.libraryTokenSubscriptionsPath(),
+      async () => {
+        const normalizedLibraryId =
+          normalizeLibraryRegistryId(libraryId);
+        const subscription = (
+          await this.readLibraryRegistryTokenSubscriptions()
+        ).find(
+          (candidate) =>
+            candidate.fileId === fileId
+            && candidate.libraryId === normalizedLibraryId
+        );
+        if (!subscription) {
+          throw notFoundError(
+            `library registry token subscription not found: ${normalizedLibraryId}`
+          );
+        }
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(
+            fileId,
+            normalizedLibraryId
+          );
+        return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+          fileId,
+          entry,
+          archive
+        );
+      }
     );
-    if (!subscription) {
-      throw notFoundError(`library registry token subscription not found: ${normalizedLibraryId}`);
-    }
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
-    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
-    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
-    return imported;
   }
 
-  private async replaceFileTokensFromLibraryRegistryArchive(
+  // Caller must hold registry, token-subscription, file, and asset locks.
+  private async replaceAndSubscribeLibraryRegistryTokensLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
     archive: Buffer
   ): Promise<ImportedLibraryRegistryTokens> {
-    return this.mutateFile(fileId, async (target) => {
+    const original = await captureStoragePathSnapshots([
+      this.filePathFor(fileId),
+      this.libraryTokenSubscriptionsPath()
+    ]);
+    try {
+      const imported =
+        await this.replaceFileTokensFromLibraryRegistryArchiveLocked(
+          fileId,
+          entry,
+          archive
+        );
+      await this.upsertLibraryRegistryTokenSubscriptionLocked(
+        fileId,
+        entry,
+        imported
+      );
+      return imported;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "library registry token import failed and rollback failed"
+        );
+      }
+      throw error;
+    }
+  }
+
+  // Caller must hold the target file and asset-reference locks.
+  private async replaceFileTokensFromLibraryRegistryArchiveLocked(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    archive: Buffer
+  ): Promise<ImportedLibraryRegistryTokens> {
+    const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const replacedTokenCount = (target.tokens ?? []).length;
     const replacedTokenSetCount = (target.token_sets ?? []).length;
@@ -3585,9 +3678,12 @@ export class FileStorage {
 
     target.tokens = structuredClone(library.library.tokens);
     target.token_sets = structuredClone(library.library.token_sets);
-    target.token_themes = structuredClone(library.library.token_themes);
+    target.token_themes = structuredClone(
+      library.library.token_themes
+    );
+    await this.writeFileDurablyWithoutMutationLock(fileId, target);
 
-      return {
+    return {
       fileId,
       libraryId: entry.libraryId,
       libraryName: entry.name,
@@ -3600,7 +3696,6 @@ export class FileStorage {
       replacedTokenSetCount,
       replacedTokenThemeCount
     };
-    }, false);
   }
 
   async reviewLibraryRegistryItemUpdate(
@@ -3631,11 +3726,10 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
-    return withStoragePathMutationLock(
+    return this.withLibraryRegistryTargetMutationLocks(
+      fileId,
       this.librarySubscriptionsPath(),
-      () => this.withFileMutationLock(fileId, () =>
-        this.updateLibraryRegistryItemLocked(fileId, libraryId)
-      )
+      () => this.updateLibraryRegistryItemLocked(fileId, libraryId)
     );
   }
 
@@ -3954,7 +4048,7 @@ export class FileStorage {
       const thread: StoredCommentThread = {
         schemaVersion: 1,
         threadId: createStorageId("comment"),
-        fileId,
+        fileId: store.fileId,
         nodeId: node.id,
         nodeName: node.name,
         body,
@@ -3973,7 +4067,7 @@ export class FileStorage {
         threads: [thread, ...store.threads],
         activity: prependCommentActivity(store.activity, {
           type: "created",
-          fileId,
+          fileId: store.fileId,
           threadId: thread.threadId,
           nodeId: thread.nodeId,
           nodeName: thread.nodeName,
@@ -3985,7 +4079,7 @@ export class FileStorage {
         }),
         events: appendCommentLiveEvent(store.events, {
           type: "created",
-          fileId,
+          fileId: store.fileId,
           threadId: thread.threadId,
           createdAt: thread.createdAt
         })
@@ -4036,7 +4130,7 @@ export class FileStorage {
           ),
           {
             type: "edited",
-            fileId,
+            fileId: store.fileId,
             threadId,
             nodeId: thread.nodeId,
             nodeName: thread.nodeName,
@@ -4049,7 +4143,7 @@ export class FileStorage {
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "edited",
-          fileId,
+          fileId: store.fileId,
           threadId,
           createdAt: modifiedAt
         })
@@ -4083,7 +4177,7 @@ export class FileStorage {
           store.activity.filter((event) => event.threadId !== threadId),
           {
             type: "deleted",
-            fileId,
+            fileId: store.fileId,
             threadId,
             nodeId: thread.nodeId,
             nodeName: thread.nodeName,
@@ -4096,7 +4190,7 @@ export class FileStorage {
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "deleted",
-          fileId,
+          fileId: store.fileId,
           threadId,
           createdAt: deletedAt
         })
@@ -4146,7 +4240,7 @@ export class FileStorage {
         ),
         activity: prependCommentActivity(store.activity, {
           type: "replied",
-          fileId,
+          fileId: store.fileId,
           threadId,
           replyId: reply.replyId,
           nodeId: thread.nodeId,
@@ -4159,7 +4253,7 @@ export class FileStorage {
         }),
         events: appendCommentLiveEvent(store.events, {
           type: "replied",
-          fileId,
+          fileId: store.fileId,
           threadId,
           replyId: reply.replyId,
           createdAt: reply.createdAt
@@ -4222,7 +4316,7 @@ export class FileStorage {
           ),
           {
             type: "edited",
-            fileId,
+            fileId: store.fileId,
             threadId,
             replyId,
             nodeId: thread.nodeId,
@@ -4236,7 +4330,7 @@ export class FileStorage {
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "edited",
-          fileId,
+          fileId: store.fileId,
           threadId,
           replyId,
           createdAt: modifiedAt
@@ -4283,7 +4377,7 @@ export class FileStorage {
           store.activity.filter((event) => event.replyId !== replyId),
           {
             type: "deleted",
-            fileId,
+            fileId: store.fileId,
             threadId,
             replyId,
             nodeId: thread.nodeId,
@@ -4297,7 +4391,7 @@ export class FileStorage {
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "deleted",
-          fileId,
+          fileId: store.fileId,
           threadId,
           replyId,
           createdAt: deletedAt
@@ -4329,7 +4423,7 @@ export class FileStorage {
         ),
         events: appendCommentLiveEvent(store.events, {
           type: "read",
-          fileId,
+          fileId: store.fileId,
           threadId,
           viewerId,
           createdAt: createMonotonicCommentTimestamp(
@@ -4363,7 +4457,7 @@ export class FileStorage {
         threads,
         events: appendCommentLiveEvent(store.events, {
           type: "read",
-          fileId,
+          fileId: store.fileId,
           viewerId,
           createdAt: createMonotonicCommentTimestamp(
             latestCommentStoreTimestamp(store),
@@ -4405,7 +4499,7 @@ export class FileStorage {
         ),
         activity: prependCommentActivity(store.activity, {
           type: "resolved",
-          fileId,
+          fileId: store.fileId,
           threadId,
           nodeId: thread.nodeId,
           nodeName: thread.nodeName,
@@ -4417,7 +4511,7 @@ export class FileStorage {
         }),
         events: appendCommentLiveEvent(store.events, {
           type: "resolved",
-          fileId,
+          fileId: store.fileId,
           threadId,
           createdAt: resolvedAt
         })
@@ -5068,24 +5162,65 @@ export class FileStorage {
     return version;
   }
 
-  private async readCommentThreadFile(fileId: string): Promise<StoredCommentThreadFile> {
+  private async readCommentThreadFile(
+    fileId: string
+  ): Promise<StoredCommentThreadFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
+    const storedFileId = (await this.readFile(fileId)).id;
+    const canonicalPath = this.commentThreadsPathFor(storedFileId);
+    const legacyPath = this.legacyCommentThreadsPathFor(storedFileId);
     let raw: string;
     try {
-      raw = await readFile(this.commentThreadsPathFor(fileId), "utf8");
-    } catch {
-      return { schemaVersion: 1, fileId, threads: [], activity: [], events: [] };
+      raw = await readFile(canonicalPath, "utf8");
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") {
+        throw error;
+      }
+      if (legacyPath === canonicalPath) {
+        return {
+          schemaVersion: 1,
+          fileId: storedFileId,
+          threads: [],
+          activity: [],
+          events: []
+        };
+      }
+      try {
+        raw = await readFile(legacyPath, "utf8");
+      } catch (legacyError) {
+        if ((legacyError as { code?: string }).code !== "ENOENT") {
+          throw legacyError;
+        }
+        return {
+          schemaVersion: 1,
+          fileId: storedFileId,
+          threads: [],
+          activity: [],
+          events: []
+        };
+      }
     }
 
-    return parseStoredCommentThreadFile(JSON.parse(raw), fileId);
+    return parseStoredCommentThreadFile(
+      JSON.parse(raw),
+      storedFileId
+    );
   }
 
-  private async writeCommentThreadFile(store: StoredCommentThreadFile): Promise<void> {
+  private async writeCommentThreadFile(
+    store: StoredCommentThreadFile
+  ): Promise<void> {
     await mkdir(this.commentsDir, { recursive: true });
+    const canonicalPath = this.commentThreadsPathFor(store.fileId);
+    const legacyPath = this.legacyCommentThreadsPathFor(store.fileId);
     await durablyReplaceFile(
-      this.commentThreadsPathFor(store.fileId),
+      canonicalPath,
       Buffer.from(`${JSON.stringify(store, null, 2)}\n`, "utf8")
     );
+    if (legacyPath !== canonicalPath) {
+      await rm(legacyPath, { force: true });
+      await syncDirectory(this.commentsDir);
+    }
   }
 
   private async readLibraryRegistryEntries(): Promise<LibraryRegistryEntry[]> {
@@ -5180,12 +5315,20 @@ export class FileStorage {
     }
   }
 
-  private async writeLibraryRegistryTokenSubscriptions(subscriptions: LibraryRegistryTokenSubscription[]): Promise<void> {
+  private async writeLibraryRegistryTokenSubscriptions(
+    subscriptions: LibraryRegistryTokenSubscription[]
+  ): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(
+    await durablyReplaceFile(
       this.libraryTokenSubscriptionsPath(),
-      `${JSON.stringify({ schemaVersion: 1, subscriptions }, null, 2)}\n`,
-      "utf8"
+      Buffer.from(
+        `${JSON.stringify(
+          { schemaVersion: 1, subscriptions },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      )
     );
   }
 
@@ -5257,7 +5400,7 @@ export class FileStorage {
     );
   }
 
-  private async upsertLibraryRegistryTokenSubscription(
+  private async upsertLibraryRegistryTokenSubscriptionLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryTokens
