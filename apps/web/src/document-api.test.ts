@@ -1883,7 +1883,7 @@ describe("comment API helpers", () => {
         fetcher as typeof fetch,
         credentials
       )
-    ).rejects.toMatchObject<DocumentRequestError>({
+    ).rejects.toMatchObject({
       name: "DocumentRequestError",
       status: 409
     });
