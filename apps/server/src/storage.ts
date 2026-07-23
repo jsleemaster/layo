@@ -751,8 +751,10 @@ export interface StoredCommentThread {
   nodeId: string;
   nodeName: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   resolvedAt: string | null;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
@@ -765,14 +767,16 @@ export interface StoredCommentReply {
   schemaVersion: 1;
   replyId: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
 }
 
 export type CommentActivityType = "created" | "replied" | "resolved";
-export type CommentLiveEventType = CommentActivityType | "read";
+export type CommentLiveEventType = CommentActivityType | "read" | "edited" | "deleted";
 export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
 
 export interface StoredCommentMentionTarget {
@@ -804,6 +808,7 @@ export interface StoredCommentLiveEvent {
   type: CommentLiveEventType;
   fileId: string;
   threadId?: string;
+  replyId?: string;
   viewerId?: string;
   createdAt: string;
 }
@@ -811,14 +816,37 @@ export interface StoredCommentLiveEvent {
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: StoredCommentMentionTarget[];
 }
 
 export interface CreateCommentReplyInput {
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: StoredCommentMentionTarget[];
+}
+
+export interface UpdateCommentThreadInput {
+  body: string;
+  actorId: string;
+  expectedModifiedAt: string;
+  mentionTargets?: StoredCommentMentionTarget[];
+}
+
+export interface DeleteCommentThreadInput {
+  actorId: string;
+  expectedModifiedAt: string;
+}
+
+export interface UpdateCommentReplyInput extends UpdateCommentThreadInput {}
+
+export interface DeleteCommentReplyInput extends DeleteCommentThreadInput {}
+
+export interface DeleteCommentThreadResult {
+  threadId: string;
+  deleted: true;
 }
 
 export interface ListCommentThreadsOptions {
@@ -1433,6 +1461,13 @@ export class FileStorage {
       this.filePathFor(fileId),
       () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
     );
+  }
+
+  private async withCommentMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(this.commentThreadsPathFor(fileId), operation);
   }
 
   private async adoptPriorDefaultStoreIfNeeded() {
@@ -3228,48 +3263,130 @@ export class FileStorage {
       throw new Error(`node not found: ${input.nodeId}`);
     }
 
-    const now = createMonotonicCommentTimestamp();
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
-    const thread: StoredCommentThread = {
-      schemaVersion: 1,
-      threadId: createStorageId("comment"),
-      fileId,
-      nodeId: node.id,
-      nodeName: node.name,
-      body,
-      authorName,
-      createdAt: now,
-      resolvedAt: null,
-      mentions: extractCommentMentions(body),
-      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets),
-      readBy: [authorName],
-      replies: []
-    };
-    const store = await this.readCommentThreadFile(fileId);
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: [thread, ...store.threads],
-      activity: prependCommentActivity(store.activity, {
-        type: "created",
+    const authorId = normalizeName(input.authorId, authorName);
+    return this.withCommentMutationLock(fileId, async () => {
+      const now = createMonotonicCommentTimestamp();
+      const thread: StoredCommentThread = {
+        schemaVersion: 1,
+        threadId: createStorageId("comment"),
         fileId,
-        threadId: thread.threadId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: thread.authorName,
-        body: thread.body,
-        mentions: thread.mentions,
-        mentionTargets: thread.mentionTargets,
-        createdAt: thread.createdAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "created",
-        fileId,
-        threadId: thread.threadId,
-        createdAt: thread.createdAt
-      })
+        nodeId: node.id,
+        nodeName: node.name,
+        body,
+        authorId,
+        authorName,
+        createdAt: now,
+        modifiedAt: now,
+        resolvedAt: null,
+        mentions: extractCommentMentions(body),
+        mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets),
+        readBy: [authorId],
+        replies: []
+      };
+      const store = await this.readCommentThreadFile(fileId);
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: [thread, ...store.threads],
+        activity: prependCommentActivity(store.activity, {
+          type: "created",
+          fileId,
+          threadId: thread.threadId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: thread.authorName,
+          body: thread.body,
+          mentions: thread.mentions,
+          mentionTargets: thread.mentionTargets,
+          createdAt: thread.createdAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "created",
+          fileId,
+          threadId: thread.threadId,
+          createdAt: thread.createdAt
+        })
+      });
+      return thread;
     });
-    return thread;
+  }
+
+  async updateCommentThread(
+    fileId: string,
+    threadId: string,
+    input: UpdateCommentThreadInput
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    await this.readFile(fileId);
+    const body = normalizeCommentBody(input.body);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      assertCommentOwner(thread.authorId, actorId);
+      assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp();
+      const mentions = extractCommentMentions(body);
+      const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        body,
+        modifiedAt,
+        mentions,
+        mentionTargets,
+        readBy: [actorId]
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: store.activity.map((event) =>
+          event.threadId === threadId && !event.replyId
+            ? { ...event, body, mentions, mentionTargets }
+            : event
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "edited",
+          fileId,
+          threadId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
+  async deleteCommentThread(
+    fileId: string,
+    threadId: string,
+    input: DeleteCommentThreadInput
+  ): Promise<DeleteCommentThreadResult> {
+    assertSafeStorageId(threadId);
+    await this.readFile(fileId);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      assertCommentOwner(thread.authorId, actorId);
+      assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
+      const deletedAt = createMonotonicCommentTimestamp();
+
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.filter((candidate) => candidate.threadId !== threadId),
+        activity: store.activity.filter((event) => event.threadId !== threadId),
+        events: appendCommentLiveEvent(store.events, {
+          type: "deleted",
+          fileId,
+          threadId,
+          createdAt: deletedAt
+        })
+      });
+      return { threadId, deleted: true };
+    });
   }
 
   async addCommentReply(
@@ -3279,54 +3396,155 @@ export class FileStorage {
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
-    const reply: StoredCommentReply = {
-      schemaVersion: 1,
-      replyId: createStorageId("reply"),
-      body,
-      authorName,
-      createdAt: createMonotonicCommentTimestamp(),
-      mentions: extractCommentMentions(body),
-      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
-    };
-    const repliedThread: StoredCommentThread = {
-      ...thread,
-      readBy: [authorName],
-      replies: [...thread.replies, reply]
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? repliedThread : candidate
-      ),
-      activity: prependCommentActivity(store.activity, {
-        type: "replied",
-        fileId,
-        threadId,
-        replyId: reply.replyId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: reply.authorName,
-        body: reply.body,
-        mentions: reply.mentions,
-        mentionTargets: reply.mentionTargets,
-        createdAt: reply.createdAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "replied",
-        fileId,
-        threadId,
-        createdAt: reply.createdAt
-      })
+    const authorId = normalizeName(input.authorId, authorName);
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const createdAt = createMonotonicCommentTimestamp();
+      const reply: StoredCommentReply = {
+        schemaVersion: 1,
+        replyId: createStorageId("reply"),
+        body,
+        authorId,
+        authorName,
+        createdAt,
+        modifiedAt: createdAt,
+        mentions: extractCommentMentions(body),
+        mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
+      };
+      const repliedThread: StoredCommentThread = {
+        ...thread,
+        readBy: [authorId],
+        replies: [...thread.replies, reply]
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? repliedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "replied",
+          fileId,
+          threadId,
+          replyId: reply.replyId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: reply.authorName,
+          body: reply.body,
+          mentions: reply.mentions,
+          mentionTargets: reply.mentionTargets,
+          createdAt: reply.createdAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "replied",
+          fileId,
+          threadId,
+          replyId: reply.replyId,
+          createdAt: reply.createdAt
+        })
+      });
+      return repliedThread;
     });
-    return repliedThread;
+  }
+
+  async updateCommentReply(
+    fileId: string,
+    threadId: string,
+    replyId: string,
+    input: UpdateCommentReplyInput
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    assertSafeStorageId(replyId);
+    await this.readFile(fileId);
+    const body = normalizeCommentBody(input.body);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const reply = requireCommentReply(thread, replyId);
+      assertCommentOwner(reply.authorId, actorId);
+      assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp();
+      const mentions = extractCommentMentions(body);
+      const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
+      const updatedReply: StoredCommentReply = {
+        ...reply,
+        body,
+        modifiedAt,
+        mentions,
+        mentionTargets
+      };
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        readBy: [actorId],
+        replies: thread.replies.map((candidate) =>
+          candidate.replyId === replyId ? updatedReply : candidate
+        )
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: store.activity.map((event) =>
+          event.replyId === replyId
+            ? { ...event, body, mentions, mentionTargets }
+            : event
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "edited",
+          fileId,
+          threadId,
+          replyId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
+  async deleteCommentReply(
+    fileId: string,
+    threadId: string,
+    replyId: string,
+    input: DeleteCommentReplyInput
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    assertSafeStorageId(replyId);
+    await this.readFile(fileId);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const reply = requireCommentReply(thread, replyId);
+      assertCommentOwner(reply.authorId, actorId);
+      assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
+
+      const deletedAt = createMonotonicCommentTimestamp();
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        readBy: [actorId],
+        replies: thread.replies.filter((candidate) => candidate.replyId !== replyId)
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: store.activity.filter((event) => event.replyId !== replyId),
+        events: appendCommentLiveEvent(store.events, {
+          type: "deleted",
+          fileId,
+          threadId,
+          replyId,
+          createdAt: deletedAt
+        })
+      });
+      return updatedThread;
+    });
   }
 
   async markCommentThreadRead(
@@ -3337,30 +3555,28 @@ export class FileStorage {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
-    const readThread: StoredCommentThread = {
-      ...thread,
-      readBy: uniqueNames([...thread.readBy, viewerId])
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? readThread : candidate
-      ),
-      events: appendCommentLiveEvent(store.events, {
-        type: "read",
-        fileId,
-        threadId,
-        viewerId,
-        createdAt: createMonotonicCommentTimestamp()
-      })
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const readThread: StoredCommentThread = {
+        ...thread,
+        readBy: uniqueNames([...thread.readBy, viewerId])
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? readThread : candidate
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "read",
+          fileId,
+          threadId,
+          viewerId,
+          createdAt: createMonotonicCommentTimestamp()
+        })
+      });
+      return withViewerUnread(readThread, viewerId);
     });
-    return withViewerUnread(readThread, viewerId);
   }
 
   async markFileCommentsRead(
@@ -3369,67 +3585,67 @@ export class FileStorage {
   ): Promise<StoredCommentThread[]> {
     await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    const store = await this.readCommentThreadFile(fileId);
-    const threads = store.threads.map((thread) =>
-      thread.resolvedAt === null
-        ? {
-            ...thread,
-            readBy: uniqueNames([...thread.readBy, viewerId])
-          }
-        : thread
-    );
-    await this.writeCommentThreadFile({
-      ...store,
-      threads,
-      events: appendCommentLiveEvent(store.events, {
-        type: "read",
-        fileId,
-        viewerId,
-        createdAt: createMonotonicCommentTimestamp()
-      })
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const threads = store.threads.map((thread) =>
+        thread.resolvedAt === null
+          ? {
+              ...thread,
+              readBy: uniqueNames([...thread.readBy, viewerId])
+            }
+          : thread
+      );
+      await this.writeCommentThreadFile({
+        ...store,
+        threads,
+        events: appendCommentLiveEvent(store.events, {
+          type: "read",
+          fileId,
+          viewerId,
+          createdAt: createMonotonicCommentTimestamp()
+        })
+      });
+      return threads.map((thread) => withViewerUnread(thread, viewerId));
     });
-    return threads.map((thread) => withViewerUnread(thread, viewerId));
   }
 
   async resolveCommentThread(fileId: string, threadId: string): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
-    const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
-    const resolvedThread: StoredCommentThread = {
-      ...thread,
-      resolvedAt
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? resolvedThread : candidate
-      ),
-      activity: prependCommentActivity(store.activity, {
-        type: "resolved",
-        fileId,
-        threadId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: "사용자",
-        body: thread.body,
-        mentions: thread.mentions,
-        mentionTargets: thread.mentionTargets,
-        createdAt: resolvedAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "resolved",
-        fileId,
-        threadId,
-        createdAt: resolvedAt
-      })
+    return this.withCommentMutationLock(fileId, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
+      const resolvedThread: StoredCommentThread = {
+        ...thread,
+        resolvedAt
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? resolvedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "resolved",
+          fileId,
+          threadId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: "사용자",
+          body: thread.body,
+          mentions: thread.mentions,
+          mentionTargets: thread.mentionTargets,
+          createdAt: resolvedAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "resolved",
+          fileId,
+          threadId,
+          createdAt: resolvedAt
+        })
+      });
+      return resolvedThread;
     });
-    return resolvedThread;
   }
 
   async exportTokensDtcg(fileId: string): Promise<Record<string, unknown>> {
@@ -4088,10 +4304,9 @@ export class FileStorage {
 
   private async writeCommentThreadFile(store: StoredCommentThreadFile): Promise<void> {
     await mkdir(this.commentsDir, { recursive: true });
-    await writeFile(
+    await durablyReplaceFile(
       this.commentThreadsPathFor(store.fileId),
-      `${JSON.stringify(store, null, 2)}\n`,
-      "utf8"
+      Buffer.from(`${JSON.stringify(store, null, 2)}\n`, "utf8")
     );
   }
 
@@ -4446,6 +4661,61 @@ function normalizeName(value: string | undefined, fallback: string) {
     throw new Error("name is required");
   }
   return normalized;
+}
+
+function normalizeCommentActorId(value: unknown) {
+  const actorId = typeof value === "string" ? value.trim() : "";
+  if (!actorId) {
+    throw inputValidationError("comment actor id is required");
+  }
+  return actorId;
+}
+
+function requireCommentThread(
+  store: StoredCommentThreadFile,
+  threadId: string
+): StoredCommentThread {
+  const thread = store.threads.find((candidate) => candidate.threadId === threadId);
+  if (!thread) {
+    throw Object.assign(new Error(`comment thread not found: ${threadId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  return thread;
+}
+
+function requireCommentReply(
+  thread: StoredCommentThread,
+  replyId: string
+): StoredCommentReply {
+  const reply = thread.replies.find((candidate) => candidate.replyId === replyId);
+  if (!reply) {
+    throw Object.assign(new Error(`comment reply not found: ${replyId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  return reply;
+}
+
+function assertCommentOwner(authorId: string, actorId: string) {
+  if (authorId !== actorId) {
+    throw forbiddenError("only the comment author can modify this comment");
+  }
+}
+
+function assertCommentVersion(modifiedAt: string, expectedModifiedAt: unknown) {
+  const expected = typeof expectedModifiedAt === "string" ? expectedModifiedAt.trim() : "";
+  if (!expected) {
+    throw inputValidationError("expected comment modifiedAt is required");
+  }
+  if (modifiedAt !== expected) {
+    throw Object.assign(new Error("comment was modified by another writer"), {
+      code: "ECONFLICT",
+      statusCode: 409
+    });
+  }
 }
 
 function normalizeCommentBody(value: unknown) {
@@ -5835,6 +6105,8 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
 
   const body = normalizeCommentBody(candidate.body);
   const authorName = normalizeName(candidate.authorName, "사용자");
+  const authorId = normalizeName(candidate.authorId, authorName);
+  const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
   return {
     schemaVersion: 1,
@@ -5843,12 +6115,14 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     nodeId: candidate.nodeId,
     nodeName: normalizeName(candidate.nodeName, candidate.nodeId),
     body,
+    authorId,
     authorName,
-    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
+    createdAt,
+    modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     resolvedAt: candidate.resolvedAt ? normalizeName(candidate.resolvedAt, "") : null,
     mentions: normalizeCommentMentionList(candidate.mentions, body),
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
-    readBy: normalizeCommentReaderList(candidate.readBy, authorName),
+    readBy: normalizeCommentReaderList(candidate.readBy, authorId),
     replies: Array.isArray(candidate.replies)
       ? candidate.replies.map((reply) => parseStoredCommentReply(reply))
       : []
@@ -5867,13 +6141,18 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
   assertSafeStorageId(candidate.replyId);
 
   const body = normalizeCommentBody(candidate.body);
+  const authorName = normalizeName(candidate.authorName, "사용자");
+  const authorId = normalizeName(candidate.authorId, authorName);
+  const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
   return {
     schemaVersion: 1,
     replyId: candidate.replyId,
     body,
-    authorName: normalizeName(candidate.authorName, "사용자"),
-    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
+    authorId,
+    authorName,
+    createdAt,
+    modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     mentions: normalizeCommentMentionList(candidate.mentions, body),
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets)
   };
@@ -5940,10 +6219,13 @@ function parseStoredCommentLiveEvent(
   if (candidate.threadId) {
     assertSafeStorageId(candidate.threadId);
   }
+  if (candidate.replyId) {
+    assertSafeStorageId(candidate.replyId);
+  }
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment live event file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved", "read"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "read", "edited", "deleted"].includes(candidate.type)) {
     throw new Error(`unsupported comment live event type: ${String(candidate.type)}`);
   }
 
@@ -5954,6 +6236,7 @@ function parseStoredCommentLiveEvent(
     type: candidate.type,
     fileId: candidate.fileId,
     ...(candidate.threadId ? { threadId: candidate.threadId } : {}),
+    ...(candidate.replyId ? { replyId: candidate.replyId } : {}),
     ...(candidate.viewerId ? { viewerId: normalizeName(candidate.viewerId, "사용자") } : {}),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
   };
