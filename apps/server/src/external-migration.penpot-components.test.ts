@@ -1080,6 +1080,84 @@ describe("Penpot component instance migration", () => {
     }
   });
 
+  test("rolls back an initial registry import when subscription persistence fails", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-initial-rollback-"));
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(packagedLibrarySwapArchive(), {
+        projectId: "initial-rollback-source-project",
+        documentId: "initial-rollback-source-target",
+        documentName: "Source product file",
+        fileName: "packaged-library-swap.penpot"
+      });
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      const assetId = `penpot-asset-${libraryMediaId}`;
+      await storage.createProject({
+        projectId: "initial-rollback-target-project",
+        name: "초기 라이브러리 가져오기 대상",
+        documentId: "initial-rollback-target",
+        documentName: "초기 가져오기 전 문서"
+      });
+      const beforeTarget = await storage.readFile("initial-rollback-target");
+      const beforeSubscriptions =
+        await storage.listLibraryRegistrySubscriptions();
+      const internals = storage as unknown as {
+        assetPathFor(assetId: string): string;
+        assetMetadataPathFor(assetId: string): string;
+        writeLibraryRegistrySubscriptions(
+          subscriptions: unknown[]
+        ): Promise<void>;
+      };
+      await rm(internals.assetPathFor(assetId), { force: true });
+      await rm(internals.assetMetadataPathFor(assetId), { force: true });
+
+      const writeSubscriptions =
+        internals.writeLibraryRegistrySubscriptions.bind(storage);
+      let failAfterSubscriptionWrite = true;
+      internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+        await writeSubscriptions(subscriptions);
+        if (failAfterSubscriptionWrite) {
+          failAfterSubscriptionWrite = false;
+          throw new Error("injected initial subscription commit failure");
+        }
+      };
+
+      await expect(
+        storage.importLibraryRegistryItem(
+          "initial-rollback-target",
+          libraryDocumentId,
+          { idPrefix: "imported" }
+        )
+      ).rejects.toThrow("injected initial subscription commit failure");
+
+      expect(await storage.readFile("initial-rollback-target")).toEqual(
+        beforeTarget
+      );
+      expect(await storage.listLibraryRegistrySubscriptions()).toEqual(
+        beforeSubscriptions
+      );
+      await expect(storage.readAsset(assetId)).rejects.toMatchObject({
+        code: "ENOENT"
+      });
+
+      await expect(
+        storage.importLibraryRegistryItem(
+          "initial-rollback-target",
+          libraryDocumentId,
+          { idPrefix: "imported" }
+        )
+      ).resolves.toMatchObject({ componentCount: 2, assetCount: 1 });
+      expect(
+        (await storage.readFile("initial-rollback-target")).components
+      ).toHaveLength(2);
+      await expect(storage.readAsset(assetId)).resolves.toMatchObject({
+        assetId
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("serializes concurrent library updates for the same target", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-update-lock-"));
     try {
@@ -1894,6 +1972,99 @@ describe("Penpot component instance migration", () => {
       await rm(root, { recursive: true, force: true });
     }
   }, 15_000);
+
+  test("a prepared writer recovers a later interrupted publication before publishing", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-live-recovery-"));
+    const releasePath = path.join(root, "unused-release");
+    const workerPath = fileURLToPath(
+      new URL("./storage-publication-worker.ts", import.meta.url)
+    );
+    let publisher: ChildProcessWithoutNullStreams | null = null;
+
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-live-a-project",
+        documentId: "publication-live-a",
+        documentName: "Publication Live A",
+        fileName: "publication-live-a.penpot"
+      });
+      await storage.importExternalMigrationArchive(componentArchive(), {
+        projectId: "publication-live-b-project",
+        documentId: "publication-live-b",
+        documentName: "Publication Live B",
+        fileName: "publication-live-b.penpot"
+      });
+      await storage.publishLibraryToRegistry("publication-live-a", {
+        libraryId: "live-recovery-publication"
+      });
+      await storage.prepareFiles();
+
+      publisher = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          workerPath,
+          "publish-crash-after-archive",
+          root,
+          "publication-live-b",
+          "live-recovery-publication",
+          releasePath
+        ],
+        { stdio: ["pipe", "pipe", "pipe"], env: process.env }
+      );
+      await new Promise<void>((resolve, reject) => {
+        let stderr = "";
+        publisher?.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        publisher?.once("error", reject);
+        publisher?.once("exit", (code) => {
+          if (code === 86) {
+            resolve();
+          } else {
+            reject(
+              new Error(
+                `crashing live publisher exited ${code}: ${stderr}`
+              )
+            );
+          }
+        });
+      });
+
+      await storage.publishLibraryToRegistry("publication-live-b", {
+        libraryId: "unrelated-live-publication"
+      });
+
+      const entries = await storage.listLibraryRegistry();
+      expect(
+        entries.find(
+          (candidate) =>
+            candidate.libraryId === "live-recovery-publication"
+        )?.sourceFileId
+      ).toBe("publication-live-a");
+      expect(
+        entries.find(
+          (candidate) =>
+            candidate.libraryId === "unrelated-live-publication"
+        )?.sourceFileId
+      ).toBe("publication-live-b");
+      await expect(
+        storage.reviewLibraryRegistryItem(
+          "publication-live-a",
+          "live-recovery-publication"
+        )
+      ).resolves.toMatchObject({
+        originalFileId: "publication-live-a"
+      });
+    } finally {
+      if (publisher?.exitCode === null) {
+        publisher.kill("SIGKILL");
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
 
   test("namespaces publication recovery journals away from document update journals", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-publication-namespace-"));
