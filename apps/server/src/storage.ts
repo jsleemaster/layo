@@ -341,6 +341,24 @@ async function withAssetReferenceMutationLock<T>(
   );
 }
 
+async function storagePathsReferenceSameEntry(
+  firstPath: string,
+  secondPath: string
+): Promise<boolean> {
+  try {
+    const [first, second] = await Promise.all([
+      stat(firstPath),
+      stat(secondPath)
+    ]);
+    return first.dev === second.dev && first.ino === second.ino;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 export interface LayoutSpacing {
   top: number;
   right: number;
@@ -956,6 +974,15 @@ export interface ProjectDocumentSummary {
 export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
+
+export interface CommentAuthorizationBoundary {
+  projectId: string;
+  expectedSharing: ProjectSharing;
+}
+
+export interface CommentMutationOptions {
+  authorizationBoundary?: CommentAuthorizationBoundary;
+}
 
 export interface ProjectMutationOptions {
   expectedSharing?: ProjectSharing;
@@ -1861,9 +1888,49 @@ export class FileStorage {
 
   private async withCommentMutationLock<T>(
     fileId: string,
+    options: CommentMutationOptions,
     operation: () => Promise<T>
   ): Promise<T> {
-    return withStoragePathMutationLock(this.commentThreadsPathFor(fileId), operation);
+    const mutate = () =>
+      withStoragePathMutationLock(this.commentThreadsPathFor(fileId), operation);
+    const boundary = options.authorizationBoundary;
+    if (!boundary) {
+      return mutate();
+    }
+
+    assertSafeStorageId(boundary.projectId);
+    return this.withProjectMutationLock(boundary.projectId, async () => {
+      let project: ProjectManifest;
+      try {
+        project = parseProjectManifest(
+          JSON.parse(
+            await readFile(this.projectPathFor(boundary.projectId), "utf8")
+          )
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+        throw Object.assign(
+          new Error("comment authorization project changed before persistence"),
+          { code: "ECONFLICT", statusCode: 409 }
+        );
+      }
+      this.assertExpectedProjectSharing(project, boundary.expectedSharing);
+      const canonicalFileId = canonicalStorageId(fileId);
+      if (
+        !project.documents.some(
+          (document) =>
+            canonicalStorageId(document.documentId) === canonicalFileId
+        )
+      ) {
+        throw Object.assign(
+          new Error("comment authorization project no longer contains the file"),
+          { code: "ECONFLICT", statusCode: 409 }
+        );
+      }
+      return mutate();
+    });
   }
 
   private async adoptPriorDefaultStoreIfNeeded() {
@@ -4616,7 +4683,8 @@ export class FileStorage {
 
   async createCommentThread(
     fileId: string,
-    input: CreateCommentThreadInput
+    input: CreateCommentThreadInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(input.nodeId);
     const document = await this.readFile(fileId);
@@ -4628,7 +4696,7 @@ export class FileStorage {
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
     const authorId = normalizeName(input.authorId, authorName);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const now = createMonotonicCommentTimestamp(latestCommentStoreTimestamp(store));
       const thread: StoredCommentThread = {
@@ -4677,13 +4745,14 @@ export class FileStorage {
   async updateCommentThread(
     fileId: string,
     threadId: string,
-    input: UpdateCommentThreadInput
+    input: UpdateCommentThreadInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const actorId = normalizeCommentActorId(input.actorId);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       assertCommentOwner(thread.authorId, actorId);
@@ -4741,12 +4810,13 @@ export class FileStorage {
   async deleteCommentThread(
     fileId: string,
     threadId: string,
-    input: DeleteCommentThreadInput
+    input: DeleteCommentThreadInput,
+    options: CommentMutationOptions = {}
   ): Promise<DeleteCommentThreadResult> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const actorId = normalizeCommentActorId(input.actorId);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       assertCommentOwner(thread.authorId, actorId);
@@ -4788,14 +4858,15 @@ export class FileStorage {
   async addCommentReply(
     fileId: string,
     threadId: string,
-    input: CreateCommentReplyInput
+    input: CreateCommentReplyInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
     const authorId = normalizeName(input.authorId, authorName);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const createdAt = createMonotonicCommentTimestamp(
@@ -4853,14 +4924,15 @@ export class FileStorage {
     fileId: string,
     threadId: string,
     replyId: string,
-    input: UpdateCommentReplyInput
+    input: UpdateCommentReplyInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     assertSafeStorageId(replyId);
     await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const actorId = normalizeCommentActorId(input.actorId);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const reply = requireCommentReply(thread, replyId);
@@ -4930,13 +5002,14 @@ export class FileStorage {
     fileId: string,
     threadId: string,
     replyId: string,
-    input: DeleteCommentReplyInput
+    input: DeleteCommentReplyInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     assertSafeStorageId(replyId);
     await this.readFile(fileId);
     const actorId = normalizeCommentActorId(input.actorId);
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const reply = requireCommentReply(thread, replyId);
@@ -4990,12 +5063,13 @@ export class FileStorage {
   async markCommentThreadRead(
     fileId: string,
     threadId: string,
-    input: MarkCommentThreadReadInput = {}
+    input: MarkCommentThreadReadInput = {},
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const readThread: StoredCommentThread = {
@@ -5024,11 +5098,12 @@ export class FileStorage {
 
   async markFileCommentsRead(
     fileId: string,
-    input: MarkFileCommentsReadInput = {}
+    input: MarkFileCommentsReadInput = {},
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread[]> {
     await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const threads = store.threads.map((thread) =>
         thread.resolvedAt === null
@@ -5058,12 +5133,13 @@ export class FileStorage {
   async resolveCommentThread(
     fileId: string,
     threadId: string,
-    actorName = "사용자"
+    actorName = "사용자",
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
     const resolvedActorName = normalizeName(actorName, "사용자");
-    return this.withCommentMutationLock(fileId, async () => {
+    return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       if (thread.resolvedAt !== null) {
@@ -5803,7 +5879,10 @@ export class FileStorage {
       canonicalPath,
       Buffer.from(`${JSON.stringify(store, null, 2)}\n`, "utf8")
     );
-    if (legacyPath !== canonicalPath) {
+    if (
+      legacyPath !== canonicalPath
+      && !(await storagePathsReferenceSameEntry(canonicalPath, legacyPath))
+    ) {
       await rm(legacyPath, { force: true });
       await syncDirectory(this.commentsDir);
     }
@@ -6062,6 +6141,36 @@ export class FileStorage {
             : []
         )
     );
+  }
+
+  async getCommentAuthorizationBoundary(
+    fileId: string
+  ): Promise<CommentAuthorizationBoundary | undefined> {
+    const canonicalFileId = canonicalStorageId(fileId);
+    const projects = (await this.listProjects())
+      .filter((project) =>
+        project.documents.some(
+          (document) =>
+            canonicalStorageId(document.documentId) === canonicalFileId
+        )
+      )
+      .sort((first, second) => {
+        const firstTeam =
+          first.sharing.mode === "team" ? first.sharing.teamId : "";
+        const secondTeam =
+          second.sharing.mode === "team" ? second.sharing.teamId : "";
+        return Number(second.sharing.mode === "team")
+          - Number(first.sharing.mode === "team")
+          || firstTeam.localeCompare(secondTeam)
+          || first.projectId.localeCompare(second.projectId);
+      });
+    const project = projects[0];
+    return project
+      ? {
+          projectId: project.projectId,
+          expectedSharing: structuredClone(project.sharing)
+        }
+      : undefined;
   }
 
   async getTeamIdForFile(fileId: string): Promise<string | undefined> {
