@@ -2038,6 +2038,8 @@ export class FileStorage {
   }
 
   private async recoverInterruptedImportsBeforeMutation(): Promise<void> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedImportsOnce();
     await this.recoverInterruptedLibraryUpdates();
     await this.recoverInterruptedImports();
   }
