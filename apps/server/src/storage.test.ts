@@ -2019,6 +2019,21 @@ describe("FileStorage", () => {
         expect.objectContaining({ type: "edited", threadId: created.threadId })
       ])
     );
+    await expect(storage.listCommentActivity({ viewerId: "user-reviewer" })).resolves.toMatchObject({
+      events: [
+        {
+          type: "edited",
+          threadId: created.threadId,
+          actorName: "민지",
+          body: "@준호 수정된 검수"
+        },
+        {
+          type: "created",
+          threadId: created.threadId,
+          body: "@준호 수정된 검수"
+        }
+      ]
+    });
   });
 
   test("comment reply owners can edit and delete replies without leaking deleted content", async () => {
@@ -2087,6 +2102,15 @@ describe("FileStorage", () => {
     const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
     expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 원문");
     expect(JSON.stringify(sidecar.activity)).not.toContain("수정된 답글");
+    expect(sidecar.activity[0]).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId,
+      replyId: reply.replyId,
+      actorName: "답글 작성자",
+      body: "답글이 삭제되었습니다",
+      mentions: [],
+      mentionTargets: []
+    });
     expect(sidecar.events.at(-1)).toMatchObject({
       type: "deleted",
       threadId: created.threadId,
@@ -2133,6 +2157,16 @@ describe("FileStorage", () => {
     const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
     expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 스레드 본문");
     expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 답글 본문");
+    expect(sidecar.activity).toEqual([
+      expect.objectContaining({
+        type: "deleted",
+        threadId: created.threadId,
+        actorName: "소유자",
+        body: "코멘트가 삭제되었습니다",
+        mentions: [],
+        mentionTargets: []
+      })
+    ]);
     expect(sidecar.events.at(-1)).toMatchObject({
       type: "deleted",
       threadId: created.threadId

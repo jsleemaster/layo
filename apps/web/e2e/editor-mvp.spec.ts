@@ -6184,6 +6184,38 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
 });
 
+test("deleting the last comment clears its canvas bubble and keeps a content-free activity tombstone", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("삭제할 단일 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveText("1");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "삭제할 단일 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveCount(0);
+
+  await openFilePanel(page);
+  const activity = page.getByTestId("comment-activity-feed");
+  await expect(activity).toContainText("삭제");
+  await expect(activity).toContainText("코멘트가 삭제되었습니다");
+  await expect(activity).not.toContainText("삭제할 단일 코멘트");
+
+  const activityResponse = await page.request.get(
+    "http://127.0.0.1:4317/comments/activity?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90&limit=8"
+  );
+  expect(activityResponse.ok()).toBeTruthy();
+  expect((await activityResponse.json()).feed.events[0]).toMatchObject({
+    type: "deleted",
+    fileId: documentId,
+    body: "코멘트가 삭제되었습니다",
+    mentions: [],
+    mentionTargets: []
+  });
+});
+
 test("comments panel keeps feedback controls available to team viewers and maps trusted actor names", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   const teamManifest = {
@@ -6424,6 +6456,9 @@ test("comment authorization end stops fallback polling and preserves the recover
       ) {
         instrumentedWindow.__layoCommentListRequestCount =
           (instrumentedWindow.__layoCommentListRequestCount ?? 0) + 1;
+        if (instrumentedWindow.__layoCommentListRequestCount === 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+        }
       }
       if (parsedUrl.pathname === "/comments/events") {
         instrumentedWindow.__layoCommentTerminalStreamCount =
