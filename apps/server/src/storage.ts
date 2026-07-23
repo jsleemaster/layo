@@ -1366,7 +1366,7 @@ export interface ImportedLibraryRegistryTokens {
 export class FileStorage {
   private readonly priorRootDir: string | null;
   private libraryUpdateRecoveryPromise: Promise<void> | null = null;
-  private importRecoveryPromise: Promise<void> | null = null;
+  private storageTransactionRecoveryPromise: Promise<void> | null = null;
 
   constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
     const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
@@ -1877,7 +1877,7 @@ export class FileStorage {
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
-    await this.recoverInterruptedImportsOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
@@ -1885,31 +1885,31 @@ export class FileStorage {
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
-    await this.recoverInterruptedImportsOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
     await this.removeUnreferencedLegacySampleDocument();
   }
 
-  private importRecoveryDir() {
-    return path.join(this.rootDir, "recovery", "imports");
+  private storageTransactionRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "transactions");
   }
 
-  private importRecoveryPathFor(transactionId: string) {
+  private storageTransactionRecoveryPathFor(transactionId: string) {
     assertSafeStorageId(transactionId);
-    return path.join(this.importRecoveryDir(), `${transactionId}.json`);
+    return path.join(this.storageTransactionRecoveryDir(), `${transactionId}.json`);
   }
 
-  private async persistImportRecoveryJournal(
+  private async persistStorageTransactionRecoveryJournal(
     transactionId: string,
-    kind: ImportRecoveryKind,
+    kind: StorageTransactionRecoveryKind,
     projectId: string | undefined,
     fileIds: readonly string[],
     original: readonly StoragePathSnapshot[],
     intended: readonly StoragePathSnapshot[]
   ): Promise<void> {
-    const journal: ImportRecoveryJournal = {
+    const journal: StorageTransactionRecoveryJournal = {
       schemaVersion: 1,
       kind,
       transactionId,
@@ -1922,7 +1922,7 @@ export class FileStorage {
         serializeRecoverySnapshot(this.rootDir, snapshot)
       )
     };
-    const journalPath = this.importRecoveryPathFor(transactionId);
+    const journalPath = this.storageTransactionRecoveryPathFor(transactionId);
     await mkdir(path.dirname(journalPath), { recursive: true });
     await durablyReplaceFile(
       journalPath,
@@ -1930,10 +1930,10 @@ export class FileStorage {
     );
   }
 
-  private async removeImportRecoveryJournal(
+  private async removeStorageTransactionRecoveryJournal(
     transactionId: string
   ): Promise<void> {
-    const journalPath = this.importRecoveryPathFor(transactionId);
+    const journalPath = this.storageTransactionRecoveryPathFor(transactionId);
     await rm(journalPath, { force: true });
     const recoveryDir = path.dirname(journalPath);
     if (await pathExists(recoveryDir)) {
@@ -1941,8 +1941,8 @@ export class FileStorage {
     }
   }
 
-  private async withImportRecoveryTransaction<T>(
-    kind: ImportRecoveryKind,
+  private async withStorageTransactionRecovery<T>(
+    kind: StorageTransactionRecoveryKind,
     projectId: string | undefined,
     fileIds: readonly string[],
     originalPaths: readonly string[],
@@ -1965,7 +1965,7 @@ export class FileStorage {
         !== orderedFileIds.length
     ) {
       throw inputValidationError(
-        "import recovery file ids must be unique ignoring case"
+        "storage transaction recovery file ids must be unique ignoring case"
       );
     }
     const orderedOriginalPaths = [
@@ -1984,13 +1984,13 @@ export class FileStorage {
       for (const snapshot of snapshots) {
         if (!originalPathSet.has(path.resolve(snapshot.filePath))) {
           throw new Error(
-            `import recovery intent is outside original paths: ${snapshot.filePath}`
+            `storage transaction recovery intent is outside original paths: ${snapshot.filePath}`
           );
         }
       }
     };
     assertIntendedPaths(intended);
-    await this.persistImportRecoveryJournal(
+    await this.persistStorageTransactionRecoveryJournal(
       transactionId,
       kind,
       projectId,
@@ -2004,7 +2004,7 @@ export class FileStorage {
     ): Promise<void> => {
       assertIntendedPaths(snapshots);
       intended.push(...snapshots);
-      await this.persistImportRecoveryJournal(
+      await this.persistStorageTransactionRecoveryJournal(
         transactionId,
         kind,
         projectId,
@@ -2016,12 +2016,12 @@ export class FileStorage {
 
     try {
       const result = await operation(appendIntended);
-      await this.removeImportRecoveryJournal(transactionId);
+      await this.removeStorageTransactionRecoveryJournal(transactionId);
       return result;
     } catch (error) {
       try {
         await restoreStoragePathSnapshots(original);
-        await this.removeImportRecoveryJournal(transactionId);
+        await this.removeStorageTransactionRecoveryJournal(transactionId);
       } catch (rollbackError) {
         throw new AggregateError(
           [error, rollbackError],
@@ -2032,33 +2032,33 @@ export class FileStorage {
     }
   }
 
-  private recoverInterruptedImportsOnce(): Promise<void> {
-    this.importRecoveryPromise ??= this.recoverInterruptedImports();
-    return this.importRecoveryPromise;
+  private recoverInterruptedStorageTransactionsOnce(): Promise<void> {
+    this.storageTransactionRecoveryPromise ??= this.recoverInterruptedStorageTransactions();
+    return this.storageTransactionRecoveryPromise;
   }
 
-  private async recoverInterruptedImportsBeforeMutation(): Promise<void> {
+  private async recoverInterruptedStorageTransactionsBeforeMutation(): Promise<void> {
     await this.recoverInterruptedLibraryUpdatesOnce();
-    await this.recoverInterruptedImportsOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
     await this.recoverInterruptedLibraryUpdates();
-    await this.recoverInterruptedImports();
+    await this.recoverInterruptedStorageTransactions();
   }
 
-  private async recoverInterruptedImports(): Promise<void> {
+  private async recoverInterruptedStorageTransactions(): Promise<void> {
     const journalPaths = await this.listLibraryRecoveryJournalPaths(
-      this.importRecoveryDir()
+      this.storageTransactionRecoveryDir()
     );
     for (const journalPath of journalPaths) {
-      await this.recoverInterruptedImportJournal(journalPath);
+      await this.recoverInterruptedStorageTransactionJournal(journalPath);
     }
   }
 
-  private async recoverInterruptedImportJournal(
+  private async recoverInterruptedStorageTransactionJournal(
     journalPath: string
   ): Promise<void> {
-    let expected: ImportRecoveryJournal;
+    let expected: StorageTransactionRecoveryJournal;
     try {
-      expected = parseImportRecoveryJournal(
+      expected = parseStorageTransactionRecoveryJournal(
         JSON.parse(await readFile(journalPath, "utf8"))
       );
     } catch (error) {
@@ -2069,9 +2069,9 @@ export class FileStorage {
     }
 
     const recover = async (): Promise<void> => {
-      let journal: ImportRecoveryJournal;
+      let journal: StorageTransactionRecoveryJournal;
       try {
-        journal = parseImportRecoveryJournal(
+        journal = parseStorageTransactionRecoveryJournal(
           JSON.parse(await readFile(journalPath, "utf8"))
         );
       } catch (error) {
@@ -2090,7 +2090,7 @@ export class FileStorage {
         )
       ) {
         throw new StorageRollbackConflictError(
-          `import recovery journal changed while waiting: ${journalPath}`
+          `storage transaction recovery journal changed while waiting: ${journalPath}`
         );
       }
 
@@ -2108,7 +2108,7 @@ export class FileStorage {
         );
         if (!originalPathSet.has(restored.filePath)) {
           throw new Error(
-            `import recovery intent is outside original paths: ${restored.filePath}`
+            `storage transaction recovery intent is outside original paths: ${restored.filePath}`
           );
         }
         const candidates = intended.get(restored.filePath) ?? [];
@@ -2163,7 +2163,7 @@ export class FileStorage {
 
     const projectId = expected.projectId;
     if (!projectId) {
-      throw new Error("import recovery project id is required");
+      throw new Error("storage transaction recovery project id is required");
     }
     return this.withProjectMutationLock(projectId, () => {
       if (expected.kind === "external-migration-import") {
@@ -2585,11 +2585,18 @@ export class FileStorage {
     input: DuplicateProjectInput = {},
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    const source = await this.withProjectMutationLock(sourceProjectId, async () => {
-      const project = await this.readProject(sourceProjectId);
-      this.assertExpectedProjectSharing(project, options.expectedSharing);
-      return project;
-    });
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    const source = await this.withProjectMutationLock(
+      sourceProjectId,
+      async () => {
+        const project = await this.readProject(sourceProjectId);
+        this.assertExpectedProjectSharing(
+          project,
+          options.expectedSharing
+        );
+        return project;
+      }
+    );
     const now = new Date().toISOString();
     const projectId = input.projectId ?? createStorageId("project");
     assertSafeStorageId(projectId);
@@ -2605,10 +2612,13 @@ export class FileStorage {
           projectId
         )
       ) {
-        throw Object.assign(new Error(`project already exists: ${projectId}`), {
-          code: "EEXIST",
-          statusCode: 409
-        });
+        throw Object.assign(
+          new Error(`project already exists: ${projectId}`),
+          {
+            code: "EEXIST",
+            statusCode: 409
+          }
+        );
       }
 
       const documents: ProjectDocumentSummary[] = [];
@@ -2620,7 +2630,9 @@ export class FileStorage {
           : createStorageId("document");
         assertSafeStorageId(documentId);
 
-        const document = await this.readFile(sourceDocument.documentId);
+        const document = await this.readFile(
+          sourceDocument.documentId
+        );
         const name = `${sourceDocument.name} 사본`;
         files.push({
           fileId: documentId,
@@ -2641,22 +2653,53 @@ export class FileStorage {
         }
       }
 
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: normalizeName(input.name, `${source.name} 사본`),
+        createdAt: now,
+        updatedAt: now,
+        currentDocumentId:
+          currentDocumentId || documents[0].documentId,
+        documents,
+        sharing: { mode: "private" }
+      });
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId))
+      ];
+      const intended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        }))
+      ];
+
       return this.withNewProjectRollback(
         projectId,
         () =>
           this.withExclusiveProjectFiles(
             files,
-            () =>
-              this.writeProject({
-                schemaVersion: 1,
+            () => this.writeProject(nextProject),
+            (writeOperation) =>
+              this.withStorageTransactionRecovery(
+                "project-duplicate",
                 projectId,
-                name: normalizeName(input.name, `${source.name} 사본`),
-                createdAt: now,
-                updatedAt: now,
-                currentDocumentId: currentDocumentId || documents[0].documentId,
-                documents,
-                sharing: { mode: "private" }
-              })
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                intended,
+                () => writeOperation()
+              )
           )
       );
     });
@@ -2928,7 +2971,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportFileArchiveOptions = {}
   ): Promise<ImportedFileArchive> {
-    await this.recoverInterruptedImportsBeforeMutation();
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const entries = readZipArchive(archive);
     const manifest = parseFileArchiveManifest(
       readJsonArchiveEntry(entries, "manifest.json")
@@ -3024,7 +3067,7 @@ export class FileStorage {
             };
           },
           (writeOperation) =>
-            this.withImportRecoveryTransaction(
+            this.withStorageTransactionRecovery(
               "file-archive-import",
               undefined,
               [fileId],
@@ -3128,7 +3171,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportExternalMigrationArchiveOptions = {}
   ): Promise<ImportedExternalMigrationArchive> {
-    await this.recoverInterruptedImportsBeforeMutation();
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const projectId = options.projectId ?? createStorageId("project");
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
@@ -3340,7 +3383,7 @@ export class FileStorage {
                 }
               ),
             (writeOperation) =>
-              this.withImportRecoveryTransaction(
+              this.withStorageTransactionRecovery(
                 "external-migration-import",
                 projectId,
                 files.map((entry) => entry.fileId),
@@ -3375,7 +3418,7 @@ export class FileStorage {
     archive: Buffer,
     options: ImportProjectArchiveOptions = {}
   ): Promise<ImportedProjectArchive> {
-    await this.recoverInterruptedImportsBeforeMutation();
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const archiveProject = readProjectArchivePayload(readZipArchive(archive));
     const now = new Date().toISOString();
     const projectId = options.projectId ?? createStorageId("project");
@@ -3510,7 +3553,7 @@ export class FileStorage {
                 () => this.writeProject(nextProject)
               ),
             (writeOperation) =>
-              this.withImportRecoveryTransaction(
+              this.withStorageTransactionRecovery(
                 "project-archive-import",
                 projectId,
                 files.map((entry) => entry.fileId),
@@ -7112,14 +7155,15 @@ interface LibraryUpdateRecoveryJournal {
   intended: SerializedRecoverySnapshot[];
 }
 
-type ImportRecoveryKind =
+type StorageTransactionRecoveryKind =
   | "file-archive-import"
   | "project-archive-import"
-  | "external-migration-import";
+  | "external-migration-import"
+  | "project-duplicate";
 
-interface ImportRecoveryJournal {
+interface StorageTransactionRecoveryJournal {
   schemaVersion: 1;
-  kind: ImportRecoveryKind;
+  kind: StorageTransactionRecoveryKind;
   transactionId: string;
   projectId?: string;
   fileIds: string[];
@@ -7191,30 +7235,31 @@ function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecover
   };
 }
 
-function parseImportRecoveryJournal(value: unknown): ImportRecoveryJournal {
+function parseStorageTransactionRecoveryJournal(value: unknown): StorageTransactionRecoveryJournal {
   if (!value || typeof value !== "object") {
-    throw new Error("invalid import recovery journal");
+    throw new Error("invalid storage transaction recovery journal");
   }
-  const candidate = value as Partial<ImportRecoveryJournal>;
+  const candidate = value as Partial<StorageTransactionRecoveryJournal>;
   if (
     candidate.schemaVersion !== 1
     || (
       candidate.kind !== "file-archive-import"
       && candidate.kind !== "project-archive-import"
       && candidate.kind !== "external-migration-import"
+      && candidate.kind !== "project-duplicate"
     )
     || typeof candidate.transactionId !== "string"
     || !Array.isArray(candidate.fileIds)
     || !Array.isArray(candidate.original)
     || !Array.isArray(candidate.intended)
   ) {
-    throw new Error("invalid import recovery journal");
+    throw new Error("invalid storage transaction recovery journal");
   }
 
   assertSafeStorageId(candidate.transactionId);
   const fileIds = candidate.fileIds.map((fileId) => {
     if (typeof fileId !== "string") {
-      throw new Error("invalid import recovery file id");
+      throw new Error("invalid storage transaction recovery file id");
     }
     assertSafeStorageId(fileId);
     return fileId;
@@ -7223,7 +7268,7 @@ function parseImportRecoveryJournal(value: unknown): ImportRecoveryJournal {
     fileIds.length === 0
     || new Set(fileIds.map(canonicalStorageId)).size !== fileIds.length
   ) {
-    throw new Error("invalid import recovery file ids");
+    throw new Error("invalid storage transaction recovery file ids");
   }
 
   const projectId =
@@ -7240,7 +7285,7 @@ function parseImportRecoveryJournal(value: unknown): ImportRecoveryJournal {
       && projectId === undefined
     )
   ) {
-    throw new Error("invalid import recovery project id");
+    throw new Error("invalid storage transaction recovery project id");
   }
 
   return {
