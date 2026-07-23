@@ -1428,8 +1428,10 @@ export class FileStorage {
   }
 
   private commentThreadsPathFor(fileId: string) {
-    assertSafeStorageId(fileId);
-    return path.join(this.commentsDir, `${fileId}.json`);
+    return path.join(
+      this.commentsDir,
+      `${canonicalStorageId(fileId)}.json`
+    );
   }
 
   private libraryRegistryPath() {
@@ -1891,96 +1893,104 @@ export class FileStorage {
   }
 
   private recoverInterruptedLibraryUpdatesOnce(): Promise<void> {
-    this.libraryUpdateRecoveryPromise ??= this.recoverInterruptedLibraryUpdates();
+    this.libraryUpdateRecoveryPromise ??=
+      this.recoverInterruptedLibraryUpdates();
     return this.libraryUpdateRecoveryPromise;
   }
 
-  private async recoverInterruptedLibraryUpdates(): Promise<void> {
-    const journalPaths: string[] = [];
-    for (const recoveryDir of [
-      this.libraryUpdateRecoveryDir(),
+  private async listLibraryRecoveryJournalPaths(
+    recoveryDir: string
+  ): Promise<string[]> {
+    try {
+      return (await readdir(recoveryDir))
+        .filter((candidate) => candidate.endsWith(".json"))
+        .map((entry) => path.join(recoveryDir, entry))
+        .sort();
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async recoverInterruptedLibraryUpdateJournal(
+    journalPath: string
+  ): Promise<void> {
+    let journal: LibraryUpdateRecoveryJournal;
+    try {
+      journal = parseLibraryUpdateRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    const original = journal.original.map((snapshot) =>
+      deserializeRecoverySnapshot(this.rootDir, snapshot)
+    );
+    const intended = new Map<string, Array<Buffer | null>>();
+    for (const snapshot of journal.intended) {
+      const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
+      const candidates = intended.get(restored.filePath) ?? [];
+      candidates.push(restored.data);
+      intended.set(restored.filePath, candidates);
+    }
+    const current = await captureStoragePathSnapshots(
+      original.map((snapshot) => snapshot.filePath)
+    );
+
+    for (const snapshot of original) {
+      const currentData = current.find(
+        (candidate) => candidate.filePath === snapshot.filePath
+      )?.data ?? null;
+      const intendedData = intended.get(snapshot.filePath) ?? [];
+      if (
+        !storageSnapshotDataEquals(currentData, snapshot.data)
+        && !intendedData.some((candidate) =>
+          storageSnapshotDataEquals(currentData, candidate)
+        )
+      ) {
+        const transactionName =
+          journal.kind === "library-registry-publication"
+            ? "library publication"
+            : "library update";
+        throw new StorageRollbackConflictError(
+          `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
+        );
+      }
+    }
+
+    await restoreStoragePathSnapshots(original);
+    await rm(journalPath, { force: true });
+    await syncDirectory(path.dirname(journalPath));
+  }
+
+  // Caller must hold the registry path lock.
+  private async recoverInterruptedLibraryPublicationsLocked(): Promise<void> {
+    const journalPaths = await this.listLibraryRecoveryJournalPaths(
       this.libraryPublicationRecoveryDir()
-    ]) {
-      try {
-        const entries = await readdir(recoveryDir);
-        journalPaths.push(
-          ...entries
-            .filter((candidate) => candidate.endsWith(".json"))
-            .map((entry) => path.join(recoveryDir, entry))
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== "ENOENT") {
-          throw error;
-        }
-      }
+    );
+    for (const journalPath of journalPaths) {
+      await this.recoverInterruptedLibraryUpdateJournal(journalPath);
+    }
+  }
+
+  private async recoverInterruptedLibraryUpdates(): Promise<void> {
+    const updateJournalPaths = await this.listLibraryRecoveryJournalPaths(
+      this.libraryUpdateRecoveryDir()
+    );
+    for (const journalPath of updateJournalPaths) {
+      await this.recoverInterruptedLibraryUpdateJournal(journalPath);
     }
 
-    for (const journalPath of journalPaths.sort()) {
-      let pendingJournal: LibraryUpdateRecoveryJournal;
-      try {
-        pendingJournal = parseLibraryUpdateRecoveryJournal(
-          JSON.parse(await readFile(journalPath, "utf8"))
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code === "ENOENT") {
-          continue;
-        }
-        throw error;
-      }
-      const recoverJournal = async (): Promise<void> => {
-        let journal: LibraryUpdateRecoveryJournal;
-        try {
-          journal = parseLibraryUpdateRecoveryJournal(
-            JSON.parse(await readFile(journalPath, "utf8"))
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code === "ENOENT") {
-            return;
-          }
-          throw error;
-        }
-        const original = journal.original.map((snapshot) =>
-          deserializeRecoverySnapshot(this.rootDir, snapshot)
-        );
-        const intended = new Map(
-          journal.intended.map((snapshot) => {
-            const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
-            return [restored.filePath, restored.data] as const;
-          })
-        );
-        const current = await captureStoragePathSnapshots(
-          original.map((snapshot) => snapshot.filePath)
-        );
-
-        for (const snapshot of original) {
-          const currentData = current.find(
-            (candidate) => candidate.filePath === snapshot.filePath
-          )?.data ?? null;
-          const intendedData = intended.get(snapshot.filePath);
-          if (
-            !storageSnapshotDataEquals(currentData, snapshot.data)
-            && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
-          ) {
-            const transactionName = journal.kind === "library-registry-publication"
-              ? "library publication"
-              : "library update";
-            throw new StorageRollbackConflictError(
-              `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
-            );
-          }
-        }
-
-        await restoreStoragePathSnapshots(original);
-        await rm(journalPath, { force: true });
-        await syncDirectory(path.dirname(journalPath));
-      };
-
-      if (pendingJournal.kind === "library-registry-publication") {
-        await withStoragePathMutationLock(this.libraryRegistryPath(), recoverJournal);
-      } else {
-        await recoverJournal();
-      }
-    }
+    await withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      () => this.recoverInterruptedLibraryPublicationsLocked()
+    );
   }
 
   private async removeUnreferencedLegacySampleDocument() {
@@ -3084,78 +3094,88 @@ export class FileStorage {
     archive: Buffer,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryArchive> {
-    return this.withFileMutationLock(fileId, async () => {
-      const target = await this.readFile(fileId);
-      const library = readLibraryArchivePayload(readZipArchive(archive));
-      const idPrefix = options.idPrefix?.trim()
-        ? normalizeLibraryIdPrefix(options.idPrefix)
-        : undefined;
-      const tokenIdMap = createLibraryTokenIdMap(
-        target,
-        library.library.tokens,
-        idPrefix
-      );
-      const componentIdMap = createLibraryComponentIdMap(
-        target,
-        library.library.components,
-        idPrefix
-      );
+    return this.withFileMutationLock(
+      fileId,
+      () => this.importLibraryArchiveLocked(fileId, archive, options)
+    );
+  }
 
-      const targetTokens = [...(target.tokens ?? [])];
-      for (const token of library.library.tokens) {
-        const nextTokenId = tokenIdMap[token.id];
-        if (!nextTokenId) {
-          throw new Error(
-            `library token missing from id map: ${token.id}`
-          );
-        }
-        const existing = targetTokens.find(
-          (candidate) => candidate.id === nextTokenId
+  // Caller must hold the target file and asset-reference locks.
+  private async importLibraryArchiveLocked(
+    fileId: string,
+    archive: Buffer,
+    options: ImportLibraryArchiveOptions = {}
+  ): Promise<ImportedLibraryArchive> {
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const idPrefix = options.idPrefix?.trim()
+      ? normalizeLibraryIdPrefix(options.idPrefix)
+      : undefined;
+    const tokenIdMap = createLibraryTokenIdMap(
+      target,
+      library.library.tokens,
+      idPrefix
+    );
+    const componentIdMap = createLibraryComponentIdMap(
+      target,
+      library.library.components,
+      idPrefix
+    );
+
+    const targetTokens = [...(target.tokens ?? [])];
+    for (const token of library.library.tokens) {
+      const nextTokenId = tokenIdMap[token.id];
+      if (!nextTokenId) {
+        throw new Error(
+          `library token missing from id map: ${token.id}`
         );
-        if (!existing) {
-          targetTokens.push({
-            ...structuredClone(token),
-            id: nextTokenId
-          });
-        }
       }
+      const existing = targetTokens.find(
+        (candidate) => candidate.id === nextTokenId
+      );
+      if (!existing) {
+        targetTokens.push({
+          ...structuredClone(token),
+          id: nextTokenId
+        });
+      }
+    }
 
-      const importedComponents = library.library.components.map((component) => {
-        const nextComponentId = componentIdMap[component.id];
-        if (!nextComponentId) {
-          throw new Error(
-            `library component missing from id map: ${component.id}`
-          );
-        }
-        return remapLibraryComponent(
-          component,
-          nextComponentId,
-          componentIdMap,
-          tokenIdMap
+    const importedComponents = library.library.components.map((component) => {
+      const nextComponentId = componentIdMap[component.id];
+      if (!nextComponentId) {
+        throw new Error(
+          `library component missing from id map: ${component.id}`
         );
-      });
+      }
+      return remapLibraryComponent(
+        component,
+        nextComponentId,
+        componentIdMap,
+        tokenIdMap
+      );
+    });
 
-      target.tokens = targetTokens;
-      target.components = [
-        ...(target.components ?? []),
-        ...importedComponents
-      ];
+    target.tokens = targetTokens;
+    target.components = [
+      ...(target.components ?? []),
+      ...importedComponents
+    ];
 
-      return this.withImportedAssetWrites(library.assets, async () => {
-        await this.writeFileWithoutMutationLock(fileId, target);
-        return {
-          fileId,
-          originalFileId: library.manifest.fileId,
-          originalName: library.manifest.name,
-          componentCount: importedComponents.length,
-          tokenCount: library.library.tokens.length,
-          tokenSetCount: library.library.token_sets.length,
-          tokenThemeCount: library.library.token_themes.length,
-          assetCount: library.assetIds.length,
-          componentIdMap,
-          tokenIdMap
-        };
-      });
+    return this.withImportedAssetWrites(library.assets, async () => {
+      await this.writeFileDurablyWithoutMutationLock(fileId, target);
+      return {
+        fileId,
+        originalFileId: library.manifest.fileId,
+        originalName: library.manifest.name,
+        componentCount: importedComponents.length,
+        tokenCount: library.library.tokens.length,
+        tokenSetCount: library.library.token_sets.length,
+        tokenThemeCount: library.library.token_themes.length,
+        assetCount: library.assetIds.length,
+        componentIdMap,
+        tokenIdMap
+      };
     });
   }
 
@@ -3163,7 +3183,6 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
-    await this.recoverInterruptedLibraryUpdatesOnce();
     return withStoragePathMutationLock(
       this.libraryRegistryPath(),
       () => this.publishLibraryToRegistryLocked(fileId, options)
@@ -3175,6 +3194,7 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
+    await this.recoverInterruptedLibraryPublicationsLocked();
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
     const name = normalizeName(options.name, exported.name);
@@ -3450,15 +3470,53 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    const imported = await this.importLibraryArchive(fileId, archive, options);
-    const registryImport = {
-      ...imported,
-      libraryId: entry.libraryId,
-      libraryName: entry.name
-    };
-    await this.upsertLibraryRegistrySubscription(fileId, entry, registryImport, options.idPrefix);
-    return registryImport;
+    const { entry, archive } =
+      await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+
+    return withStoragePathMutationLock(
+      this.librarySubscriptionsPath(),
+      () =>
+        this.withFileMutationLock(fileId, async () => {
+          const original = await captureStoragePathSnapshots([
+            this.filePathFor(fileId),
+            this.librarySubscriptionsPath(),
+            ...library.assets.flatMap((asset) => [
+              this.assetPathFor(asset.metadata.assetId),
+              this.assetMetadataPathFor(asset.metadata.assetId)
+            ])
+          ]);
+          try {
+            const imported = await this.importLibraryArchiveLocked(
+              fileId,
+              archive,
+              options
+            );
+            const registryImport: ImportedLibraryRegistryItem = {
+              ...imported,
+              libraryId: entry.libraryId,
+              libraryName: entry.name
+            };
+            await this.upsertLibraryRegistrySubscriptionLocked(
+              fileId,
+              entry,
+              registryImport,
+              options.idPrefix
+            );
+            return registryImport;
+          } catch (error) {
+            try {
+              await restoreStoragePathSnapshots(original);
+            } catch (rollbackError) {
+              throw new AggregateError(
+                [error, rollbackError],
+                "library registry import failed and rollback failed"
+              );
+            }
+            throw error;
+          }
+        })
+    );
   }
 
   async reviewLibraryRegistryTokens(
@@ -5257,12 +5315,21 @@ export class FileStorage {
   }
 
   private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
-    assertSafeStorageId(fileId);
+    const canonicalFileId = canonicalStorageId(fileId);
     const projects = await this.listProjects();
     return new Set(
       projects
-        .filter((project) => project.documents.some((document) => document.documentId === fileId))
-        .flatMap((project) => project.sharing.mode === "team" ? [project.sharing.teamId] : [])
+        .filter((project) =>
+          project.documents.some(
+            (document) =>
+              canonicalStorageId(document.documentId) === canonicalFileId
+          )
+        )
+        .flatMap((project) =>
+          project.sharing.mode === "team"
+            ? [project.sharing.teamId]
+            : []
+        )
     );
   }
 
