@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { FileStorage } from "./storage.js";
 
-const [mode, root, firstArg, secondArg, thirdArg] = process.argv.slice(2);
+const [mode, root, firstArg, secondArg, thirdArg, fourthArg] = process.argv.slice(2);
 if (!mode || !root) {
   throw new Error("storage worker mode and root are required");
 }
@@ -101,6 +101,27 @@ if (
     projectId,
     documentIdPrefix
   });
+} else if (mode === "project-import-crash-after-journal-remove") {
+  const archivePath = requiredArg(firstArg, "archivePath");
+  const projectId = requiredArg(secondArg, "projectId");
+  const documentIdPrefix = requiredArg(thirdArg, "documentIdPrefix");
+  const idempotencyKey = requiredArg(fourthArg, "idempotencyKey");
+  const internals = storage as unknown as {
+    removeStorageTransactionRecoveryJournal(transactionId: string): Promise<void>;
+  };
+  const originalRemove =
+    internals.removeStorageTransactionRecoveryJournal.bind(storage);
+  internals.removeStorageTransactionRecoveryJournal = async (
+    transactionId
+  ) => {
+    await originalRemove(transactionId);
+    await crash("project-import-response-crashing", 91);
+  };
+  await storage.importProjectArchive(await readFile(archivePath), {
+    projectId,
+    documentIdPrefix,
+    idempotencyKey
+  } as Parameters<FileStorage["importProjectArchive"]>[1]);
 } else if (mode === "project-duplicate-crash-after-project") {
   const sourceProjectId = requiredArg(firstArg, "sourceProjectId");
   const projectId = requiredArg(secondArg, "projectId");
@@ -118,6 +139,15 @@ if (
     projectId,
     documentIdPrefix
   });
+} else if (mode === "library-update-crash-after-commit") {
+  const fileId = requiredArg(firstArg, "fileId");
+  const libraryId = requiredArg(secondArg, "libraryId");
+  const internals = storage as unknown as {
+    removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void>;
+  };
+  internals.removeLibraryUpdateRecoveryJournal = () =>
+    crash("library-update-crashing", 93);
+  await storage.updateLibraryRegistryItem(fileId, libraryId);
 } else if (mode === "external-import-crash-after-publication") {
   const archivePath = requiredArg(firstArg, "archivePath");
   const projectId = requiredArg(secondArg, "projectId");
@@ -149,6 +179,28 @@ if (
     documentId,
     fileName: pathBaseName(archivePath)
   });
+} else if (mode === "external-import-crash-after-journal-remove") {
+  const archivePath = requiredArg(firstArg, "archivePath");
+  const projectId = requiredArg(secondArg, "projectId");
+  const documentId = requiredArg(thirdArg, "documentId");
+  const idempotencyKey = requiredArg(fourthArg, "idempotencyKey");
+  const internals = storage as unknown as {
+    removeStorageTransactionRecoveryJournal(transactionId: string): Promise<void>;
+  };
+  const originalRemove =
+    internals.removeStorageTransactionRecoveryJournal.bind(storage);
+  internals.removeStorageTransactionRecoveryJournal = async (
+    transactionId
+  ) => {
+    await originalRemove(transactionId);
+    await crash("external-import-response-crashing", 92);
+  };
+  await storage.importExternalMigrationArchive(await readFile(archivePath), {
+    projectId,
+    documentId,
+    fileName: pathBaseName(archivePath),
+    idempotencyKey
+  } as Parameters<FileStorage["importExternalMigrationArchive"]>[1]);
 } else {
   throw new Error(`unknown storage worker mode: ${mode}`);
 }
