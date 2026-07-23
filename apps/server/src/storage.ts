@@ -3130,6 +3130,7 @@ export class FileStorage {
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
     return withStoragePathMutationLock(
       this.libraryRegistryPath(),
       () => this.publishLibraryToRegistryLocked(fileId, options)
