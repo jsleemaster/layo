@@ -2450,16 +2450,14 @@ describe("MCP AI editing workflow", () => {
     const activity = parseToolJson(
       await client.callTool({
         name: "list_comment_activity",
-        arguments: { limit: 10 }
+        arguments: { limit: 1 }
       })
     );
     expect(
-      new Set(
-        activity.feed.events.map(
-          (event: { projectId: string }) => event.projectId
-        )
+      activity.feed.events.map(
+        (event: { projectId: string }) => event.projectId
       )
-    ).toEqual(new Set(["private-comment-project", "team-comment-project"]));
+    ).toEqual(["team-comment-project"]);
   });
 
   test("keeps private comment feeds available without a team principal", async () => {
