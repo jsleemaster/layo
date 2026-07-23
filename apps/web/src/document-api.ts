@@ -256,7 +256,7 @@ export interface ReviewExternalMigrationArchiveOptions {
 
 export interface ImportExternalMigrationArchiveInput {
   archiveBase64: string;
-  idempotencyKey?: string;
+  idempotencyKey: string;
   fileName?: string;
   sourceHint?: ExternalMigrationSource;
   projectId?: string;
@@ -683,7 +683,7 @@ export async function importExternalMigrationArchive(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
+      "Idempotency-Key": idempotencyKey
     },
     body: JSON.stringify(body)
   });
