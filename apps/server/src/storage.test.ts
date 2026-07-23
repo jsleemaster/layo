@@ -1936,6 +1936,199 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("comment mutations preserve concurrent writers across FileStorage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const creator = await storageWithDocument(tempRoot);
+    const writers = Array.from({ length: 8 }, () => new FileStorage(tempRoot));
+
+    await Promise.all(
+      writers.map((writer, index) =>
+        writer.createCommentThread("sample-file", {
+          nodeId: "text-1",
+          body: `동시 코멘트 ${index + 1}`,
+          authorId: `user-${index + 1}`,
+          authorName: `사용자 ${index + 1}`
+        })
+      )
+    );
+
+    const threads = await creator.listCommentThreads("sample-file");
+    expect(threads).toHaveLength(8);
+    expect(new Set(threads.map((thread) => thread.body))).toEqual(
+      new Set(Array.from({ length: 8 }, (_, index) => `동시 코멘트 ${index + 1}`))
+    );
+    await expect(creator.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toHaveLength(8);
+  });
+
+  test("comment authors can edit a thread with optimistic concurrency while other users cannot", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "@민지 처음 검수",
+      authorId: "user-minji",
+      authorName: "민지",
+      mentionTargets: [{ userId: "user-minji", displayName: "민지", role: "editor" }]
+    });
+    await storage.markCommentThreadRead("sample-file", created.threadId, { viewerId: "user-reviewer" });
+
+    expect(created).toMatchObject({
+      authorId: "user-minji",
+      modifiedAt: created.createdAt,
+      readBy: ["user-minji"]
+    });
+
+    await expect(
+      storage.updateCommentThread("sample-file", created.threadId, {
+        body: "권한 없는 수정",
+        actorId: "user-reviewer",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(storage.listCommentThreads("sample-file")).resolves.toEqual([
+      expect.objectContaining({ body: "@민지 처음 검수" })
+    ]);
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "@준호 수정된 검수",
+      actorId: "user-minji",
+      expectedModifiedAt: created.modifiedAt,
+      mentionTargets: [{ userId: "user-junho", displayName: "준호", role: "viewer" }]
+    });
+    expect(updated).toMatchObject({
+      body: "@준호 수정된 검수",
+      authorId: "user-minji",
+      mentions: ["준호"],
+      mentionTargets: [{ userId: "user-junho", displayName: "준호", role: "viewer" }],
+      readBy: ["user-minji"]
+    });
+    expect(updated.modifiedAt).not.toBe(created.modifiedAt);
+
+    await expect(
+      storage.updateCommentThread("sample-file", created.threadId, {
+        body: "오래된 화면의 수정",
+        actorId: "user-minji",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(storage.listCommentThreads("sample-file")).resolves.toEqual([
+      expect.objectContaining({ body: "@준호 수정된 검수", modifiedAt: updated.modifiedAt })
+    ]);
+    await expect(storage.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "edited", threadId: created.threadId })
+      ])
+    );
+  });
+
+  test("comment reply owners can edit and delete replies without leaking deleted content", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "검수 요청",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "삭제될 원문",
+      authorId: "user-replier",
+      authorName: "답글 작성자"
+    });
+    const reply = replied.replies[0];
+
+    expect(reply).toMatchObject({
+      authorId: "user-replier",
+      modifiedAt: reply.createdAt
+    });
+    await expect(
+      storage.updateCommentReply("sample-file", created.threadId, reply.replyId, {
+        body: "권한 없는 답글 수정",
+        actorId: "user-owner",
+        expectedModifiedAt: reply.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    const edited = await storage.updateCommentReply("sample-file", created.threadId, reply.replyId, {
+      body: "@민지 수정된 답글",
+      actorId: "user-replier",
+      expectedModifiedAt: reply.modifiedAt,
+      mentionTargets: [{ userId: "user-minji", displayName: "민지", role: "editor" }]
+    });
+    expect(edited.replies[0]).toMatchObject({
+      body: "@민지 수정된 답글",
+      mentions: ["민지"],
+      authorId: "user-replier"
+    });
+
+    await expect(
+      storage.deleteCommentReply("sample-file", created.threadId, reply.replyId, {
+        actorId: "user-owner",
+        expectedModifiedAt: edited.replies[0].modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    const deleted = await storage.deleteCommentReply("sample-file", created.threadId, reply.replyId, {
+      actorId: "user-replier",
+      expectedModifiedAt: edited.replies[0].modifiedAt
+    });
+    expect(deleted.replies).toEqual([]);
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 원문");
+    expect(JSON.stringify(sidecar.activity)).not.toContain("수정된 답글");
+    expect(sidecar.events.at(-1)).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId,
+      replyId: reply.replyId
+    });
+  });
+
+  test("only a thread owner can delete the thread at its current version", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "삭제될 스레드 본문",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    await storage.addCommentReply("sample-file", created.threadId, {
+      body: "삭제될 답글 본문",
+      authorId: "user-replier",
+      authorName: "답글 작성자"
+    });
+
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-other",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: "2026-01-01T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).resolves.toEqual({ threadId: created.threadId, deleted: true });
+    await expect(storage.listCommentThreads("sample-file", { includeResolved: true })).resolves.toEqual([]);
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 스레드 본문");
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 답글 본문");
+    expect(sidecar.events.at(-1)).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId
+    });
+  });
+
   test("comment threads reject a missing body with a validation error", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
