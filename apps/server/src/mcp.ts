@@ -665,7 +665,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     if (!member) {
       return undefined;
     }
-    authorizeTeamLibraryWrite(member, teamId);
+    // Penpot permits file readers, including team viewers, to participate in comments.
+    authorizeTeamLibraryRead(member, teamId);
     return member;
   };
 
