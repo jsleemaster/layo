@@ -3416,6 +3416,7 @@ export class FileStorage {
       };
       const repliedThread: StoredCommentThread = {
         ...thread,
+        modifiedAt: createdAt,
         readBy: [authorId],
         replies: [...thread.replies, reply]
       };
@@ -3479,6 +3480,7 @@ export class FileStorage {
       };
       const updatedThread: StoredCommentThread = {
         ...thread,
+        modifiedAt,
         readBy: [actorId],
         replies: thread.replies.map((candidate) =>
           candidate.replyId === replyId ? updatedReply : candidate
@@ -3526,6 +3528,7 @@ export class FileStorage {
       const deletedAt = createMonotonicCommentTimestamp();
       const updatedThread: StoredCommentThread = {
         ...thread,
+        modifiedAt: deletedAt,
         readBy: [actorId],
         replies: thread.replies.filter((candidate) => candidate.replyId !== replyId)
       };
@@ -3618,6 +3621,7 @@ export class FileStorage {
       const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
       const resolvedThread: StoredCommentThread = {
         ...thread,
+        modifiedAt: resolvedAt,
         resolvedAt
       };
       await this.writeCommentThreadFile({
