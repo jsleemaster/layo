@@ -1,11 +1,35 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { validateDocument as validateDesignFile } from "./agent-control";
 import { FileStorage } from "./storage";
 
 let tempRoot: string | undefined;
+
+function storageMutationLockDir(rootDir: string, storagePath: string) {
+  const resourceHash = createHash("sha256")
+    .update(path.resolve(storagePath))
+    .digest("hex");
+  return path.join(rootDir, "locks", `storage-mutation-${resourceHash}.lock`);
+}
+
+async function waitForPath(targetPath: string) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await stat(targetPath);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for path: ${targetPath}`);
+}
 
 afterEach(async () => {
   if (tempRoot) {
@@ -74,6 +98,134 @@ describe("FileStorage", () => {
     const projects = await storage.listProjects();
 
     expect(projects).toEqual([]);
+  });
+
+  test("concurrent project creation reserves an explicit document id exactly once", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const sharedDocumentId = "shared-explicit-file";
+    const sharedFilePath = path.join(tempRoot, "files", `${sharedDocumentId}.json`);
+    const sharedFileLockDir = storageMutationLockDir(tempRoot, sharedFilePath);
+    await mkdir(sharedFileLockDir, { recursive: true });
+    await writeFile(
+      path.join(sharedFileLockDir, "owner.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        token: "test-file-lock",
+        pid: process.pid,
+        hostname: hostname(),
+        acquiredAt: new Date().toISOString()
+      }),
+      "utf8"
+    );
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const firstCreation = firstStorage.createProject({
+      projectId: "concurrent-project-a",
+      name: "동시 프로젝트 A",
+      documentId: sharedDocumentId,
+      documentName: "동시 문서 A"
+    });
+    const secondCreation = secondStorage.createProject({
+      projectId: "concurrent-project-b",
+      name: "동시 프로젝트 B",
+      documentId: sharedDocumentId,
+      documentName: "동시 문서 B"
+    });
+
+    try {
+      await Promise.all([
+        waitForPath(
+          storageMutationLockDir(
+            tempRoot,
+            path.join(tempRoot, "projects", "concurrent-project-a.json")
+          )
+        ),
+        waitForPath(
+          storageMutationLockDir(
+            tempRoot,
+            path.join(tempRoot, "projects", "concurrent-project-b.json")
+          )
+        )
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      await rm(sharedFileLockDir, { recursive: true, force: true });
+    }
+
+    const results = await Promise.allSettled([firstCreation, secondCreation]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(rejected?.reason).toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    const verifier = new FileStorage(tempRoot);
+    const projects = await verifier.listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0].documents).toEqual([
+      expect.objectContaining({ documentId: sharedDocumentId })
+    ]);
+    await expect(verifier.readFile(sharedDocumentId)).resolves.toMatchObject({
+      id: sharedDocumentId,
+      name: projects[0].documents[0].name
+    });
+  });
+
+  test("concurrent deletion cannot remove both remaining projects", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const creator = new FileStorage(tempRoot);
+    await creator.createProject({
+      projectId: "delete-project-a",
+      name: "삭제 프로젝트 A",
+      documentId: "delete-file-a",
+      documentName: "삭제 문서 A"
+    });
+    await creator.createProject({
+      projectId: "delete-project-b",
+      name: "삭제 프로젝트 B",
+      documentId: "delete-file-b",
+      documentName: "삭제 문서 B"
+    });
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const firstListProjects = firstStorage.listProjects.bind(firstStorage);
+    const secondListProjects = secondStorage.listProjects.bind(secondStorage);
+    let listArrivals = 0;
+    let releaseLists!: () => void;
+    const bothListsArrived = new Promise<void>((resolve) => {
+      releaseLists = resolve;
+    });
+    const holdList = (listProjects: () => ReturnType<FileStorage["listProjects"]>) =>
+      async () => {
+        const projects = await listProjects();
+        listArrivals += 1;
+        if (listArrivals === 2) {
+          releaseLists();
+        }
+        await Promise.race([
+          bothListsArrived,
+          new Promise<void>((resolve) => setTimeout(resolve, 500))
+        ]);
+        return projects;
+      };
+    firstStorage.listProjects = holdList(firstListProjects);
+    secondStorage.listProjects = holdList(secondListProjects);
+
+    const results = await Promise.allSettled([
+      firstStorage.deleteProject("delete-project-a"),
+      secondStorage.deleteProject("delete-project-b")
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const verifier = new FileStorage(tempRoot);
+    const projects = await verifier.listProjects();
+    expect(projects).toHaveLength(1);
+    await expect(
+      verifier.readFile(projects[0].currentDocumentId)
+    ).resolves.toMatchObject({ id: projects[0].currentDocumentId });
   });
 
   test("cannot replace an existing shared project through project creation", async () => {
