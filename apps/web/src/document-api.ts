@@ -1218,9 +1218,11 @@ export async function resolveCommentThread(
   fetcher: typeof fetch = fetch,
   credentials?: LibraryRegistryCredentials
 ): Promise<CommentThread> {
+  const headers = libraryRegistryWriteHeaders(credentials);
+  delete headers["Content-Type"];
   const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}/resolve`), {
     method: "POST",
-    headers: libraryRegistryWriteHeaders(credentials)
+    headers
   });
   const payload = await readDocumentJson(response);
   return (payload as { thread: CommentThread }).thread;
