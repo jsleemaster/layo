@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   FileStorage,
   type CodeComponentMapping,
+  type CommentAuthorizationBoundary,
   type DesignFile,
   type DesignNode,
   type StoredCommentMentionTarget,
@@ -639,35 +640,48 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     }
   };
 
+  interface CommentAuthorization {
+    member?: AuthenticatedTeamMember;
+    authorizationBoundary?: CommentAuthorizationBoundary;
+  }
+
   const authorizeCommentRead = async (
     fileId: string
-  ): Promise<AuthenticatedTeamMember | undefined> => {
-    const teamId = await storage.getTeamIdForFile(fileId);
-    if (!teamId || !teamAuthorizationProvider) {
-      return undefined;
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
     }
     const member = await authenticateTeamMember();
-    if (!member) {
-      return undefined;
-    }
-    authorizeTeamLibraryRead(member, teamId);
-    return member;
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
   };
 
   const authorizeCommentWrite = async (
     fileId: string
-  ): Promise<AuthenticatedTeamMember | undefined> => {
-    const teamId = await storage.getTeamIdForFile(fileId);
-    if (!teamId || !teamAuthorizationProvider) {
-      return undefined;
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
     }
     const member = await authenticateTeamMember();
-    if (!member) {
-      return undefined;
-    }
     // Penpot permits file readers, including team viewers, to participate in comments.
-    authorizeTeamLibraryRead(member, teamId);
-    return member;
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
   };
 
   const commentActorId = (
@@ -1910,7 +1924,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, includeResolved, viewerId }) => {
-      const member = await authorizeCommentRead(fileId);
+      const { member } = await authorizeCommentRead(fileId);
       return {
         content: [
           {
@@ -1947,7 +1961,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, nodeId, body, authorId, authorName, mentionTargets }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       return {
         content: [
           {
@@ -1961,7 +1976,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                   authorId: member?.userId ?? authorId,
                   authorName: member?.userId ?? authorName,
                   mentionTargets
-                })
+                }, { authorizationBoundary })
               },
               null,
               2
@@ -1988,7 +2003,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, body, actorId, expectedModifiedAt, mentionTargets, dryRun }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
         await commentThreadForReview(fileId, threadId),
@@ -2015,7 +2031,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                         actorId: resolvedActorId,
                         expectedModifiedAt,
                         mentionTargets: mentionTargets as StoredCommentMentionTarget[] | undefined
-                      })
+                      }, { authorizationBoundary })
                     })
               },
               null,
@@ -2041,7 +2057,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, actorId, expectedModifiedAt, dryRun }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
         await commentThreadForReview(fileId, threadId),
@@ -2062,10 +2079,15 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                 ...(isDryRun
                   ? {}
                   : {
-                      deleted: await storage.deleteCommentThread(fileId, threadId, {
-                        actorId: resolvedActorId,
-                        expectedModifiedAt
-                      })
+                      deleted: await storage.deleteCommentThread(
+                        fileId,
+                        threadId,
+                        {
+                          actorId: resolvedActorId,
+                          expectedModifiedAt
+                        },
+                        { authorizationBoundary }
+                      )
                     })
               },
               null,
@@ -2138,7 +2160,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       return {
         content: [
           {
@@ -2146,7 +2169,12 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             text: JSON.stringify(
               {
                 fileId,
-                thread: await storage.resolveCommentThread(fileId, threadId, member?.userId)
+                thread: await storage.resolveCommentThread(
+                  fileId,
+                  threadId,
+                  member?.userId,
+                  { authorizationBoundary }
+                )
               },
               null,
               2
@@ -2169,7 +2197,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, viewerId }) => {
-      const member = await authorizeCommentRead(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
       return {
         content: [
           {
@@ -2177,9 +2206,12 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             text: JSON.stringify(
               {
                 fileId,
-                thread: await storage.markCommentThreadRead(fileId, threadId, {
-                  viewerId: member?.userId ?? viewerId
-                })
+                thread: await storage.markCommentThreadRead(
+                  fileId,
+                  threadId,
+                  { viewerId: member?.userId ?? viewerId },
+                  { authorizationBoundary }
+                )
               },
               null,
               2
@@ -2201,7 +2233,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, viewerId }) => {
-      const member = await authorizeCommentRead(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
       return {
         content: [
           {
@@ -2209,9 +2242,11 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             text: JSON.stringify(
               {
                 fileId,
-                threads: await storage.markFileCommentsRead(fileId, {
-                  viewerId: member?.userId ?? viewerId
-                })
+                threads: await storage.markFileCommentsRead(
+                  fileId,
+                  { viewerId: member?.userId ?? viewerId },
+                  { authorizationBoundary }
+                )
               },
               null,
               2
@@ -2237,7 +2272,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, body, authorId, authorName, mentionTargets }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       return {
         content: [
           {
@@ -2250,7 +2286,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                   authorId: member?.userId ?? authorId,
                   authorName: member?.userId ?? authorName,
                   mentionTargets
-                })
+                }, { authorizationBoundary })
               },
               null,
               2
@@ -2278,7 +2314,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, replyId, body, actorId, expectedModifiedAt, mentionTargets, dryRun }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
         await commentThreadForReview(fileId, threadId),
@@ -2309,7 +2346,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                           actorId: resolvedActorId,
                           expectedModifiedAt,
                           mentionTargets: mentionTargets as StoredCommentMentionTarget[] | undefined
-                        }
+                        },
+                        { authorizationBoundary }
                       )
                     })
               },
@@ -2337,7 +2375,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId, replyId, actorId, expectedModifiedAt, dryRun }) => {
-      const member = await authorizeCommentWrite(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
         await commentThreadForReview(fileId, threadId),
@@ -2366,7 +2405,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                         {
                           actorId: resolvedActorId,
                           expectedModifiedAt
-                        }
+                        },
+                        { authorizationBoundary }
                       )
                     })
               },
