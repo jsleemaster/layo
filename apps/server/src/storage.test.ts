@@ -172,6 +172,39 @@ describe("FileStorage", () => {
     });
   });
 
+  test("project duplication reserves every destination document before writing", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createProjectDocument("test-project", {
+      documentId: "second-file",
+      name: "두 번째 문서"
+    });
+    await storage.createProject({
+      projectId: "collision-owner",
+      name: "충돌 소유 프로젝트",
+      documentId: "copy-second-file",
+      documentName: "보존할 충돌 문서"
+    });
+
+    await expect(
+      storage.duplicateProject("test-project", {
+        projectId: "copy-project",
+        documentIdPrefix: "copy"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(storage.readProject("copy-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(storage.readFile("copy-sample-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(storage.readFile("copy-second-file")).resolves.toMatchObject({
+      id: "copy-second-file",
+      name: "보존할 충돌 문서"
+    });
+  });
+
   test("concurrent deletion cannot remove both remaining projects", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const creator = new FileStorage(tempRoot);

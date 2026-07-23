@@ -1461,6 +1461,19 @@ export class FileStorage {
     return path.join(this.filesDir, ".asset-references");
   }
 
+  private projectCollectionMutationPath() {
+    return path.join(this.projectsDir, ".collection");
+  }
+
+  private async withProjectCollectionMutationLock<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(
+      this.projectCollectionMutationPath(),
+      operation
+    );
+  }
+
   private async withProjectMutationLock<T>(
     projectId: string,
     operation: () => Promise<T>
@@ -1497,6 +1510,71 @@ export class FileStorage {
     return withStoragePathMutationLock(
       this.filePathFor(fileId),
       () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
+    );
+  }
+
+  // Keep the global lock order aligned with single-file mutations: file paths, then assets.
+  private async withOrderedFileMutationLocks<T>(
+    fileIds: readonly string[],
+    operation: () => Promise<T>,
+    index = 0
+  ): Promise<T> {
+    const fileId = fileIds[index];
+    if (!fileId) {
+      return withAssetReferenceMutationLock(
+        this.assetReferenceMutationPath(),
+        operation
+      );
+    }
+    return withStoragePathMutationLock(
+      this.filePathFor(fileId),
+      () => this.withOrderedFileMutationLocks(fileIds, operation, index + 1)
+    );
+  }
+
+  private async withExclusiveProjectFiles<T>(
+    files: Array<{ fileId: string; document: DesignFile }>,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const entries = [...files].sort((first, second) =>
+      first.fileId.localeCompare(second.fileId)
+    );
+    if (new Set(entries.map((entry) => entry.fileId)).size !== entries.length) {
+      throw inputValidationError("project document ids must be unique");
+    }
+    for (const entry of entries) {
+      assertSafeStorageId(entry.fileId);
+    }
+
+    return this.withOrderedFileMutationLocks(
+      entries.map((entry) => entry.fileId),
+      async () => {
+        for (const entry of entries) {
+          if (await pathExists(this.filePathFor(entry.fileId))) {
+            throw Object.assign(
+              new Error(`project document already exists: ${entry.fileId}`),
+              { code: "EEXIST", statusCode: 409 }
+            );
+          }
+        }
+
+        try {
+          for (const entry of entries) {
+            await this.writeFileWithoutMutationLock(
+              entry.fileId,
+              entry.document
+            );
+          }
+          return await operation();
+        } catch (error) {
+          await Promise.all(
+            entries.map((entry) =>
+              rm(this.filePathFor(entry.fileId), { force: true })
+            )
+          );
+          throw error;
+        }
+      }
     );
   }
 
@@ -1785,23 +1863,32 @@ export class FileStorage {
           statusCode: 409
         });
       }
-      if (await pathExists(this.filePathFor(documentId))) {
-        throw Object.assign(new Error(`project document already exists: ${documentId}`), {
-          code: "EEXIST",
-          statusCode: 409
-        });
-      }
-      await this.writeFile(documentId, createInitialDesignFile(documentId, documentName));
-      return this.writeProject({
-        schemaVersion: 1,
-        projectId,
-        name: projectName,
-        createdAt: now,
-        updatedAt: now,
-        currentDocumentId: documentId,
-        documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
-        sharing: { mode: "private" }
-      });
+      return this.withExclusiveProjectFiles(
+        [
+          {
+            fileId: documentId,
+            document: createInitialDesignFile(documentId, documentName)
+          }
+        ],
+        () =>
+          this.writeProject({
+            schemaVersion: 1,
+            projectId,
+            name: projectName,
+            createdAt: now,
+            updatedAt: now,
+            currentDocumentId: documentId,
+            documents: [
+              {
+                documentId,
+                name: documentName,
+                createdAt: now,
+                updatedAt: now
+              }
+            ],
+            sharing: { mode: "private" }
+          })
+      );
     });
   }
 
@@ -1838,10 +1925,7 @@ export class FileStorage {
       const now = new Date().toISOString();
       const documentId = input.documentId ?? createStorageId("document");
       assertSafeStorageId(documentId);
-      if (
-        project.documents.some((document) => document.documentId === documentId)
-        || await pathExists(this.filePathFor(documentId))
-      ) {
+      if (project.documents.some((document) => document.documentId === documentId)) {
         throw Object.assign(new Error(`project document already exists: ${documentId}`), {
           code: "EEXIST",
           statusCode: 409
@@ -1849,13 +1933,24 @@ export class FileStorage {
       }
 
       const name = normalizeName(input.name, "새 문서");
-      await this.writeFile(documentId, createInitialDesignFile(documentId, name));
-      return this.writeProject({
-        ...project,
-        updatedAt: now,
-        currentDocumentId: documentId,
-        documents: [...project.documents, { documentId, name, createdAt: now, updatedAt: now }]
-      });
+      return this.withExclusiveProjectFiles(
+        [
+          {
+            fileId: documentId,
+            document: createInitialDesignFile(documentId, name)
+          }
+        ],
+        () =>
+          this.writeProject({
+            ...project,
+            updatedAt: now,
+            currentDocumentId: documentId,
+            documents: [
+              ...project.documents,
+              { documentId, name, createdAt: now, updatedAt: now }
+            ]
+          })
+      );
     });
   }
 
@@ -1910,22 +2005,24 @@ export class FileStorage {
       }
 
       const documents: ProjectDocumentSummary[] = [];
+      const files: Array<{ fileId: string; document: DesignFile }> = [];
       let currentDocumentId = "";
       for (const sourceDocument of source.documents) {
         const documentId = input.documentIdPrefix
           ? `${input.documentIdPrefix}-${sourceDocument.documentId}`
           : createStorageId("document");
         assertSafeStorageId(documentId);
-        if (await pathExists(this.filePathFor(documentId))) {
-          throw Object.assign(new Error(`document already exists: ${documentId}`), {
-            code: "EEXIST",
-            statusCode: 409
-          });
-        }
 
         const document = await this.readFile(sourceDocument.documentId);
         const name = `${sourceDocument.name} 사본`;
-        await this.writeFile(documentId, { ...structuredClone(document), id: documentId, name });
+        files.push({
+          fileId: documentId,
+          document: {
+            ...structuredClone(document),
+            id: documentId,
+            name
+          }
+        });
         documents.push({
           documentId,
           name,
@@ -1937,16 +2034,20 @@ export class FileStorage {
         }
       }
 
-      return this.writeProject({
-        schemaVersion: 1,
-        projectId,
-        name: normalizeName(input.name, `${source.name} 사본`),
-        createdAt: now,
-        updatedAt: now,
-        currentDocumentId: currentDocumentId || documents[0].documentId,
-        documents,
-        sharing: { mode: "private" }
-      });
+      return this.withExclusiveProjectFiles(
+        files,
+        () =>
+          this.writeProject({
+            schemaVersion: 1,
+            projectId,
+            name: normalizeName(input.name, `${source.name} 사본`),
+            createdAt: now,
+            updatedAt: now,
+            currentDocumentId: currentDocumentId || documents[0].documentId,
+            documents,
+            sharing: { mode: "private" }
+          })
+      );
     });
   }
 
@@ -1954,31 +2055,37 @@ export class FileStorage {
     projectId: string,
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    return this.withProjectMutationLock(projectId, async () => {
-      const projects = await this.listProjects();
-      const project = projects.find((candidate) => candidate.projectId === projectId);
-      if (!project) {
-        throw new Error(`project not found: ${projectId}`);
-      }
-      this.assertExpectedProjectSharing(project, options.expectedSharing);
-      if (projects.length <= 1) {
-        throw new Error("cannot delete last project");
-      }
+    return this.withProjectCollectionMutationLock(() =>
+      this.withProjectMutationLock(projectId, async () => {
+        const projects = await this.listProjects();
+        const project = projects.find((candidate) => candidate.projectId === projectId);
+        if (!project) {
+          throw new Error(`project not found: ${projectId}`);
+        }
+        this.assertExpectedProjectSharing(project, options.expectedSharing);
+        if (projects.length <= 1) {
+          throw new Error("cannot delete last project");
+        }
 
-      const otherDocumentIds = new Set(
-        projects
-          .filter((candidate) => candidate.projectId !== projectId)
-          .flatMap((candidate) => candidate.documents.map((document) => document.documentId))
-      );
-      await rm(this.projectPathFor(project.projectId), { force: true });
-      await Promise.all(
-        project.documents
-          .filter((document) => !otherDocumentIds.has(document.documentId))
-          .map((document) => rm(this.filePathFor(document.documentId), { force: true }))
-      );
+        const otherDocumentIds = new Set(
+          projects
+            .filter((candidate) => candidate.projectId !== projectId)
+            .flatMap((candidate) =>
+              candidate.documents.map((document) => document.documentId)
+            )
+        );
+        await rm(this.projectPathFor(project.projectId), { force: true });
+        await Promise.all(
+          project.documents
+            .filter((document) => !otherDocumentIds.has(document.documentId))
+            .map((document) =>
+              rm(this.filePathFor(document.documentId), { force: true })
+            )
+        );
 
-      return project;
-    });
+        return project;
+      })
+    );
   }
 
   async listCommentNotifications(
@@ -2336,6 +2443,7 @@ export class FileStorage {
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
     assertSafeStorageId(documentId);
+
     return this.withProjectMutationLock(projectId, async () => {
       if (await pathExists(this.projectPathFor(projectId))) {
         throw Object.assign(new Error(`project already exists: ${projectId}`), {
@@ -2343,103 +2451,126 @@ export class FileStorage {
           statusCode: 409
         });
       }
-    if (await pathExists(this.filePathFor(documentId))) {
-      throw inputValidationError(`document already exists: ${documentId}`);
-    }
 
-    const imported = importExternalMigrationDesignArchive(archive, {
-      fileId: documentId,
-      fileName: options.fileName,
-      sourceHint: options.sourceHint,
-      name: options.documentName ?? options.name
-    });
-    const documentName = normalizeName(options.documentName ?? options.name, imported.file.name);
-    const projectName = normalizeName(options.name, documentName);
-    const now = new Date().toISOString();
-    const file: DesignFile = {
-      ...imported.file,
-      id: documentId,
-      name: documentName
-    };
-    const importedLibraries = imported.importedLibraries ?? [];
-    const libraryFiles = importedLibraries.map((library) => ({
-      sourceFileId: library.sourceFileId,
-      file: structuredClone(library.file)
-    }));
-    const libraryFileIds = new Set<string>();
-    for (const library of libraryFiles) {
-      assertSafeStorageId(library.file.id);
-      if (library.file.id === documentId || libraryFileIds.has(library.file.id)) {
-        throw inputValidationError(`external migration library document id is ambiguous: ${library.file.id}`);
-      }
-      if (await pathExists(this.filePathFor(library.file.id))) {
-        throw inputValidationError(`document already exists: ${library.file.id}`);
-      }
-      libraryFileIds.add(library.file.id);
-    }
-
-    await Promise.all(imported.importedAssets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-    await this.writeFile(documentId, file);
-    for (const library of libraryFiles) {
-      await this.writeFile(library.file.id, library.file);
-    }
-    const documents: ProjectDocumentSummary[] = [
-      { documentId, name: documentName, createdAt: now, updatedAt: now },
-      ...libraryFiles.map((library) => ({
-        documentId: library.file.id,
-        name: library.file.name,
-        createdAt: now,
-        updatedAt: now
-      }))
-    ];
-    const project = await this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: projectName,
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents,
-      sharing: { mode: "private" }
-    });
-
-    for (const library of libraryFiles) {
-      const entry = await this.publishLibraryToRegistry(library.file.id, {
-        libraryId: library.file.id,
-        name: library.file.name
+      const imported = importExternalMigrationDesignArchive(archive, {
+        fileId: documentId,
+        fileName: options.fileName,
+        sourceHint: options.sourceHint,
+        name: options.documentName ?? options.name
       });
-      const componentIdMap = Object.fromEntries(
-        (library.file.components ?? []).map((component) => [component.id, component.id])
+      const documentName = normalizeName(
+        options.documentName ?? options.name,
+        imported.file.name
       );
-      await this.upsertLibraryRegistrySubscription(
-        documentId,
-        entry,
-        {
-          fileId: documentId,
-          originalFileId: library.sourceFileId,
-          originalName: library.file.name,
-          componentCount: library.file.components?.length ?? 0,
-          tokenCount: library.file.tokens?.length ?? 0,
-          assetCount: collectComponentImageAssetIds(library.file.components ?? []).length,
-          componentIdMap,
-          tokenIdMap: {},
-          libraryId: entry.libraryId,
-          libraryName: entry.name
-        },
-        undefined
-      );
-    }
+      const projectName = normalizeName(options.name, documentName);
+      const now = new Date().toISOString();
+      const file: DesignFile = {
+        ...imported.file,
+        id: documentId,
+        name: documentName
+      };
+      const importedLibraries = imported.importedLibraries ?? [];
+      const libraryFiles = importedLibraries.map((library) => ({
+        sourceFileId: library.sourceFileId,
+        file: structuredClone(library.file)
+      }));
+      const libraryFileIds = new Set<string>();
+      for (const library of libraryFiles) {
+        assertSafeStorageId(library.file.id);
+        if (
+          library.file.id === documentId
+          || libraryFileIds.has(library.file.id)
+        ) {
+          throw inputValidationError(
+            `external migration library document id is ambiguous: ${library.file.id}`
+          );
+        }
+        libraryFileIds.add(library.file.id);
+      }
 
-    return {
-      project,
-      file,
-      source: imported.source,
-      sourceLabel: imported.sourceLabel,
-      assetCount: imported.importedAssets.length,
-      mappedNodeCount: imported.mappedNodeCount,
-      skippedNodeCount: imported.skippedNodeCount,
-      warnings: imported.warnings
-    };
+      const documents: ProjectDocumentSummary[] = [
+        {
+          documentId,
+          name: documentName,
+          createdAt: now,
+          updatedAt: now
+        },
+        ...libraryFiles.map((library) => ({
+          documentId: library.file.id,
+          name: library.file.name,
+          createdAt: now,
+          updatedAt: now
+        }))
+      ];
+      const project = await this.withExclusiveProjectFiles(
+        [
+          { fileId: documentId, document: file },
+          ...libraryFiles.map((library) => ({
+            fileId: library.file.id,
+            document: library.file
+          }))
+        ],
+        async () => {
+          await Promise.all(
+            imported.importedAssets.map((asset) =>
+              this.writeAsset(asset.metadata, asset.data)
+            )
+          );
+          return this.writeProject({
+            schemaVersion: 1,
+            projectId,
+            name: projectName,
+            createdAt: now,
+            updatedAt: now,
+            currentDocumentId: documentId,
+            documents,
+            sharing: { mode: "private" }
+          });
+        }
+      );
+
+      for (const library of libraryFiles) {
+        const entry = await this.publishLibraryToRegistry(library.file.id, {
+          libraryId: library.file.id,
+          name: library.file.name
+        });
+        const componentIdMap = Object.fromEntries(
+          (library.file.components ?? []).map((component) => [
+            component.id,
+            component.id
+          ])
+        );
+        await this.upsertLibraryRegistrySubscription(
+          documentId,
+          entry,
+          {
+            fileId: documentId,
+            originalFileId: library.sourceFileId,
+            originalName: library.file.name,
+            componentCount: library.file.components?.length ?? 0,
+            tokenCount: library.file.tokens?.length ?? 0,
+            assetCount: collectComponentImageAssetIds(
+              library.file.components ?? []
+            ).length,
+            componentIdMap,
+            tokenIdMap: {},
+            libraryId: entry.libraryId,
+            libraryName: entry.name
+          },
+          undefined
+        );
+      }
+
+      return {
+        project,
+        file,
+        source: imported.source,
+        sourceLabel: imported.sourceLabel,
+        assetCount: imported.importedAssets.length,
+        mappedNodeCount: imported.mappedNodeCount,
+        skippedNodeCount: imported.skippedNodeCount,
+        warnings: imported.warnings
+      };
     });
   }
 
@@ -2454,6 +2585,7 @@ export class FileStorage {
     if (options.documentIdPrefix !== undefined) {
       assertSafeStorageId(options.documentIdPrefix);
     }
+
     return this.withProjectMutationLock(projectId, async () => {
       if (await pathExists(this.projectPathFor(projectId))) {
         throw Object.assign(new Error(`project already exists: ${projectId}`), {
@@ -2462,61 +2594,73 @@ export class FileStorage {
         });
       }
 
-    const documentIdMap: Record<string, string> = {};
-    for (const document of archiveProject.documents) {
-      const nextDocumentId = options.documentIdPrefix
-        ? `${options.documentIdPrefix}-${document.id}`
-        : createStorageId("document");
-      assertSafeStorageId(nextDocumentId);
-      if (await pathExists(this.filePathFor(nextDocumentId))) {
-        throw new Error(`document already exists: ${nextDocumentId}`);
+      const documentIdMap: Record<string, string> = {};
+      for (const document of archiveProject.documents) {
+        const nextDocumentId = options.documentIdPrefix
+          ? `${options.documentIdPrefix}-${document.id}`
+          : createStorageId("document");
+        assertSafeStorageId(nextDocumentId);
+        documentIdMap[document.id] = nextDocumentId;
       }
-      documentIdMap[document.id] = nextDocumentId;
-    }
 
-    await Promise.all(archiveProject.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-
-    const documents: ProjectDocumentSummary[] = [];
-    for (const archivedSummary of archiveProject.project.documents) {
-      const archivedDocument = archiveProject.documentsById.get(archivedSummary.documentId);
-      const documentId = documentIdMap[archivedSummary.documentId];
-      if (!archivedDocument || !documentId) {
-        throw new Error(`project archive document missing: ${archivedSummary.documentId}`);
+      const documents: ProjectDocumentSummary[] = [];
+      const files: Array<{ fileId: string; document: DesignFile }> = [];
+      for (const archivedSummary of archiveProject.project.documents) {
+        const archivedDocument = archiveProject.documentsById.get(
+          archivedSummary.documentId
+        );
+        const documentId = documentIdMap[archivedSummary.documentId];
+        if (!archivedDocument || !documentId) {
+          throw new Error(
+            `project archive document missing: ${archivedSummary.documentId}`
+          );
+        }
+        const document: DesignFile = {
+          ...structuredClone(archivedDocument),
+          id: documentId,
+          name: normalizeName(archivedDocument.name, archivedSummary.name)
+        };
+        files.push({ fileId: documentId, document });
+        documents.push({
+          documentId,
+          name: document.name,
+          createdAt: now,
+          updatedAt: now
+        });
       }
-      const document: DesignFile = {
-        ...structuredClone(archivedDocument),
-        id: documentId,
-        name: normalizeName(archivedDocument.name, archivedSummary.name)
+
+      const currentDocumentId =
+        documentIdMap[archiveProject.project.currentDocumentId]
+        ?? documents[0].documentId;
+      const project = await this.withExclusiveProjectFiles(
+        files,
+        async () => {
+          await Promise.all(
+            archiveProject.assets.map((asset) =>
+              this.writeAsset(asset.metadata, asset.data)
+            )
+          );
+          return this.writeProject({
+            schemaVersion: 1,
+            projectId,
+            name: normalizeName(options.name, archiveProject.project.name),
+            createdAt: now,
+            updatedAt: now,
+            currentDocumentId,
+            documents,
+            sharing: { mode: "private" }
+          });
+        }
+      );
+
+      return {
+        project,
+        originalProjectId: archiveProject.manifest.projectId,
+        originalName: archiveProject.manifest.name,
+        documentCount: archiveProject.documents.length,
+        assetCount: archiveProject.assetIds.length,
+        documentIdMap
       };
-      await this.writeFile(documentId, document);
-      documents.push({
-        documentId,
-        name: document.name,
-        createdAt: now,
-        updatedAt: now
-      });
-    }
-
-    const currentDocumentId = documentIdMap[archiveProject.project.currentDocumentId] ?? documents[0].documentId;
-    const project = await this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: normalizeName(options.name, archiveProject.project.name),
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId,
-      documents,
-      sharing: { mode: "private" }
-    });
-
-    return {
-      project,
-      originalProjectId: archiveProject.manifest.projectId,
-      originalName: archiveProject.manifest.name,
-      documentCount: archiveProject.documents.length,
-      assetCount: archiveProject.assetIds.length,
-      documentIdMap
-    };
     });
   }
 
