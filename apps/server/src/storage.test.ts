@@ -2429,6 +2429,51 @@ describe("FileStorage", () => {
     });
   });
 
+  test("keeps the canonical comment sidecar when a legacy spelling resolves to the same entry", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "alias-comment-project",
+      name: "경로 별칭 코멘트 프로젝트",
+      documentId: "Alias-File",
+      documentName: "경로 별칭 코멘트 문서"
+    });
+
+    const internals = storage as unknown as {
+      legacyCommentThreadsPathFor(fileId: string): string;
+    };
+    internals.legacyCommentThreadsPathFor = () =>
+      path.join(
+        tempRoot,
+        "comments",
+        "..",
+        "comments",
+        "alias-file.json"
+      );
+
+    const created = await storage.createCommentThread("Alias-File", {
+      nodeId: "text-1",
+      body: "같은 엔트리를 지우면 안 됨",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    await expect(
+      storage.listCommentThreads("Alias-File", { includeResolved: true })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        threadId: created.threadId,
+        body: "같은 엔트리를 지우면 안 됨"
+      })
+    ]);
+    await expect(
+      readFile(
+        path.join(tempRoot, "comments", "alias-file.json"),
+        "utf8"
+      )
+    ).resolves.toContain("같은 엔트리를 지우면 안 됨");
+  });
+
   test("comment threads keep replies in the sidecar store", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
