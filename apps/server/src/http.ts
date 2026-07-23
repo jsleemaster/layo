@@ -146,7 +146,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     if (!member) {
       return undefined;
     }
-    authorizeTeamLibraryWrite(member, teamId);
+    // Penpot permits file readers, including team viewers, to participate in comments.
+    authorizeTeamLibraryRead(member, teamId);
     return member;
   };
 
