@@ -2300,25 +2300,13 @@ describe("Penpot component instance migration", () => {
         name: "Shape library"
       });
 
-      const internals = storage as unknown as {
-        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
-      };
-      let markSubscriptionReached!: () => void;
-      const subscriptionReached = new Promise<void>((resolve) => {
-        markSubscriptionReached = resolve;
-      });
-      const neverCommits = new Promise<void>(() => undefined);
-      internals.writeLibraryRegistrySubscriptions = async () => {
-        markSubscriptionReached();
-        await neverCommits;
-      };
-
-      const interruptedUpdate = storage.updateLibraryRegistryItem(
-        "penpot-restart-target",
-        libraryDocumentId
+      await expectStorageWorkerCrash(
+        root,
+        "library-update-crash-before-subscription",
+        ["penpot-restart-target", libraryDocumentId],
+        94,
+        "library-update-before-subscription-crashing"
       );
-      void interruptedUpdate.catch(() => undefined);
-      await subscriptionReached;
       expect(
         (await storage.readFile("penpot-restart-target")).components?.find(
           (component) => component.id === `penpot-component-${circleComponentId}`
@@ -2367,7 +2355,6 @@ describe("Penpot component instance migration", () => {
           },
           data: Buffer
         ): Promise<unknown>;
-        removeLibraryUpdateRecoveryJournal(fileId: string): Promise<void>;
       };
       await internals.writeAsset(
         { ...originalAsset, byteLength: publishedAssetData.length },
@@ -2385,22 +2372,13 @@ describe("Penpot component instance migration", () => {
       });
       await internals.writeAsset(originalAsset, originalAsset.data);
 
-      let markCleanupReached!: () => void;
-      const cleanupReached = new Promise<void>((resolve) => {
-        markCleanupReached = resolve;
-      });
-      const neverCleans = new Promise<void>(() => undefined);
-      internals.removeLibraryUpdateRecoveryJournal = async () => {
-        markCleanupReached();
-        await neverCleans;
-      };
-
-      const interruptedUpdate = storage.updateLibraryRegistryItem(
-        "penpot-commit-restart-target",
-        libraryDocumentId
+      await expectStorageWorkerCrash(
+        root,
+        "library-update-crash-after-commit",
+        ["penpot-commit-restart-target", libraryDocumentId],
+        93,
+        "library-update-crashing"
       );
-      void interruptedUpdate.catch(() => undefined);
-      await cleanupReached;
       expect(
         (await storage.readFile("penpot-commit-restart-target")).components?.find(
           (component) => component.id === `penpot-component-${circleComponentId}`
@@ -2445,26 +2423,17 @@ describe("Penpot component instance migration", () => {
         name: "Shape library"
       });
 
+      await expectStorageWorkerCrash(
+        root,
+        "library-update-crash-before-subscription",
+        ["penpot-restart-conflict-target", libraryDocumentId],
+        94,
+        "library-update-before-subscription-crashing"
+      );
+
       const internals = storage as unknown as {
-        writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
         filePathFor(fileId: string): string;
       };
-      let markSubscriptionReached!: () => void;
-      const subscriptionReached = new Promise<void>((resolve) => {
-        markSubscriptionReached = resolve;
-      });
-      const neverCommits = new Promise<void>(() => undefined);
-      internals.writeLibraryRegistrySubscriptions = async () => {
-        markSubscriptionReached();
-        await neverCommits;
-      };
-      const interruptedUpdate = storage.updateLibraryRegistryItem(
-        "penpot-restart-conflict-target",
-        libraryDocumentId
-      );
-      void interruptedUpdate.catch(() => undefined);
-      await subscriptionReached;
-
       const externalTarget = await storage.readFile("penpot-restart-conflict-target");
       externalTarget.name = "External writer after interruption";
       await writeRawFile(
