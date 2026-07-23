@@ -2871,7 +2871,7 @@ describe("Penpot component instance migration", () => {
         "project-import-crashing"
       );
 
-      await delay(200);
+      await Promise.race([crashPromise, delay(4_000)]);
       releaseWaiting();
       await Promise.all([
         crashPromise,
