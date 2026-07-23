@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -2439,17 +2439,16 @@ describe("FileStorage", () => {
       documentName: "경로 별칭 코멘트 문서"
     });
 
+    const commentsDir = path.join(tempRoot!, "comments");
+    const commentsAliasDir = path.join(tempRoot!, "comments-alias");
+    await mkdir(commentsDir, { recursive: true });
+    await symlink(commentsDir, commentsAliasDir, "dir");
+
     const internals = storage as unknown as {
       legacyCommentThreadsPathFor(fileId: string): string;
     };
     internals.legacyCommentThreadsPathFor = () =>
-      path.join(
-        tempRoot!,
-        "comments",
-        "..",
-        "comments",
-        "alias-file.json"
-      );
+      path.join(commentsAliasDir, "alias-file.json");
 
     const created = await storage.createCommentThread("Alias-File", {
       nodeId: "text-1",
