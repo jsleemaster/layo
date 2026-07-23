@@ -2138,7 +2138,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, threadId }) => {
-      await authorizeCommentWrite(fileId);
+      const member = await authorizeCommentWrite(fileId);
       return {
         content: [
           {
@@ -2146,7 +2146,7 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
             text: JSON.stringify(
               {
                 fileId,
-                thread: await storage.resolveCommentThread(fileId, threadId)
+                thread: await storage.resolveCommentThread(fileId, threadId, member?.userId)
               },
               null,
               2

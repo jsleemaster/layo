@@ -1139,10 +1139,11 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{ Params: { fileId: string; threadId: string } }>(
     "/files/:fileId/comments/:threadId/resolve",
     async (request) => {
-      await authorizeCommentWrite(request, request.params.fileId);
+      const member = await authorizeCommentWrite(request, request.params.fileId);
       const thread = await storage.resolveCommentThread(
         request.params.fileId,
-        request.params.threadId
+        request.params.threadId,
+        member?.userId
       );
       return { thread };
     }

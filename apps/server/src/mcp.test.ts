@@ -2384,6 +2384,32 @@ describe("MCP AI editing workflow", () => {
       body: "viewer도 피드백 가능"
     });
 
+    const resolved = parseToolJson(
+      await client.callTool({
+        name: "resolve_comment_thread",
+        arguments: {
+          fileId: "comment-file",
+          threadId: created.thread.threadId
+        }
+      })
+    );
+    const activity = parseToolJson(
+      await client.callTool({
+        name: "list_comment_activity",
+        arguments: { viewerId: "spoofed-viewer", limit: 8 }
+      })
+    );
+    expect(
+      activity.feed.events.find(
+        (event: { type: string; threadId: string }) =>
+          event.type === "resolved"
+          && event.threadId === created.thread.threadId
+      )
+    ).toMatchObject({
+      actorName: "comment-viewer",
+      body: "viewer도 피드백 가능"
+    });
+
     const updated = parseToolJson(
       await client.callTool({
         name: "update_comment_thread",
@@ -2391,7 +2417,7 @@ describe("MCP AI editing workflow", () => {
           fileId: "comment-file",
           threadId: created.thread.threadId,
           body: "viewer 피드백 수정",
-          expectedModifiedAt: created.thread.modifiedAt,
+          expectedModifiedAt: resolved.thread.modifiedAt,
           dryRun: false
         }
       })

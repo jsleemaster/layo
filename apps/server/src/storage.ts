@@ -3676,9 +3676,14 @@ export class FileStorage {
     });
   }
 
-  async resolveCommentThread(fileId: string, threadId: string): Promise<StoredCommentThread> {
+  async resolveCommentThread(
+    fileId: string,
+    threadId: string,
+    actorName = "사용자"
+  ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     await this.readFile(fileId);
+    const resolvedActorName = normalizeName(actorName, "사용자");
     return this.withCommentMutationLock(fileId, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
@@ -3699,7 +3704,7 @@ export class FileStorage {
           threadId,
           nodeId: thread.nodeId,
           nodeName: thread.nodeName,
-          actorName: "사용자",
+          actorName: resolvedActorName,
           body: thread.body,
           mentions: thread.mentions,
           mentionTargets: thread.mentionTargets,
