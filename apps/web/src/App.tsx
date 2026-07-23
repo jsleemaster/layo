@@ -1433,6 +1433,7 @@ interface ExternalMigrationReviewState {
   review: ExternalMigrationReview;
   archiveBase64: string;
   sourceFileName: string;
+  idempotencyKey: string;
 }
 
 interface LibraryArchiveReviewState {
@@ -1453,6 +1454,7 @@ interface ProjectArchiveReviewState {
   review: ProjectArchiveReview;
   archiveBase64: string;
   sourceFileName: string;
+  idempotencyKey: string;
 }
 
 interface AreaSelectionSession {
@@ -15514,7 +15516,8 @@ export function App() {
       setExternalMigrationReview({
         review,
         archiveBase64,
-        sourceFileName: file.name
+        sourceFileName: file.name,
+        idempotencyKey: crypto.randomUUID()
       });
       setExternalMigrationStatus(`외부 디자인 검토됨 · ${review.sourceLabel}`);
     } catch (error) {
@@ -15547,6 +15550,7 @@ export function App() {
       const imported = await runProjectDocumentTransition(async (transitionToken) => {
         const nextImported = await importExternalMigrationArchive({
           archiveBase64: externalMigrationReview.archiveBase64,
+          idempotencyKey: externalMigrationReview.idempotencyKey,
           fileName: externalMigrationReview.sourceFileName,
           sourceHint: externalMigrationReview.review.source,
           name: importName
@@ -16070,7 +16074,8 @@ export function App() {
       setProjectArchiveReview({
         review,
         archiveBase64,
-        sourceFileName: file.name
+        sourceFileName: file.name,
+        idempotencyKey: crypto.randomUUID()
       });
       setProjectArchiveImportName(review.suggestedName || review.originalName);
       setProjectArchiveStatus(`${review.suggestedName || review.originalName} 검토됨`);
@@ -16107,6 +16112,7 @@ export function App() {
       const imported = await runProjectDocumentTransition(async (transitionToken) => {
         const nextImported = await importProjectArchive({
           archiveBase64: projectArchiveReview.archiveBase64,
+          idempotencyKey: projectArchiveReview.idempotencyKey,
           name: archiveName
         });
         const nextProjects = [
