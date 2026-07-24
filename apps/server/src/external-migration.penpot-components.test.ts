@@ -1735,6 +1735,95 @@ describe("Penpot component instance migration", () => {
     }
   }, 20_000);
 
+  test("rolls back project deletion when subscription cleanup fails", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-delete-subscription-rollback-")
+    );
+    try {
+      const storage = new FileStorage(root);
+      await storage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "delete-rollback-library-project",
+          documentId: "delete-rollback-library-file",
+          documentName: "Delete rollback library",
+          fileName: "delete-rollback-library.penpot"
+        }
+      );
+      const libraryDocumentId = `penpot-library-${libraryFileId}`;
+      await storage.createProject({
+        projectId: "delete-rollback-project",
+        name: "Delete rollback project",
+        documentId: "delete-rollback-target",
+        documentName: "Delete rollback target"
+      });
+      await storage.importLibraryRegistryItem(
+        "delete-rollback-target",
+        libraryDocumentId,
+        { idPrefix: "delete-rollback" }
+      );
+      await storage.importLibraryRegistryTokens(
+        "delete-rollback-target",
+        libraryDocumentId
+      );
+
+      const beforeProject = await storage.readProject(
+        "delete-rollback-project"
+      );
+      const beforeFile = await storage.readFile(
+        "delete-rollback-target"
+      );
+      const beforeSubscriptions =
+        await storage.listLibraryRegistrySubscriptions();
+      const beforeTokenSubscriptions =
+        await storage.listLibraryRegistryTokenSubscriptions();
+      const internals = storage as unknown as {
+        writeLibraryRegistryTokenSubscriptions(
+          subscriptions: unknown[]
+        ): Promise<void>;
+      };
+      const originalWriteTokenSubscriptions =
+        internals.writeLibraryRegistryTokenSubscriptions.bind(storage);
+      let failCleanup = true;
+      internals.writeLibraryRegistryTokenSubscriptions = async (
+        subscriptions
+      ) => {
+        await originalWriteTokenSubscriptions(subscriptions);
+        if (failCleanup) {
+          failCleanup = false;
+          throw new Error("injected project delete cleanup failure");
+        }
+      };
+
+      await expect(
+        storage.deleteProject("delete-rollback-project")
+      ).rejects.toThrow("injected project delete cleanup failure");
+      await expect(
+        storage.readProject("delete-rollback-project")
+      ).resolves.toEqual(beforeProject);
+      await expect(
+        storage.readFile("delete-rollback-target")
+      ).resolves.toEqual(beforeFile);
+      expect(
+        await storage.listLibraryRegistrySubscriptions()
+      ).toEqual(beforeSubscriptions);
+      expect(
+        await storage.listLibraryRegistryTokenSubscriptions()
+      ).toEqual(beforeTokenSubscriptions);
+
+      await expect(
+        storage.deleteProject("delete-rollback-project")
+      ).resolves.toMatchObject({
+        projectId: "delete-rollback-project"
+      });
+      await expect(
+        storage.readFile("delete-rollback-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test("serializes a library update and product write across processes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-process-lock-"));
     const releasePath = path.join(root, "release-update");

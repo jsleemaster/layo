@@ -211,18 +211,21 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return { member, authorizationBoundary };
   };
 
-  const visibleCommentProjectIds = async (member?: AuthenticatedTeamMember) => {
+  const visibleCommentProjectAuthorizationBoundaries = async (
+    member?: AuthenticatedTeamMember
+  ): Promise<CommentAuthorizationBoundary[]> => {
     const projects = await storage.listProjects();
-    return new Set(
-      projects.flatMap((project) =>
-        project.sharing.mode === "private"
-        || (
-          project.sharing.mode === "team"
-          && member?.teamIds.includes(project.sharing.teamId)
-        )
-          ? [project.projectId]
-          : []
+    return projects.flatMap((project) =>
+      project.sharing.mode === "private"
+      || (
+        project.sharing.mode === "team"
+        && member?.teamIds.includes(project.sharing.teamId)
       )
+        ? [{
+            projectId: project.projectId,
+            expectedSharing: project.sharing
+          }]
+        : []
     );
   };
 
@@ -998,11 +1001,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Params: { fileId: string }; Querystring: { includeResolved?: string; viewerId?: string } }>(
     "/files/:fileId/comments",
     async (request) => {
-      const { member } = await authorizeCommentRead(request, request.params.fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(request, request.params.fileId);
       return {
         threads: await storage.listCommentThreads(request.params.fileId, {
           includeResolved: request.query.includeResolved === "true",
-          viewerId: member?.userId ?? request.query.viewerId
+          viewerId: member?.userId ?? request.query.viewerId,
+          authorizationBoundary
         })
       };
     }
@@ -1073,11 +1078,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
               { code: "EACCES", statusCode: 403 }
             );
           }
-          await authorizeCommentRead(request, fileId);
+          const { authorizationBoundary } =
+            await authorizeCommentRead(request, fileId);
           const events = await storage.listCommentLiveEvents({
             after: lastSequence,
             fileId,
-            limit: 100
+            limit: 100,
+            authorizationBoundary
           });
           for (const event of events) {
             lastSequence = Math.max(lastSequence, event.sequence);
@@ -1186,27 +1193,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
     const member = await authenticateOptionalTeamMember(request);
-    const projectIds = teamAuthorizationProvider
-      ? await visibleCommentProjectIds(member)
+    const authorizationBoundaries = teamAuthorizationProvider
+      ? await visibleCommentProjectAuthorizationBoundaries(member)
       : undefined;
     return {
       summary: await storage.listCommentNotifications({
         viewerId: member?.userId ?? request.query.viewerId,
-        projectIds
+        authorizationBoundaries
       })
     };
   });
 
   server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
     const member = await authenticateOptionalTeamMember(request);
-    const projectIds = teamAuthorizationProvider
-      ? await visibleCommentProjectIds(member)
+    const authorizationBoundaries = teamAuthorizationProvider
+      ? await visibleCommentProjectAuthorizationBoundaries(member)
       : undefined;
     return {
       feed: await storage.listCommentActivity({
         viewerId: member?.userId ?? request.query.viewerId,
         limit: request.query.limit ? Number(request.query.limit) : undefined,
-        projectIds
+        authorizationBoundaries
       })
     };
   });

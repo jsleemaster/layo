@@ -891,6 +891,7 @@ export interface DeleteCommentThreadResult {
 export interface ListCommentThreadsOptions {
   includeResolved?: boolean;
   viewerId?: string;
+  authorizationBoundary?: CommentAuthorizationBoundary;
 }
 
 export interface MarkCommentThreadReadInput {
@@ -900,6 +901,7 @@ export interface MarkCommentThreadReadInput {
 export interface ListCommentNotificationsOptions {
   viewerId?: string;
   projectIds?: ReadonlySet<string>;
+  authorizationBoundaries?: readonly CommentAuthorizationBoundary[];
 }
 
 export interface MarkFileCommentsReadInput {
@@ -910,12 +912,14 @@ export interface ListCommentActivityOptions {
   viewerId?: string;
   limit?: number;
   projectIds?: ReadonlySet<string>;
+  authorizationBoundaries?: readonly CommentAuthorizationBoundary[];
 }
 
 export interface ListCommentLiveEventsOptions {
   fileId?: string;
   after?: number;
   limit?: number;
+  authorizationBoundary?: CommentAuthorizationBoundary;
 }
 
 export interface CommentActivityEvent extends StoredCommentActivityEvent {
@@ -1734,6 +1738,28 @@ export class FileStorage {
     );
   }
 
+  private async withOrderedLibraryRegistryTargetMutationLocks<T>(
+    fileIds: readonly string[],
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const orderedFileIds = [...fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    const acquire = (index: number): Promise<T> => {
+      const fileId = orderedFileIds[index];
+      if (!fileId) {
+        return operation();
+      }
+      return this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        () => acquire(index + 1)
+      );
+    };
+    return acquire(0);
+  }
+
   private async withRawFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
@@ -1766,13 +1792,16 @@ export class FileStorage {
     fileId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    return this.withLibraryRegistryTargetMutationLock(
-      fileId,
-      async () => {
-        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
-        return this.withRawFileMutationLock(fileId, operation);
-      }
-    );
+    return this.withStorageTransactionCoordinatorLock(async () => {
+      await this.recoverInterruptedStorageTransactions();
+      return this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        async () => {
+          await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+          return this.withRawFileMutationLock(fileId, operation);
+        }
+      );
+    });
   }
 
   // Keep the global lock order aligned with single-file mutations: file paths, then assets.
@@ -2027,18 +2056,10 @@ export class FileStorage {
     );
   }
 
-  private async withCommentMutationLock<T>(
-    fileId: string,
-    options: CommentMutationOptions,
-    operation: () => Promise<T>
+  private async withCommentProjectAuthorizationBoundary<T>(
+    boundary: CommentAuthorizationBoundary,
+    operation: (project: ProjectManifest) => Promise<T>
   ): Promise<T> {
-    const mutate = () =>
-      withStoragePathMutationLock(this.commentThreadsPathFor(fileId), operation);
-    const boundary = options.authorizationBoundary;
-    if (!boundary) {
-      return mutate();
-    }
-
     assertSafeStorageId(boundary.projectId);
     return this.withProjectMutationLock(boundary.projectId, async () => {
       let project: ProjectManifest;
@@ -2053,25 +2074,95 @@ export class FileStorage {
           throw error;
         }
         throw Object.assign(
-          new Error("comment authorization project changed before persistence"),
+          new Error("comment authorization project changed before access"),
           { code: "ECONFLICT", statusCode: 409 }
         );
       }
       this.assertExpectedProjectSharing(project, boundary.expectedSharing);
-      const canonicalFileId = canonicalStorageId(fileId);
-      if (
-        !project.documents.some(
-          (document) =>
-            canonicalStorageId(document.documentId) === canonicalFileId
-        )
-      ) {
-        throw Object.assign(
-          new Error("comment authorization project no longer contains the file"),
-          { code: "ECONFLICT", statusCode: 409 }
+      return operation(project);
+    });
+  }
+
+  private async withCommentAuthorizationBoundary<T>(
+    fileId: string,
+    boundary: CommentAuthorizationBoundary | undefined,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (!boundary) {
+      return operation();
+    }
+    const canonicalFileId = canonicalStorageId(fileId);
+    return this.withCommentProjectAuthorizationBoundary(
+      boundary,
+      async (project) => {
+        if (
+          !project.documents.some(
+            (document) =>
+              canonicalStorageId(document.documentId) === canonicalFileId
+          )
+        ) {
+          throw Object.assign(
+            new Error(
+              "comment authorization project no longer contains the file"
+            ),
+            { code: "ECONFLICT", statusCode: 409 }
+          );
+        }
+        return operation();
+      }
+    );
+  }
+
+  private async mapCommentProjectsForRead<T>(
+    projectIds: ReadonlySet<string> | undefined,
+    authorizationBoundaries: readonly CommentAuthorizationBoundary[] | undefined,
+    operation: (project: ProjectManifest) => Promise<T>
+  ): Promise<T[]> {
+    if (authorizationBoundaries !== undefined) {
+      const seenProjectIds = new Set<string>();
+      const results: T[] = [];
+      for (const boundary of authorizationBoundaries) {
+        const canonicalProjectId = canonicalStorageId(boundary.projectId);
+        if (seenProjectIds.has(canonicalProjectId)) {
+          throw inputValidationError(
+            `comment authorization project is duplicated: ${boundary.projectId}`
+          );
+        }
+        seenProjectIds.add(canonicalProjectId);
+        results.push(
+          await this.withCommentProjectAuthorizationBoundary(
+            boundary,
+            operation
+          )
         );
       }
-      return mutate();
-    });
+      return results;
+    }
+
+    const projects = (await this.listProjects()).filter(
+      (project) => !projectIds || projectIds.has(project.projectId)
+    );
+    const results: T[] = [];
+    for (const project of projects) {
+      results.push(await operation(project));
+    }
+    return results;
+  }
+
+  private async withCommentMutationLock<T>(
+    fileId: string,
+    options: CommentMutationOptions,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      () =>
+        withStoragePathMutationLock(
+          this.commentThreadsPathFor(fileId),
+          operation
+        )
+    );
   }
 
   private async adoptPriorDefaultStoreIfNeeded() {
@@ -2410,6 +2501,23 @@ export class FileStorage {
       throw new Error("storage transaction recovery project id is required");
     }
     return this.withProjectMutationLock(projectId, () => {
+      if (expected.kind === "project-delete") {
+        return this.withOrderedLibraryRegistryTargetMutationLocks(
+          orderedFileIds,
+          () =>
+            withOrderedStoragePathMutationLocks(
+              [
+                this.librarySubscriptionsPath(),
+                this.libraryTokenSubscriptionsPath()
+              ],
+              () =>
+                this.withOrderedFileMutationLocks(
+                  orderedFileIds,
+                  recover
+                )
+            )
+        );
+      }
       if (expected.kind === "external-migration-import") {
         return withOrderedStoragePathMutationLocks(
           [
@@ -2967,10 +3075,19 @@ export class FileStorage {
     projectId: string,
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.deleteProject(projectId, options)
+      );
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+
     return this.withProjectCollectionMutationLock(() =>
       this.withProjectMutationLock(projectId, async () => {
         const projects = await this.listProjects();
-        const project = projects.find((candidate) => candidate.projectId === projectId);
+        const project = projects.find(
+          (candidate) => candidate.projectId === projectId
+        );
         if (!project) {
           throw new Error(`project not found: ${projectId}`);
         }
@@ -2983,19 +3100,151 @@ export class FileStorage {
           projects
             .filter((candidate) => candidate.projectId !== projectId)
             .flatMap((candidate) =>
-              candidate.documents.map((document) => document.documentId)
+              candidate.documents.map((document) =>
+                canonicalStorageId(document.documentId)
+              )
             )
         );
-        await rm(this.projectPathFor(project.projectId), { force: true });
-        await Promise.all(
-          project.documents
-            .filter((document) => !otherDocumentIds.has(document.documentId))
-            .map((document) =>
-              rm(this.filePathFor(document.documentId), { force: true })
-            )
+        const projectFileIds = project.documents
+          .map((document) => document.documentId)
+          .sort(
+            (first, second) =>
+              canonicalStorageId(first).localeCompare(
+                canonicalStorageId(second)
+              )
+              || first.localeCompare(second)
+          );
+        const fileIds = projectFileIds.filter(
+          (documentId) =>
+            !otherDocumentIds.has(canonicalStorageId(documentId))
         );
+        const deletedFileIds = new Set(fileIds.map(canonicalStorageId));
 
-        return project;
+        return this.withOrderedLibraryRegistryTargetMutationLocks(
+          projectFileIds,
+          async () => {
+            for (const fileId of projectFileIds) {
+              await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+            }
+            return withOrderedStoragePathMutationLocks(
+              [
+                this.librarySubscriptionsPath(),
+                this.libraryTokenSubscriptionsPath()
+              ],
+              () =>
+                this.withOrderedFileMutationLocks(
+                  projectFileIds,
+                  async () => {
+                    const subscriptions =
+                      await this.readLibraryRegistrySubscriptions();
+                    const nextSubscriptions = subscriptions.filter(
+                      (subscription) =>
+                        !deletedFileIds.has(
+                          canonicalStorageId(subscription.fileId)
+                        )
+                    );
+                    const tokenSubscriptions =
+                      await this.readLibraryRegistryTokenSubscriptions();
+                    const nextTokenSubscriptions = tokenSubscriptions.filter(
+                      (subscription) =>
+                        !deletedFileIds.has(
+                          canonicalStorageId(subscription.fileId)
+                        )
+                    );
+                    const subscriptionsChanged =
+                      nextSubscriptions.length !== subscriptions.length;
+                    const tokenSubscriptionsChanged =
+                      nextTokenSubscriptions.length
+                        !== tokenSubscriptions.length;
+                    const originalPaths = [
+                      this.projectPathFor(project.projectId),
+                      ...fileIds.map((fileId) =>
+                        this.filePathFor(fileId)
+                      ),
+                      ...(subscriptionsChanged
+                        ? [this.librarySubscriptionsPath()]
+                        : []),
+                      ...(tokenSubscriptionsChanged
+                        ? [this.libraryTokenSubscriptionsPath()]
+                        : [])
+                    ];
+                    const intended: StoragePathSnapshot[] = [
+                      {
+                        filePath: this.projectPathFor(project.projectId),
+                        data: null
+                      },
+                      ...fileIds.map((fileId) => ({
+                        filePath: this.filePathFor(fileId),
+                        data: null
+                      })),
+                      ...(subscriptionsChanged
+                        ? [{
+                            filePath: this.librarySubscriptionsPath(),
+                            data: Buffer.from(
+                              `${JSON.stringify(
+                                {
+                                  schemaVersion: 1,
+                                  subscriptions: nextSubscriptions
+                                },
+                                null,
+                                2
+                              )}\n`,
+                              "utf8"
+                            )
+                          }]
+                        : []),
+                      ...(tokenSubscriptionsChanged
+                        ? [{
+                            filePath:
+                              this.libraryTokenSubscriptionsPath(),
+                            data: Buffer.from(
+                              `${JSON.stringify(
+                                {
+                                  schemaVersion: 1,
+                                  subscriptions: nextTokenSubscriptions
+                                },
+                                null,
+                                2
+                              )}\n`,
+                              "utf8"
+                            )
+                          }]
+                        : [])
+                    ];
+  
+                    return this.withStorageTransactionRecovery(
+                      "project-delete",
+                      project.projectId,
+                      projectFileIds,
+                      originalPaths,
+                      intended,
+                      async () => {
+                        await rm(
+                          this.projectPathFor(project.projectId),
+                          { force: true }
+                        );
+                        for (const fileId of fileIds) {
+                          await rm(this.filePathFor(fileId), {
+                            force: true
+                          });
+                        }
+                        if (subscriptionsChanged) {
+                          await this.writeLibraryRegistrySubscriptions(
+                            nextSubscriptions
+                          );
+                        }
+                        if (tokenSubscriptionsChanged) {
+                          await this.writeLibraryRegistryTokenSubscriptions(
+                            nextTokenSubscriptions
+                          );
+                        }
+                        return project;
+                      }
+                    );
+                  })
+            );
+          }
+        );
       })
     );
   }
@@ -3004,78 +3253,120 @@ export class FileStorage {
     options: ListCommentNotificationsOptions = {}
   ): Promise<CommentNotificationSummary> {
     const viewerId = normalizeName(options.viewerId, "사용자");
-    const projects = (await this.listProjects()).filter(
-      (project) => !options.projectIds || options.projectIds.has(project.projectId)
-    );
-    const projectSummaries: Array<CommentNotificationProjectSummary & { latestUnreadAt: string }> = [];
-
-    for (const project of projects) {
-      const files: Array<CommentNotificationFileSummary & { latestUnreadAt: string }> = [];
-      for (const document of project.documents) {
-        const store = await this.readCommentThreadFile(document.documentId);
-        const unreadThreads = unreadCommentThreads(store.threads, viewerId);
-        const unreadCount = unreadThreads.length;
-        const mentionCount = unreadThreads.filter((thread) => isCommentThreadMentionedForViewer(thread, viewerId)).length;
-        if (unreadCount > 0) {
-          files.push({
-            fileId: document.documentId,
-            name: document.name,
-            unreadCount,
-            mentionCount,
-            latestUnreadAt: latestCommentThreadCreatedAt(unreadThreads)
-          });
+    const summaries = await this.mapCommentProjectsForRead(
+      options.projectIds,
+      options.authorizationBoundaries,
+      async (project) => {
+        const files: Array<
+          CommentNotificationFileSummary & { latestUnreadAt: string }
+        > = [];
+        for (const document of project.documents) {
+          const store = await this.readCommentThreadFile(
+            document.documentId
+          );
+          const unreadThreads = unreadCommentThreads(
+            store.threads,
+            viewerId
+          );
+          const unreadCount = unreadThreads.length;
+          const mentionCount = unreadThreads.filter((thread) =>
+            isCommentThreadMentionedForViewer(thread, viewerId)
+          ).length;
+          if (unreadCount > 0) {
+            files.push({
+              fileId: document.documentId,
+              name: document.name,
+              unreadCount,
+              mentionCount,
+              latestUnreadAt:
+                latestCommentThreadCreatedAt(unreadThreads)
+            });
+          }
         }
-      }
 
-      files.sort(compareCommentNotificationRecency);
-      const unreadCount = files.reduce((total, file) => total + file.unreadCount, 0);
-      const mentionCount = files.reduce((total, file) => total + file.mentionCount, 0);
-      if (unreadCount > 0) {
-        projectSummaries.push({
-          projectId: project.projectId,
-          name: project.name,
-          unreadCount,
-          mentionCount,
-          files: files.map(({ latestUnreadAt: _latestUnreadAt, ...file }) => file),
-          latestUnreadAt: files[0]?.latestUnreadAt ?? new Date(0).toISOString()
-        });
+        files.sort(compareCommentNotificationRecency);
+        const unreadCount = files.reduce(
+          (total, file) => total + file.unreadCount,
+          0
+        );
+        const mentionCount = files.reduce(
+          (total, file) => total + file.mentionCount,
+          0
+        );
+        return unreadCount > 0
+          ? {
+              projectId: project.projectId,
+              name: project.name,
+              unreadCount,
+              mentionCount,
+              files: files.map(
+                ({ latestUnreadAt: _latestUnreadAt, ...file }) => file
+              ),
+              latestUnreadAt:
+                files[0]?.latestUnreadAt ?? new Date(0).toISOString()
+            }
+          : null;
       }
-    }
+    );
+    const projectSummaries = summaries.filter(
+      (
+        summary
+      ): summary is CommentNotificationProjectSummary & {
+        latestUnreadAt: string;
+      } => summary !== null
+    );
 
     projectSummaries.sort(compareCommentNotificationRecency);
     return {
       viewerId,
-      totalUnread: projectSummaries.reduce((total, project) => total + project.unreadCount, 0),
-      totalMentions: projectSummaries.reduce((total, project) => total + project.mentionCount, 0),
-      projects: projectSummaries.map(({ latestUnreadAt: _latestUnreadAt, ...project }) => project)
+      totalUnread: projectSummaries.reduce(
+        (total, project) => total + project.unreadCount,
+        0
+      ),
+      totalMentions: projectSummaries.reduce(
+        (total, project) => total + project.mentionCount,
+        0
+      ),
+      projects: projectSummaries.map(
+        ({ latestUnreadAt: _latestUnreadAt, ...project }) => project
+      )
     };
   }
 
-  async listCommentActivity(options: ListCommentActivityOptions = {}): Promise<CommentActivityFeed> {
+  async listCommentActivity(
+    options: ListCommentActivityOptions = {}
+  ): Promise<CommentActivityFeed> {
     const viewerId = normalizeName(options.viewerId, "사용자");
-    const limit = normalizeListLimit(options.limit, COMMENT_ACTIVITY_RETENTION_LIMIT);
-    const projects = (await this.listProjects()).filter(
-      (project) => !options.projectIds || options.projectIds.has(project.projectId)
+    const limit = normalizeListLimit(
+      options.limit,
+      COMMENT_ACTIVITY_RETENTION_LIMIT
     );
-    const events: CommentActivityEvent[] = [];
-
-    for (const project of projects) {
-      for (const document of project.documents) {
-        const store = await this.readCommentThreadFile(document.documentId);
-        events.push(
-          ...store.activity.map((event) => ({
-            ...event,
-            projectId: project.projectId,
-            projectName: project.name,
-            fileName: document.name
-          }))
-        );
+    const projectEvents = await this.mapCommentProjectsForRead(
+      options.projectIds,
+      options.authorizationBoundaries,
+      async (project) => {
+        const events: CommentActivityEvent[] = [];
+        for (const document of project.documents) {
+          const store = await this.readCommentThreadFile(
+            document.documentId
+          );
+          events.push(
+            ...store.activity.map((event) => ({
+              ...event,
+              projectId: project.projectId,
+              projectName: project.name,
+              fileName: document.name
+            }))
+          );
+        }
+        return events;
       }
-    }
+    );
 
     return {
       viewerId,
-      events: events
+      events: projectEvents
+        .flat()
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, limit)
     };
@@ -3086,14 +3377,30 @@ export class FileStorage {
   ): Promise<StoredCommentLiveEvent[]> {
     const fileId = options.fileId;
     if (!fileId) {
-      throw inputValidationError("comment live event replay requires a file id");
+      throw inputValidationError(
+        "comment live event replay requires a file id"
+      );
     }
-    const after = Math.max(0, Math.floor(Number(options.after) || 0));
-    const limit = Math.max(0, Math.floor(Number(options.limit) || 0));
-    await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    const events = store.events.filter((event) => event.sequence > after);
-    return limit > 0 ? events.slice(0, limit) : events;
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      async () => {
+        const after = Math.max(
+          0,
+          Math.floor(Number(options.after) || 0)
+        );
+        const limit = Math.max(
+          0,
+          Math.floor(Number(options.limit) || 0)
+        );
+        await this.readFile(fileId);
+        const store = await this.readCommentThreadFile(fileId);
+        const events = store.events.filter(
+          (event) => event.sequence > after
+        );
+        return limit > 0 ? events.slice(0, limit) : events;
+      }
+    );
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
@@ -4976,11 +5283,21 @@ export class FileStorage {
     fileId: string,
     options: ListCommentThreadsOptions = {}
   ): Promise<StoredCommentThread[]> {
-    await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    return store.threads
-      .filter((thread) => options.includeResolved || thread.resolvedAt === null)
-      .map((thread) => withViewerUnread(thread, options.viewerId));
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      async () => {
+        const store = await this.readCommentThreadFile(fileId);
+        return store.threads
+          .filter(
+            (thread) =>
+              options.includeResolved || thread.resolvedAt === null
+          )
+          .map((thread) =>
+            withViewerUnread(thread, options.viewerId)
+          );
+      }
+    );
   }
 
   async createCommentThread(
@@ -4989,16 +5306,15 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(input.nodeId);
-    const document = await this.readFile(fileId);
-    const node = findNodeById(document, input.nodeId);
-    if (!node) {
-      throw new Error(`node not found: ${input.nodeId}`);
-    }
-
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
     const authorId = normalizeName(input.authorId, authorName);
     return this.withCommentMutationLock(fileId, options, async () => {
+      const document = await this.readFile(fileId);
+      const node = findNodeById(document, input.nodeId);
+      if (!node) {
+        throw new Error(`node not found: ${input.nodeId}`);
+      }
       const store = await this.readCommentThreadFile(fileId);
       const now = createMonotonicCommentTimestamp(latestCommentStoreTimestamp(store));
       const thread: StoredCommentThread = {
@@ -5051,7 +5367,6 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const actorId = normalizeCommentActorId(input.actorId);
     return this.withCommentMutationLock(fileId, options, async () => {
@@ -5116,7 +5431,6 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<DeleteCommentThreadResult> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const actorId = normalizeCommentActorId(input.actorId);
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
@@ -5164,7 +5478,6 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
     const authorId = normalizeName(input.authorId, authorName);
@@ -5231,7 +5544,6 @@ export class FileStorage {
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     assertSafeStorageId(replyId);
-    await this.readFile(fileId);
     const body = normalizeCommentBody(input.body);
     const actorId = normalizeCommentActorId(input.actorId);
     return this.withCommentMutationLock(fileId, options, async () => {
@@ -5309,7 +5621,6 @@ export class FileStorage {
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
     assertSafeStorageId(replyId);
-    await this.readFile(fileId);
     const actorId = normalizeCommentActorId(input.actorId);
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
@@ -5369,7 +5680,6 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
@@ -5403,7 +5713,6 @@ export class FileStorage {
     input: MarkFileCommentsReadInput = {},
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread[]> {
-    await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
@@ -5439,7 +5748,6 @@ export class FileStorage {
     options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const resolvedActorName = normalizeName(actorName, "사용자");
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
@@ -7678,7 +7986,8 @@ type StorageTransactionRecoveryKind =
   | "file-archive-import"
   | "project-archive-import"
   | "external-migration-import"
-  | "project-duplicate";
+  | "project-duplicate"
+  | "project-delete";
 
 interface StorageTransactionRecoveryJournal {
   schemaVersion: 1;
@@ -7766,6 +8075,7 @@ function parseStorageTransactionRecoveryJournal(value: unknown): StorageTransact
       && candidate.kind !== "project-archive-import"
       && candidate.kind !== "external-migration-import"
       && candidate.kind !== "project-duplicate"
+      && candidate.kind !== "project-delete"
     )
     || typeof candidate.transactionId !== "string"
     || !Array.isArray(candidate.fileIds)

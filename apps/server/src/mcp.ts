@@ -695,9 +695,14 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     requestedActorId?: string
   ) => member?.userId ?? (requestedActorId?.trim() || "사용자");
 
-  const commentThreadForReview = async (fileId: string, threadId: string) => {
+  const commentThreadForReview = async (
+    fileId: string,
+    threadId: string,
+    authorizationBoundary?: CommentAuthorizationBoundary
+  ) => {
     const thread = (await storage.listCommentThreads(fileId, {
-      includeResolved: true
+      includeResolved: true,
+      authorizationBoundary
     })).find((candidate) => candidate.threadId === threadId);
     if (!thread) {
       throw Object.assign(new Error(`comment thread not found: ${threadId}`), {
@@ -708,18 +713,21 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     return thread;
   };
 
-  const visibleCommentProjectIds = async (member?: AuthenticatedTeamMember) => {
+  const visibleCommentProjectAuthorizationBoundaries = async (
+    member?: AuthenticatedTeamMember
+  ): Promise<CommentAuthorizationBoundary[]> => {
     const projects = await storage.listProjects();
-    return new Set(
-      projects.flatMap((project) =>
-        project.sharing.mode === "private"
-        || (
-          project.sharing.mode === "team"
-          && member?.teamIds.includes(project.sharing.teamId)
-        )
-          ? [project.projectId]
-          : []
+    return projects.flatMap((project) =>
+      project.sharing.mode === "private"
+      || (
+        project.sharing.mode === "team"
+        && member?.teamIds.includes(project.sharing.teamId)
       )
+        ? [{
+            projectId: project.projectId,
+            expectedSharing: project.sharing
+          }]
+        : []
     );
   };
 
@@ -1930,7 +1938,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       }
     },
     async ({ fileId, includeResolved, viewerId }) => {
-      const { member } = await authorizeCommentRead(fileId);
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
       return {
         content: [
           {
@@ -1940,7 +1949,8 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                 fileId,
                 threads: await storage.listCommentThreads(fileId, {
                   includeResolved,
-                  viewerId: member?.userId ?? viewerId
+                  viewerId: member?.userId ?? viewerId,
+                  authorizationBoundary
                 })
               },
               null,
@@ -2013,7 +2023,11 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
-        await commentThreadForReview(fileId, threadId),
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
         "update_thread",
         resolvedActorId,
         expectedModifiedAt,
@@ -2067,7 +2081,11 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
-        await commentThreadForReview(fileId, threadId),
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
         "delete_thread",
         resolvedActorId,
         expectedModifiedAt
@@ -2116,12 +2134,12 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     },
     async ({ viewerId }) => {
       const member = await authenticateOptionalTeamMember();
-      const projectIds = teamAuthorizationProvider
-        ? await visibleCommentProjectIds(member)
+      const authorizationBoundaries = teamAuthorizationProvider
+        ? await visibleCommentProjectAuthorizationBoundaries(member)
         : undefined;
       const summary = await storage.listCommentNotifications({
         viewerId: member?.userId ?? viewerId,
-        projectIds
+        authorizationBoundaries
       });
       return {
         content: [{ type: "text", text: JSON.stringify({ summary }, null, 2) }]
@@ -2141,13 +2159,13 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     },
     async ({ viewerId, limit }) => {
       const member = await authenticateOptionalTeamMember();
-      const projectIds = teamAuthorizationProvider
-        ? await visibleCommentProjectIds(member)
+      const authorizationBoundaries = teamAuthorizationProvider
+        ? await visibleCommentProjectAuthorizationBoundaries(member)
         : undefined;
       const feed = await storage.listCommentActivity({
         viewerId: member?.userId ?? viewerId,
         limit,
-        projectIds
+        authorizationBoundaries
       });
       return {
         content: [{ type: "text", text: JSON.stringify({ feed }, null, 2) }]
@@ -2324,7 +2342,11 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
-        await commentThreadForReview(fileId, threadId),
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
         "update_reply",
         resolvedActorId,
         expectedModifiedAt,
@@ -2385,7 +2407,11 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         await authorizeCommentWrite(fileId);
       const resolvedActorId = commentActorId(member, actorId);
       const review = reviewCommentMutation(
-        await commentThreadForReview(fileId, threadId),
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
         "delete_reply",
         resolvedActorId,
         expectedModifiedAt,
