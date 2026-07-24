@@ -58,8 +58,11 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 
 const storagePathMutationTails = new Map<string, Promise<void>>();
 const assetReferenceMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
+const libraryTargetMutationContext = new AsyncLocalStorage<ReadonlySet<string>>();
+const storageTransactionCoordinatorContext = new AsyncLocalStorage<ReadonlySet<string>>();
 const STORAGE_PROCESS_LOCK_RETRY_MS = 25;
 const STORAGE_PROCESS_LOCK_TIMEOUT_MS = 30_000;
+const STORAGE_PROCESS_LOCK_STALE_MS = 500;
 
 interface StorageProcessLockOwner {
   schemaVersion: 1;
@@ -249,7 +252,7 @@ function normalizeStorageProcessLockStale(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 50
     ? Math.floor(parsed)
-    : 5_000;
+    : STORAGE_PROCESS_LOCK_STALE_MS;
 }
 
 function parseStorageProcessLockOwner(value: unknown): StorageProcessLockOwner {
@@ -282,27 +285,45 @@ async function withStoragePathMutationLock<T>(
   storagePath: string,
   operation: () => Promise<T>
 ): Promise<T> {
-  const previous = storagePathMutationTails.get(storagePath) ?? Promise.resolve();
+  const normalizedPath = path.resolve(storagePath);
+  const previous =
+    storagePathMutationTails.get(normalizedPath) ?? Promise.resolve();
   let releaseInProcess!: () => void;
   const current = new Promise<void>((resolve) => {
     releaseInProcess = resolve;
   });
-  storagePathMutationTails.set(storagePath, current);
+  storagePathMutationTails.set(normalizedPath, current);
   await previous;
   let releaseProcessLock: (() => Promise<void>) | null = null;
   try {
-    releaseProcessLock = await acquireStorageProcessMutationLock(storagePath);
+    releaseProcessLock = await acquireStorageProcessMutationLock(normalizedPath);
     return await operation();
   } finally {
     try {
       await releaseProcessLock?.();
     } finally {
       releaseInProcess();
-      if (storagePathMutationTails.get(storagePath) === current) {
-        storagePathMutationTails.delete(storagePath);
+      if (storagePathMutationTails.get(normalizedPath) === current) {
+        storagePathMutationTails.delete(normalizedPath);
       }
     }
   }
+}
+
+async function withOrderedStoragePathMutationLocks<T>(
+  storagePaths: readonly string[],
+  operation: () => Promise<T>
+): Promise<T> {
+  const orderedPaths = [...new Set(storagePaths.map((entry) => path.resolve(entry)))]
+    .sort((first, second) => first.localeCompare(second));
+  const acquire = (index: number): Promise<T> => {
+    const storagePath = orderedPaths[index];
+    if (!storagePath) {
+      return operation();
+    }
+    return withStoragePathMutationLock(storagePath, () => acquire(index + 1));
+  };
+  return acquire(0);
 }
 
 async function withAssetReferenceMutationLock<T>(
@@ -321,6 +342,24 @@ async function withAssetReferenceMutationLock<T>(
       operation
     )
   );
+}
+
+async function storagePathsReferenceSameEntry(
+  firstPath: string,
+  secondPath: string
+): Promise<boolean> {
+  try {
+    const [first, second] = await Promise.all([
+      stat(firstPath),
+      stat(secondPath)
+    ]);
+    return first.dev === second.dev && first.ino === second.ino;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 export interface LayoutSpacing {
@@ -751,8 +790,10 @@ export interface StoredCommentThread {
   nodeId: string;
   nodeName: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   resolvedAt: string | null;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
@@ -765,13 +806,15 @@ export interface StoredCommentReply {
   schemaVersion: 1;
   replyId: string;
   body: string;
+  authorId: string;
   authorName: string;
   createdAt: string;
+  modifiedAt: string;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
 }
 
-export type CommentActivityType = "created" | "replied" | "resolved";
+export type CommentActivityType = "created" | "replied" | "resolved" | "edited" | "deleted";
 export type CommentLiveEventType = CommentActivityType | "read";
 export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
 
@@ -804,6 +847,7 @@ export interface StoredCommentLiveEvent {
   type: CommentLiveEventType;
   fileId: string;
   threadId?: string;
+  replyId?: string;
   viewerId?: string;
   createdAt: string;
 }
@@ -811,19 +855,43 @@ export interface StoredCommentLiveEvent {
 export interface CreateCommentThreadInput {
   nodeId: string;
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: StoredCommentMentionTarget[];
 }
 
 export interface CreateCommentReplyInput {
   body: string;
+  authorId?: string;
   authorName?: string;
   mentionTargets?: StoredCommentMentionTarget[];
+}
+
+export interface UpdateCommentThreadInput {
+  body: string;
+  actorId: string;
+  expectedModifiedAt: string;
+  mentionTargets?: StoredCommentMentionTarget[];
+}
+
+export interface DeleteCommentThreadInput {
+  actorId: string;
+  expectedModifiedAt: string;
+}
+
+export interface UpdateCommentReplyInput extends UpdateCommentThreadInput {}
+
+export interface DeleteCommentReplyInput extends DeleteCommentThreadInput {}
+
+export interface DeleteCommentThreadResult {
+  threadId: string;
+  deleted: true;
 }
 
 export interface ListCommentThreadsOptions {
   includeResolved?: boolean;
   viewerId?: string;
+  authorizationBoundary?: CommentAuthorizationBoundary;
 }
 
 export interface MarkCommentThreadReadInput {
@@ -832,6 +900,8 @@ export interface MarkCommentThreadReadInput {
 
 export interface ListCommentNotificationsOptions {
   viewerId?: string;
+  projectIds?: ReadonlySet<string>;
+  authorizationBoundaries?: readonly CommentAuthorizationBoundary[];
 }
 
 export interface MarkFileCommentsReadInput {
@@ -841,12 +911,15 @@ export interface MarkFileCommentsReadInput {
 export interface ListCommentActivityOptions {
   viewerId?: string;
   limit?: number;
+  projectIds?: ReadonlySet<string>;
+  authorizationBoundaries?: readonly CommentAuthorizationBoundary[];
 }
 
 export interface ListCommentLiveEventsOptions {
   fileId?: string;
   after?: number;
   limit?: number;
+  authorizationBoundary?: CommentAuthorizationBoundary;
 }
 
 export interface CommentActivityEvent extends StoredCommentActivityEvent {
@@ -908,6 +981,21 @@ export interface ProjectDocumentSummary {
 export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
+
+export interface CommentAuthorizationBoundary {
+  projectId: string;
+  expectedSharing: ProjectSharing;
+}
+
+export interface CommentMutationOptions {
+  authorizationBoundary?: CommentAuthorizationBoundary;
+}
+
+export interface ProjectMutationOptions {
+  expectedSharing?: ProjectSharing;
+}
+
+export type SetProjectSharingOptions = ProjectMutationOptions;
 
 export interface ProjectManifest {
   schemaVersion: 1;
@@ -1059,6 +1147,7 @@ export interface ImportProjectArchiveOptions {
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
+  idempotencyKey?: string;
 }
 
 export interface ImportExternalMigrationArchiveOptions {
@@ -1068,6 +1157,19 @@ export interface ImportExternalMigrationArchiveOptions {
   documentName?: string;
   fileName?: string;
   sourceHint?: ExternalMigrationSource;
+  idempotencyKey?: string;
+}
+
+type StorageImportReceiptKind =
+  | "project-archive-import"
+  | "external-migration-import";
+
+interface StorageImportReceipt {
+  schemaVersion: 1;
+  kind: StorageImportReceiptKind;
+  idempotencyKey: string;
+  fingerprint: string;
+  result: unknown;
 }
 
 export interface ImportedExternalMigrationArchive {
@@ -1312,6 +1414,7 @@ export interface ImportedLibraryRegistryTokens {
 export class FileStorage {
   private readonly priorRootDir: string | null;
   private libraryUpdateRecoveryPromise: Promise<void> | null = null;
+  private storageTransactionRecoveryPromise: Promise<void> | null = null;
 
   constructor(private readonly rootDir = path.join(process.cwd(), DEFAULT_STORAGE_DIR)) {
     const defaultRootDir = path.resolve(process.cwd(), DEFAULT_STORAGE_DIR);
@@ -1354,6 +1457,10 @@ export class FileStorage {
     return path.join(this.filesDir, `${safeFileId}.json`);
   }
 
+  private fileMutationPathFor(fileId: string) {
+    return this.filePathFor(canonicalStorageId(fileId));
+  }
+
   private fileHistoryDirFor(fileId: string) {
     assertSafeStorageId(fileId);
     return path.join(this.historyDir, fileId);
@@ -1370,6 +1477,13 @@ export class FileStorage {
   }
 
   private commentThreadsPathFor(fileId: string) {
+    return path.join(
+      this.commentsDir,
+      `${canonicalStorageId(fileId)}.json`
+    );
+  }
+
+  private legacyCommentThreadsPathFor(fileId: string) {
     assertSafeStorageId(fileId);
     return path.join(this.commentsDir, `${fileId}.json`);
   }
@@ -1390,6 +1504,14 @@ export class FileStorage {
     return path.join(this.librariesDir, "token-subscriptions.json");
   }
 
+  private libraryRegistryTargetMutationPathFor(fileId: string) {
+    return path.join(
+      this.rootDir,
+      "library-target-mutations",
+      `${canonicalStorageId(fileId)}.json`
+    );
+  }
+
   private libraryArchivePathFor(libraryId: string) {
     assertSafeStorageId(libraryId);
     return path.join(this.librariesDir, `${libraryId}.layo-library.zip`);
@@ -1406,9 +1528,87 @@ export class FileStorage {
     );
   }
 
+  private storageImportReceiptPathFor(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string
+  ) {
+    assertSafeStorageId(idempotencyKey);
+    return path.join(
+      this.rootDir,
+      "receipts",
+      "imports",
+      kind,
+      `${idempotencyKey}.json`
+    );
+  }
+
+  private storageImportReceiptSnapshot<T>(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string,
+    fingerprint: string,
+    result: T
+  ): StoragePathSnapshot {
+    const receipt: StorageImportReceipt = {
+      schemaVersion: 1,
+      kind,
+      idempotencyKey,
+      fingerprint,
+      result
+    };
+    return {
+      filePath: this.storageImportReceiptPathFor(kind, idempotencyKey),
+      data: Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8")
+    };
+  }
+
+  private async readStorageImportReceipt<T>(
+    kind: StorageImportReceiptKind,
+    idempotencyKey: string,
+    fingerprint: string,
+    parseResult: (value: unknown) => T
+  ): Promise<T | null> {
+    const receiptPath = this.storageImportReceiptPathFor(
+      kind,
+      idempotencyKey
+    );
+    let receipt: StorageImportReceipt;
+    try {
+      receipt = parseStorageImportReceipt(
+        JSON.parse(await readFile(receiptPath, "utf8")),
+        kind,
+        idempotencyKey
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+    if (receipt.fingerprint !== fingerprint) {
+      throw idempotencyConflictError(
+        `${kind} idempotency key was already used with another request: ${idempotencyKey}`
+      );
+    }
+    return parseResult(receipt.result);
+  }
+
+  private async writeStorageImportReceipt(
+    snapshot: StoragePathSnapshot
+  ): Promise<void> {
+    if (snapshot.data === null) {
+      throw new Error("storage import receipt data is required");
+    }
+    await mkdir(path.dirname(snapshot.filePath), { recursive: true });
+    await durablyReplaceFile(snapshot.filePath, snapshot.data);
+  }
+
   private projectPathFor(projectId: string) {
     assertSafeStorageId(projectId);
     return path.join(this.projectsDir, `${projectId}.json`);
+  }
+
+  private projectMutationPathFor(projectId: string) {
+    return this.projectPathFor(canonicalStorageId(projectId));
   }
 
   private assetPathFor(assetId: string) {
@@ -1425,13 +1625,543 @@ export class FileStorage {
     return path.join(this.filesDir, ".asset-references");
   }
 
-  private async withFileMutationLock<T>(
+  private async storageIdsInDirectory(
+    directory: string,
+    suffix: string
+  ): Promise<string[]> {
+    try {
+      const entries = await readdir(directory);
+      return entries
+        .filter((entry) => entry.endsWith(suffix))
+        .map((entry) => entry.slice(0, -suffix.length))
+        .filter((entry) => /^[a-zA-Z0-9_-]+$/.test(entry));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async canonicalStorageIdExists(
+    directory: string,
+    suffix: string,
+    storageId: string
+  ): Promise<boolean> {
+    const canonicalId = canonicalStorageId(storageId);
+    return (await this.storageIdsInDirectory(directory, suffix)).some(
+      (entry) => canonicalStorageId(entry) === canonicalId
+    );
+  }
+
+  private async listAssetStorageIds(): Promise<string[]> {
+    try {
+      const entries = await readdir(this.assetsDir);
+      return [
+        ...new Set(
+          entries
+            .map((entry) =>
+              entry.endsWith(".json") ? entry.slice(0, -".json".length) : entry
+            )
+            .filter((entry) => /^[a-zA-Z0-9_-]+$/.test(entry))
+        )
+      ];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private projectCollectionMutationPath() {
+    return path.join(this.projectsDir, ".collection");
+  }
+
+  private async withProjectCollectionMutationLock<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(
+      this.projectCollectionMutationPath(),
+      operation
+    );
+  }
+
+  private async withProjectMutationLock<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withStoragePathMutationLock(
+      this.projectMutationPathFor(projectId),
+      operation
+    );
+  }
+
+  private assertExpectedProjectSharing(
+    project: ProjectManifest,
+    expectedSharing?: ProjectSharing
+  ): void {
+    if (
+      expectedSharing
+      && (
+        project.sharing.mode !== expectedSharing.mode
+        || (
+          project.sharing.mode === "team"
+          && expectedSharing.mode === "team"
+          && project.sharing.teamId !== expectedSharing.teamId
+        )
+      )
+    ) {
+      throw Object.assign(new Error("project sharing changed before the update was applied"), {
+        code: "ECONFLICT",
+        statusCode: 409
+      });
+    }
+  }
+
+  private async withLibraryRegistryTargetMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const targetPath = path.resolve(
+      this.libraryRegistryTargetMutationPathFor(fileId)
+    );
+    const activePaths = libraryTargetMutationContext.getStore();
+    if (activePaths?.has(targetPath)) {
+      return operation();
+    }
+    return withStoragePathMutationLock(targetPath, () =>
+      libraryTargetMutationContext.run(
+        new Set([...(activePaths ?? []), targetPath]),
+        operation
+      )
+    );
+  }
+
+  private async withOrderedLibraryRegistryTargetMutationLocks<T>(
+    fileIds: readonly string[],
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const orderedFileIds = [...fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    const acquire = (index: number): Promise<T> => {
+      const fileId = orderedFileIds[index];
+      if (!fileId) {
+        return operation();
+      }
+      return this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        () => acquire(index + 1)
+      );
+    };
+    return acquire(0);
+  }
+
+  private async withRawFileMutationLock<T>(
     fileId: string,
     operation: () => Promise<T>
   ): Promise<T> {
     return withStoragePathMutationLock(
-      this.filePathFor(fileId),
-      () => withAssetReferenceMutationLock(this.assetReferenceMutationPath(), operation)
+      this.fileMutationPathFor(fileId),
+      () =>
+        withAssetReferenceMutationLock(
+          this.assetReferenceMutationPath(),
+          operation
+        )
+    );
+  }
+
+  // Caller must hold the target mutation lock so a new journal cannot appear.
+  private async recoverInterruptedLibraryUpdateForTarget(
+    fileId: string
+  ): Promise<void> {
+    const journalPath = this.libraryUpdateRecoveryPathFor(fileId);
+    if (!(await pathExists(journalPath))) {
+      return;
+    }
+    await this.withLibraryRegistryTargetMutationLocks(
+      fileId,
+      () => this.recoverInterruptedLibraryUpdateJournal(journalPath)
+    );
+  }
+
+  private async withFileMutationLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.withStorageTransactionCoordinatorLock(async () => {
+      await this.recoverInterruptedStorageTransactions();
+      return this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        async () => {
+          await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+          return this.withRawFileMutationLock(fileId, operation);
+        }
+      );
+    });
+  }
+
+  // Keep the global lock order aligned with single-file mutations: file paths, then assets.
+  private async withOrderedFileMutationLocks<T>(
+    fileIds: readonly string[],
+    operation: () => Promise<T>,
+    index = 0
+  ): Promise<T> {
+    const fileId = fileIds[index];
+    if (!fileId) {
+      return withAssetReferenceMutationLock(
+        this.assetReferenceMutationPath(),
+        operation
+      );
+    }
+    return withStoragePathMutationLock(
+      this.fileMutationPathFor(fileId),
+      () => this.withOrderedFileMutationLocks(fileIds, operation, index + 1)
+    );
+  }
+
+  private async withExclusiveProjectFiles<T>(
+    files: Array<{ fileId: string; document: DesignFile }>,
+    operation: () => Promise<T>,
+    transaction: (
+      writeOperation: () => Promise<T>
+    ) => Promise<T> = (writeOperation) => writeOperation()
+  ): Promise<T> {
+    const entries = [...files].sort(
+      (first, second) =>
+        canonicalStorageId(first.fileId).localeCompare(
+          canonicalStorageId(second.fileId)
+        )
+        || first.fileId.localeCompare(second.fileId)
+    );
+    const canonicalFileIds = entries.map((entry) =>
+      canonicalStorageId(entry.fileId)
+    );
+    if (new Set(canonicalFileIds).size !== entries.length) {
+      throw inputValidationError(
+        "project document ids must be unique ignoring case"
+      );
+    }
+
+    return this.withOrderedFileMutationLocks(
+      entries.map((entry) => entry.fileId),
+      async () => {
+        const existingFileIds = new Set(
+          (await this.storageIdsInDirectory(this.filesDir, ".json")).map(
+            canonicalStorageId
+          )
+        );
+        for (const entry of entries) {
+          if (existingFileIds.has(canonicalStorageId(entry.fileId))) {
+            throw storageIdentityConflictError(
+              `project document already exists: ${entry.fileId}`
+            );
+          }
+        }
+
+        const writeOperation = async (): Promise<T> => {
+          try {
+            for (const entry of entries) {
+              await this.writeFileWithoutMutationLock(
+                entry.fileId,
+                entry.document
+              );
+            }
+            return await operation();
+          } catch (error) {
+            await Promise.all(
+              entries.map((entry) =>
+                rm(this.filePathFor(entry.fileId), { force: true })
+              )
+            );
+            throw error;
+          }
+        };
+        return transaction(writeOperation);
+      }
+    );
+  }
+
+  private async withImportedAssetWrites<T>(
+    assets: Array<{ metadata: StoredAsset; data: Buffer }>,
+    operation: () => Promise<T>,
+    transaction: (
+      writeOperation: () => Promise<T>
+    ) => Promise<T> = (writeOperation) => writeOperation()
+  ): Promise<T> {
+    return withAssetReferenceMutationLock(
+      this.assetReferenceMutationPath(),
+      async () => {
+        const entries = assets.map((asset) => {
+          const metadata = parseStoredAsset(asset.metadata);
+          if (asset.data.length !== metadata.byteLength) {
+            throw new Error(
+              `asset byte length mismatch: ${metadata.assetId}`
+            );
+          }
+          assertImageBytesMatchMimeType(asset.data, metadata.mimeType);
+          return { metadata, data: asset.data };
+        });
+        const canonicalAssetIds = entries.map((entry) =>
+          canonicalStorageId(entry.metadata.assetId)
+        );
+        if (new Set(canonicalAssetIds).size !== entries.length) {
+          throw inputValidationError(
+            "import asset ids must be unique ignoring case"
+          );
+        }
+
+        const existingIdsByCanonical = new Map<string, Set<string>>();
+        for (const assetId of await this.listAssetStorageIds()) {
+          const canonicalId = canonicalStorageId(assetId);
+          const existingIds =
+            existingIdsByCanonical.get(canonicalId) ?? new Set<string>();
+          existingIds.add(assetId);
+          existingIdsByCanonical.set(canonicalId, existingIds);
+        }
+
+        const writes: typeof entries = [];
+        for (const entry of entries) {
+          const assetId = entry.metadata.assetId;
+          const existingIds = existingIdsByCanonical.get(
+            canonicalStorageId(assetId)
+          );
+          if (!existingIds) {
+            writes.push(entry);
+            continue;
+          }
+          if (existingIds.size !== 1 || !existingIds.has(assetId)) {
+            throw storageIdentityConflictError(
+              `asset id collides by case: ${assetId}`
+            );
+          }
+
+          let existing: StoredAssetData;
+          try {
+            existing = await this.readAsset(assetId);
+          } catch {
+            throw storageIdentityConflictError(
+              `asset storage is incomplete: ${assetId}`
+            );
+          }
+          const metadataMatches =
+            existing.assetId === entry.metadata.assetId
+            && existing.name === entry.metadata.name
+            && existing.mimeType === entry.metadata.mimeType
+            && existing.byteLength === entry.metadata.byteLength
+            && existing.url === entry.metadata.url;
+          if (!metadataMatches || !existing.data.equals(entry.data)) {
+            throw storageIdentityConflictError(
+              `asset already exists with different content: ${assetId}`
+            );
+          }
+        }
+
+        const snapshots = await captureStoragePathSnapshots(
+          writes.flatMap((entry) => [
+            this.assetPathFor(entry.metadata.assetId),
+            this.assetMetadataPathFor(entry.metadata.assetId)
+          ])
+        );
+        const writeOperation = async (): Promise<T> => {
+          try {
+            for (const entry of writes) {
+              await this.writeAssetDurably(entry.metadata, entry.data);
+            }
+            return await operation();
+          } catch (error) {
+            await restoreStoragePathSnapshots(snapshots);
+            throw error;
+          }
+        };
+        return transaction(writeOperation);
+      }
+    );
+  }
+
+  private async withNewProjectRollback<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const snapshots = await captureStoragePathSnapshots([
+      this.projectPathFor(projectId)
+    ]);
+    try {
+      return await operation();
+    } catch (error) {
+      await restoreStoragePathSnapshots(snapshots);
+      throw error;
+    }
+  }
+
+  private async withLibraryRegistryTargetTransactionLock<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    return this.withLibraryRegistryTargetMutationLock(
+      fileId,
+      async () => {
+        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+        return operation();
+      }
+    );
+  }
+
+  private async withLibraryRegistryTargetMutationLocks<T>(
+    fileId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return withOrderedStoragePathMutationLocks(
+      [
+        this.librarySubscriptionsPath(),
+        this.libraryTokenSubscriptionsPath()
+      ],
+      () => this.withRawFileMutationLock(fileId, operation)
+    );
+  }
+
+  private async withExternalMigrationRegistryTransaction<T>(
+    projectId: string,
+    libraryIds: readonly string[],
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    if (libraryIds.length === 0) {
+      return this.withNewProjectRollback(projectId, operation);
+    }
+
+    return withOrderedStoragePathMutationLocks(
+      [this.libraryRegistryPath(), this.librarySubscriptionsPath()],
+      async () => {
+        const snapshots = await captureStoragePathSnapshots([
+          this.projectPathFor(projectId),
+          this.libraryRegistryPath(),
+          this.libraryRegistryEventsPath(),
+          this.librarySubscriptionsPath(),
+          ...libraryIds.map((libraryId) =>
+            this.libraryArchivePathFor(libraryId)
+          )
+        ]);
+        try {
+          return await operation();
+        } catch (error) {
+          await restoreStoragePathSnapshots(snapshots);
+          throw error;
+        }
+      }
+    );
+  }
+
+  private async withCommentProjectAuthorizationBoundary<T>(
+    boundary: CommentAuthorizationBoundary,
+    operation: (project: ProjectManifest) => Promise<T>
+  ): Promise<T> {
+    assertSafeStorageId(boundary.projectId);
+    return this.withProjectMutationLock(boundary.projectId, async () => {
+      let project: ProjectManifest;
+      try {
+        project = parseProjectManifest(
+          JSON.parse(
+            await readFile(this.projectPathFor(boundary.projectId), "utf8")
+          )
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+        throw Object.assign(
+          new Error("comment authorization project changed before access"),
+          { code: "ECONFLICT", statusCode: 409 }
+        );
+      }
+      this.assertExpectedProjectSharing(project, boundary.expectedSharing);
+      return operation(project);
+    });
+  }
+
+  private async withCommentAuthorizationBoundary<T>(
+    fileId: string,
+    boundary: CommentAuthorizationBoundary | undefined,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (!boundary) {
+      return operation();
+    }
+    const canonicalFileId = canonicalStorageId(fileId);
+    return this.withCommentProjectAuthorizationBoundary(
+      boundary,
+      async (project) => {
+        if (
+          !project.documents.some(
+            (document) =>
+              canonicalStorageId(document.documentId) === canonicalFileId
+          )
+        ) {
+          throw Object.assign(
+            new Error(
+              "comment authorization project no longer contains the file"
+            ),
+            { code: "ECONFLICT", statusCode: 409 }
+          );
+        }
+        return operation();
+      }
+    );
+  }
+
+  private async mapCommentProjectsForRead<T>(
+    projectIds: ReadonlySet<string> | undefined,
+    authorizationBoundaries: readonly CommentAuthorizationBoundary[] | undefined,
+    operation: (project: ProjectManifest) => Promise<T>
+  ): Promise<T[]> {
+    if (authorizationBoundaries !== undefined) {
+      const seenProjectIds = new Set<string>();
+      const results: T[] = [];
+      for (const boundary of authorizationBoundaries) {
+        const canonicalProjectId = canonicalStorageId(boundary.projectId);
+        if (seenProjectIds.has(canonicalProjectId)) {
+          throw inputValidationError(
+            `comment authorization project is duplicated: ${boundary.projectId}`
+          );
+        }
+        seenProjectIds.add(canonicalProjectId);
+        results.push(
+          await this.withCommentProjectAuthorizationBoundary(
+            boundary,
+            operation
+          )
+        );
+      }
+      return results;
+    }
+
+    const projects = (await this.listProjects()).filter(
+      (project) => !projectIds || projectIds.has(project.projectId)
+    );
+    const results: T[] = [];
+    for (const project of projects) {
+      results.push(await operation(project));
+    }
+    return results;
+  }
+
+  private async withCommentMutationLock<T>(
+    fileId: string,
+    options: CommentMutationOptions,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      () =>
+        withStoragePathMutationLock(
+          this.commentThreadsPathFor(fileId),
+          operation
+        )
     );
   }
 
@@ -1446,6 +2176,7 @@ export class FileStorage {
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
@@ -1453,10 +2184,358 @@ export class FileStorage {
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
     await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
     await this.removeUnreferencedLegacySampleDocument();
+  }
+
+  private storageTransactionRecoveryDir() {
+    return path.join(this.rootDir, "recovery", "transactions");
+  }
+
+  private storageTransactionCoordinatorPath() {
+    return path.join(this.storageTransactionRecoveryDir(), ".coordinator");
+  }
+
+  private isStorageTransactionCoordinatorHeld(): boolean {
+    return storageTransactionCoordinatorContext.getStore()?.has(
+      path.resolve(this.storageTransactionCoordinatorPath())
+    ) ?? false;
+  }
+
+  private async withStorageTransactionCoordinatorLock<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const coordinatorPath = path.resolve(
+      this.storageTransactionCoordinatorPath()
+    );
+    const activePaths = storageTransactionCoordinatorContext.getStore();
+    if (activePaths?.has(coordinatorPath)) {
+      return operation();
+    }
+    return withStoragePathMutationLock(coordinatorPath, () =>
+      storageTransactionCoordinatorContext.run(
+        new Set([...(activePaths ?? []), coordinatorPath]),
+        operation
+      )
+    );
+  }
+
+  private storageTransactionRecoveryPathFor(transactionId: string) {
+    assertSafeStorageId(transactionId);
+    return path.join(this.storageTransactionRecoveryDir(), `${transactionId}.json`);
+  }
+
+  private async persistStorageTransactionRecoveryJournal(
+    transactionId: string,
+    kind: StorageTransactionRecoveryKind,
+    projectId: string | undefined,
+    fileIds: readonly string[],
+    original: readonly StoragePathSnapshot[],
+    intended: readonly StoragePathSnapshot[]
+  ): Promise<void> {
+    const journal: StorageTransactionRecoveryJournal = {
+      schemaVersion: 1,
+      kind,
+      transactionId,
+      ...(projectId ? { projectId } : {}),
+      fileIds: [...fileIds],
+      original: original.map((snapshot) =>
+        serializeRecoverySnapshot(this.rootDir, snapshot)
+      ),
+      intended: intended.map((snapshot) =>
+        serializeRecoverySnapshot(this.rootDir, snapshot)
+      )
+    };
+    const journalPath = this.storageTransactionRecoveryPathFor(transactionId);
+    await mkdir(path.dirname(journalPath), { recursive: true });
+    await durablyReplaceFile(
+      journalPath,
+      Buffer.from(`${JSON.stringify(journal, null, 2)}\n`, "utf8")
+    );
+  }
+
+  private async removeStorageTransactionRecoveryJournal(
+    transactionId: string
+  ): Promise<void> {
+    const journalPath = this.storageTransactionRecoveryPathFor(transactionId);
+    await rm(journalPath, { force: true });
+    const recoveryDir = path.dirname(journalPath);
+    if (await pathExists(recoveryDir)) {
+      await syncDirectory(recoveryDir);
+    }
+  }
+
+  private async withStorageTransactionRecovery<T>(
+    kind: StorageTransactionRecoveryKind,
+    projectId: string | undefined,
+    fileIds: readonly string[],
+    originalPaths: readonly string[],
+    initialIntended: readonly StoragePathSnapshot[],
+    operation: (
+      appendIntended: (
+        snapshots: readonly StoragePathSnapshot[]
+      ) => Promise<void>
+    ) => Promise<T>
+  ): Promise<T> {
+    const transactionId = randomUUID();
+    const orderedFileIds = [...fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    if (
+      orderedFileIds.length === 0
+      || new Set(orderedFileIds.map(canonicalStorageId)).size
+        !== orderedFileIds.length
+    ) {
+      throw inputValidationError(
+        "storage transaction recovery file ids must be unique ignoring case"
+      );
+    }
+    const orderedOriginalPaths = [
+      ...new Set(originalPaths.map((filePath) => path.resolve(filePath)))
+    ];
+    const original = await captureStoragePathSnapshots(
+      orderedOriginalPaths
+    );
+    const originalPathSet = new Set(
+      original.map((snapshot) => snapshot.filePath)
+    );
+    const intended = [...initialIntended];
+    const assertIntendedPaths = (
+      snapshots: readonly StoragePathSnapshot[]
+    ) => {
+      for (const snapshot of snapshots) {
+        if (!originalPathSet.has(path.resolve(snapshot.filePath))) {
+          throw new Error(
+            `storage transaction recovery intent is outside original paths: ${snapshot.filePath}`
+          );
+        }
+      }
+    };
+    assertIntendedPaths(intended);
+    await this.persistStorageTransactionRecoveryJournal(
+      transactionId,
+      kind,
+      projectId,
+      orderedFileIds,
+      original,
+      intended
+    );
+
+    const appendIntended = async (
+      snapshots: readonly StoragePathSnapshot[]
+    ): Promise<void> => {
+      assertIntendedPaths(snapshots);
+      intended.push(...snapshots);
+      await this.persistStorageTransactionRecoveryJournal(
+        transactionId,
+        kind,
+        projectId,
+        orderedFileIds,
+        original,
+        intended
+      );
+    };
+
+    try {
+      const result = await operation(appendIntended);
+      await this.removeStorageTransactionRecoveryJournal(transactionId);
+      return result;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
+        await this.removeStorageTransactionRecoveryJournal(transactionId);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "import transaction failed and rollback failed"
+        );
+      }
+      throw error;
+    }
+  }
+
+  private recoverInterruptedStorageTransactionsOnce(): Promise<void> {
+    this.storageTransactionRecoveryPromise ??=
+      this.withStorageTransactionCoordinatorLock(() =>
+        this.recoverInterruptedStorageTransactions()
+      );
+    return this.storageTransactionRecoveryPromise;
+  }
+
+  private async recoverInterruptedStorageTransactionsBeforeMutation(): Promise<void> {
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    await this.recoverInterruptedStorageTransactionsOnce();
+    await this.recoverInterruptedLibraryUpdates();
+    await this.recoverInterruptedStorageTransactions();
+  }
+
+  private async recoverInterruptedStorageTransactions(): Promise<void> {
+    const journalPaths = await this.listLibraryRecoveryJournalPaths(
+      this.storageTransactionRecoveryDir()
+    );
+    for (const journalPath of journalPaths) {
+      await this.recoverInterruptedStorageTransactionJournal(journalPath);
+    }
+  }
+
+  private async recoverInterruptedStorageTransactionJournal(
+    journalPath: string
+  ): Promise<void> {
+    let expected: StorageTransactionRecoveryJournal;
+    try {
+      expected = parseStorageTransactionRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    const recover = async (): Promise<void> => {
+      let journal: StorageTransactionRecoveryJournal;
+      try {
+        journal = parseStorageTransactionRecoveryJournal(
+          JSON.parse(await readFile(journalPath, "utf8"))
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === "ENOENT") {
+          return;
+        }
+        throw error;
+      }
+      if (
+        journal.transactionId !== expected.transactionId
+        || journal.kind !== expected.kind
+        || journal.projectId !== expected.projectId
+        || journal.fileIds.length !== expected.fileIds.length
+        || journal.fileIds.some(
+          (fileId, index) => fileId !== expected.fileIds[index]
+        )
+      ) {
+        throw new StorageRollbackConflictError(
+          `storage transaction recovery journal changed while waiting: ${journalPath}`
+        );
+      }
+
+      const original = journal.original.map((snapshot) =>
+        deserializeRecoverySnapshot(this.rootDir, snapshot)
+      );
+      const originalPathSet = new Set(
+        original.map((snapshot) => snapshot.filePath)
+      );
+      const intended = new Map<string, Array<Buffer | null>>();
+      for (const snapshot of journal.intended) {
+        const restored = deserializeRecoverySnapshot(
+          this.rootDir,
+          snapshot
+        );
+        if (!originalPathSet.has(restored.filePath)) {
+          throw new Error(
+            `storage transaction recovery intent is outside original paths: ${restored.filePath}`
+          );
+        }
+        const candidates = intended.get(restored.filePath) ?? [];
+        candidates.push(restored.data);
+        intended.set(restored.filePath, candidates);
+      }
+      const rollbackOriginal =
+        await this.omitReferencedNewAssetsFromRollback(
+          original,
+          journal.fileIds
+        );
+      const current = await captureStoragePathSnapshots(
+        rollbackOriginal.map((snapshot) => snapshot.filePath)
+      );
+      const currentByPath = new Map(
+        current.map((snapshot) => [snapshot.filePath, snapshot.data])
+      );
+
+      for (const snapshot of rollbackOriginal) {
+        const currentData = currentByPath.get(snapshot.filePath) ?? null;
+        const intendedData = intended.get(snapshot.filePath) ?? [];
+        if (
+          !storageSnapshotDataEquals(currentData, snapshot.data)
+          && !intendedData.some((candidate) =>
+            storageSnapshotDataEquals(currentData, candidate)
+          )
+        ) {
+          throw new StorageRollbackConflictError(
+            `interrupted ${journal.kind} path changed outside journal: ${snapshot.filePath}`
+          );
+        }
+      }
+
+      await restoreStoragePathSnapshots(rollbackOriginal);
+      await rm(journalPath, { force: true });
+      const recoveryDir = path.dirname(journalPath);
+      if (await pathExists(recoveryDir)) {
+        await syncDirectory(recoveryDir);
+      }
+    };
+
+    const orderedFileIds = [...expected.fileIds].sort(
+      (first, second) =>
+        canonicalStorageId(first).localeCompare(canonicalStorageId(second))
+        || first.localeCompare(second)
+    );
+    if (expected.kind === "file-archive-import") {
+      return withStoragePathMutationLock(
+        this.fileMutationPathFor(orderedFileIds[0]),
+        () =>
+          withAssetReferenceMutationLock(
+            this.assetReferenceMutationPath(),
+            recover
+          )
+      );
+    }
+
+    const projectId = expected.projectId;
+    if (!projectId) {
+      throw new Error("storage transaction recovery project id is required");
+    }
+    return this.withProjectMutationLock(projectId, () => {
+      if (expected.kind === "project-delete") {
+        return this.withOrderedLibraryRegistryTargetMutationLocks(
+          orderedFileIds,
+          () =>
+            withOrderedStoragePathMutationLocks(
+              [
+                this.librarySubscriptionsPath(),
+                this.libraryTokenSubscriptionsPath()
+              ],
+              () =>
+                this.withOrderedFileMutationLocks(
+                  orderedFileIds,
+                  recover
+                )
+            )
+        );
+      }
+      if (expected.kind === "external-migration-import") {
+        return withOrderedStoragePathMutationLocks(
+          [
+            this.libraryRegistryPath(),
+            this.librarySubscriptionsPath()
+          ],
+          () =>
+            this.withOrderedFileMutationLocks(
+              orderedFileIds,
+              recover
+            )
+        );
+      }
+      return this.withOrderedFileMutationLocks(
+        orderedFileIds,
+        recover
+      );
+    });
   }
 
   private libraryUpdateRecoveryDir() {
@@ -1512,96 +2591,113 @@ export class FileStorage {
   }
 
   private recoverInterruptedLibraryUpdatesOnce(): Promise<void> {
-    this.libraryUpdateRecoveryPromise ??= this.recoverInterruptedLibraryUpdates();
+    this.libraryUpdateRecoveryPromise ??=
+      this.recoverInterruptedLibraryUpdates();
     return this.libraryUpdateRecoveryPromise;
   }
 
-  private async recoverInterruptedLibraryUpdates(): Promise<void> {
-    const journalPaths: string[] = [];
-    for (const recoveryDir of [
-      this.libraryUpdateRecoveryDir(),
+  private async listLibraryRecoveryJournalPaths(
+    recoveryDir: string
+  ): Promise<string[]> {
+    try {
+      return (await readdir(recoveryDir))
+        .filter((candidate) => candidate.endsWith(".json"))
+        .map((entry) => path.join(recoveryDir, entry))
+        .sort();
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async recoverInterruptedLibraryUpdateJournal(
+    journalPath: string
+  ): Promise<void> {
+    let journal: LibraryUpdateRecoveryJournal;
+    try {
+      journal = parseLibraryUpdateRecoveryJournal(
+        JSON.parse(await readFile(journalPath, "utf8"))
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    const original = journal.original.map((snapshot) =>
+      deserializeRecoverySnapshot(this.rootDir, snapshot)
+    );
+    const intended = new Map<string, Array<Buffer | null>>();
+    for (const snapshot of journal.intended) {
+      const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
+      const candidates = intended.get(restored.filePath) ?? [];
+      candidates.push(restored.data);
+      intended.set(restored.filePath, candidates);
+    }
+    const current = await captureStoragePathSnapshots(
+      original.map((snapshot) => snapshot.filePath)
+    );
+
+    for (const snapshot of original) {
+      const currentData = current.find(
+        (candidate) => candidate.filePath === snapshot.filePath
+      )?.data ?? null;
+      const intendedData = intended.get(snapshot.filePath) ?? [];
+      if (
+        !storageSnapshotDataEquals(currentData, snapshot.data)
+        && !intendedData.some((candidate) =>
+          storageSnapshotDataEquals(currentData, candidate)
+        )
+      ) {
+        const transactionName =
+          journal.kind === "library-registry-publication"
+            ? "library publication"
+            : "library update";
+        throw new StorageRollbackConflictError(
+          `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
+        );
+      }
+    }
+
+    await restoreStoragePathSnapshots(original);
+    await rm(journalPath, { force: true });
+    await syncDirectory(path.dirname(journalPath));
+  }
+
+  // Caller must hold the registry path lock.
+  private async recoverInterruptedLibraryPublicationsLocked(): Promise<void> {
+    const journalPaths = await this.listLibraryRecoveryJournalPaths(
       this.libraryPublicationRecoveryDir()
-    ]) {
-      try {
-        const entries = await readdir(recoveryDir);
-        journalPaths.push(
-          ...entries
-            .filter((candidate) => candidate.endsWith(".json"))
-            .map((entry) => path.join(recoveryDir, entry))
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code !== "ENOENT") {
-          throw error;
-        }
-      }
+    );
+    for (const journalPath of journalPaths) {
+      await this.recoverInterruptedLibraryUpdateJournal(journalPath);
+    }
+  }
+
+  private async recoverInterruptedLibraryUpdates(): Promise<void> {
+    const updateJournalPaths = await this.listLibraryRecoveryJournalPaths(
+      this.libraryUpdateRecoveryDir()
+    );
+    for (const journalPath of updateJournalPaths) {
+      const fileId = path.basename(journalPath, ".json");
+      assertSafeStorageId(fileId);
+      await this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        () =>
+          this.withLibraryRegistryTargetMutationLocks(
+            fileId,
+            () => this.recoverInterruptedLibraryUpdateJournal(journalPath)
+          )
+      );
     }
 
-    for (const journalPath of journalPaths.sort()) {
-      let pendingJournal: LibraryUpdateRecoveryJournal;
-      try {
-        pendingJournal = parseLibraryUpdateRecoveryJournal(
-          JSON.parse(await readFile(journalPath, "utf8"))
-        );
-      } catch (error) {
-        if ((error as { code?: string }).code === "ENOENT") {
-          continue;
-        }
-        throw error;
-      }
-      const recoverJournal = async (): Promise<void> => {
-        let journal: LibraryUpdateRecoveryJournal;
-        try {
-          journal = parseLibraryUpdateRecoveryJournal(
-            JSON.parse(await readFile(journalPath, "utf8"))
-          );
-        } catch (error) {
-          if ((error as { code?: string }).code === "ENOENT") {
-            return;
-          }
-          throw error;
-        }
-        const original = journal.original.map((snapshot) =>
-          deserializeRecoverySnapshot(this.rootDir, snapshot)
-        );
-        const intended = new Map(
-          journal.intended.map((snapshot) => {
-            const restored = deserializeRecoverySnapshot(this.rootDir, snapshot);
-            return [restored.filePath, restored.data] as const;
-          })
-        );
-        const current = await captureStoragePathSnapshots(
-          original.map((snapshot) => snapshot.filePath)
-        );
-
-        for (const snapshot of original) {
-          const currentData = current.find(
-            (candidate) => candidate.filePath === snapshot.filePath
-          )?.data ?? null;
-          const intendedData = intended.get(snapshot.filePath);
-          if (
-            !storageSnapshotDataEquals(currentData, snapshot.data)
-            && (intendedData === undefined || !storageSnapshotDataEquals(currentData, intendedData))
-          ) {
-            const transactionName = journal.kind === "library-registry-publication"
-              ? "library publication"
-              : "library update";
-            throw new StorageRollbackConflictError(
-              `interrupted ${transactionName} path changed outside journal: ${snapshot.filePath}`
-            );
-          }
-        }
-
-        await restoreStoragePathSnapshots(original);
-        await rm(journalPath, { force: true });
-        await syncDirectory(path.dirname(journalPath));
-      };
-
-      if (pendingJournal.kind === "library-registry-publication") {
-        await withStoragePathMutationLock(this.libraryRegistryPath(), recoverJournal);
-      } else {
-        await recoverJournal();
-      }
-    }
+    await withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      () => this.recoverInterruptedLibraryPublicationsLocked()
+    );
   }
 
   private async removeUnreferencedLegacySampleDocument() {
@@ -1706,222 +2802,571 @@ export class FileStorage {
     const projectName = normalizeName(input.name, "새 프로젝트");
     const documentName = normalizeName(input.documentName, `${projectName} 문서`);
 
-    await this.writeFile(documentId, createInitialDesignFile(documentId, documentName));
-    return this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: projectName,
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents: [{ documentId, name: documentName, createdAt: now, updatedAt: now }],
-      sharing: { mode: "private" }
+    return this.withProjectMutationLock(projectId, async () => {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
+        throw Object.assign(new Error(`project already exists: ${projectId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
+      return this.withNewProjectRollback(
+        projectId,
+        () =>
+          this.withExclusiveProjectFiles(
+            [
+              {
+                fileId: documentId,
+                document: createInitialDesignFile(documentId, documentName)
+              }
+            ],
+            () =>
+              this.writeProject({
+                schemaVersion: 1,
+                projectId,
+                name: projectName,
+                createdAt: now,
+                updatedAt: now,
+                currentDocumentId: documentId,
+                documents: [
+                  {
+                    documentId,
+                    name: documentName,
+                    createdAt: now,
+                    updatedAt: now
+                  }
+                ],
+                sharing: { mode: "private" }
+              })
+          )
+      );
     });
   }
 
-  async updateProject(projectId: string, input: UpdateProjectInput): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const currentDocumentId = input.currentDocumentId ?? project.currentDocumentId;
-    if (!project.documents.some((document) => document.documentId === currentDocumentId)) {
-      throw new Error(`project document not found: ${currentDocumentId}`);
-    }
+  async updateProject(
+    projectId: string,
+    input: UpdateProjectInput,
+    options: ProjectMutationOptions = {}
+  ): Promise<ProjectManifest> {
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      const currentDocumentId = input.currentDocumentId ?? project.currentDocumentId;
+      if (!project.documents.some((document) => document.documentId === currentDocumentId)) {
+        throw new Error(`project document not found: ${currentDocumentId}`);
+      }
 
-    return this.writeProject({
-      ...project,
-      name: input.name === undefined ? project.name : normalizeName(input.name, project.name),
-      currentDocumentId,
-      updatedAt: new Date().toISOString()
+      return this.writeProject({
+        ...project,
+        name: input.name === undefined ? project.name : normalizeName(input.name, project.name),
+        currentDocumentId,
+        updatedAt: new Date().toISOString()
+      });
     });
   }
 
   async createProjectDocument(
     projectId: string,
-    input: CreateProjectDocumentInput = {}
+    input: CreateProjectDocumentInput = {},
+    options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const now = new Date().toISOString();
-    const documentId = input.documentId ?? createStorageId("document");
-    assertSafeStorageId(documentId);
-    if (project.documents.some((document) => document.documentId === documentId)) {
-      throw new Error(`project document already exists: ${documentId}`);
-    }
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
+      const now = new Date().toISOString();
+      const documentId = input.documentId ?? createStorageId("document");
+      assertSafeStorageId(documentId);
+      if (
+        project.documents.some(
+          (document) =>
+            canonicalStorageId(document.documentId)
+            === canonicalStorageId(documentId)
+        )
+      ) {
+        throw Object.assign(new Error(`project document already exists: ${documentId}`), {
+          code: "EEXIST",
+          statusCode: 409
+        });
+      }
 
-    const name = normalizeName(input.name, "새 문서");
-    await this.writeFile(documentId, createInitialDesignFile(documentId, name));
-    return this.writeProject({
-      ...project,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents: [...project.documents, { documentId, name, createdAt: now, updatedAt: now }]
+      const name = normalizeName(input.name, "새 문서");
+      return this.withExclusiveProjectFiles(
+        [
+          {
+            fileId: documentId,
+            document: createInitialDesignFile(documentId, name)
+          }
+        ],
+        () =>
+          this.writeProject({
+            ...project,
+            updatedAt: now,
+            currentDocumentId: documentId,
+            documents: [
+              ...project.documents,
+              { documentId, name, createdAt: now, updatedAt: now }
+            ]
+          })
+      );
     });
   }
 
-  async setProjectSharing(projectId: string, sharing: ProjectSharing): Promise<ProjectManifest> {
-    const project = await this.readProject(projectId);
-    const nextSharing: ProjectSharing =
-      sharing.mode === "team"
-        ? { mode: "team", teamId: normalizeName(sharing.teamId, "") }
-        : { mode: "private" };
-    if (nextSharing.mode === "team" && !nextSharing.teamId) {
-      throw new Error("team id is required for project sharing");
-    }
+  async setProjectSharing(
+    projectId: string,
+    sharing: ProjectSharing,
+    options: SetProjectSharingOptions = {}
+  ): Promise<ProjectManifest> {
+    return this.withProjectMutationLock(projectId, async () => {
+      const project = await this.readProject(projectId);
+      this.assertExpectedProjectSharing(project, options.expectedSharing);
 
-    return this.writeProject({
-      ...project,
-      sharing: nextSharing,
-      updatedAt: new Date().toISOString()
+      const nextSharing: ProjectSharing =
+        sharing.mode === "team"
+          ? { mode: "team", teamId: normalizeName(sharing.teamId, "") }
+          : { mode: "private" };
+      if (nextSharing.mode === "team" && !nextSharing.teamId) {
+        throw new Error("team id is required for project sharing");
+      }
+
+      return this.writeProject({
+        ...project,
+        sharing: nextSharing,
+        updatedAt: new Date().toISOString()
+      });
     });
   }
 
   async duplicateProject(
     sourceProjectId: string,
-    input: DuplicateProjectInput = {}
+    input: DuplicateProjectInput = {},
+    options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    const source = await this.readProject(sourceProjectId);
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.duplicateProject(sourceProjectId, input, options)
+      );
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    const source = await this.withProjectMutationLock(
+      sourceProjectId,
+      async () => {
+        const project = await this.readProject(sourceProjectId);
+        this.assertExpectedProjectSharing(
+          project,
+          options.expectedSharing
+        );
+        return project;
+      }
+    );
     const now = new Date().toISOString();
     const projectId = input.projectId ?? createStorageId("project");
     assertSafeStorageId(projectId);
     if (input.documentIdPrefix !== undefined) {
       assertSafeStorageId(input.documentIdPrefix);
     }
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw new Error(`project already exists: ${projectId}`);
-    }
 
-    const documents: ProjectDocumentSummary[] = [];
-    let currentDocumentId = "";
-    for (const sourceDocument of source.documents) {
-      const documentId = input.documentIdPrefix
-        ? `${input.documentIdPrefix}-${sourceDocument.documentId}`
-        : createStorageId("document");
-      assertSafeStorageId(documentId);
-      if (await pathExists(this.filePathFor(documentId))) {
-        throw new Error(`document already exists: ${documentId}`);
+    return this.withProjectMutationLock(projectId, async () => {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
+        throw Object.assign(
+          new Error(`project already exists: ${projectId}`),
+          {
+            code: "EEXIST",
+            statusCode: 409
+          }
+        );
       }
 
-      const document = await this.readFile(sourceDocument.documentId);
-      const name = `${sourceDocument.name} 사본`;
-      await this.writeFile(documentId, { ...structuredClone(document), id: documentId, name });
-      documents.push({
-        documentId,
-        name,
+      const documents: ProjectDocumentSummary[] = [];
+      const files: Array<{ fileId: string; document: DesignFile }> = [];
+      let currentDocumentId = "";
+      for (const sourceDocument of source.documents) {
+        const documentId = input.documentIdPrefix
+          ? `${input.documentIdPrefix}-${sourceDocument.documentId}`
+          : createStorageId("document");
+        assertSafeStorageId(documentId);
+
+        const document = await this.readFile(
+          sourceDocument.documentId
+        );
+        const name = `${sourceDocument.name} 사본`;
+        files.push({
+          fileId: documentId,
+          document: {
+            ...structuredClone(document),
+            id: documentId,
+            name
+          }
+        });
+        documents.push({
+          documentId,
+          name,
+          createdAt: now,
+          updatedAt: now
+        });
+        if (sourceDocument.documentId === source.currentDocumentId) {
+          currentDocumentId = documentId;
+        }
+      }
+
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: normalizeName(input.name, `${source.name} 사본`),
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        currentDocumentId:
+          currentDocumentId || documents[0].documentId,
+        documents,
+        sharing: { mode: "private" }
       });
-      if (sourceDocument.documentId === source.currentDocumentId) {
-        currentDocumentId = documentId;
-      }
-    }
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId))
+      ];
+      const intended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        }))
+      ];
 
-    return this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: normalizeName(input.name, `${source.name} 사본`),
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: currentDocumentId || documents[0].documentId,
-      documents,
-      sharing: { mode: "private" }
+      return this.withNewProjectRollback(
+        projectId,
+        () =>
+          this.withExclusiveProjectFiles(
+            files,
+            () => this.writeProject(nextProject),
+            (writeOperation) =>
+              this.withStorageTransactionRecovery(
+                "project-duplicate",
+                projectId,
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                intended,
+                () => writeOperation()
+              )
+          )
+      );
     });
   }
 
-  async deleteProject(projectId: string): Promise<ProjectManifest> {
-    const projects = await this.listProjects();
-    const project = projects.find((candidate) => candidate.projectId === projectId);
-    if (!project) {
-      throw new Error(`project not found: ${projectId}`);
+  async deleteProject(
+    projectId: string,
+    options: ProjectMutationOptions = {}
+  ): Promise<ProjectManifest> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.deleteProject(projectId, options)
+      );
     }
-    if (projects.length <= 1) {
-      throw new Error("cannot delete last project");
-    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
 
-    const otherDocumentIds = new Set(
-      projects
-        .filter((candidate) => candidate.projectId !== projectId)
-        .flatMap((candidate) => candidate.documents.map((document) => document.documentId))
-    );
-    await rm(this.projectPathFor(project.projectId), { force: true });
-    await Promise.all(
-      project.documents
-        .filter((document) => !otherDocumentIds.has(document.documentId))
-        .map((document) => rm(this.filePathFor(document.documentId), { force: true }))
-    );
+    return this.withProjectCollectionMutationLock(() =>
+      this.withProjectMutationLock(projectId, async () => {
+        const projects = await this.listProjects();
+        const project = projects.find(
+          (candidate) => candidate.projectId === projectId
+        );
+        if (!project) {
+          throw new Error(`project not found: ${projectId}`);
+        }
+        this.assertExpectedProjectSharing(project, options.expectedSharing);
+        if (projects.length <= 1) {
+          throw new Error("cannot delete last project");
+        }
 
-    return project;
+        const otherDocumentIds = new Set(
+          projects
+            .filter((candidate) => candidate.projectId !== projectId)
+            .flatMap((candidate) =>
+              candidate.documents.map((document) =>
+                canonicalStorageId(document.documentId)
+              )
+            )
+        );
+        const projectFileIds = project.documents
+          .map((document) => document.documentId)
+          .sort(
+            (first, second) =>
+              canonicalStorageId(first).localeCompare(
+                canonicalStorageId(second)
+              )
+              || first.localeCompare(second)
+          );
+        const fileIds = projectFileIds.filter(
+          (documentId) =>
+            !otherDocumentIds.has(canonicalStorageId(documentId))
+        );
+        const deletedFileIds = new Set(fileIds.map(canonicalStorageId));
+
+        return this.withOrderedLibraryRegistryTargetMutationLocks(
+          projectFileIds,
+          async () => {
+            for (const fileId of projectFileIds) {
+              await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+            }
+            return withOrderedStoragePathMutationLocks(
+              [
+                this.librarySubscriptionsPath(),
+                this.libraryTokenSubscriptionsPath()
+              ],
+              () =>
+                this.withOrderedFileMutationLocks(
+                  projectFileIds,
+                  async () => {
+                    const subscriptions =
+                      await this.readLibraryRegistrySubscriptions();
+                    const nextSubscriptions = subscriptions.filter(
+                      (subscription) =>
+                        !deletedFileIds.has(
+                          canonicalStorageId(subscription.fileId)
+                        )
+                    );
+                    const tokenSubscriptions =
+                      await this.readLibraryRegistryTokenSubscriptions();
+                    const nextTokenSubscriptions = tokenSubscriptions.filter(
+                      (subscription) =>
+                        !deletedFileIds.has(
+                          canonicalStorageId(subscription.fileId)
+                        )
+                    );
+                    const subscriptionsChanged =
+                      nextSubscriptions.length !== subscriptions.length;
+                    const tokenSubscriptionsChanged =
+                      nextTokenSubscriptions.length
+                        !== tokenSubscriptions.length;
+                    const originalPaths = [
+                      this.projectPathFor(project.projectId),
+                      ...fileIds.map((fileId) =>
+                        this.filePathFor(fileId)
+                      ),
+                      ...(subscriptionsChanged
+                        ? [this.librarySubscriptionsPath()]
+                        : []),
+                      ...(tokenSubscriptionsChanged
+                        ? [this.libraryTokenSubscriptionsPath()]
+                        : [])
+                    ];
+                    const intended: StoragePathSnapshot[] = [
+                      {
+                        filePath: this.projectPathFor(project.projectId),
+                        data: null
+                      },
+                      ...fileIds.map((fileId) => ({
+                        filePath: this.filePathFor(fileId),
+                        data: null
+                      })),
+                      ...(subscriptionsChanged
+                        ? [{
+                            filePath: this.librarySubscriptionsPath(),
+                            data: Buffer.from(
+                              `${JSON.stringify(
+                                {
+                                  schemaVersion: 1,
+                                  subscriptions: nextSubscriptions
+                                },
+                                null,
+                                2
+                              )}\n`,
+                              "utf8"
+                            )
+                          }]
+                        : []),
+                      ...(tokenSubscriptionsChanged
+                        ? [{
+                            filePath:
+                              this.libraryTokenSubscriptionsPath(),
+                            data: Buffer.from(
+                              `${JSON.stringify(
+                                {
+                                  schemaVersion: 1,
+                                  subscriptions: nextTokenSubscriptions
+                                },
+                                null,
+                                2
+                              )}\n`,
+                              "utf8"
+                            )
+                          }]
+                        : [])
+                    ];
+  
+                    return this.withStorageTransactionRecovery(
+                      "project-delete",
+                      project.projectId,
+                      projectFileIds,
+                      originalPaths,
+                      intended,
+                      async () => {
+                        await rm(
+                          this.projectPathFor(project.projectId),
+                          { force: true }
+                        );
+                        for (const fileId of fileIds) {
+                          await rm(this.filePathFor(fileId), {
+                            force: true
+                          });
+                        }
+                        if (subscriptionsChanged) {
+                          await this.writeLibraryRegistrySubscriptions(
+                            nextSubscriptions
+                          );
+                        }
+                        if (tokenSubscriptionsChanged) {
+                          await this.writeLibraryRegistryTokenSubscriptions(
+                            nextTokenSubscriptions
+                          );
+                        }
+                        return project;
+                      }
+                    );
+                  })
+            );
+          }
+        );
+      })
+    );
   }
 
   async listCommentNotifications(
     options: ListCommentNotificationsOptions = {}
   ): Promise<CommentNotificationSummary> {
     const viewerId = normalizeName(options.viewerId, "사용자");
-    const projects = await this.listProjects();
-    const projectSummaries: Array<CommentNotificationProjectSummary & { latestUnreadAt: string }> = [];
-
-    for (const project of projects) {
-      const files: Array<CommentNotificationFileSummary & { latestUnreadAt: string }> = [];
-      for (const document of project.documents) {
-        const store = await this.readCommentThreadFile(document.documentId);
-        const unreadThreads = unreadCommentThreads(store.threads, viewerId);
-        const unreadCount = unreadThreads.length;
-        const mentionCount = unreadThreads.filter((thread) => isCommentThreadMentionedForViewer(thread, viewerId)).length;
-        if (unreadCount > 0) {
-          files.push({
-            fileId: document.documentId,
-            name: document.name,
-            unreadCount,
-            mentionCount,
-            latestUnreadAt: latestCommentThreadCreatedAt(unreadThreads)
-          });
+    const summaries = await this.mapCommentProjectsForRead(
+      options.projectIds,
+      options.authorizationBoundaries,
+      async (project) => {
+        const files: Array<
+          CommentNotificationFileSummary & { latestUnreadAt: string }
+        > = [];
+        for (const document of project.documents) {
+          const store = await this.readCommentThreadFile(
+            document.documentId
+          );
+          const unreadThreads = unreadCommentThreads(
+            store.threads,
+            viewerId
+          );
+          const unreadCount = unreadThreads.length;
+          const mentionCount = unreadThreads.filter((thread) =>
+            isCommentThreadMentionedForViewer(thread, viewerId)
+          ).length;
+          if (unreadCount > 0) {
+            files.push({
+              fileId: document.documentId,
+              name: document.name,
+              unreadCount,
+              mentionCount,
+              latestUnreadAt:
+                latestCommentThreadCreatedAt(unreadThreads)
+            });
+          }
         }
-      }
 
-      files.sort(compareCommentNotificationRecency);
-      const unreadCount = files.reduce((total, file) => total + file.unreadCount, 0);
-      const mentionCount = files.reduce((total, file) => total + file.mentionCount, 0);
-      if (unreadCount > 0) {
-        projectSummaries.push({
-          projectId: project.projectId,
-          name: project.name,
-          unreadCount,
-          mentionCount,
-          files: files.map(({ latestUnreadAt: _latestUnreadAt, ...file }) => file),
-          latestUnreadAt: files[0]?.latestUnreadAt ?? new Date(0).toISOString()
-        });
+        files.sort(compareCommentNotificationRecency);
+        const unreadCount = files.reduce(
+          (total, file) => total + file.unreadCount,
+          0
+        );
+        const mentionCount = files.reduce(
+          (total, file) => total + file.mentionCount,
+          0
+        );
+        return unreadCount > 0
+          ? {
+              projectId: project.projectId,
+              name: project.name,
+              unreadCount,
+              mentionCount,
+              files: files.map(
+                ({ latestUnreadAt: _latestUnreadAt, ...file }) => file
+              ),
+              latestUnreadAt:
+                files[0]?.latestUnreadAt ?? new Date(0).toISOString()
+            }
+          : null;
       }
-    }
+    );
+    const projectSummaries = summaries.filter(
+      (
+        summary
+      ): summary is CommentNotificationProjectSummary & {
+        latestUnreadAt: string;
+      } => summary !== null
+    );
 
     projectSummaries.sort(compareCommentNotificationRecency);
     return {
       viewerId,
-      totalUnread: projectSummaries.reduce((total, project) => total + project.unreadCount, 0),
-      totalMentions: projectSummaries.reduce((total, project) => total + project.mentionCount, 0),
-      projects: projectSummaries.map(({ latestUnreadAt: _latestUnreadAt, ...project }) => project)
+      totalUnread: projectSummaries.reduce(
+        (total, project) => total + project.unreadCount,
+        0
+      ),
+      totalMentions: projectSummaries.reduce(
+        (total, project) => total + project.mentionCount,
+        0
+      ),
+      projects: projectSummaries.map(
+        ({ latestUnreadAt: _latestUnreadAt, ...project }) => project
+      )
     };
   }
 
-  async listCommentActivity(options: ListCommentActivityOptions = {}): Promise<CommentActivityFeed> {
+  async listCommentActivity(
+    options: ListCommentActivityOptions = {}
+  ): Promise<CommentActivityFeed> {
     const viewerId = normalizeName(options.viewerId, "사용자");
-    const limit = normalizeListLimit(options.limit, COMMENT_ACTIVITY_RETENTION_LIMIT);
-    const projects = await this.listProjects();
-    const events: CommentActivityEvent[] = [];
-
-    for (const project of projects) {
-      for (const document of project.documents) {
-        const store = await this.readCommentThreadFile(document.documentId);
-        events.push(
-          ...store.activity.map((event) => ({
-            ...event,
-            projectId: project.projectId,
-            projectName: project.name,
-            fileName: document.name
-          }))
-        );
+    const limit = normalizeListLimit(
+      options.limit,
+      COMMENT_ACTIVITY_RETENTION_LIMIT
+    );
+    const projectEvents = await this.mapCommentProjectsForRead(
+      options.projectIds,
+      options.authorizationBoundaries,
+      async (project) => {
+        const events: CommentActivityEvent[] = [];
+        for (const document of project.documents) {
+          const store = await this.readCommentThreadFile(
+            document.documentId
+          );
+          events.push(
+            ...store.activity.map((event) => ({
+              ...event,
+              projectId: project.projectId,
+              projectName: project.name,
+              fileName: document.name
+            }))
+          );
+        }
+        return events;
       }
-    }
+    );
 
     return {
       viewerId,
-      events: events
+      events: projectEvents
+        .flat()
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, limit)
     };
@@ -1930,29 +3375,32 @@ export class FileStorage {
   async listCommentLiveEvents(
     options: ListCommentLiveEventsOptions = {}
   ): Promise<StoredCommentLiveEvent[]> {
-    const after = Math.max(0, Math.floor(Number(options.after) || 0));
-    const limit = Math.max(0, Math.floor(Number(options.limit) || 0));
-
-    if (options.fileId) {
-      await this.readFile(options.fileId);
-      const store = await this.readCommentThreadFile(options.fileId);
-      const events = store.events.filter((event) => event.sequence > after);
-      return limit > 0 ? events.slice(-limit) : events;
+    const fileId = options.fileId;
+    if (!fileId) {
+      throw inputValidationError(
+        "comment live event replay requires a file id"
+      );
     }
-
-    const projects = await this.listProjects();
-    const fileIds = new Set(
-      projects.flatMap((project) => project.documents.map((document) => document.documentId))
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      async () => {
+        const after = Math.max(
+          0,
+          Math.floor(Number(options.after) || 0)
+        );
+        const limit = Math.max(
+          0,
+          Math.floor(Number(options.limit) || 0)
+        );
+        await this.readFile(fileId);
+        const store = await this.readCommentThreadFile(fileId);
+        const events = store.events.filter(
+          (event) => event.sequence > after
+        );
+        return limit > 0 ? events.slice(0, limit) : events;
+      }
     );
-    const events: StoredCommentLiveEvent[] = [];
-    for (const fileId of fileIds) {
-      const store = await this.readCommentThreadFile(fileId);
-      events.push(...store.events.filter((event) => event.sequence > after));
-    }
-    const sorted = events.sort(
-      (a, b) => a.createdAt.localeCompare(b.createdAt) || a.fileId.localeCompare(b.fileId) || a.sequence - b.sequence
-    );
-    return limit > 0 ? sorted.slice(-limit) : sorted;
   }
 
   async readFile(fileId: string): Promise<DesignFile> {
@@ -2088,11 +3536,23 @@ export class FileStorage {
     archive: Buffer,
     options: ImportFileArchiveOptions = {}
   ): Promise<ImportedFileArchive> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.importFileArchive(archive, options)
+      );
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
     const entries = readZipArchive(archive);
-    const manifest = parseFileArchiveManifest(readJsonArchiveEntry(entries, "manifest.json"));
-    const archivedDocument = parseDesignFileArchiveDocument(readJsonArchiveEntry(entries, "document.json"));
+    const manifest = parseFileArchiveManifest(
+      readJsonArchiveEntry(entries, "manifest.json")
+    );
+    const archivedDocument = parseDesignFileArchiveDocument(
+      readJsonArchiveEntry(entries, "document.json")
+    );
     if (archivedDocument.id !== manifest.fileId) {
-      throw new Error(`file archive document mismatch: ${archivedDocument.id}`);
+      throw new Error(
+        `file archive document mismatch: ${archivedDocument.id}`
+      );
     }
 
     const fileId = options.fileId ?? archivedDocument.id;
@@ -2108,15 +3568,86 @@ export class FileStorage {
     }
 
     const assets = readFileArchiveAssets(entries, assetIds);
-    await Promise.all(assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-    await this.writeFile(fileId, document);
-    return {
-      fileId,
-      name: document.name,
-      originalFileId: manifest.fileId,
-      originalName: manifest.name,
-      assetCount: assetIds.length
-    };
+    return withStoragePathMutationLock(
+      this.fileMutationPathFor(fileId),
+      async () => {
+        const canonicalFileId = canonicalStorageId(fileId);
+        const casingConflict = (
+          await this.storageIdsInDirectory(this.filesDir, ".json")
+        ).find(
+          (entry) =>
+            canonicalStorageId(entry) === canonicalFileId
+            && entry !== fileId
+        );
+        if (casingConflict) {
+          throw storageIdentityConflictError(
+            `file archive target already exists with another casing: ${fileId}`
+          );
+        }
+
+        const parsedAssets = assets.map((asset) => ({
+          metadata: parseStoredAsset(asset.metadata),
+          data: asset.data
+        }));
+        const originalPaths = [
+          this.filePathFor(fileId),
+          ...parsedAssets.flatMap((asset) => [
+            this.assetPathFor(asset.metadata.assetId),
+            this.assetMetadataPathFor(asset.metadata.assetId)
+          ])
+        ];
+        const intended: StoragePathSnapshot[] = [
+          {
+            filePath: this.filePathFor(fileId),
+            data: Buffer.from(
+              `${JSON.stringify(document, null, 2)}\n`,
+              "utf8"
+            )
+          },
+          ...parsedAssets.flatMap((asset) => [
+            {
+              filePath: this.assetPathFor(asset.metadata.assetId),
+              data: Buffer.from(asset.data)
+            },
+            {
+              filePath: this.assetMetadataPathFor(
+                asset.metadata.assetId
+              ),
+              data: Buffer.from(
+                `${JSON.stringify(asset.metadata, null, 2)}\n`,
+                "utf8"
+              )
+            }
+          ])
+        ];
+
+        return this.withImportedAssetWrites(
+          parsedAssets,
+          async () => {
+            await this.writeFileDurablyWithoutMutationLock(
+              fileId,
+              document
+            );
+            return {
+              fileId,
+              name: document.name,
+              originalFileId: manifest.fileId,
+              originalName: manifest.name,
+              assetCount: assetIds.length
+            };
+          },
+          (writeOperation) =>
+            this.withStorageTransactionRecovery(
+              "file-archive-import",
+              undefined,
+              [fileId],
+              originalPaths,
+              intended,
+              () => writeOperation()
+            )
+        );
+      }
+    );
   }
 
   async reviewFileArchive(archive: Buffer): Promise<ReviewedFileArchive> {
@@ -2210,116 +3741,342 @@ export class FileStorage {
     archive: Buffer,
     options: ImportExternalMigrationArchiveOptions = {}
   ): Promise<ImportedExternalMigrationArchive> {
+    const receiptKind = "external-migration-import" as const;
+    const idempotencyKey = normalizeStorageImportIdempotencyKey(
+      options.idempotencyKey
+    );
+    const fingerprint = storageImportRequestFingerprint(
+      receiptKind,
+      archive,
+      {
+        projectId: options.projectId ?? null,
+        documentId: options.documentId ?? null,
+        name: options.name ?? null,
+        documentName: options.documentName ?? null,
+        fileName: options.fileName ?? null,
+        sourceHint: options.sourceHint ?? null
+      }
+    );
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      const run = () =>
+        this.withStorageTransactionCoordinatorLock(() =>
+          this.importExternalMigrationArchive(archive, options)
+        );
+      return idempotencyKey
+        ? withStoragePathMutationLock(
+            this.storageImportReceiptPathFor(receiptKind, idempotencyKey),
+            run
+          )
+        : run();
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    if (idempotencyKey) {
+      const replay = await this.readStorageImportReceipt(
+        receiptKind,
+        idempotencyKey,
+        fingerprint,
+        parseImportedExternalMigrationArchive
+      );
+      if (replay) {
+        return replay;
+      }
+    }
     const projectId = options.projectId ?? createStorageId("project");
     const documentId = options.documentId ?? createStorageId("document");
     assertSafeStorageId(projectId);
     assertSafeStorageId(documentId);
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw inputValidationError(`project already exists: ${projectId}`);
-    }
-    if (await pathExists(this.filePathFor(documentId))) {
-      throw inputValidationError(`document already exists: ${documentId}`);
-    }
 
-    const imported = importExternalMigrationDesignArchive(archive, {
-      fileId: documentId,
-      fileName: options.fileName,
-      sourceHint: options.sourceHint,
-      name: options.documentName ?? options.name
-    });
-    const documentName = normalizeName(options.documentName ?? options.name, imported.file.name);
-    const projectName = normalizeName(options.name, documentName);
-    const now = new Date().toISOString();
-    const file: DesignFile = {
-      ...imported.file,
-      id: documentId,
-      name: documentName
-    };
-    const importedLibraries = imported.importedLibraries ?? [];
-    const libraryFiles = importedLibraries.map((library) => ({
-      sourceFileId: library.sourceFileId,
-      file: structuredClone(library.file)
-    }));
-    const libraryFileIds = new Set<string>();
-    for (const library of libraryFiles) {
-      assertSafeStorageId(library.file.id);
-      if (library.file.id === documentId || libraryFileIds.has(library.file.id)) {
-        throw inputValidationError(`external migration library document id is ambiguous: ${library.file.id}`);
+    return this.withProjectMutationLock(projectId, async () => {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
+        throw storageIdentityConflictError(
+          `project already exists: ${projectId}`
+        );
       }
-      if (await pathExists(this.filePathFor(library.file.id))) {
-        throw inputValidationError(`document already exists: ${library.file.id}`);
-      }
-      libraryFileIds.add(library.file.id);
-    }
 
-    await Promise.all(imported.importedAssets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-    await this.writeFile(documentId, file);
-    for (const library of libraryFiles) {
-      await this.writeFile(library.file.id, library.file);
-    }
-    const documents: ProjectDocumentSummary[] = [
-      { documentId, name: documentName, createdAt: now, updatedAt: now },
-      ...libraryFiles.map((library) => ({
-        documentId: library.file.id,
-        name: library.file.name,
-        createdAt: now,
-        updatedAt: now
-      }))
-    ];
-    const project = await this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: projectName,
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId: documentId,
-      documents,
-      sharing: { mode: "private" }
-    });
-
-    for (const library of libraryFiles) {
-      const entry = await this.publishLibraryToRegistry(library.file.id, {
-        libraryId: library.file.id,
-        name: library.file.name
+      const imported = importExternalMigrationDesignArchive(archive, {
+        fileId: documentId,
+        fileName: options.fileName,
+        sourceHint: options.sourceHint,
+        name: options.documentName ?? options.name
       });
-      const componentIdMap = Object.fromEntries(
-        (library.file.components ?? []).map((component) => [component.id, component.id])
+      const documentName = normalizeName(
+        options.documentName ?? options.name,
+        imported.file.name
       );
-      await this.upsertLibraryRegistrySubscription(
-        documentId,
-        entry,
-        {
-          fileId: documentId,
-          originalFileId: library.sourceFileId,
-          originalName: library.file.name,
-          componentCount: library.file.components?.length ?? 0,
-          tokenCount: library.file.tokens?.length ?? 0,
-          assetCount: collectComponentImageAssetIds(library.file.components ?? []).length,
-          componentIdMap,
-          tokenIdMap: {},
-          libraryId: entry.libraryId,
-          libraryName: entry.name
-        },
-        undefined
-      );
-    }
+      const projectName = normalizeName(options.name, documentName);
+      const now = new Date().toISOString();
+      const file: DesignFile = {
+        ...imported.file,
+        id: documentId,
+        name: documentName
+      };
+      const importedLibraries = imported.importedLibraries ?? [];
+      const libraryFiles = importedLibraries.map((library) => ({
+        sourceFileId: library.sourceFileId,
+        file: structuredClone(library.file)
+      }));
+      const libraryFileIds = new Set<string>();
+      const canonicalDocumentId = canonicalStorageId(documentId);
+      for (const library of libraryFiles) {
+        const canonicalLibraryId = canonicalStorageId(library.file.id);
+        if (
+          canonicalLibraryId === canonicalDocumentId
+          || libraryFileIds.has(canonicalLibraryId)
+        ) {
+          throw inputValidationError(
+            `external migration library document id is ambiguous: ${library.file.id}`
+          );
+        }
+        libraryFileIds.add(canonicalLibraryId);
+      }
 
-    return {
-      project,
-      file,
-      source: imported.source,
-      sourceLabel: imported.sourceLabel,
-      assetCount: imported.importedAssets.length,
-      mappedNodeCount: imported.mappedNodeCount,
-      skippedNodeCount: imported.skippedNodeCount,
-      warnings: imported.warnings
-    };
+      const documents: ProjectDocumentSummary[] = [
+        {
+          documentId,
+          name: documentName,
+          createdAt: now,
+          updatedAt: now
+        },
+        ...libraryFiles.map((library) => ({
+          documentId: library.file.id,
+          name: library.file.name,
+          createdAt: now,
+          updatedAt: now
+        }))
+      ];
+      const files = [
+        { fileId: documentId, document: file },
+        ...libraryFiles.map((library) => ({
+          fileId: library.file.id,
+          document: library.file
+        }))
+      ];
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: projectName,
+        createdAt: now,
+        updatedAt: now,
+        currentDocumentId: documentId,
+        documents,
+        sharing: { mode: "private" }
+      });
+      const parsedAssets = imported.importedAssets.map((asset) => ({
+        metadata: parseStoredAsset(asset.metadata),
+        data: asset.data
+      }));
+      const importedResult: ImportedExternalMigrationArchive = {
+        project: nextProject,
+        file,
+        source: imported.source,
+        sourceLabel: imported.sourceLabel,
+        assetCount: imported.importedAssets.length,
+        mappedNodeCount: imported.mappedNodeCount,
+        skippedNodeCount: imported.skippedNodeCount,
+        warnings: imported.warnings
+      };
+      const receiptSnapshot = idempotencyKey
+        ? this.storageImportReceiptSnapshot(
+            receiptKind,
+            idempotencyKey,
+            fingerprint,
+            importedResult
+          )
+        : undefined;
+      const libraryIds = libraryFiles.map(
+        (library) => library.file.id
+      );
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId)),
+        ...parsedAssets.flatMap((asset) => [
+          this.assetPathFor(asset.metadata.assetId),
+          this.assetMetadataPathFor(asset.metadata.assetId)
+        ]),
+        ...(libraryIds.length > 0
+          ? [
+              this.libraryRegistryPath(),
+              this.libraryRegistryEventsPath(),
+              this.librarySubscriptionsPath(),
+              ...libraryIds.map((libraryId) =>
+                this.libraryArchivePathFor(libraryId)
+              )
+            ]
+          : []),
+        ...(receiptSnapshot ? [receiptSnapshot.filePath] : [])
+      ];
+      const initialIntended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        })),
+        ...parsedAssets.flatMap((asset) => [
+          {
+            filePath: this.assetPathFor(asset.metadata.assetId),
+            data: Buffer.from(asset.data)
+          },
+          {
+            filePath: this.assetMetadataPathFor(
+              asset.metadata.assetId
+            ),
+            data: Buffer.from(
+              `${JSON.stringify(asset.metadata, null, 2)}\n`,
+              "utf8"
+            )
+          }
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot] : [])
+      ];
+      let appendImportIntended:
+        | ((
+            snapshots: readonly StoragePathSnapshot[]
+          ) => Promise<void>)
+        | undefined;
+
+      const result = await this.withExternalMigrationRegistryTransaction(
+        projectId,
+        libraryIds,
+        () =>
+          this.withExclusiveProjectFiles(
+            files,
+            () =>
+              this.withImportedAssetWrites(
+                parsedAssets,
+                async () => {
+                  const appendIntended = appendImportIntended;
+                  if (!appendIntended) {
+                    throw new Error(
+                      "external migration recovery transaction is missing"
+                    );
+                  }
+                  await this.writeProject(nextProject);
+
+                  for (const library of libraryFiles) {
+                    const entry =
+                      await this.publishLibraryToRegistryLocked(
+                        library.file.id,
+                        {
+                          libraryId: library.file.id,
+                          name: library.file.name
+                        },
+                        appendIntended
+                      );
+                    const componentIdMap = Object.fromEntries(
+                      (library.file.components ?? []).map((component) => [
+                        component.id,
+                        component.id
+                      ])
+                    );
+                    await this.upsertLibraryRegistrySubscriptionLocked(
+                      documentId,
+                      entry,
+                      {
+                        fileId: documentId,
+                        originalFileId: library.sourceFileId,
+                        originalName: library.file.name,
+                        componentCount:
+                          library.file.components?.length ?? 0,
+                        tokenCount: library.file.tokens?.length ?? 0,
+                        assetCount: collectComponentImageAssetIds(
+                          library.file.components ?? []
+                        ).length,
+                        componentIdMap,
+                        tokenIdMap: {},
+                        libraryId: entry.libraryId,
+                        libraryName: entry.name
+                      },
+                      undefined,
+                      undefined,
+                      (snapshot) => appendIntended([snapshot])
+                    );
+                  }
+
+                  if (receiptSnapshot) {
+                    await this.writeStorageImportReceipt(receiptSnapshot);
+                  }
+                  return importedResult;
+                }
+              ),
+            (writeOperation) =>
+              this.withStorageTransactionRecovery(
+                "external-migration-import",
+                projectId,
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                initialIntended,
+                async (appendIntended) => {
+                  appendImportIntended = appendIntended;
+                  try {
+                    return await writeOperation();
+                  } finally {
+                    appendImportIntended = undefined;
+                  }
+                }
+              )
+          )
+      );
+
+      return result;
+    });
   }
 
   async importProjectArchive(
     archive: Buffer,
     options: ImportProjectArchiveOptions = {}
   ): Promise<ImportedProjectArchive> {
+    const receiptKind = "project-archive-import" as const;
+    const idempotencyKey = normalizeStorageImportIdempotencyKey(
+      options.idempotencyKey
+    );
+    const fingerprint = storageImportRequestFingerprint(
+      receiptKind,
+      archive,
+      {
+        projectId: options.projectId ?? null,
+        name: options.name ?? null,
+        documentIdPrefix: options.documentIdPrefix ?? null
+      }
+    );
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      const run = () =>
+        this.withStorageTransactionCoordinatorLock(() =>
+          this.importProjectArchive(archive, options)
+        );
+      return idempotencyKey
+        ? withStoragePathMutationLock(
+            this.storageImportReceiptPathFor(receiptKind, idempotencyKey),
+            run
+          )
+        : run();
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    if (idempotencyKey) {
+      const replay = await this.readStorageImportReceipt(
+        receiptKind,
+        idempotencyKey,
+        fingerprint,
+        parseImportedProjectArchive
+      );
+      if (replay) {
+        return replay;
+      }
+    }
     const archiveProject = readProjectArchivePayload(readZipArchive(archive));
     const now = new Date().toISOString();
     const projectId = options.projectId ?? createStorageId("project");
@@ -2327,65 +4084,170 @@ export class FileStorage {
     if (options.documentIdPrefix !== undefined) {
       assertSafeStorageId(options.documentIdPrefix);
     }
-    if (await pathExists(this.projectPathFor(projectId))) {
-      throw new Error(`project already exists: ${projectId}`);
-    }
 
-    const documentIdMap: Record<string, string> = {};
-    for (const document of archiveProject.documents) {
-      const nextDocumentId = options.documentIdPrefix
-        ? `${options.documentIdPrefix}-${document.id}`
-        : createStorageId("document");
-      assertSafeStorageId(nextDocumentId);
-      if (await pathExists(this.filePathFor(nextDocumentId))) {
-        throw new Error(`document already exists: ${nextDocumentId}`);
+    return this.withProjectMutationLock(projectId, async () => {
+      if (
+        await this.canonicalStorageIdExists(
+          this.projectsDir,
+          ".json",
+          projectId
+        )
+      ) {
+        throw Object.assign(
+          new Error(`project already exists: ${projectId}`),
+          {
+            code: "EEXIST",
+            statusCode: 409
+          }
+        );
       }
-      documentIdMap[document.id] = nextDocumentId;
-    }
 
-    await Promise.all(archiveProject.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
-
-    const documents: ProjectDocumentSummary[] = [];
-    for (const archivedSummary of archiveProject.project.documents) {
-      const archivedDocument = archiveProject.documentsById.get(archivedSummary.documentId);
-      const documentId = documentIdMap[archivedSummary.documentId];
-      if (!archivedDocument || !documentId) {
-        throw new Error(`project archive document missing: ${archivedSummary.documentId}`);
+      const documentIdMap: Record<string, string> = {};
+      for (const document of archiveProject.documents) {
+        const nextDocumentId = options.documentIdPrefix
+          ? `${options.documentIdPrefix}-${document.id}`
+          : createStorageId("document");
+        assertSafeStorageId(nextDocumentId);
+        documentIdMap[document.id] = nextDocumentId;
       }
-      const document: DesignFile = {
-        ...structuredClone(archivedDocument),
-        id: documentId,
-        name: normalizeName(archivedDocument.name, archivedSummary.name)
-      };
-      await this.writeFile(documentId, document);
-      documents.push({
-        documentId,
-        name: document.name,
+
+      const documents: ProjectDocumentSummary[] = [];
+      const files: Array<{ fileId: string; document: DesignFile }> = [];
+      for (const archivedSummary of archiveProject.project.documents) {
+        const archivedDocument = archiveProject.documentsById.get(
+          archivedSummary.documentId
+        );
+        const documentId = documentIdMap[archivedSummary.documentId];
+        if (!archivedDocument || !documentId) {
+          throw new Error(
+            `project archive document missing: ${archivedSummary.documentId}`
+          );
+        }
+        const document: DesignFile = {
+          ...structuredClone(archivedDocument),
+          id: documentId,
+          name: normalizeName(
+            archivedDocument.name,
+            archivedSummary.name
+          )
+        };
+        files.push({ fileId: documentId, document });
+        documents.push({
+          documentId,
+          name: document.name,
+          createdAt: now,
+          updatedAt: now
+        });
+      }
+
+      const currentDocumentId =
+        documentIdMap[archiveProject.project.currentDocumentId]
+        ?? documents[0].documentId;
+      const nextProject = parseProjectManifest({
+        schemaVersion: 1,
+        projectId,
+        name: normalizeName(
+          options.name,
+          archiveProject.project.name
+        ),
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        currentDocumentId,
+        documents,
+        sharing: { mode: "private" }
       });
-    }
+      const parsedAssets = archiveProject.assets.map((asset) => ({
+        metadata: parseStoredAsset(asset.metadata),
+        data: asset.data
+      }));
+      const importedResult: ImportedProjectArchive = {
+        project: nextProject,
+        originalProjectId: archiveProject.manifest.projectId,
+        originalName: archiveProject.manifest.name,
+        documentCount: archiveProject.documents.length,
+        assetCount: archiveProject.assetIds.length,
+        documentIdMap
+      };
+      const receiptSnapshot = idempotencyKey
+        ? this.storageImportReceiptSnapshot(
+            receiptKind,
+            idempotencyKey,
+            fingerprint,
+            importedResult
+          )
+        : undefined;
+      const originalPaths = [
+        this.projectPathFor(projectId),
+        ...files.map((entry) => this.filePathFor(entry.fileId)),
+        ...parsedAssets.flatMap((asset) => [
+          this.assetPathFor(asset.metadata.assetId),
+          this.assetMetadataPathFor(asset.metadata.assetId)
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot.filePath] : [])
+      ];
+      const intended: StoragePathSnapshot[] = [
+        {
+          filePath: this.projectPathFor(projectId),
+          data: Buffer.from(
+            `${JSON.stringify(nextProject, null, 2)}\n`,
+            "utf8"
+          )
+        },
+        ...files.map((entry) => ({
+          filePath: this.filePathFor(entry.fileId),
+          data: Buffer.from(
+            `${JSON.stringify(entry.document, null, 2)}\n`,
+            "utf8"
+          )
+        })),
+        ...parsedAssets.flatMap((asset) => [
+          {
+            filePath: this.assetPathFor(asset.metadata.assetId),
+            data: Buffer.from(asset.data)
+          },
+          {
+            filePath: this.assetMetadataPathFor(
+              asset.metadata.assetId
+            ),
+            data: Buffer.from(
+              `${JSON.stringify(asset.metadata, null, 2)}\n`,
+              "utf8"
+            )
+          }
+        ]),
+        ...(receiptSnapshot ? [receiptSnapshot] : [])
+      ];
 
-    const currentDocumentId = documentIdMap[archiveProject.project.currentDocumentId] ?? documents[0].documentId;
-    const project = await this.writeProject({
-      schemaVersion: 1,
-      projectId,
-      name: normalizeName(options.name, archiveProject.project.name),
-      createdAt: now,
-      updatedAt: now,
-      currentDocumentId,
-      documents,
-      sharing: { mode: "private" }
+      const result = await this.withNewProjectRollback(
+        projectId,
+        () =>
+          this.withExclusiveProjectFiles(
+            files,
+            () =>
+              this.withImportedAssetWrites(
+                parsedAssets,
+                async () => {
+                  await this.writeProject(nextProject);
+                  if (receiptSnapshot) {
+                    await this.writeStorageImportReceipt(receiptSnapshot);
+                  }
+                  return importedResult;
+                }
+              ),
+            (writeOperation) =>
+              this.withStorageTransactionRecovery(
+                "project-archive-import",
+                projectId,
+                files.map((entry) => entry.fileId),
+                originalPaths,
+                intended,
+                () => writeOperation()
+              )
+          )
+      );
+
+      return result;
     });
-
-    return {
-      project,
-      originalProjectId: archiveProject.manifest.projectId,
-      originalName: archiveProject.manifest.name,
-      documentCount: archiveProject.documents.length,
-      assetCount: archiveProject.assetIds.length,
-      documentIdMap
-    };
   }
 
   async exportLibraryArchive(fileId: string): Promise<ExportedLibraryArchive> {
@@ -2484,161 +4346,209 @@ export class FileStorage {
     archive: Buffer,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryArchive> {
-    return this.mutateFile(fileId, async (target) => {
-    const library = readLibraryArchivePayload(readZipArchive(archive));
-    const idPrefix = options.idPrefix?.trim() ? normalizeLibraryIdPrefix(options.idPrefix) : undefined;
-    const tokenIdMap = createLibraryTokenIdMap(target, library.library.tokens, idPrefix);
-    const componentIdMap = createLibraryComponentIdMap(target, library.library.components, idPrefix);
+    return this.withFileMutationLock(
+      fileId,
+      () => this.importLibraryArchiveLocked(fileId, archive, options)
+    );
+  }
 
-    await Promise.all(library.assets.map((asset) => this.writeAsset(asset.metadata, asset.data)));
+  // Caller must hold the target file and asset-reference locks.
+  private async importLibraryArchiveLocked(
+    fileId: string,
+    archive: Buffer,
+    options: ImportLibraryArchiveOptions = {}
+  ): Promise<ImportedLibraryArchive> {
+    const target = await this.readFile(fileId);
+    const library = readLibraryArchivePayload(readZipArchive(archive));
+    const idPrefix = options.idPrefix?.trim()
+      ? normalizeLibraryIdPrefix(options.idPrefix)
+      : undefined;
+    const tokenIdMap = createLibraryTokenIdMap(
+      target,
+      library.library.tokens,
+      idPrefix
+    );
+    const componentIdMap = createLibraryComponentIdMap(
+      target,
+      library.library.components,
+      idPrefix
+    );
 
     const targetTokens = [...(target.tokens ?? [])];
     for (const token of library.library.tokens) {
       const nextTokenId = tokenIdMap[token.id];
       if (!nextTokenId) {
-        throw new Error(`library token missing from id map: ${token.id}`);
+        throw new Error(
+          `library token missing from id map: ${token.id}`
+        );
       }
-      const existing = targetTokens.find((candidate) => candidate.id === nextTokenId);
+      const existing = targetTokens.find(
+        (candidate) => candidate.id === nextTokenId
+      );
       if (!existing) {
-        targetTokens.push({ ...structuredClone(token), id: nextTokenId });
+        targetTokens.push({
+          ...structuredClone(token),
+          id: nextTokenId
+        });
       }
     }
 
     const importedComponents = library.library.components.map((component) => {
       const nextComponentId = componentIdMap[component.id];
       if (!nextComponentId) {
-        throw new Error(`library component missing from id map: ${component.id}`);
+        throw new Error(
+          `library component missing from id map: ${component.id}`
+        );
       }
-      return remapLibraryComponent(component, nextComponentId, componentIdMap, tokenIdMap);
+      return remapLibraryComponent(
+        component,
+        nextComponentId,
+        componentIdMap,
+        tokenIdMap
+      );
     });
 
     target.tokens = targetTokens;
-    target.components = [...(target.components ?? []), ...importedComponents];
+    target.components = [
+      ...(target.components ?? []),
+      ...importedComponents
+    ];
 
+    return this.withImportedAssetWrites(library.assets, async () => {
+      await this.writeFileDurablyWithoutMutationLock(fileId, target);
       return {
-      fileId,
-      originalFileId: library.manifest.fileId,
-      originalName: library.manifest.name,
-      componentCount: importedComponents.length,
-      tokenCount: library.library.tokens.length,
-      tokenSetCount: library.library.token_sets.length,
-      tokenThemeCount: library.library.token_themes.length,
-      assetCount: library.assetIds.length,
-      componentIdMap,
-      tokenIdMap
-    };
-    }, false);
+        fileId,
+        originalFileId: library.manifest.fileId,
+        originalName: library.manifest.name,
+        componentCount: importedComponents.length,
+        tokenCount: library.library.tokens.length,
+        tokenSetCount: library.library.token_sets.length,
+        tokenThemeCount: library.library.token_themes.length,
+        assetCount: library.assetIds.length,
+        componentIdMap,
+        tokenIdMap
+      };
+    });
   }
 
   async publishLibraryToRegistry(
     fileId: string,
     options: PublishLibraryRegistryOptions = {}
   ): Promise<LibraryRegistryEntry> {
+    if (!this.isStorageTransactionCoordinatorHeld()) {
+      return this.withStorageTransactionCoordinatorLock(() =>
+        this.publishLibraryToRegistry(fileId, options)
+      );
+    }
+    await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    return withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      () => this.publishLibraryToRegistryLocked(fileId, options)
+    );
+  }
+
+  // Caller must hold the registry path lock.
+  private async publishLibraryToRegistryLocked(
+    fileId: string,
+    options: PublishLibraryRegistryOptions = {},
+    onPrepared?: (
+      snapshots: readonly StoragePathSnapshot[]
+    ) => Promise<void>
+  ): Promise<LibraryRegistryEntry> {
+    await this.recoverInterruptedLibraryPublicationsLocked();
     const exported = await this.exportLibraryArchive(fileId);
     const libraryId = normalizeLibraryRegistryId(options.libraryId ?? exported.fileId);
     const name = normalizeName(options.name, exported.name);
     const idempotencyKey = normalizeLibraryPublicationIdempotencyKey(options.idempotencyKey);
     const teamId = await this.findTeamIdForFile(fileId);
     const fingerprint = JSON.stringify({ fileId, libraryId, name, teamId: teamId ?? null });
-    return withStoragePathMutationLock(this.libraryRegistryPath(), async () => {
-      const existingEntries = await this.readLibraryRegistryEntries();
-      const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
-      if (existing?.teamId && existing.teamId !== teamId) {
-        throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
-      }
-      const receiptPath = idempotencyKey
-        ? this.libraryPublicationReceiptPathFor(libraryId, idempotencyKey)
-        : undefined;
-      if (receiptPath && await pathExists(receiptPath)) {
-        const receipt = parseLibraryPublicationReceipt(
-          JSON.parse(await readFile(receiptPath, "utf8"))
-        );
-        if (receipt.fingerprint !== fingerprint) {
-          throw idempotencyConflictError(
-            `library publication idempotency key was already used with another request: ${idempotencyKey}`
-          );
-        }
-        return receipt.entry;
-      }
-      const now = nextIsoTimestamp(existing?.updatedAt);
-      const entry: LibraryRegistryEntry = {
-        libraryId,
-        name,
-        sourceFileId: exported.fileId,
-        sourceName: exported.name,
-        teamId,
-        componentCount: exported.componentCount,
-        tokenCount: exported.tokenCount,
-        assetCount: exported.assetCount,
-        publishedAt: existing?.publishedAt ?? now,
-        updatedAt: now
-      };
-      const nextEntries = [
-        entry,
-        ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
-      ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-
-      const existingEvents = await this.readLibraryRegistryEvents();
-      const nextEvent = this.createLibraryRegistryEvent(entry, exported, existingEvents);
-      const nextEvents = [...existingEvents, nextEvent];
-      const archivePath = this.libraryArchivePathFor(libraryId);
-      const registryPath = this.libraryRegistryPath();
-      const eventsPath = this.libraryRegistryEventsPath();
-      const original = await captureStoragePathSnapshots([
-        archivePath,
-        registryPath,
-        eventsPath,
-        ...(receiptPath ? [receiptPath] : [])
-      ]);
-      const intended: StoragePathSnapshot[] = [
-        { filePath: archivePath, data: exported.archive },
-        {
-          filePath: registryPath,
-          data: Buffer.from(
-            `${JSON.stringify({ schemaVersion: 1, libraries: nextEntries }, null, 2)}\n`,
-            "utf8"
-          )
-        },
-        {
-          filePath: eventsPath,
-          data: Buffer.from(
-            `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
-            "utf8"
-          )
-        },
-        ...(receiptPath && idempotencyKey
-          ? [{
-              filePath: receiptPath,
-              data: Buffer.from(
-                `${JSON.stringify({
-                  schemaVersion: 1,
-                  idempotencyKey,
-                  fingerprint,
-                  entry
-                } satisfies LibraryPublicationReceipt, null, 2)}\n`,
-                "utf8"
-              )
-            }]
-          : [])
-      ];
-      const recoveryId = libraryId;
-
-      await this.persistLibraryUpdateRecoveryJournal(
-        recoveryId,
-        original,
-        intended,
-        "library-registry-publication"
+    const existingEntries = await this.readLibraryRegistryEntries();
+    const canonicalLibraryId = canonicalStorageId(libraryId);
+    const registryCasingConflict = existingEntries.find(
+      (entry) =>
+        canonicalStorageId(entry.libraryId) === canonicalLibraryId
+        && entry.libraryId !== libraryId
+    );
+    const archiveCasingConflict = (
+      await this.storageIdsInDirectory(this.librariesDir, ".layo-library.zip")
+    ).find(
+      (entry) =>
+        canonicalStorageId(entry) === canonicalLibraryId
+        && entry !== libraryId
+    );
+    if (registryCasingConflict || archiveCasingConflict) {
+      throw storageIdentityConflictError(
+        `library registry item already exists with another casing: ${libraryId}`
       );
-      try {
-        await mkdir(this.librariesDir, { recursive: true });
-        await durablyReplaceFile(archivePath, exported.archive);
-        await this.writeLibraryRegistryEntries(nextEntries);
-        await this.writeLibraryRegistryEvents(nextEvents);
-        if (receiptPath && idempotencyKey) {
-          await mkdir(path.dirname(receiptPath), { recursive: true });
-          await durablyReplaceFile(
-            receiptPath,
-            Buffer.from(
+    }
+    const existing = existingEntries.find((entry) => entry.libraryId === libraryId);
+    if (existing?.teamId && existing.teamId !== teamId) {
+      throw forbiddenError(`library registry item is scoped to another team: ${libraryId}`);
+    }
+    const receiptPath = idempotencyKey
+      ? this.libraryPublicationReceiptPathFor(libraryId, idempotencyKey)
+      : undefined;
+    if (receiptPath && await pathExists(receiptPath)) {
+      const receipt = parseLibraryPublicationReceipt(
+        JSON.parse(await readFile(receiptPath, "utf8"))
+      );
+      if (receipt.fingerprint !== fingerprint) {
+        throw idempotencyConflictError(
+          `library publication idempotency key was already used with another request: ${idempotencyKey}`
+        );
+      }
+      return receipt.entry;
+    }
+    const now = nextIsoTimestamp(existing?.updatedAt);
+    const entry: LibraryRegistryEntry = {
+      libraryId,
+      name,
+      sourceFileId: exported.fileId,
+      sourceName: exported.name,
+      teamId,
+      componentCount: exported.componentCount,
+      tokenCount: exported.tokenCount,
+      assetCount: exported.assetCount,
+      publishedAt: existing?.publishedAt ?? now,
+      updatedAt: now
+    };
+    const nextEntries = [
+      entry,
+      ...existingEntries.filter((candidate) => candidate.libraryId !== libraryId)
+    ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    const existingEvents = await this.readLibraryRegistryEvents();
+    const nextEvent = this.createLibraryRegistryEvent(entry, exported, existingEvents);
+    const nextEvents = [...existingEvents, nextEvent];
+    const archivePath = this.libraryArchivePathFor(libraryId);
+    const registryPath = this.libraryRegistryPath();
+    const eventsPath = this.libraryRegistryEventsPath();
+    const original = await captureStoragePathSnapshots([
+      archivePath,
+      registryPath,
+      eventsPath,
+      ...(receiptPath ? [receiptPath] : [])
+    ]);
+    const intended: StoragePathSnapshot[] = [
+      { filePath: archivePath, data: exported.archive },
+      {
+        filePath: registryPath,
+        data: Buffer.from(
+          `${JSON.stringify({ schemaVersion: 1, libraries: nextEntries }, null, 2)}\n`,
+          "utf8"
+        )
+      },
+      {
+        filePath: eventsPath,
+        data: Buffer.from(
+          `${JSON.stringify({ schemaVersion: 1, events: nextEvents }, null, 2)}\n`,
+          "utf8"
+        )
+      },
+      ...(receiptPath && idempotencyKey
+        ? [{
+            filePath: receiptPath,
+            data: Buffer.from(
               `${JSON.stringify({
                 schemaVersion: 1,
                 idempotencyKey,
@@ -2647,29 +4557,58 @@ export class FileStorage {
               } satisfies LibraryPublicationReceipt, null, 2)}\n`,
               "utf8"
             )
-          );
-        }
+          }]
+        : [])
+    ];
+    const recoveryId = libraryId;
+
+    await onPrepared?.(intended);
+    await this.persistLibraryUpdateRecoveryJournal(
+      recoveryId,
+      original,
+      intended,
+      "library-registry-publication"
+    );
+    try {
+      await mkdir(this.librariesDir, { recursive: true });
+      await durablyReplaceFile(archivePath, exported.archive);
+      await this.writeLibraryRegistryEntries(nextEntries);
+      await this.writeLibraryRegistryEvents(nextEvents);
+      if (receiptPath && idempotencyKey) {
+        await mkdir(path.dirname(receiptPath), { recursive: true });
+        await durablyReplaceFile(
+          receiptPath,
+          Buffer.from(
+            `${JSON.stringify({
+              schemaVersion: 1,
+              idempotencyKey,
+              fingerprint,
+              entry
+            } satisfies LibraryPublicationReceipt, null, 2)}\n`,
+            "utf8"
+          )
+        );
+      }
+      await this.removeLibraryUpdateRecoveryJournal(
+        recoveryId,
+        "library-registry-publication"
+      );
+      return entry;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
         await this.removeLibraryUpdateRecoveryJournal(
           recoveryId,
           "library-registry-publication"
         );
-        return entry;
-      } catch (error) {
-        try {
-          await restoreStoragePathSnapshots(original);
-          await this.removeLibraryUpdateRecoveryJournal(
-            recoveryId,
-            "library-registry-publication"
-          );
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            "library registry publication failed and rollback failed"
-          );
-        }
-        throw error;
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "library registry publication failed and rollback failed"
+        );
       }
-    });
+      throw error;
+    }
   }
 
   async listLibraryRegistry(): Promise<LibraryRegistryEntry[]>;
@@ -2793,15 +4732,58 @@ export class FileStorage {
     libraryId: string,
     options: ImportLibraryArchiveOptions = {}
   ): Promise<ImportedLibraryRegistryItem> {
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    const imported = await this.importLibraryArchive(fileId, archive, options);
-    const registryImport = {
-      ...imported,
-      libraryId: entry.libraryId,
-      libraryName: entry.name
-    };
-    await this.upsertLibraryRegistrySubscription(fileId, entry, registryImport, options.idPrefix);
-    return registryImport;
+    return this.withLibraryRegistryTargetTransactionLock(
+      fileId,
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          async () => {
+            const library = readLibraryArchivePayload(
+              readZipArchive(archive)
+            );
+            const original = await captureStoragePathSnapshots([
+              this.filePathFor(fileId),
+              this.librarySubscriptionsPath(),
+              ...library.assets.flatMap((asset) => [
+                this.assetPathFor(asset.metadata.assetId),
+                this.assetMetadataPathFor(asset.metadata.assetId)
+              ])
+            ]);
+            try {
+              const imported = await this.importLibraryArchiveLocked(
+                fileId,
+                archive,
+                options
+              );
+              const registryImport: ImportedLibraryRegistryItem = {
+                ...imported,
+                libraryId: entry.libraryId,
+                libraryName: entry.name
+              };
+              await this.upsertLibraryRegistrySubscriptionLocked(
+                fileId,
+                entry,
+                registryImport,
+                options.idPrefix
+              );
+              return registryImport;
+            } catch (error) {
+              try {
+                await restoreStoragePathSnapshots(original);
+              } catch (rollbackError) {
+                throw new AggregateError(
+                  [error, rollbackError],
+                  "library registry import failed and rollback failed"
+                );
+              }
+              throw error;
+            }
+          }
+        );
+      }
+    );
   }
 
   async reviewLibraryRegistryTokens(
@@ -2832,35 +4814,107 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
-    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
-    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
-    return imported;
+    return this.withLibraryRegistryTargetTransactionLock(
+      fileId,
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          async () => {
+            return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+              fileId,
+              entry,
+              archive
+            );
+          }
+        );
+      }
+    );
   }
 
   async updateLibraryRegistryTokens(
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryTokens> {
-    const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistryTokenSubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    return this.withLibraryRegistryTargetTransactionLock(
+      fileId,
+      async () => {
+        const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(
+            fileId,
+            normalizedLibraryId
+          );
+        return this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          async () => {
+            const subscription = (
+              await this.readLibraryRegistryTokenSubscriptions()
+            ).find(
+              (candidate) =>
+                candidate.fileId === fileId
+                && candidate.libraryId === normalizedLibraryId
+            );
+            if (!subscription) {
+              throw notFoundError(
+                `library registry token subscription not found: ${normalizedLibraryId}`
+              );
+            }
+            return this.replaceAndSubscribeLibraryRegistryTokensLocked(
+              fileId,
+              entry,
+              archive
+            );
+          }
+        );
+      }
     );
-    if (!subscription) {
-      throw notFoundError(`library registry token subscription not found: ${normalizedLibraryId}`);
-    }
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(fileId, normalizedLibraryId);
-    const imported = await this.replaceFileTokensFromLibraryRegistryArchive(fileId, entry, archive);
-    await this.upsertLibraryRegistryTokenSubscription(fileId, entry, imported);
-    return imported;
   }
 
-  private async replaceFileTokensFromLibraryRegistryArchive(
+  // Caller must hold token-subscription, file, and asset locks.
+  private async replaceAndSubscribeLibraryRegistryTokensLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
     archive: Buffer
   ): Promise<ImportedLibraryRegistryTokens> {
-    return this.mutateFile(fileId, async (target) => {
+    const original = await captureStoragePathSnapshots([
+      this.filePathFor(fileId),
+      this.libraryTokenSubscriptionsPath()
+    ]);
+    try {
+      const imported =
+        await this.replaceFileTokensFromLibraryRegistryArchiveLocked(
+          fileId,
+          entry,
+          archive
+        );
+      await this.upsertLibraryRegistryTokenSubscriptionLocked(
+        fileId,
+        entry,
+        imported
+      );
+      return imported;
+    } catch (error) {
+      try {
+        await restoreStoragePathSnapshots(original);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "library registry token import failed and rollback failed"
+        );
+      }
+      throw error;
+    }
+  }
+
+  // Caller must hold the target file and asset-reference locks.
+  private async replaceFileTokensFromLibraryRegistryArchiveLocked(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    archive: Buffer
+  ): Promise<ImportedLibraryRegistryTokens> {
+    const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const replacedTokenCount = (target.tokens ?? []).length;
     const replacedTokenSetCount = (target.token_sets ?? []).length;
@@ -2868,9 +4922,12 @@ export class FileStorage {
 
     target.tokens = structuredClone(library.library.tokens);
     target.token_sets = structuredClone(library.library.token_sets);
-    target.token_themes = structuredClone(library.library.token_themes);
+    target.token_themes = structuredClone(
+      library.library.token_themes
+    );
+    await this.writeFileDurablyWithoutMutationLock(fileId, target);
 
-      return {
+    return {
       fileId,
       libraryId: entry.libraryId,
       libraryName: entry.name,
@@ -2883,7 +4940,6 @@ export class FileStorage {
       replacedTokenSetCount,
       replacedTokenThemeCount
     };
-    }, false);
   }
 
   async reviewLibraryRegistryItemUpdate(
@@ -2891,8 +4947,12 @@ export class FileStorage {
     libraryId: string
   ): Promise<LibraryRegistryItemUpdatePreview> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    const subscription = (
+      await this.readLibraryRegistrySubscriptions()
+    ).find(
+      (candidate) =>
+        candidate.fileId === fileId
+        && candidate.libraryId === normalizedLibraryId
     );
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
@@ -2914,29 +4974,42 @@ export class FileStorage {
     fileId: string,
     libraryId: string
   ): Promise<ImportedLibraryRegistryItem> {
-    return withStoragePathMutationLock(
-      this.librarySubscriptionsPath(),
-      () => this.withFileMutationLock(fileId, () =>
-        this.updateLibraryRegistryItemLocked(fileId, libraryId)
-      )
+    return this.withLibraryRegistryTargetTransactionLock(
+      fileId,
+      async () => {
+        const { entry, archive } =
+          await this.readAccessibleLibraryRegistryArchive(fileId, libraryId);
+        return this.withLibraryRegistryTargetMutationLocks(
+          fileId,
+          () =>
+            this.updateLibraryRegistryItemLocked(
+              fileId,
+              libraryId,
+              entry,
+              archive
+            )
+        );
+      }
     );
   }
 
   private async updateLibraryRegistryItemLocked(
     fileId: string,
-    libraryId: string
+    libraryId: string,
+    entry: LibraryRegistryEntry,
+    archive: Buffer
   ): Promise<ImportedLibraryRegistryItem> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const subscription = (await this.listLibraryRegistrySubscriptions(fileId)).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    const subscription = (
+      await this.readLibraryRegistrySubscriptions()
+    ).find(
+      (candidate) =>
+        candidate.fileId === fileId
+        && candidate.libraryId === normalizedLibraryId
     );
     if (!subscription) {
       throw notFoundError(`library registry subscription not found: ${normalizedLibraryId}`);
     }
-    const { entry, archive } = await this.readAccessibleLibraryRegistryArchive(
-      fileId,
-      normalizedLibraryId
-    );
     const target = await this.readFile(fileId);
     const library = readLibraryArchivePayload(readZipArchive(archive));
     const preview = reviewLibraryRegistryComponentUpdate(
@@ -3071,7 +5144,7 @@ export class FileStorage {
         libraryId: entry.libraryId,
         libraryName: entry.name
       };
-      await this.upsertLibraryRegistrySubscription(
+      await this.upsertLibraryRegistrySubscriptionLocked(
         fileId,
         entry,
         imported,
@@ -3210,226 +5283,513 @@ export class FileStorage {
     fileId: string,
     options: ListCommentThreadsOptions = {}
   ): Promise<StoredCommentThread[]> {
-    await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    return store.threads
-      .filter((thread) => options.includeResolved || thread.resolvedAt === null)
-      .map((thread) => withViewerUnread(thread, options.viewerId));
+    return this.withCommentAuthorizationBoundary(
+      fileId,
+      options.authorizationBoundary,
+      async () => {
+        const store = await this.readCommentThreadFile(fileId);
+        return store.threads
+          .filter(
+            (thread) =>
+              options.includeResolved || thread.resolvedAt === null
+          )
+          .map((thread) =>
+            withViewerUnread(thread, options.viewerId)
+          );
+      }
+    );
   }
 
   async createCommentThread(
     fileId: string,
-    input: CreateCommentThreadInput
+    input: CreateCommentThreadInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(input.nodeId);
-    const document = await this.readFile(fileId);
-    const node = findNodeById(document, input.nodeId);
-    if (!node) {
-      throw new Error(`node not found: ${input.nodeId}`);
-    }
-
-    const now = createMonotonicCommentTimestamp();
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
-    const thread: StoredCommentThread = {
-      schemaVersion: 1,
-      threadId: createStorageId("comment"),
-      fileId,
-      nodeId: node.id,
-      nodeName: node.name,
-      body,
-      authorName,
-      createdAt: now,
-      resolvedAt: null,
-      mentions: extractCommentMentions(body),
-      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets),
-      readBy: [authorName],
-      replies: []
-    };
-    const store = await this.readCommentThreadFile(fileId);
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: [thread, ...store.threads],
-      activity: prependCommentActivity(store.activity, {
-        type: "created",
-        fileId,
-        threadId: thread.threadId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: thread.authorName,
-        body: thread.body,
-        mentions: thread.mentions,
-        mentionTargets: thread.mentionTargets,
-        createdAt: thread.createdAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "created",
-        fileId,
-        threadId: thread.threadId,
-        createdAt: thread.createdAt
-      })
+    const authorId = normalizeName(input.authorId, authorName);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const document = await this.readFile(fileId);
+      const node = findNodeById(document, input.nodeId);
+      if (!node) {
+        throw new Error(`node not found: ${input.nodeId}`);
+      }
+      const store = await this.readCommentThreadFile(fileId);
+      const now = createMonotonicCommentTimestamp(latestCommentStoreTimestamp(store));
+      const thread: StoredCommentThread = {
+        schemaVersion: 1,
+        threadId: createStorageId("comment"),
+        fileId: store.fileId,
+        nodeId: node.id,
+        nodeName: node.name,
+        body,
+        authorId,
+        authorName,
+        createdAt: now,
+        modifiedAt: now,
+        resolvedAt: null,
+        mentions: extractCommentMentions(body),
+        mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets),
+        readBy: [authorId],
+        replies: []
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: [thread, ...store.threads],
+        activity: prependCommentActivity(store.activity, {
+          type: "created",
+          fileId: store.fileId,
+          threadId: thread.threadId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: thread.authorName,
+          body: thread.body,
+          mentions: thread.mentions,
+          mentionTargets: thread.mentionTargets,
+          createdAt: thread.createdAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "created",
+          fileId: store.fileId,
+          threadId: thread.threadId,
+          createdAt: thread.createdAt
+        })
+      });
+      return thread;
     });
-    return thread;
+  }
+
+  async updateCommentThread(
+    fileId: string,
+    threadId: string,
+    input: UpdateCommentThreadInput,
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    const body = normalizeCommentBody(input.body);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      assertCommentOwner(thread.authorId, actorId);
+      assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
+      const mentions = extractCommentMentions(body);
+      const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        body,
+        modifiedAt,
+        mentions,
+        mentionTargets,
+        readBy: [actorId]
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: prependCommentActivity(
+          store.activity.map((event) =>
+            event.threadId === threadId && !event.replyId
+              ? { ...event, body, mentions, mentionTargets }
+              : event
+          ),
+          {
+            type: "edited",
+            fileId: store.fileId,
+            threadId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: thread.authorName,
+            body,
+            mentions,
+            mentionTargets,
+            createdAt: modifiedAt
+          }
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "edited",
+          fileId: store.fileId,
+          threadId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
+  async deleteCommentThread(
+    fileId: string,
+    threadId: string,
+    input: DeleteCommentThreadInput,
+    options: CommentMutationOptions = {}
+  ): Promise<DeleteCommentThreadResult> {
+    assertSafeStorageId(threadId);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      assertCommentOwner(thread.authorId, actorId);
+      assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
+      const deletedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
+
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.filter((candidate) => candidate.threadId !== threadId),
+        activity: prependCommentActivity(
+          store.activity.filter((event) => event.threadId !== threadId),
+          {
+            type: "deleted",
+            fileId: store.fileId,
+            threadId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: thread.authorName,
+            body: "코멘트가 삭제되었습니다",
+            mentions: [],
+            mentionTargets: [],
+            createdAt: deletedAt
+          }
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "deleted",
+          fileId: store.fileId,
+          threadId,
+          createdAt: deletedAt
+        })
+      });
+      return { threadId, deleted: true };
+    });
   }
 
   async addCommentReply(
     fileId: string,
     threadId: string,
-    input: CreateCommentReplyInput
+    input: CreateCommentReplyInput,
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
     const body = normalizeCommentBody(input.body);
     const authorName = normalizeName(input.authorName, "사용자");
-    const reply: StoredCommentReply = {
-      schemaVersion: 1,
-      replyId: createStorageId("reply"),
-      body,
-      authorName,
-      createdAt: createMonotonicCommentTimestamp(),
-      mentions: extractCommentMentions(body),
-      mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
-    };
-    const repliedThread: StoredCommentThread = {
-      ...thread,
-      readBy: [authorName],
-      replies: [...thread.replies, reply]
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? repliedThread : candidate
-      ),
-      activity: prependCommentActivity(store.activity, {
-        type: "replied",
-        fileId,
-        threadId,
-        replyId: reply.replyId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: reply.authorName,
-        body: reply.body,
-        mentions: reply.mentions,
-        mentionTargets: reply.mentionTargets,
-        createdAt: reply.createdAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "replied",
-        fileId,
-        threadId,
-        createdAt: reply.createdAt
-      })
+    const authorId = normalizeName(input.authorId, authorName);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const createdAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
+      const reply: StoredCommentReply = {
+        schemaVersion: 1,
+        replyId: createStorageId("reply"),
+        body,
+        authorId,
+        authorName,
+        createdAt,
+        modifiedAt: createdAt,
+        mentions: extractCommentMentions(body),
+        mentionTargets: normalizeCommentMentionTargetList(input.mentionTargets)
+      };
+      const repliedThread: StoredCommentThread = {
+        ...thread,
+        modifiedAt: createdAt,
+        readBy: [authorId],
+        replies: [...thread.replies, reply]
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? repliedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "replied",
+          fileId: store.fileId,
+          threadId,
+          replyId: reply.replyId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: reply.authorName,
+          body: reply.body,
+          mentions: reply.mentions,
+          mentionTargets: reply.mentionTargets,
+          createdAt: reply.createdAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "replied",
+          fileId: store.fileId,
+          threadId,
+          replyId: reply.replyId,
+          createdAt: reply.createdAt
+        })
+      });
+      return repliedThread;
     });
-    return repliedThread;
+  }
+
+  async updateCommentReply(
+    fileId: string,
+    threadId: string,
+    replyId: string,
+    input: UpdateCommentReplyInput,
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    assertSafeStorageId(replyId);
+    const body = normalizeCommentBody(input.body);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const reply = requireCommentReply(thread, replyId);
+      assertCommentOwner(reply.authorId, actorId);
+      assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt,
+        reply.modifiedAt
+      );
+      const mentions = extractCommentMentions(body);
+      const mentionTargets = normalizeCommentMentionTargetList(input.mentionTargets);
+      const updatedReply: StoredCommentReply = {
+        ...reply,
+        body,
+        modifiedAt,
+        mentions,
+        mentionTargets
+      };
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        modifiedAt,
+        readBy: [actorId],
+        replies: thread.replies.map((candidate) =>
+          candidate.replyId === replyId ? updatedReply : candidate
+        )
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: prependCommentActivity(
+          store.activity.map((event) =>
+            event.replyId === replyId
+              ? { ...event, body, mentions, mentionTargets }
+              : event
+          ),
+          {
+            type: "edited",
+            fileId: store.fileId,
+            threadId,
+            replyId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: reply.authorName,
+            body,
+            mentions,
+            mentionTargets,
+            createdAt: modifiedAt
+          }
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "edited",
+          fileId: store.fileId,
+          threadId,
+          replyId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
+  async deleteCommentReply(
+    fileId: string,
+    threadId: string,
+    replyId: string,
+    input: DeleteCommentReplyInput,
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    assertSafeStorageId(replyId);
+    const actorId = normalizeCommentActorId(input.actorId);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const reply = requireCommentReply(thread, replyId);
+      assertCommentOwner(reply.authorId, actorId);
+      assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
+
+      const deletedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt,
+        reply.modifiedAt
+      );
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        modifiedAt: deletedAt,
+        readBy: [actorId],
+        replies: thread.replies.filter((candidate) => candidate.replyId !== replyId)
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: prependCommentActivity(
+          store.activity.filter((event) => event.replyId !== replyId),
+          {
+            type: "deleted",
+            fileId: store.fileId,
+            threadId,
+            replyId,
+            nodeId: thread.nodeId,
+            nodeName: thread.nodeName,
+            actorName: reply.authorName,
+            body: "답글이 삭제되었습니다",
+            mentions: [],
+            mentionTargets: [],
+            createdAt: deletedAt
+          }
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "deleted",
+          fileId: store.fileId,
+          threadId,
+          replyId,
+          createdAt: deletedAt
+        })
+      });
+      return updatedThread;
+    });
   }
 
   async markCommentThreadRead(
     fileId: string,
     threadId: string,
-    input: MarkCommentThreadReadInput = {}
+    input: MarkCommentThreadReadInput = {},
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
-    const readThread: StoredCommentThread = {
-      ...thread,
-      readBy: uniqueNames([...thread.readBy, viewerId])
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? readThread : candidate
-      ),
-      events: appendCommentLiveEvent(store.events, {
-        type: "read",
-        fileId,
-        threadId,
-        viewerId,
-        createdAt: createMonotonicCommentTimestamp()
-      })
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const readThread: StoredCommentThread = {
+        ...thread,
+        readBy: uniqueNames([...thread.readBy, viewerId])
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? readThread : candidate
+        ),
+        events: appendCommentLiveEvent(store.events, {
+          type: "read",
+          fileId: store.fileId,
+          threadId,
+          viewerId,
+          createdAt: createMonotonicCommentTimestamp(
+            latestCommentStoreTimestamp(store),
+            thread.modifiedAt
+          )
+        })
+      });
+      return withViewerUnread(readThread, viewerId);
     });
-    return withViewerUnread(readThread, viewerId);
   }
 
   async markFileCommentsRead(
     fileId: string,
-    input: MarkFileCommentsReadInput = {}
+    input: MarkFileCommentsReadInput = {},
+    options: CommentMutationOptions = {}
   ): Promise<StoredCommentThread[]> {
-    await this.readFile(fileId);
     const viewerId = normalizeName(input.viewerId, "사용자");
-    const store = await this.readCommentThreadFile(fileId);
-    const threads = store.threads.map((thread) =>
-      thread.resolvedAt === null
-        ? {
-            ...thread,
-            readBy: uniqueNames([...thread.readBy, viewerId])
-          }
-        : thread
-    );
-    await this.writeCommentThreadFile({
-      ...store,
-      threads,
-      events: appendCommentLiveEvent(store.events, {
-        type: "read",
-        fileId,
-        viewerId,
-        createdAt: createMonotonicCommentTimestamp()
-      })
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const threads = store.threads.map((thread) =>
+        thread.resolvedAt === null
+          ? {
+              ...thread,
+              readBy: uniqueNames([...thread.readBy, viewerId])
+            }
+          : thread
+      );
+      await this.writeCommentThreadFile({
+        ...store,
+        threads,
+        events: appendCommentLiveEvent(store.events, {
+          type: "read",
+          fileId: store.fileId,
+          viewerId,
+          createdAt: createMonotonicCommentTimestamp(
+            latestCommentStoreTimestamp(store),
+            ...threads.map((thread) => thread.modifiedAt)
+          )
+        })
+      });
+      return threads.map((thread) => withViewerUnread(thread, viewerId));
     });
-    return threads.map((thread) => withViewerUnread(thread, viewerId));
   }
 
-  async resolveCommentThread(fileId: string, threadId: string): Promise<StoredCommentThread> {
+  async resolveCommentThread(
+    fileId: string,
+    threadId: string,
+    actorName = "사용자",
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
     assertSafeStorageId(threadId);
-    await this.readFile(fileId);
-    const store = await this.readCommentThreadFile(fileId);
-    const thread = store.threads.find((candidate) => candidate.threadId === threadId);
-    if (!thread) {
-      throw new Error(`comment thread not found: ${threadId}`);
-    }
-
-    const resolvedAt = thread.resolvedAt ?? createMonotonicCommentTimestamp();
-    const resolvedThread: StoredCommentThread = {
-      ...thread,
-      resolvedAt
-    };
-    await this.writeCommentThreadFile({
-      ...store,
-      threads: store.threads.map((candidate) =>
-        candidate.threadId === threadId ? resolvedThread : candidate
-      ),
-      activity: prependCommentActivity(store.activity, {
-        type: "resolved",
-        fileId,
-        threadId,
-        nodeId: thread.nodeId,
-        nodeName: thread.nodeName,
-        actorName: "사용자",
-        body: thread.body,
-        mentions: thread.mentions,
-        mentionTargets: thread.mentionTargets,
-        createdAt: resolvedAt
-      }),
-      events: appendCommentLiveEvent(store.events, {
-        type: "resolved",
-        fileId,
-        threadId,
-        createdAt: resolvedAt
-      })
+    const resolvedActorName = normalizeName(actorName, "사용자");
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      if (thread.resolvedAt !== null) {
+        return thread;
+      }
+      const resolvedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
+      const resolvedThread: StoredCommentThread = {
+        ...thread,
+        modifiedAt: resolvedAt,
+        resolvedAt
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? resolvedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "resolved",
+          fileId: store.fileId,
+          threadId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: resolvedActorName,
+          body: thread.body,
+          mentions: thread.mentions,
+          mentionTargets: thread.mentionTargets,
+          createdAt: resolvedAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "resolved",
+          fileId: store.fileId,
+          threadId,
+          createdAt: resolvedAt
+        })
+      });
+      return resolvedThread;
     });
-    return resolvedThread;
   }
 
   async exportTokensDtcg(fileId: string): Promise<Record<string, unknown>> {
@@ -3658,16 +6018,90 @@ export class FileStorage {
     return { ...asset, data };
   }
 
-  private async isAssetReferenced(assetId: string): Promise<boolean> {
-    const files = await this.listFiles();
-    for (const file of files) {
-      const document = await this.readFile(file.id);
+  private assetIdForStoragePath(filePath: string): string | null {
+    const relativePath = path.relative(
+      path.resolve(this.assetsDir),
+      path.resolve(filePath)
+    );
+    if (
+      !relativePath
+      || relativePath.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativePath)
+      || path.dirname(relativePath) !== "."
+    ) {
+      return null;
+    }
+    const assetId = relativePath.endsWith(".json")
+      ? relativePath.slice(0, -".json".length)
+      : relativePath;
+    return /^[a-zA-Z0-9_-]+$/.test(assetId) ? assetId : null;
+  }
+
+  private async omitReferencedNewAssetsFromRollback(
+    snapshots: readonly StoragePathSnapshot[],
+    excludedFileIds: readonly string[]
+  ): Promise<StoragePathSnapshot[]> {
+    const candidateAssetIds = new Set(
+      snapshots.flatMap((snapshot) => {
+        if (snapshot.data !== null) {
+          return [];
+        }
+        const assetId = this.assetIdForStoragePath(snapshot.filePath);
+        return assetId ? [assetId] : [];
+      })
+    );
+    const retainedAssetIds = new Set<string>();
+    for (const assetId of candidateAssetIds) {
+      if (await this.isAssetReferenced(assetId, excludedFileIds)) {
+        retainedAssetIds.add(assetId);
+      }
+    }
+    return snapshots.filter((snapshot) => {
+      const assetId = this.assetIdForStoragePath(snapshot.filePath);
+      return !assetId || !retainedAssetIds.has(assetId);
+    });
+  }
+
+  private async isAssetReferenced(
+    assetId: string,
+    excludedFileIds: readonly string[] = []
+  ): Promise<boolean> {
+    await this.adoptPriorDefaultStoreIfNeeded();
+    const excluded = new Set(excludedFileIds.map(canonicalStorageId));
+    const fileIds = await this.storageIdsInDirectory(this.filesDir, ".json");
+    for (const fileId of fileIds) {
+      if (excluded.has(canonicalStorageId(fileId))) {
+        continue;
+      }
+      const document = JSON.parse(
+        await readFile(this.filePathFor(fileId), "utf8")
+      ) as DesignFile;
       if (collectImageAssetIds(document).includes(assetId)) {
         return true;
       }
-      const versions = await this.listFileVersions(file.id);
-      for (const version of versions) {
-        const snapshot = await this.readFileVersion(file.id, version.versionId);
+
+      let versionEntries: string[];
+      try {
+        versionEntries = await readdir(this.fileHistoryDirFor(fileId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        throw error;
+      }
+      for (const entry of versionEntries) {
+        if (!entry.endsWith(".json")) {
+          continue;
+        }
+        const snapshot = parseStoredFileVersion(
+          JSON.parse(
+            await readFile(
+              path.join(this.fileHistoryDirFor(fileId), entry),
+              "utf8"
+            )
+          ),
+          fileId
+        );
         if (collectImageAssetIds(snapshot.document).includes(assetId)) {
           return true;
         }
@@ -4074,25 +6508,68 @@ export class FileStorage {
     return version;
   }
 
-  private async readCommentThreadFile(fileId: string): Promise<StoredCommentThreadFile> {
+  private async readCommentThreadFile(
+    fileId: string
+  ): Promise<StoredCommentThreadFile> {
     await this.adoptPriorDefaultStoreIfNeeded();
+    const storedFileId = (await this.readFile(fileId)).id;
+    const canonicalPath = this.commentThreadsPathFor(storedFileId);
+    const legacyPath = this.legacyCommentThreadsPathFor(storedFileId);
     let raw: string;
     try {
-      raw = await readFile(this.commentThreadsPathFor(fileId), "utf8");
-    } catch {
-      return { schemaVersion: 1, fileId, threads: [], activity: [], events: [] };
+      raw = await readFile(canonicalPath, "utf8");
+    } catch (error) {
+      if ((error as { code?: string }).code !== "ENOENT") {
+        throw error;
+      }
+      if (legacyPath === canonicalPath) {
+        return {
+          schemaVersion: 1,
+          fileId: storedFileId,
+          threads: [],
+          activity: [],
+          events: []
+        };
+      }
+      try {
+        raw = await readFile(legacyPath, "utf8");
+      } catch (legacyError) {
+        if ((legacyError as { code?: string }).code !== "ENOENT") {
+          throw legacyError;
+        }
+        return {
+          schemaVersion: 1,
+          fileId: storedFileId,
+          threads: [],
+          activity: [],
+          events: []
+        };
+      }
     }
 
-    return parseStoredCommentThreadFile(JSON.parse(raw), fileId);
+    return parseStoredCommentThreadFile(
+      JSON.parse(raw),
+      storedFileId
+    );
   }
 
-  private async writeCommentThreadFile(store: StoredCommentThreadFile): Promise<void> {
+  private async writeCommentThreadFile(
+    store: StoredCommentThreadFile
+  ): Promise<void> {
     await mkdir(this.commentsDir, { recursive: true });
-    await writeFile(
-      this.commentThreadsPathFor(store.fileId),
-      `${JSON.stringify(store, null, 2)}\n`,
-      "utf8"
+    const canonicalPath = this.commentThreadsPathFor(store.fileId);
+    const legacyPath = this.legacyCommentThreadsPathFor(store.fileId);
+    await durablyReplaceFile(
+      canonicalPath,
+      Buffer.from(`${JSON.stringify(store, null, 2)}\n`, "utf8")
     );
+    if (
+      legacyPath !== canonicalPath
+      && !(await storagePathsReferenceSameEntry(canonicalPath, legacyPath))
+    ) {
+      await rm(legacyPath, { force: true });
+      await syncDirectory(this.commentsDir);
+    }
   }
 
   private async readLibraryRegistryEntries(): Promise<LibraryRegistryEntry[]> {
@@ -4187,16 +6664,47 @@ export class FileStorage {
     }
   }
 
-  private async writeLibraryRegistryTokenSubscriptions(subscriptions: LibraryRegistryTokenSubscription[]): Promise<void> {
+  private async writeLibraryRegistryTokenSubscriptions(
+    subscriptions: LibraryRegistryTokenSubscription[]
+  ): Promise<void> {
     await mkdir(this.librariesDir, { recursive: true });
-    await writeFile(
+    await durablyReplaceFile(
       this.libraryTokenSubscriptionsPath(),
-      `${JSON.stringify({ schemaVersion: 1, subscriptions }, null, 2)}\n`,
-      "utf8"
+      Buffer.from(
+        `${JSON.stringify(
+          { schemaVersion: 1, subscriptions },
+          null,
+          2
+        )}\n`,
+        "utf8"
+      )
     );
   }
 
   private async upsertLibraryRegistrySubscription(
+    fileId: string,
+    entry: LibraryRegistryEntry,
+    imported: ImportedLibraryRegistryItem,
+    idPrefix: string | undefined,
+    onCommitted?: (snapshot: StoragePathSnapshot) => void,
+    onPrepared?: (snapshot: StoragePathSnapshot) => Promise<void>
+  ): Promise<void> {
+    return withStoragePathMutationLock(
+      this.librarySubscriptionsPath(),
+      () =>
+        this.upsertLibraryRegistrySubscriptionLocked(
+          fileId,
+          entry,
+          imported,
+          idPrefix,
+          onCommitted,
+          onPrepared
+        )
+    );
+  }
+
+  // Caller must hold the subscription path lock.
+  private async upsertLibraryRegistrySubscriptionLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryItem,
@@ -4224,18 +6732,24 @@ export class FileStorage {
     const nextSubscriptions = [
       subscription,
       ...subscriptions.filter(
-        (candidate) => candidate.fileId !== fileId || candidate.libraryId !== entry.libraryId
+        (candidate) =>
+          candidate.fileId !== fileId
+          || candidate.libraryId !== entry.libraryId
       )
     ].sort(
       (a, b) =>
-        a.fileId.localeCompare(b.fileId) ||
-        a.libraryName.localeCompare(b.libraryName) ||
-        a.libraryId.localeCompare(b.libraryId)
+        a.fileId.localeCompare(b.fileId)
+        || a.libraryName.localeCompare(b.libraryName)
+        || a.libraryId.localeCompare(b.libraryId)
     );
-    await this.writeLibraryRegistrySubscriptions(nextSubscriptions, onCommitted, onPrepared);
+    await this.writeLibraryRegistrySubscriptions(
+      nextSubscriptions,
+      onCommitted,
+      onPrepared
+    );
   }
 
-  private async upsertLibraryRegistryTokenSubscription(
+  private async upsertLibraryRegistryTokenSubscriptionLocked(
     fileId: string,
     entry: LibraryRegistryEntry,
     imported: ImportedLibraryRegistryTokens
@@ -4295,13 +6809,52 @@ export class FileStorage {
   }
 
   private async findTeamIdsForFile(fileId: string): Promise<Set<string>> {
-    assertSafeStorageId(fileId);
+    const canonicalFileId = canonicalStorageId(fileId);
     const projects = await this.listProjects();
     return new Set(
       projects
-        .filter((project) => project.documents.some((document) => document.documentId === fileId))
-        .flatMap((project) => project.sharing.mode === "team" ? [project.sharing.teamId] : [])
+        .filter((project) =>
+          project.documents.some(
+            (document) =>
+              canonicalStorageId(document.documentId) === canonicalFileId
+          )
+        )
+        .flatMap((project) =>
+          project.sharing.mode === "team"
+            ? [project.sharing.teamId]
+            : []
+        )
     );
+  }
+
+  async getCommentAuthorizationBoundary(
+    fileId: string
+  ): Promise<CommentAuthorizationBoundary | undefined> {
+    const canonicalFileId = canonicalStorageId(fileId);
+    const projects = (await this.listProjects())
+      .filter((project) =>
+        project.documents.some(
+          (document) =>
+            canonicalStorageId(document.documentId) === canonicalFileId
+        )
+      )
+      .sort((first, second) => {
+        const firstTeam =
+          first.sharing.mode === "team" ? first.sharing.teamId : "";
+        const secondTeam =
+          second.sharing.mode === "team" ? second.sharing.teamId : "";
+        return Number(second.sharing.mode === "team")
+          - Number(first.sharing.mode === "team")
+          || firstTeam.localeCompare(secondTeam)
+          || first.projectId.localeCompare(second.projectId);
+      });
+    const project = projects[0];
+    return project
+      ? {
+          projectId: project.projectId,
+          expectedSharing: structuredClone(project.sharing)
+        }
+      : undefined;
   }
 
   async getTeamIdForFile(fileId: string): Promise<string | undefined> {
@@ -4347,19 +6900,44 @@ export class FileStorage {
     return result;
   }
 
-  private async readLibraryRegistryArchive(libraryId: string): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
+  private async readLibraryRegistryArchive(
+    libraryId: string
+  ): Promise<{ entry: LibraryRegistryEntry; archive: Buffer }> {
     const normalizedLibraryId = normalizeLibraryRegistryId(libraryId);
-    const entry = (await this.readLibraryRegistryEntries()).find(
-      (candidate) => candidate.libraryId === normalizedLibraryId
+    await this.recoverInterruptedLibraryUpdatesOnce();
+    return withStoragePathMutationLock(
+      this.libraryRegistryPath(),
+      async () => {
+        await this.recoverInterruptedLibraryPublicationsLocked();
+        const entry = (await this.readLibraryRegistryEntries()).find(
+          (candidate) => candidate.libraryId === normalizedLibraryId
+        );
+        if (!entry) {
+          throw notFoundError(
+            `library registry item not found: ${normalizedLibraryId}`
+          );
+        }
+        return {
+          entry,
+          archive: await readFile(
+            this.libraryArchivePathFor(entry.libraryId)
+          )
+        };
+      }
     );
-    if (!entry) {
-      throw notFoundError(`library registry item not found: ${normalizedLibraryId}`);
-    }
-    return {
-      entry,
-      archive: await readFile(this.libraryArchivePathFor(entry.libraryId))
-    };
   }
+}
+
+function canonicalStorageId(value: string) {
+  assertSafeStorageId(value);
+  return value.toLowerCase();
+}
+
+function storageIdentityConflictError(message: string) {
+  return Object.assign(new Error(message), {
+    code: "EEXIST",
+    statusCode: 409
+  });
 }
 
 function assertSafeStorageId(value: string) {
@@ -4372,6 +6950,40 @@ function normalizeLibraryRegistryId(value: string | undefined) {
   const libraryId = value?.trim() || "library";
   assertSafeStorageId(libraryId);
   return libraryId;
+}
+
+function normalizeStorageImportIdempotencyKey(
+  value: string | undefined
+): string | undefined {
+  const idempotencyKey = value?.trim();
+  if (!idempotencyKey) {
+    return undefined;
+  }
+  if (idempotencyKey.length > 128) {
+    throw inputValidationError(
+      "storage import idempotency key must be 128 characters or fewer"
+    );
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(idempotencyKey)) {
+    throw inputValidationError(
+      "storage import idempotency key may contain only letters, numbers, underscores, and hyphens"
+    );
+  }
+  return idempotencyKey;
+}
+
+function storageImportRequestFingerprint(
+  kind: StorageImportReceiptKind,
+  archive: Buffer,
+  options: Record<string, string | null>
+): string {
+  return createHash("sha256")
+    .update(kind)
+    .update("\0")
+    .update(archive)
+    .update("\0")
+    .update(JSON.stringify(options))
+    .digest("hex");
 }
 
 function normalizeLibraryPublicationIdempotencyKey(value: string | undefined) {
@@ -4428,9 +7040,43 @@ function createStorageId(prefix: string) {
 
 let lastCommentTimestampMs = 0;
 
-function createMonotonicCommentTimestamp() {
-  const now = Date.now();
-  const next = now <= lastCommentTimestampMs ? lastCommentTimestampMs + 1 : now;
+function latestCommentStoreTimestamp(store: StoredCommentThreadFile) {
+  const timestamps: Array<string | null | undefined> = [
+    ...store.threads.flatMap((thread) => [
+      thread.createdAt,
+      thread.modifiedAt,
+      thread.resolvedAt,
+      ...thread.replies.flatMap((reply) => [reply.createdAt, reply.modifiedAt])
+    ]),
+    ...store.activity.map((event) => event.createdAt),
+    ...store.events.map((event) => event.createdAt)
+  ];
+  let latestTimestamp: string | undefined;
+  let latestTimestampMs = 0;
+  for (const timestamp of timestamps) {
+    if (!timestamp) {
+      continue;
+    }
+    const parsed = Date.parse(timestamp);
+    if (Number.isFinite(parsed) && parsed > latestTimestampMs) {
+      latestTimestamp = timestamp;
+      latestTimestampMs = parsed;
+    }
+  }
+  return latestTimestamp;
+}
+
+function createMonotonicCommentTimestamp(
+  ...previousTimestamps: Array<string | null | undefined>
+) {
+  const previousTimestampMs = previousTimestamps.reduce((latest, timestamp) => {
+    if (!timestamp) {
+      return latest;
+    }
+    const parsed = Date.parse(timestamp);
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, 0);
+  const next = Math.max(Date.now(), lastCommentTimestampMs + 1, previousTimestampMs + 1);
   lastCommentTimestampMs = next;
   return new Date(next).toISOString();
 }
@@ -4446,6 +7092,61 @@ function normalizeName(value: string | undefined, fallback: string) {
     throw new Error("name is required");
   }
   return normalized;
+}
+
+function normalizeCommentActorId(value: unknown) {
+  const actorId = typeof value === "string" ? value.trim() : "";
+  if (!actorId) {
+    throw inputValidationError("comment actor id is required");
+  }
+  return actorId;
+}
+
+function requireCommentThread(
+  store: StoredCommentThreadFile,
+  threadId: string
+): StoredCommentThread {
+  const thread = store.threads.find((candidate) => candidate.threadId === threadId);
+  if (!thread) {
+    throw Object.assign(new Error(`comment thread not found: ${threadId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  return thread;
+}
+
+function requireCommentReply(
+  thread: StoredCommentThread,
+  replyId: string
+): StoredCommentReply {
+  const reply = thread.replies.find((candidate) => candidate.replyId === replyId);
+  if (!reply) {
+    throw Object.assign(new Error(`comment reply not found: ${replyId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  return reply;
+}
+
+function assertCommentOwner(authorId: string, actorId: string) {
+  if (authorId !== actorId) {
+    throw forbiddenError("only the comment author can modify this comment");
+  }
+}
+
+function assertCommentVersion(modifiedAt: string, expectedModifiedAt: unknown) {
+  const expected = typeof expectedModifiedAt === "string" ? expectedModifiedAt.trim() : "";
+  if (!expected) {
+    throw inputValidationError("expected comment modifiedAt is required");
+  }
+  if (modifiedAt !== expected) {
+    throw Object.assign(new Error("comment was modified by another writer"), {
+      code: "ECONFLICT",
+      statusCode: 409
+    });
+  }
 }
 
 function normalizeCommentBody(value: unknown) {
@@ -5281,6 +7982,23 @@ interface LibraryUpdateRecoveryJournal {
   intended: SerializedRecoverySnapshot[];
 }
 
+type StorageTransactionRecoveryKind =
+  | "file-archive-import"
+  | "project-archive-import"
+  | "external-migration-import"
+  | "project-duplicate"
+  | "project-delete";
+
+interface StorageTransactionRecoveryJournal {
+  schemaVersion: 1;
+  kind: StorageTransactionRecoveryKind;
+  transactionId: string;
+  projectId?: string;
+  fileIds: string[];
+  original: SerializedRecoverySnapshot[];
+  intended: SerializedRecoverySnapshot[];
+}
+
 function serializeRecoverySnapshot(
   rootDir: string,
   snapshot: StoragePathSnapshot
@@ -5342,6 +8060,183 @@ function parseLibraryUpdateRecoveryJournal(value: unknown): LibraryUpdateRecover
     fileId: candidate.fileId,
     original: candidate.original.map(parseSerializedRecoverySnapshot),
     intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseStorageTransactionRecoveryJournal(value: unknown): StorageTransactionRecoveryJournal {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid storage transaction recovery journal");
+  }
+  const candidate = value as Partial<StorageTransactionRecoveryJournal>;
+  if (
+    candidate.schemaVersion !== 1
+    || (
+      candidate.kind !== "file-archive-import"
+      && candidate.kind !== "project-archive-import"
+      && candidate.kind !== "external-migration-import"
+      && candidate.kind !== "project-duplicate"
+      && candidate.kind !== "project-delete"
+    )
+    || typeof candidate.transactionId !== "string"
+    || !Array.isArray(candidate.fileIds)
+    || !Array.isArray(candidate.original)
+    || !Array.isArray(candidate.intended)
+  ) {
+    throw new Error("invalid storage transaction recovery journal");
+  }
+
+  assertSafeStorageId(candidate.transactionId);
+  const fileIds = candidate.fileIds.map((fileId) => {
+    if (typeof fileId !== "string") {
+      throw new Error("invalid storage transaction recovery file id");
+    }
+    assertSafeStorageId(fileId);
+    return fileId;
+  });
+  if (
+    fileIds.length === 0
+    || new Set(fileIds.map(canonicalStorageId)).size !== fileIds.length
+  ) {
+    throw new Error("invalid storage transaction recovery file ids");
+  }
+
+  const projectId =
+    typeof candidate.projectId === "string"
+      ? candidate.projectId
+      : undefined;
+  if (projectId) {
+    assertSafeStorageId(projectId);
+  }
+  if (
+    (candidate.kind === "file-archive-import" && projectId !== undefined)
+    || (
+      candidate.kind !== "file-archive-import"
+      && projectId === undefined
+    )
+  ) {
+    throw new Error("invalid storage transaction recovery project id");
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: candidate.kind,
+    transactionId: candidate.transactionId,
+    ...(projectId ? { projectId } : {}),
+    fileIds,
+    original: candidate.original.map(parseSerializedRecoverySnapshot),
+    intended: candidate.intended.map(parseSerializedRecoverySnapshot)
+  };
+}
+
+function parseStorageImportReceipt(
+  value: unknown,
+  expectedKind: StorageImportReceiptKind,
+  expectedIdempotencyKey: string
+): StorageImportReceipt {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid storage import receipt");
+  }
+  const candidate = value as Partial<StorageImportReceipt>;
+  if (
+    candidate.schemaVersion !== 1
+    || candidate.kind !== expectedKind
+    || candidate.idempotencyKey !== expectedIdempotencyKey
+    || typeof candidate.fingerprint !== "string"
+    || candidate.fingerprint.length !== 64
+    || candidate.result === undefined
+  ) {
+    throw new Error("invalid storage import receipt");
+  }
+  return {
+    schemaVersion: 1,
+    kind: expectedKind,
+    idempotencyKey: expectedIdempotencyKey,
+    fingerprint: candidate.fingerprint,
+    result: candidate.result
+  };
+}
+
+function parseImportedProjectArchive(value: unknown): ImportedProjectArchive {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid imported project archive receipt result");
+  }
+  const candidate = value as Partial<ImportedProjectArchive>;
+  if (
+    typeof candidate.originalProjectId !== "string"
+    || typeof candidate.originalName !== "string"
+    || typeof candidate.documentCount !== "number"
+    || !Number.isInteger(candidate.documentCount)
+    || candidate.documentCount < 0
+    || typeof candidate.assetCount !== "number"
+    || !Number.isInteger(candidate.assetCount)
+    || candidate.assetCount < 0
+    || !candidate.documentIdMap
+    || typeof candidate.documentIdMap !== "object"
+    || Array.isArray(candidate.documentIdMap)
+  ) {
+    throw new Error("invalid imported project archive receipt result");
+  }
+  const documentIdMap = Object.fromEntries(
+    Object.entries(candidate.documentIdMap).map(([sourceId, targetId]) => {
+      if (typeof targetId !== "string") {
+        throw new Error("invalid imported project archive document id map");
+      }
+      assertSafeStorageId(sourceId);
+      assertSafeStorageId(targetId);
+      return [sourceId, targetId];
+    })
+  );
+  return {
+    project: parseProjectManifest(candidate.project),
+    originalProjectId: candidate.originalProjectId,
+    originalName: candidate.originalName,
+    documentCount: candidate.documentCount,
+    assetCount: candidate.assetCount,
+    documentIdMap
+  };
+}
+
+function parseImportedExternalMigrationArchive(
+  value: unknown
+): ImportedExternalMigrationArchive {
+  if (!value || typeof value !== "object") {
+    throw new Error("invalid imported external migration receipt result");
+  }
+  const candidate = value as Partial<ImportedExternalMigrationArchive>;
+  if (
+    !candidate.file
+    || typeof candidate.file !== "object"
+    || typeof candidate.file.id !== "string"
+    || !Array.isArray(candidate.file.pages)
+    || typeof candidate.source !== "string"
+    || typeof candidate.sourceLabel !== "string"
+    || typeof candidate.assetCount !== "number"
+    || !Number.isInteger(candidate.assetCount)
+    || candidate.assetCount < 0
+    || typeof candidate.mappedNodeCount !== "number"
+    || !Number.isInteger(candidate.mappedNodeCount)
+    || candidate.mappedNodeCount < 0
+    || typeof candidate.skippedNodeCount !== "number"
+    || !Number.isInteger(candidate.skippedNodeCount)
+    || candidate.skippedNodeCount < 0
+    || !Array.isArray(candidate.warnings)
+    || candidate.warnings.some((warning) => typeof warning !== "string")
+  ) {
+    throw new Error("invalid imported external migration receipt result");
+  }
+  const project = parseProjectManifest(candidate.project);
+  if (project.currentDocumentId !== candidate.file.id) {
+    throw new Error("external migration receipt file does not match its project");
+  }
+  return {
+    project,
+    file: candidate.file,
+    source: candidate.source as ExternalMigrationSource,
+    sourceLabel: candidate.sourceLabel,
+    assetCount: candidate.assetCount,
+    mappedNodeCount: candidate.mappedNodeCount,
+    skippedNodeCount: candidate.skippedNodeCount,
+    warnings: [...candidate.warnings]
   };
 }
 
@@ -5835,6 +8730,8 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
 
   const body = normalizeCommentBody(candidate.body);
   const authorName = normalizeName(candidate.authorName, "사용자");
+  const authorId = normalizeName(candidate.authorId, authorName);
+  const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
   return {
     schemaVersion: 1,
@@ -5843,12 +8740,14 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     nodeId: candidate.nodeId,
     nodeName: normalizeName(candidate.nodeName, candidate.nodeId),
     body,
+    authorId,
     authorName,
-    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
+    createdAt,
+    modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     resolvedAt: candidate.resolvedAt ? normalizeName(candidate.resolvedAt, "") : null,
     mentions: normalizeCommentMentionList(candidate.mentions, body),
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
-    readBy: normalizeCommentReaderList(candidate.readBy, authorName),
+    readBy: normalizeCommentReaderList(candidate.readBy, authorId),
     replies: Array.isArray(candidate.replies)
       ? candidate.replies.map((reply) => parseStoredCommentReply(reply))
       : []
@@ -5867,13 +8766,18 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
   assertSafeStorageId(candidate.replyId);
 
   const body = normalizeCommentBody(candidate.body);
+  const authorName = normalizeName(candidate.authorName, "사용자");
+  const authorId = normalizeName(candidate.authorId, authorName);
+  const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
   return {
     schemaVersion: 1,
     replyId: candidate.replyId,
     body,
-    authorName: normalizeName(candidate.authorName, "사용자"),
-    createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString()),
+    authorId,
+    authorName,
+    createdAt,
+    modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     mentions: normalizeCommentMentionList(candidate.mentions, body),
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets)
   };
@@ -5901,7 +8805,7 @@ function parseStoredCommentActivityEvent(
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment activity file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "edited", "deleted"].includes(candidate.type)) {
     throw new Error(`unsupported comment activity type: ${String(candidate.type)}`);
   }
 
@@ -5940,10 +8844,13 @@ function parseStoredCommentLiveEvent(
   if (candidate.threadId) {
     assertSafeStorageId(candidate.threadId);
   }
+  if (candidate.replyId) {
+    assertSafeStorageId(candidate.replyId);
+  }
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment live event file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved", "read"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "read", "edited", "deleted"].includes(candidate.type)) {
     throw new Error(`unsupported comment live event type: ${String(candidate.type)}`);
   }
 
@@ -5954,6 +8861,7 @@ function parseStoredCommentLiveEvent(
     type: candidate.type,
     fileId: candidate.fileId,
     ...(candidate.threadId ? { threadId: candidate.threadId } : {}),
+    ...(candidate.replyId ? { replyId: candidate.replyId } : {}),
     ...(candidate.viewerId ? { viewerId: normalizeName(candidate.viewerId, "사용자") } : {}),
     createdAt: normalizeName(candidate.createdAt, new Date(0).toISOString())
   };

@@ -50,14 +50,29 @@ describe("project api", () => {
     };
 
     await createProject({ name: "새 프로젝트" }, fetcher as typeof fetch);
-    await updateProject("project-web", { name: "리네임" }, fetcher as typeof fetch);
+    await updateProject(
+      "project-web",
+      { name: "리네임" },
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
     await duplicateProject(
       "project-web",
       { projectId: "project-web-copy", name: "복제", documentIdPrefix: "web-copy" },
-      fetcher as typeof fetch
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
     );
-    await setProjectSharing("project-web", { mode: "team", teamId: "team-web" }, fetcher as typeof fetch);
-    await deleteProject("project-web-copy", fetcher as typeof fetch);
+    await setProjectSharing(
+      "project-web",
+      { mode: "team", teamId: "team-web" },
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
+    await deleteProject(
+      "project-web-copy",
+      fetcher as typeof fetch,
+      { userId: "team-owner", memberToken: "owner-token" }
+    );
 
     expect(requests).toEqual([
       {
@@ -69,28 +84,50 @@ describe("project api", () => {
       {
         url: "http://127.0.0.1:4317/projects/project-web",
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { name: "리네임" }
       },
       {
         url: "http://127.0.0.1:4317/projects/project-web/duplicate",
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { projectId: "project-web-copy", name: "복제", documentIdPrefix: "web-copy" }
       },
       {
         url: "http://127.0.0.1:4317/projects/project-web/sharing",
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: { mode: "team", teamId: "team-web" }
       },
       {
         url: "http://127.0.0.1:4317/projects/project-web-copy",
         method: "DELETE",
-        headers: undefined,
+        headers: {
+          "x-layo-user-id": "team-owner",
+          Authorization: "Bearer owner-token"
+        },
         body: null
       }
     ]);
+  });
+
+  test("requires an idempotency key at the project import API boundary", () => {
+    const requiresKey: Parameters<
+      typeof importProjectArchive
+    >[0] extends { idempotencyKey: string } ? true : false = true;
+    expect(requiresKey).toBe(true);
   });
 
   test("reviews imports and exports project archives", async () => {
@@ -116,6 +153,14 @@ describe("project api", () => {
       }
 
       if (pathname === "/projects/import/archive") {
+        expect(init?.headers).toEqual({
+          "Content-Type": "application/json",
+          "Idempotency-Key": "project-web-import-v1"
+        });
+        expect(JSON.parse(String(init?.body))).toEqual({
+          archiveBase64: "UEs=",
+          name: "복원 프로젝트"
+        });
         return new Response(
           JSON.stringify({
             imported: {
@@ -148,8 +193,16 @@ describe("project api", () => {
       originalProjectId: "project-web",
       documentCount: 2
     });
-    await expect(importProjectArchive({ archiveBase64: "UEs=", name: "복원 프로젝트" }, fetcher as typeof fetch)).resolves
-      .toMatchObject({ originalProjectId: "project-web", project });
+    await expect(
+      importProjectArchive(
+        {
+          archiveBase64: "UEs=",
+          name: "복원 프로젝트",
+          idempotencyKey: "project-web-import-v1"
+        },
+        fetcher as typeof fetch
+      )
+    ).resolves.toMatchObject({ originalProjectId: "project-web", project });
     await expect(exportProjectArchive("project-web", fetcher as typeof fetch)).resolves.toMatchObject({
       fileName: "project-web.layo-project.zip",
       mimeType: "application/vnd.layo.project-archive+zip"

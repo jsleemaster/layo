@@ -591,8 +591,20 @@ test("file panel sends active team member credentials for library publish and im
       url.searchParams.get("fileId") === documentId
     );
   });
+  const sharingRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "PATCH" &&
+      url.pathname === `/projects/${sourceProjectId}/sharing`
+    );
+  });
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  const shared = await sharingRequest;
+  expect(shared.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
   const streamed = await eventStreamRequest;
   expect(streamed.headers()).toMatchObject({
     authorization: "Bearer editor-member-token",
@@ -1037,11 +1049,26 @@ test("snapshot persistence retries a server conflict and preserves an independen
 
   const readServerFields = async () => {
     const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-    const file = (await response.json()).file;
-    return {
-      x: file.pages[0].children[0].transform.x as number,
-      text: file.pages[0].children[0].children[0].content.value as string
+    if (!response.ok()) {
+      return null;
+    }
+    const payload = (await response.json()) as {
+      file?: {
+        pages?: Array<{
+          children?: Array<{
+            transform?: { x?: number };
+            children?: Array<{ content?: { value?: string } }>;
+          }>;
+        }>;
+      };
     };
+    const frame = payload.file?.pages?.[0]?.children?.[0];
+    const x = frame?.transform?.x;
+    const text = frame?.children?.[0]?.content?.value;
+    if (typeof x !== "number" || typeof text !== "string") {
+      return null;
+    }
+    return { x, text };
   };
 
   try {
@@ -6095,6 +6122,308 @@ test("comments panel adds replies to a selected-layer thread", async ({ page }) 
     .toBe("문구를 더 짧게 줄였어요");
 });
 
+test("comments panel lets owners edit and delete threads and replies with stale-write recovery", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("수정 전 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await page.getByRole("button", { name: "수정 전 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("수정된 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 코멘트");
+
+  await page.getByTestId("comment-reply-body").fill("수정 전 답글");
+  await page.getByRole("button", { name: "답글 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+  await page.getByRole("button", { name: "수정 전 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("수정된 답글");
+  await page.getByRole("button", { name: "답글 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 답글");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 답글 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 답글");
+
+  const foreignResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "외부 소유 코멘트",
+        authorId: "reviewer",
+        authorName: "리뷰어"
+      }
+    }
+  );
+  expect(foreignResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("외부 소유 코멘트");
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 수정" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 삭제" })).toHaveCount(0);
+
+  await page.getByTestId("comment-body").fill("동시 수정 전");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(threadsResponse.ok()).toBeTruthy();
+  const concurrentThread = ((await threadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "동시 수정 전");
+  expect(concurrentThread).toBeDefined();
+
+  await page.getByRole("button", { name: "동시 수정 전 수정" }).click();
+  const threadDraft = page.getByTestId("comment-thread-edit-body");
+  await threadDraft.fill("내 오래된 수정");
+  const externalUpdate = await page.request.patch(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${concurrentThread!.threadId}`,
+    {
+      data: {
+        body: "외부 최신 코멘트",
+        actorId: "사용자",
+        expectedModifiedAt: concurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalUpdate.ok()).toBeTruthy();
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
+
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
+  );
+  const latestConflict = page.getByTestId("comment-edit-latest");
+  await expect(latestConflict).toContainText("최신 서버 코멘트");
+  await expect(latestConflict).toContainText("외부 최신 코멘트");
+  await expect(page.getByTestId("comment-list")).toContainText("외부 최신 코멘트");
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
+
+  await threadDraft.fill("내 충돌 후 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("내 충돌 후 수정");
+
+  const latestThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(latestThreadsResponse.ok()).toBeTruthy();
+  const latestConcurrentThread = ((await latestThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "내 충돌 후 수정");
+  expect(latestConcurrentThread).toBeDefined();
+
+  await page.getByTestId("comment-body").fill("기존 새 코멘트 초안");
+  await page.getByRole("button", { name: "내 충돌 후 수정 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("원격 삭제에도 보존할 초안");
+  const externalDelete = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${latestConcurrentThread!.threadId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: latestConcurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalDelete.ok()).toBeTruthy();
+
+  const recovery = page.getByTestId("comment-edit-recovery");
+  await expect(recovery).toContainText("원본 코멘트가 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 초안"
+  );
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 코멘트 초안과 합치기" })
+    .click();
+  const mergedRecoveredThreadBody = "기존 새 코멘트 초안\n\n원격 삭제에도 보존할 초안";
+  await expect(page.getByTestId("comment-body")).toHaveValue(mergedRecoveredThreadBody);
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("기존 새 코멘트 초안");
+  await expect(page.getByTestId("comment-list")).toContainText("원격 삭제에도 보존할 초안");
+
+  const recoveredThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(recoveredThreadsResponse.ok()).toBeTruthy();
+  const recoveredThread = ((await recoveredThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+  }>).find((thread) => thread.body === mergedRecoveredThreadBody);
+  expect(recoveredThread).toBeDefined();
+
+  const createdRemoteReply = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies`,
+    {
+      data: {
+        body: "원격 삭제할 답글",
+        authorId: "사용자",
+        authorName: "사용자"
+      }
+    }
+  );
+  expect(createdRemoteReply.ok()).toBeTruthy();
+  const createdRemoteReplyPayload = await createdRemoteReply.json();
+  const remoteReply = (createdRemoteReplyPayload.thread.replies as Array<{
+    replyId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((reply) => reply.body === "원격 삭제할 답글");
+  expect(remoteReply).toBeDefined();
+
+  const recoveredThreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "기존 새 코멘트 초안" });
+  await expect(recoveredThreadRow).toHaveCount(1);
+  await recoveredThreadRow.getByTestId("comment-reply-body").fill("기존 새 답글 초안");
+
+  await page.getByRole("button", { name: "원격 삭제할 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("원격 삭제에도 보존할 답글 초안");
+  const deletedRemoteReply = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies/${remoteReply!.replyId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: remoteReply!.modifiedAt
+      }
+    }
+  );
+  expect(deletedRemoteReply.ok()).toBeTruthy();
+
+  await expect(recovery).toContainText("원본 답글이 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 답글 초안"
+  );
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 답글 초안과 합치기" })
+    .click();
+
+  await expect(recoveredThreadRow.getByTestId("comment-reply-body")).toHaveValue(
+    "기존 새 답글 초안\n\n원격 삭제에도 보존할 답글 초안"
+  );
+  await recoveredThreadRow.getByRole("button", { name: "답글 추가" }).click();
+  await expect(recoveredThreadRow).toContainText("원격 삭제에도 보존할 답글 초안");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
+});
+
+test("deleting the last comment clears its canvas bubble and keeps a content-free activity tombstone", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("삭제할 단일 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveText("1");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "삭제할 단일 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveCount(0);
+
+  await openFilePanel(page);
+  const activity = page.getByTestId("comment-activity-feed");
+  await expect(activity).toContainText("삭제");
+  await expect(activity).toContainText("코멘트가 삭제되었습니다");
+  await expect(activity).not.toContainText("삭제할 단일 코멘트");
+
+  const activityResponse = await page.request.get(
+    "http://127.0.0.1:4317/comments/activity?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90&limit=8"
+  );
+  expect(activityResponse.ok()).toBeTruthy();
+  expect((await activityResponse.json()).feed.events[0]).toMatchObject({
+    type: "deleted",
+    fileId: documentId,
+    body: "코멘트가 삭제되었습니다",
+    mentions: [],
+    mentionTargets: []
+  });
+});
+
+test("comments panel keeps feedback controls available to team viewers and maps trusted actor names", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const teamManifest = {
+    schemaVersion: 1,
+    teamId: "team-comment-viewers",
+    name: "코멘트 검수 팀",
+    createdAt: "2026-07-23T00:00:00.000Z",
+    currentUserId: "team-viewer",
+    members: [
+      {
+        userId: "team-viewer",
+        displayName: "팀 뷰어",
+        color: "#2563eb",
+        role: "viewer"
+      }
+    ],
+    documents: [],
+    sync: { mode: "local", roomPrefix: "layo" },
+    permissions: { canEdit: false, canInvite: false },
+    auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
+    encryption: { mode: "none" }
+  };
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("코멘트 검수 팀");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("코멘트 검수 팀");
+
+  const created = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "뷰어 소유 코멘트",
+        authorId: "team-viewer",
+        authorName: "team-viewer"
+      }
+    }
+  );
+  expect(created.ok()).toBeTruthy();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("뷰어 소유 코멘트");
+  await expect(page.getByTestId("comment-body")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeDisabled();
+  await expect(page.getByTestId("comment-reply-body")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "답글 추가" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(1);
+
+  await page.getByTestId("comment-body").fill("뷰어가 추가한 피드백");
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeEnabled();
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await openFilePanel(page);
+  await expect(page.getByTestId("comment-activity-feed")).toContainText("팀 뷰어");
+  await expect(page.getByTestId("comment-activity-feed")).not.toContainText("team-viewer");
+});
+
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
@@ -6251,6 +6580,72 @@ test("file panel shows mention-targeted comment notifications", async ({ page })
   await expect(summary).toContainText("멘션 1개");
 });
 
+test("comment authorization end stops fallback polling and preserves the recovery state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoCommentListRequestCount?: number;
+      __layoCommentTerminalStreamCount?: number;
+    };
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const parsedUrl = new URL(url, window.location.href);
+      if (
+        method === "GET"
+        && /^\/files\/[^/]+\/comments$/.test(parsedUrl.pathname)
+      ) {
+        instrumentedWindow.__layoCommentListRequestCount =
+          (instrumentedWindow.__layoCommentListRequestCount ?? 0) + 1;
+        if (instrumentedWindow.__layoCommentListRequestCount === 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+        }
+      }
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentTerminalStreamCount =
+          (instrumentedWindow.__layoCommentTerminalStreamCount ?? 0) + 1;
+        return new Response(
+          'event: comment-authorization-ended\ndata: {"code":"credential_inactive"}\n\n',
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          }
+        );
+      }
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+  });
+
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+
+  await page.waitForTimeout(100);
+  const requestCountAfterTerminal = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+  await page.waitForTimeout(2_300);
+  const requestCountAfterFallbackWindow = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+
+  expect(requestCountAfterFallbackWindow).toBe(requestCountAfterTerminal);
+  await expect.poll(
+    () => page.evaluate(
+      () => (window as Window & { __layoCommentTerminalStreamCount?: number })
+        .__layoCommentTerminalStreamCount ?? 0
+    )
+  ).toBe(1);
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+});
+
 test("file panel receives externally created comment notifications without reload", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
@@ -6282,11 +6677,10 @@ test("file panel receives externally created comment notifications through the e
 }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
-      __layoCommentEventCount?: number;
-      __layoEventSourceUrls?: string[];
+      __layoCommentStreamUrls?: string[];
       __layoSuppressedCommentPolling?: boolean;
     };
-    const NativeEventSource = window.EventSource;
+    const nativeFetch = window.fetch.bind(window);
     const nativeSetInterval = window.setInterval.bind(window);
 
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
@@ -6297,21 +6691,17 @@ test("file panel receives externally created comment notifications through the e
       return nativeSetInterval(handler, timeout, ...args);
     }) as typeof window.setInterval;
 
-    class InstrumentedEventSource extends NativeEventSource {
-      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-        super(url, eventSourceInitDict);
-        instrumentedWindow.__layoEventSourceUrls = [
-          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
-          String(url)
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentStreamUrls = [
+          ...(instrumentedWindow.__layoCommentStreamUrls ?? []),
+          parsedUrl.toString()
         ];
-        this.addEventListener("comment", () => {
-          instrumentedWindow.__layoCommentEventCount =
-            (instrumentedWindow.__layoCommentEventCount ?? 0) + 1;
-        });
       }
-    }
-
-    window.EventSource = InstrumentedEventSource;
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
   });
 
   const { documentId } = await createProjectFromEmptyState(page);
@@ -6324,12 +6714,12 @@ test("file panel receives externally created comment notifications through the e
   await page.waitForFunction(
     ({ documentId: expectedDocumentId }) => {
       const instrumentedWindow = window as Window & {
-        __layoEventSourceUrls?: string[];
+        __layoCommentStreamUrls?: string[];
         __layoSuppressedCommentPolling?: boolean;
       };
       return (
         instrumentedWindow.__layoSuppressedCommentPolling === true &&
-        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+        (instrumentedWindow.__layoCommentStreamUrls ?? []).some((url) => {
           const parsedUrl = new URL(url, window.location.href);
           return (
             parsedUrl.pathname === "/comments/events" &&
@@ -6351,10 +6741,6 @@ test("file panel receives externally created comment notifications through the e
   });
   expect(created.ok()).toBeTruthy();
 
-  await page.waitForFunction(() => {
-    const instrumentedWindow = window as Window & { __layoCommentEventCount?: number };
-    return (instrumentedWindow.__layoCommentEventCount ?? 0) > 0;
-  });
   await expect(summary).toContainText("읽지 않은 코멘트 1개", { timeout: 1_200 });
   await expect(summary).toContainText("나를 멘션 1개");
   await expect(feed).toContainText("@사용자 이벤트 스트림 확인", { timeout: 1_200 });

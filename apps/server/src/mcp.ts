@@ -2,13 +2,22 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
-import { FileStorage, type CodeComponentMapping, type DesignFile, type DesignNode } from "./storage.js";
+import {
+  FileStorage,
+  type CodeComponentMapping,
+  type CommentAuthorizationBoundary,
+  type DesignFile,
+  type DesignNode,
+  type StoredCommentMentionTarget,
+  type StoredCommentThread
+} from "./storage.js";
 import {
   createTeamAuthorizationProvider,
   authorizeTeamLibraryRead,
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   watchTeamMemberTokenFile,
+  type AuthenticatedTeamMember,
   type TeamAuthorizationConfig,
   type TeamAuthorizationFileManager,
   type TeamAuthorizationProvider
@@ -495,10 +504,68 @@ const writeToolAnnotations = {
   openWorldHint: false
 };
 
+type CommentMutationAction =
+  | "update_thread"
+  | "delete_thread"
+  | "update_reply"
+  | "delete_reply";
+
+interface CommentMutationReview {
+  action: CommentMutationAction;
+  canApply: boolean;
+  reason: "not_owner" | "stale_version" | null;
+  ownerId: string;
+  expectedModifiedAt: string;
+  currentModifiedAt: string;
+  beforeBody: string;
+  afterBody?: string;
+  replyId?: string;
+}
+
+function reviewCommentMutation(
+  thread: StoredCommentThread,
+  action: CommentMutationAction,
+  actorId: string,
+  expectedModifiedAt: string,
+  options: { replyId?: string; afterBody?: string } = {}
+): CommentMutationReview {
+  const target = options.replyId
+    ? thread.replies.find((reply) => reply.replyId === options.replyId)
+    : thread;
+  if (!target) {
+    throw Object.assign(new Error(`comment reply not found: ${options.replyId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  const reason =
+    target.authorId !== actorId
+      ? "not_owner"
+      : target.modifiedAt !== expectedModifiedAt
+        ? "stale_version"
+        : null;
+  return {
+    action,
+    canApply: reason === null,
+    reason,
+    ownerId: target.authorId,
+    expectedModifiedAt,
+    currentModifiedAt: target.modifiedAt,
+    beforeBody: target.body,
+    ...(options.afterBody !== undefined ? { afterBody: options.afterBody } : {}),
+    ...(options.replyId ? { replyId: options.replyId } : {})
+  };
+}
+
 export interface McpServerOptions {
   libraryRegistryAuth?: TeamAuthorizationConfig;
   libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
+  teamAuthorizationProvider?: TeamAuthorizationProvider;
   libraryRegistryPrincipal?: {
+    userId: string;
+    memberToken: string;
+  };
+  teamPrincipal?: {
     userId: string;
     memberToken: string;
   };
@@ -506,18 +573,31 @@ export interface McpServerOptions {
 }
 
 export function createMcpServer(storage = new FileStorage(), options: McpServerOptions = {}) {
-  const libraryRegistryAuthorizationProvider =
-    options.libraryRegistryAuthorizationProvider
+  const teamAuthorizationProvider =
+    options.teamAuthorizationProvider
+    ?? options.libraryRegistryAuthorizationProvider
     ?? (options.libraryRegistryAuth
       ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
       : undefined);
-  const authenticateLibraryMember = async () =>
-    libraryRegistryAuthorizationProvider
-      ? libraryRegistryAuthorizationProvider.authenticate({
-          userId: options.libraryRegistryPrincipal?.userId,
-          memberToken: options.libraryRegistryPrincipal?.memberToken
+  const teamPrincipal = options.teamPrincipal ?? options.libraryRegistryPrincipal;
+  const libraryRegistryAuthorizationProvider = teamAuthorizationProvider;
+  const authenticateTeamMember = async () =>
+    teamAuthorizationProvider
+      ? teamAuthorizationProvider.authenticate({
+          userId: teamPrincipal?.userId,
+          memberToken: teamPrincipal?.memberToken
         })
       : undefined;
+  const authenticateOptionalTeamMember = async () => {
+    if (!teamAuthorizationProvider || (!teamPrincipal?.userId && !teamPrincipal?.memberToken)) {
+      return undefined;
+    }
+    return teamAuthorizationProvider.authenticate({
+      userId: teamPrincipal.userId,
+      memberToken: teamPrincipal.memberToken
+    });
+  };
+  const authenticateLibraryMember = authenticateTeamMember;
 
   const authorizeLibraryRead = async (fileId: string) => {
     const member = await authenticateLibraryMember();
@@ -560,6 +640,97 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
     }
   };
 
+  interface CommentAuthorization {
+    member?: AuthenticatedTeamMember;
+    authorizationBoundary?: CommentAuthorizationBoundary;
+  }
+
+  const authorizeCommentRead = async (
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
+    }
+    const member = await authenticateTeamMember();
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
+  };
+
+  const authorizeCommentWrite = async (
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
+    }
+    const member = await authenticateTeamMember();
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
+    // Penpot permits file readers, including team viewers, to participate in comments.
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
+  };
+
+  const commentActorId = (
+    member: AuthenticatedTeamMember | undefined,
+    requestedActorId?: string
+  ) => member?.userId ?? (requestedActorId?.trim() || "사용자");
+
+  const commentThreadForReview = async (
+    fileId: string,
+    threadId: string,
+    authorizationBoundary?: CommentAuthorizationBoundary
+  ) => {
+    const thread = (await storage.listCommentThreads(fileId, {
+      includeResolved: true,
+      authorizationBoundary
+    })).find((candidate) => candidate.threadId === threadId);
+    if (!thread) {
+      throw Object.assign(new Error(`comment thread not found: ${threadId}`), {
+        code: "ENOENT",
+        statusCode: 404
+      });
+    }
+    return thread;
+  };
+
+  const visibleCommentProjectAuthorizationBoundaries = async (
+    member?: AuthenticatedTeamMember
+  ): Promise<CommentAuthorizationBoundary[]> => {
+    const projects = await storage.listProjects();
+    return projects.flatMap((project) =>
+      project.sharing.mode === "private"
+      || (
+        project.sharing.mode === "team"
+        && member?.teamIds.includes(project.sharing.teamId)
+      )
+        ? [{
+            projectId: project.projectId,
+            expectedSharing: project.sharing
+          }]
+        : []
+    );
+  };
+
   const server = new McpServer({
     name: "layo",
     version: "0.1.0"
@@ -568,10 +739,10 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
   if (
     options.teamAuthorizationManager
     && libraryRegistryAuthorizationProvider
-    && options.libraryRegistryPrincipal
+    && teamPrincipal
   ) {
     const manager = options.teamAuthorizationManager;
-    const principal = options.libraryRegistryPrincipal;
+    const principal = teamPrincipal;
 
     if (manager.listAuditEvents) {
       const listAuditEvents = manager.listAuditEvents.bind(manager);
@@ -1766,21 +1937,29 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         viewerId: z.string().optional().describe("Optional viewer id used to compute unread state")
       }
     },
-    async ({ fileId, includeResolved, viewerId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              threads: await storage.listCommentThreads(fileId, { includeResolved, viewerId })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, includeResolved, viewerId }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                threads: await storage.listCommentThreads(fileId, {
+                  includeResolved,
+                  viewerId: member?.userId ?? viewerId,
+                  authorizationBoundary
+                })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1791,26 +1970,157 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         nodeId: z.string().describe("Canvas node id to attach the comment to"),
-        body: z.string().describe("Comment body"),
+        body: z.string().trim().min(1).describe("Comment body"),
+        authorId: z.string().optional().describe("Local author id; team credentials override this value"),
         authorName: z.string().optional().describe("Display name for the comment author"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this comment")
       }
     },
-    async ({ fileId, nodeId, body, authorName, mentionTargets }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              thread: await storage.createCommentThread(fileId, { nodeId, body, authorName, mentionTargets })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, nodeId, body, authorId, authorName, mentionTargets }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                thread: await storage.createCommentThread(fileId, {
+                  nodeId,
+                  body,
+                  authorId: member?.userId ?? authorId,
+                  authorName: member?.userId ?? authorName,
+                  mentionTargets
+                }, { authorizationBoundary })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "update_comment_thread",
+    {
+      description: "Review or apply an owner-only comment thread body update. Dry-run is the default.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
+        body: z.string().trim().min(1).describe("Replacement comment body"),
+        actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current modifiedAt returned by list_comment_threads"),
+        mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by the replacement body"),
+        dryRun: z.boolean().optional().describe("Defaults to true; pass false to persist the update")
+      }
+    },
+    async ({ fileId, threadId, body, actorId, expectedModifiedAt, mentionTargets, dryRun }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      const resolvedActorId = commentActorId(member, actorId);
+      const review = reviewCommentMutation(
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
+        "update_thread",
+        resolvedActorId,
+        expectedModifiedAt,
+        { afterBody: body }
+      );
+      const isDryRun = dryRun !== false;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                dryRun: isDryRun,
+                review,
+                ...(isDryRun
+                  ? {}
+                  : {
+                      thread: await storage.updateCommentThread(fileId, threadId, {
+                        body,
+                        actorId: resolvedActorId,
+                        expectedModifiedAt,
+                        mentionTargets: mentionTargets as StoredCommentMentionTarget[] | undefined
+                      }, { authorizationBoundary })
+                    })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "delete_comment_thread",
+    {
+      description: "Review or apply an owner-only comment thread deletion. Dry-run is the default.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
+        actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current modifiedAt returned by list_comment_threads"),
+        dryRun: z.boolean().optional().describe("Defaults to true; pass false to delete the thread")
+      }
+    },
+    async ({ fileId, threadId, actorId, expectedModifiedAt, dryRun }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      const resolvedActorId = commentActorId(member, actorId);
+      const review = reviewCommentMutation(
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
+        "delete_thread",
+        resolvedActorId,
+        expectedModifiedAt
+      );
+      const isDryRun = dryRun !== false;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                dryRun: isDryRun,
+                review,
+                ...(isDryRun
+                  ? {}
+                  : {
+                      deleted: await storage.deleteCommentThread(
+                        fileId,
+                        threadId,
+                        {
+                          actorId: resolvedActorId,
+                          expectedModifiedAt
+                        },
+                        { authorizationBoundary }
+                      )
+                    })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1822,20 +2132,19 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         viewerId: z.string().optional().describe("Viewer id used to compute unread comment notifications")
       }
     },
-    async ({ viewerId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              summary: await storage.listCommentNotifications({ viewerId })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ viewerId }) => {
+      const member = await authenticateOptionalTeamMember();
+      const authorizationBoundaries = teamAuthorizationProvider
+        ? await visibleCommentProjectAuthorizationBoundaries(member)
+        : undefined;
+      const summary = await storage.listCommentNotifications({
+        viewerId: member?.userId ?? viewerId,
+        authorizationBoundaries
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ summary }, null, 2) }]
+      };
+    }
   );
 
   server.registerTool(
@@ -1848,20 +2157,20 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         limit: z.number().optional().describe("Maximum number of recent activity events to return")
       }
     },
-    async ({ viewerId, limit }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              feed: await storage.listCommentActivity({ viewerId, limit })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ viewerId, limit }) => {
+      const member = await authenticateOptionalTeamMember();
+      const authorizationBoundaries = teamAuthorizationProvider
+        ? await visibleCommentProjectAuthorizationBoundaries(member)
+        : undefined;
+      const feed = await storage.listCommentActivity({
+        viewerId: member?.userId ?? viewerId,
+        limit,
+        authorizationBoundaries
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ feed }, null, 2) }]
+      };
+    }
   );
 
   server.registerTool(
@@ -1874,21 +2183,30 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         threadId: z.string().describe("Comment thread id returned by list_comment_threads")
       }
     },
-    async ({ fileId, threadId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              thread: await storage.resolveCommentThread(fileId, threadId)
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, threadId }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                thread: await storage.resolveCommentThread(
+                  fileId,
+                  threadId,
+                  member?.userId,
+                  { authorizationBoundary }
+                )
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1902,21 +2220,30 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         viewerId: z.string().optional().describe("Viewer id to add to the thread read state")
       }
     },
-    async ({ fileId, threadId, viewerId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              thread: await storage.markCommentThreadRead(fileId, threadId, { viewerId })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, threadId, viewerId }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                thread: await storage.markCommentThreadRead(
+                  fileId,
+                  threadId,
+                  { viewerId: member?.userId ?? viewerId },
+                  { authorizationBoundary }
+                )
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1929,21 +2256,29 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
         viewerId: z.string().optional().describe("Viewer id to add to each active thread read state")
       }
     },
-    async ({ fileId, viewerId }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              threads: await storage.markFileCommentsRead(fileId, { viewerId })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, viewerId }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                threads: await storage.markFileCommentsRead(
+                  fileId,
+                  { viewerId: member?.userId ?? viewerId },
+                  { authorizationBoundary }
+                )
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(
@@ -1954,26 +2289,166 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       inputSchema: {
         fileId: z.string().describe("Design file id returned by list_files"),
         threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
-        body: z.string().describe("Reply body"),
+        body: z.string().trim().min(1).describe("Reply body"),
+        authorId: z.string().optional().describe("Local author id; team credentials override this value"),
         authorName: z.string().optional().describe("Display name for the reply author"),
         mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by this reply")
       }
     },
-    async ({ fileId, threadId, body, authorName, mentionTargets }) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              fileId,
-              thread: await storage.addCommentReply(fileId, threadId, { body, authorName, mentionTargets })
-            },
-            null,
-            2
-          )
-        }
-      ]
-    })
+    async ({ fileId, threadId, body, authorId, authorName, mentionTargets }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                thread: await storage.addCommentReply(fileId, threadId, {
+                  body,
+                  authorId: member?.userId ?? authorId,
+                  authorName: member?.userId ?? authorName,
+                  mentionTargets
+                }, { authorizationBoundary })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "update_comment_reply",
+    {
+      description: "Review or apply an owner-only comment reply body update. Dry-run is the default.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
+        replyId: z.string().describe("Reply id returned by list_comment_threads"),
+        body: z.string().trim().min(1).describe("Replacement reply body"),
+        actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current reply modifiedAt returned by list_comment_threads"),
+        mentionTargets: z.array(commentMentionTargetSchema).optional().describe("Resolved team members mentioned by the replacement body"),
+        dryRun: z.boolean().optional().describe("Defaults to true; pass false to persist the update")
+      }
+    },
+    async ({ fileId, threadId, replyId, body, actorId, expectedModifiedAt, mentionTargets, dryRun }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      const resolvedActorId = commentActorId(member, actorId);
+      const review = reviewCommentMutation(
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
+        "update_reply",
+        resolvedActorId,
+        expectedModifiedAt,
+        { replyId, afterBody: body }
+      );
+      const isDryRun = dryRun !== false;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                dryRun: isDryRun,
+                review,
+                ...(isDryRun
+                  ? {}
+                  : {
+                      thread: await storage.updateCommentReply(
+                        fileId,
+                        threadId,
+                        replyId,
+                        {
+                          body,
+                          actorId: resolvedActorId,
+                          expectedModifiedAt,
+                          mentionTargets: mentionTargets as StoredCommentMentionTarget[] | undefined
+                        },
+                        { authorizationBoundary }
+                      )
+                    })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "delete_comment_reply",
+    {
+      description: "Review or apply an owner-only comment reply deletion. Dry-run is the default.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
+        replyId: z.string().describe("Reply id returned by list_comment_threads"),
+        actorId: z.string().optional().describe("Local actor id; team credentials override this value"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current reply modifiedAt returned by list_comment_threads"),
+        dryRun: z.boolean().optional().describe("Defaults to true; pass false to delete the reply")
+      }
+    },
+    async ({ fileId, threadId, replyId, actorId, expectedModifiedAt, dryRun }) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(fileId);
+      const resolvedActorId = commentActorId(member, actorId);
+      const review = reviewCommentMutation(
+        await commentThreadForReview(
+          fileId,
+          threadId,
+          authorizationBoundary
+        ),
+        "delete_reply",
+        resolvedActorId,
+        expectedModifiedAt,
+        { replyId }
+      );
+      const isDryRun = dryRun !== false;
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                dryRun: isDryRun,
+                review,
+                ...(isDryRun
+                  ? {}
+                  : {
+                      thread: await storage.deleteCommentReply(
+                        fileId,
+                        threadId,
+                        replyId,
+                        {
+                          actorId: resolvedActorId,
+                          expectedModifiedAt
+                        },
+                        { authorizationBoundary }
+                      )
+                    })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
   );
 
   server.registerTool(

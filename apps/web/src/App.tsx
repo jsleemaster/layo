@@ -65,6 +65,8 @@ import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
 import {
   addCommentReply,
   createCommentThread,
+  deleteCommentReply,
+  deleteCommentThread,
   deleteFileVersion,
   exportCode,
   exportFileArchive,
@@ -102,8 +104,11 @@ import {
   subscribeToCommentEvents,
   subscribeToLibraryRegistryEvents,
   summarizeDocumentChanges,
+  updateCommentReply,
+  updateCommentThread,
   updateLibraryRegistryItem,
   updateLibraryRegistryTokens,
+  DocumentRequestError,
   type CommentActivityFeed,
   type CommentMentionTarget,
   type CommentNotificationSummary,
@@ -267,6 +272,10 @@ function formatCommentActivityType(type: CommentActivityFeed["events"][number]["
       return "답글";
     case "resolved":
       return "해결";
+    case "edited":
+      return "수정";
+    case "deleted":
+      return "삭제";
   }
 }
 
@@ -1424,6 +1433,7 @@ interface ExternalMigrationReviewState {
   review: ExternalMigrationReview;
   archiveBase64: string;
   sourceFileName: string;
+  idempotencyKey: string;
 }
 
 interface LibraryArchiveReviewState {
@@ -1444,6 +1454,7 @@ interface ProjectArchiveReviewState {
   review: ProjectArchiveReview;
   archiveBase64: string;
   sourceFileName: string;
+  idempotencyKey: string;
 }
 
 interface AreaSelectionSession {
@@ -6732,6 +6743,8 @@ function Inspector({
   commentReplyBodies,
   commentStatus,
   canComment,
+  commentActorId,
+  commentAuthorNames,
   onTokenDtcgDraftChange,
   onExportTokensDtcg,
   onImportTokensDtcg,
@@ -6745,6 +6758,10 @@ function Inspector({
   onCommentReplyBodyChange,
   onCreateComment,
   onCreateCommentReply,
+  onUpdateComment,
+  onDeleteComment,
+  onUpdateCommentReply,
+  onDeleteCommentReply,
   onResolveComment,
   onMarkCommentRead,
   onDownloadSelectedPng,
@@ -6812,6 +6829,8 @@ function Inspector({
   commentReplyBodies: Record<string, string>;
   commentStatus: string;
   canComment: boolean;
+  commentActorId: string;
+  commentAuthorNames: Record<string, string>;
   onTokenDtcgDraftChange: (value: string) => void;
   onExportTokensDtcg: () => void;
   onImportTokensDtcg: () => void;
@@ -6825,6 +6844,23 @@ function Inspector({
   onCommentReplyBodyChange: (threadId: string, value: string) => void;
   onCreateComment: (nodeId: string) => void;
   onCreateCommentReply: (threadId: string) => void;
+  onUpdateComment: (
+    threadId: string,
+    body: string,
+    expectedModifiedAt: string
+  ) => Promise<"applied" | "stale" | "failed">;
+  onDeleteComment: (threadId: string, expectedModifiedAt: string) => Promise<boolean>;
+  onUpdateCommentReply: (
+    threadId: string,
+    replyId: string,
+    body: string,
+    expectedModifiedAt: string
+  ) => Promise<"applied" | "stale" | "failed">;
+  onDeleteCommentReply: (
+    threadId: string,
+    replyId: string,
+    expectedModifiedAt: string
+  ) => Promise<boolean>;
   onResolveComment: (threadId: string) => void;
   onMarkCommentRead: (threadId: string) => void;
   onDownloadSelectedPng: (scale: PngExportScale) => string | null;
@@ -6852,11 +6888,24 @@ function Inspector({
   const [styleTypeFilter, setStyleTypeFilter] = useState<"all" | DesignStyle["type"]>("all");
   const [styleSort, setStyleSort] = useState<"az" | "za" | "usage_desc">("az");
   const [strokeDashDraft, setStrokeDashDraft] = useState("");
+  const [commentEditTarget, setCommentEditTarget] = useState<{
+    kind: "thread" | "reply";
+    threadId: string;
+    replyId?: string;
+    expectedModifiedAt: string;
+  } | null>(null);
+  const [commentEditBody, setCommentEditBody] = useState("");
+  const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
+  const [commentEditLatestBody, setCommentEditLatestBody] = useState<string | null>(null);
   const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
     setPendingStyleKind(null);
     setStyleNameDraft("");
+    setCommentEditTarget(null);
+    setCommentEditBody("");
+    setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
   }, [selectedNode?.id]);
 
   useEffect(() => {
@@ -6865,6 +6914,138 @@ function Inspector({
       ? { nodeId: selectedNode.id, style: selectedNode.style }
       : null;
   }, [selectedNode?.id, selectedNode?.style]);
+
+  useEffect(() => {
+    if (!commentEditRebasePending || !commentEditTarget) {
+      return;
+    }
+    const thread = commentThreads.find(
+      (candidate) => candidate.threadId === commentEditTarget.threadId
+    );
+    const latestReply =
+      commentEditTarget.kind === "reply"
+        ? thread?.replies.find((reply) => reply.replyId === commentEditTarget.replyId)
+        : undefined;
+    const latestModifiedAt =
+      commentEditTarget.kind === "thread"
+        ? thread?.modifiedAt
+        : latestReply?.modifiedAt;
+    const latestBody =
+      commentEditTarget.kind === "thread"
+        ? thread?.body
+        : latestReply?.body;
+    if (!latestModifiedAt || latestModifiedAt === commentEditTarget.expectedModifiedAt) {
+      return;
+    }
+    setCommentEditTarget((current) => {
+      if (
+        !current
+        || current.kind !== commentEditTarget.kind
+        || current.threadId !== commentEditTarget.threadId
+        || current.replyId !== commentEditTarget.replyId
+      ) {
+        return current;
+      }
+      return { ...current, expectedModifiedAt: latestModifiedAt };
+    });
+    setCommentEditLatestBody(latestBody ?? null);
+    setCommentEditRebasePending(false);
+  }, [commentEditRebasePending, commentEditTarget, commentThreads]);
+
+  const beginCommentEdit = (
+    target: {
+      kind: "thread" | "reply";
+      threadId: string;
+      replyId?: string;
+      expectedModifiedAt: string;
+    },
+    body: string
+  ) => {
+    setCommentEditTarget(target);
+    setCommentEditBody(body);
+    setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
+  };
+
+  const cancelCommentEdit = () => {
+    setCommentEditTarget(null);
+    setCommentEditBody("");
+    setCommentEditRebasePending(false);
+    setCommentEditLatestBody(null);
+  };
+
+  const saveCommentEdit = async () => {
+    const body = commentEditBody.trim();
+    if (!commentEditTarget || !body) {
+      return;
+    }
+    const result =
+      commentEditTarget.kind === "thread"
+        ? await onUpdateComment(
+            commentEditTarget.threadId,
+            body,
+            commentEditTarget.expectedModifiedAt
+          )
+        : await onUpdateCommentReply(
+            commentEditTarget.threadId,
+            commentEditTarget.replyId ?? "",
+            body,
+            commentEditTarget.expectedModifiedAt
+          );
+    if (result === "applied") {
+      cancelCommentEdit();
+    } else if (result === "stale") {
+      setCommentEditRebasePending(true);
+    }
+  };
+
+  const commentEditThread = commentEditTarget
+    ? commentThreads.find((thread) => thread.threadId === commentEditTarget.threadId)
+    : undefined;
+  const commentEditSourceExists =
+    commentEditTarget?.kind === "thread"
+      ? Boolean(commentEditThread)
+      : Boolean(
+          commentEditThread?.replies.some(
+            (reply) => reply.replyId === commentEditTarget?.replyId
+          )
+        );
+  const commentEditRecoveryVisible =
+    commentEditTarget !== null && !commentEditSourceExists;
+  const commentEditRecoveryTargetsReply =
+    commentEditTarget?.kind === "reply" && Boolean(commentEditThread);
+  const commentEditRecoveryDestinationDraft =
+    commentEditRecoveryTargetsReply && commentEditTarget
+      ? commentReplyBodies[commentEditTarget.threadId] ?? ""
+      : commentBody;
+  const commentEditRecoveryMergesDraft =
+    Boolean(commentEditRecoveryDestinationDraft.trim());
+
+  const mergeRecoveredCommentDraft = (destinationDraft: string) => {
+    const recoveredDraft = commentEditBody.trim();
+    if (!destinationDraft.trim()) {
+      return recoveredDraft;
+    }
+    if (!recoveredDraft || destinationDraft.trim() === recoveredDraft) {
+      return destinationDraft;
+    }
+    return `${destinationDraft.trimEnd()}\n\n${recoveredDraft}`;
+  };
+
+  const moveDeletedCommentDraft = () => {
+    if (!commentEditTarget) {
+      return;
+    }
+    const mergedDraft = mergeRecoveredCommentDraft(
+      commentEditRecoveryDestinationDraft
+    );
+    if (commentEditRecoveryTargetsReply) {
+      onCommentReplyBodyChange(commentEditTarget.threadId, mergedDraft);
+    } else {
+      onCommentBodyChange(mergedDraft);
+    }
+    cancelCommentEdit();
+  };
 
   const tokenControls = (
     <InspectorTokenControls
@@ -8758,67 +8939,249 @@ function Inspector({
         <div className="comment-status" data-testid="comment-status" aria-live="polite">
           {commentStatus}
         </div>
+        {commentEditRecoveryVisible ? (
+          <section
+            className="comment-edit-recovery"
+            data-testid="comment-edit-recovery"
+            aria-label={
+              commentEditTarget?.kind === "reply"
+                ? "삭제된 답글 초안 복구"
+                : "삭제된 코멘트 초안 복구"
+            }
+          >
+            <span className="comment-edit-recovery-copy">
+              <strong>
+                {commentEditTarget?.kind === "reply"
+                  ? "원본 답글이 삭제되었습니다"
+                  : "원본 코멘트가 삭제되었습니다"}
+              </strong>
+              <span>
+                {commentEditRecoveryMergesDraft
+                  ? "기존 작성 초안과 합쳐 두 내용을 모두 보존합니다."
+                  : "작성 중인 초안을 보존했습니다."}
+              </span>
+            </span>
+            <textarea
+              className="comment-body-field"
+              data-testid="comment-edit-recovery-body"
+              aria-label={
+                commentEditTarget?.kind === "reply"
+                  ? "보존된 답글 초안"
+                  : "보존된 코멘트 초안"
+              }
+              value={commentEditBody}
+              onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+            />
+            <span className="comment-inline-actions">
+              <button
+                type="button"
+                aria-label={
+                  commentEditRecoveryMergesDraft
+                    ? commentEditRecoveryTargetsReply
+                      ? "삭제된 초안 기존 답글 초안과 합치기"
+                      : "삭제된 초안 기존 코멘트 초안과 합치기"
+                    : commentEditRecoveryTargetsReply
+                      ? "삭제된 초안 답글로 옮기기"
+                      : "삭제된 초안 새 코멘트로 옮기기"
+                }
+                onClick={moveDeletedCommentDraft}
+                disabled={!commentEditBody.trim()}
+              >
+                {commentEditRecoveryMergesDraft
+                  ? "기존 초안과 합치기"
+                  : commentEditRecoveryTargetsReply
+                    ? "답글로 옮기기"
+                    : "새 코멘트로 옮기기"}
+              </button>
+              <button type="button" onClick={cancelCommentEdit}>
+                초안 닫기
+              </button>
+            </span>
+          </section>
+        ) : null}
         <ul className="comment-list" data-testid="comment-list">
           {commentThreads.length === 0 ? (
             <li className="comment-empty">활성 코멘트 없음</li>
           ) : (
-            commentThreads.map((thread) => (
-              <li className="comment-row" key={thread.threadId}>
-                <div className="comment-row-header">
-                  <span className="comment-summary">
-                    <strong>{thread.body}</strong>
-                    <span>
-                      {thread.nodeId} · {thread.authorName}
-                    </span>
-                    <CommentMentionChips mentions={thread.mentions} mentionTargets={thread.mentionTargets} />
-                    {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
-                  </span>
-                  <span className="comment-row-actions">
-                    {thread.unread ? (
-                      <button type="button" onClick={() => onMarkCommentRead(thread.threadId)}>
-                        읽음 처리
+            commentThreads.map((thread) => {
+              const editingThread =
+                commentEditTarget?.kind === "thread" &&
+                commentEditTarget.threadId === thread.threadId;
+              return (
+                <li className="comment-row" key={thread.threadId}>
+                  <div className="comment-row-header">
+                    <div className="comment-summary">
+                      {editingThread ? (
+                        <div className="comment-edit-compose">
+                          <textarea
+                            className="comment-body-field"
+                            data-testid="comment-thread-edit-body"
+                            aria-label="코멘트 내용 수정"
+                            autoFocus
+                            value={commentEditBody}
+                            onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+                          />
+                          {commentEditLatestBody !== null ? (
+                            <span className="comment-edit-latest" data-testid="comment-edit-latest">
+                              <strong>최신 서버 코멘트</strong>
+                              <span>{commentEditLatestBody}</span>
+                            </span>
+                          ) : null}
+                          <span className="comment-inline-actions">
+                            <button type="button" aria-label="코멘트 저장" onClick={() => void saveCommentEdit()} disabled={!commentEditBody.trim()}>
+                              저장
+                            </button>
+                            <button type="button" aria-label="코멘트 수정 취소" onClick={cancelCommentEdit}>
+                              취소
+                            </button>
+                          </span>
+                        </div>
+                      ) : (
+                        <strong>{thread.body}</strong>
+                      )}
+                      <span>
+                        {thread.nodeId} · {commentAuthorNames[thread.authorId] ?? thread.authorName}
+                      </span>
+                      <CommentMentionChips mentions={thread.mentions} mentionTargets={thread.mentionTargets} />
+                      {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
+                    </div>
+                    <span className="comment-row-actions">
+                      {thread.authorId === commentActorId && !editingThread ? (
+                        <>
+                          <button
+                            type="button"
+                            aria-label={`${thread.body} 수정`}
+                            onClick={() =>
+                              beginCommentEdit(
+                                { kind: "thread", threadId: thread.threadId, expectedModifiedAt: thread.modifiedAt },
+                                thread.body
+                              )
+                            }
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`${thread.body} 삭제`}
+                            onClick={() => {
+                              if (window.confirm("이 코멘트를 삭제할까요?")) {
+                                void onDeleteComment(thread.threadId, thread.modifiedAt);
+                              }
+                            }}
+                          >
+                            삭제
+                          </button>
+                        </>
+                      ) : null}
+                      {thread.unread ? (
+                        <button type="button" onClick={() => onMarkCommentRead(thread.threadId)}>
+                          읽음 처리
+                        </button>
+                      ) : null}
+                      <button type="button" aria-label={`${thread.body} 해결`} onClick={() => onResolveComment(thread.threadId)}>
+                        해결
                       </button>
-                    ) : null}
+                    </span>
+                  </div>
+                  {thread.replies.length > 0 ? (
+                    <ul className="comment-reply-list" data-testid="comment-reply-list">
+                      {thread.replies.map((reply) => {
+                        const editingReply =
+                          commentEditTarget?.kind === "reply" &&
+                          commentEditTarget.threadId === thread.threadId &&
+                          commentEditTarget.replyId === reply.replyId;
+                        return (
+                          <li className="comment-reply" key={reply.replyId}>
+                            <div className="comment-reply-header">
+                              <div className="comment-summary">
+                                {editingReply ? (
+                                  <div className="comment-edit-compose">
+                                    <textarea
+                                      className="comment-body-field comment-reply-body-field"
+                                      data-testid="comment-reply-edit-body"
+                                      aria-label="답글 내용 수정"
+                                      autoFocus
+                                      value={commentEditBody}
+                                      onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+                                    />
+                                    {commentEditLatestBody !== null ? (
+                                      <span className="comment-edit-latest" data-testid="comment-edit-latest">
+                                        <strong>최신 서버 답글</strong>
+                                        <span>{commentEditLatestBody}</span>
+                                      </span>
+                                    ) : null}
+                                    <span className="comment-inline-actions">
+                                      <button type="button" aria-label="답글 저장" onClick={() => void saveCommentEdit()} disabled={!commentEditBody.trim()}>
+                                        저장
+                                      </button>
+                                      <button type="button" aria-label="답글 수정 취소" onClick={cancelCommentEdit}>
+                                        취소
+                                      </button>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <strong>{reply.body}</strong>
+                                )}
+                                <span>{commentAuthorNames[reply.authorId] ?? reply.authorName}</span>
+                              </div>
+                              {reply.authorId === commentActorId && !editingReply ? (
+                                <span className="comment-inline-actions">
+                                  <button
+                                    type="button"
+                                    aria-label={`${reply.body} 수정`}
+                                    onClick={() =>
+                                      beginCommentEdit(
+                                        {
+                                          kind: "reply",
+                                          threadId: thread.threadId,
+                                          replyId: reply.replyId,
+                                          expectedModifiedAt: reply.modifiedAt
+                                        },
+                                        reply.body
+                                      )
+                                    }
+                                  >
+                                    수정
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label={`${reply.body} 삭제`}
+                                    onClick={() => {
+                                      if (window.confirm("이 답글을 삭제할까요?")) {
+                                        void onDeleteCommentReply(thread.threadId, reply.replyId, reply.modifiedAt);
+                                      }
+                                    }}
+                                  >
+                                    삭제
+                                  </button>
+                                </span>
+                              ) : null}
+                            </div>
+                            <CommentMentionChips mentions={reply.mentions} mentionTargets={reply.mentionTargets} />
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
+                  <div className="comment-reply-compose">
+                    <textarea
+                      className="comment-body-field comment-reply-body-field"
+                      data-testid="comment-reply-body"
+                      placeholder="답글 입력"
+                      value={commentReplyBodies[thread.threadId] ?? ""}
+                      onChange={(event) => onCommentReplyBodyChange(thread.threadId, event.currentTarget.value)}
+                    />
                     <button
                       type="button"
-                      aria-label={`${thread.body} 해결`}
-                      onClick={() => onResolveComment(thread.threadId)}
+                      onClick={() => onCreateCommentReply(thread.threadId)}
+                      disabled={!canComment || !(commentReplyBodies[thread.threadId] ?? "").trim()}
                     >
-                      해결
+                      답글 추가
                     </button>
-                  </span>
-                </div>
-                {thread.replies.length > 0 ? (
-                  <ul className="comment-reply-list" data-testid="comment-reply-list">
-                    {thread.replies.map((reply) => (
-                      <li className="comment-reply" key={reply.replyId}>
-                        <strong>{reply.body}</strong>
-                        <span>{reply.authorName}</span>
-                        <CommentMentionChips mentions={reply.mentions} mentionTargets={reply.mentionTargets} />
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="comment-reply-compose">
-                  <textarea
-                    className="comment-body-field comment-reply-body-field"
-                    data-testid="comment-reply-body"
-                    placeholder="답글 입력"
-                    value={commentReplyBodies[thread.threadId] ?? ""}
-                    onChange={(event) =>
-                      onCommentReplyBodyChange(thread.threadId, event.currentTarget.value)
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onCreateCommentReply(thread.threadId)}
-                    disabled={!canComment || !(commentReplyBodies[thread.threadId] ?? "").trim()}
-                  >
-                    답글 추가
-                  </button>
-                </div>
-              </li>
-            ))
+                  </div>
+                </li>
+              );
+            })
           )}
         </ul>
       </section>
@@ -9593,6 +9956,18 @@ export function App() {
     activeTeamContext,
     activeMemberToken
   );
+  const projectSharingCredentials =
+    activeTeamContext && activeMemberToken.trim()
+      ? {
+          userId: activeTeamContext.currentUserId,
+          memberToken: activeMemberToken.trim()
+        }
+      : undefined;
+  const commentActorId = activeProjectTeamContext?.currentUserId ?? LOCAL_COMMENT_VIEWER_ID;
+  const commentAuthorNames = Object.fromEntries(
+    (activeProjectTeamContext?.members ?? []).map((member) => [member.userId, member.displayName])
+  );
+  const commentAuthorName = commentAuthorNames[commentActorId] ?? "사용자";
   const libraryRegistryAccessScopeKey = JSON.stringify([
     currentProject?.currentDocumentId ?? null,
     currentProject?.sharing.mode ?? null,
@@ -9663,6 +10038,8 @@ export function App() {
   const selectedPathAnchorIndicesRef = useRef<number[]>([]);
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
+  const commentAccessGenerationRef = useRef(0);
+  const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
   const libraryRegistryAccessScopeRef = useRef(libraryRegistryAccessScopeKey);
@@ -9936,19 +10313,54 @@ export function App() {
   };
 
   const refreshCommentNotifications = async () => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
-      const summary = await listCommentNotifications(LOCAL_COMMENT_VIEWER_ID);
+      const summary = await listCommentNotifications(
+        commentActorId,
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentNotificationSummary(summary);
     } catch {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentNotificationSummary(null);
     }
   };
 
   const refreshCommentActivity = async () => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
-      const feed = await listCommentActivity(LOCAL_COMMENT_VIEWER_ID, 8);
+      const feed = await listCommentActivity(
+        commentActorId,
+        8,
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentActivityFeed(feed);
     } catch {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       setCommentActivityFeed(null);
     }
   };
@@ -9958,8 +10370,21 @@ export function App() {
     status?: string,
     options: { preserveStatus?: boolean } = {}
   ) => {
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
-      const threads = await listCommentThreads(fileId, false, fetch, LOCAL_COMMENT_VIEWER_ID);
+      const threads = await listCommentThreads(
+        fileId,
+        false,
+        fetch,
+        commentActorId,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       const unreadCount = threads.filter((thread) => thread.unread).length;
       setCommentThreads(threads);
       if (!options.preserveStatus) {
@@ -9973,6 +10398,12 @@ export function App() {
         );
       }
     } catch (error) {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "코멘트를 불러오지 못했습니다";
       setCommentThreads([]);
       setCommentReplyBodies({});
@@ -9983,34 +10414,56 @@ export function App() {
   };
 
   useEffect(() => {
+    commentAccessGenerationRef.current += 1;
+    const accessGeneration = commentAccessGenerationRef.current;
+    commentAuthorizationEndedRef.current = false;
+
     const fileId = currentProject?.currentDocumentId;
     if (!fileId) {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
+    const refreshCurrentCommentScope = () => {
+      if (
+        commentAuthorizationEndedRef.current
+        || commentAccessGenerationRef.current !== accessGeneration
+      ) {
+        return;
+      }
       void Promise.all([
         refreshCommentThreads(fileId),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-    }, COMMENT_LIVE_REFRESH_INTERVAL_MS);
+    };
+
+    refreshCurrentCommentScope();
+    const intervalId = window.setInterval(
+      refreshCurrentCommentScope,
+      COMMENT_LIVE_REFRESH_INTERVAL_MS
+    );
 
     return () => window.clearInterval(intervalId);
-  }, [currentProject?.currentDocumentId]);
+  }, [currentProject?.currentDocumentId, libraryRegistryAccessScopeKey]);
 
   useEffect(() => {
     const fileId = currentProject?.currentDocumentId;
     if (!fileId) {
       return;
     }
+    const accessGeneration = commentAccessGenerationRef.current;
 
     return subscribeToCommentEvents({
       fileId,
-      viewerId: LOCAL_COMMENT_VIEWER_ID,
+      viewerId: commentActorId,
+      credentials: activeLibraryRegistryCredentials ?? undefined,
       after: commentEventSequenceByFileRef.current.get(fileId) ?? 0,
       onCommentEvent: (event) => {
-        if (event.fileId !== fileId) {
+        if (
+          event.fileId !== fileId
+          || commentAuthorizationEndedRef.current
+          || commentAccessGenerationRef.current !== accessGeneration
+        ) {
           return;
         }
         if (typeof event.sequence === "number") {
@@ -10024,9 +10477,20 @@ export function App() {
           refreshCommentNotifications(),
           refreshCommentActivity()
         ]);
+      },
+      onAuthorizationEnded: () => {
+        if (commentAccessGenerationRef.current !== accessGeneration) {
+          return;
+        }
+        commentAccessGenerationRef.current += 1;
+        commentAuthorizationEndedRef.current = true;
+        commentEventSequenceByFileRef.current.delete(fileId);
+        resetCommentThreads("팀 코멘트 접근 권한이 해제되었습니다");
+        resetCommentNotifications();
+        resetCommentActivity();
       }
     });
-  }, [currentProject?.currentDocumentId]);
+  }, [currentProject?.currentDocumentId, libraryRegistryAccessScopeKey]);
 
   useEffect(() => {
     if (inspectorTab !== "dev") {
@@ -15052,7 +15516,8 @@ export function App() {
       setExternalMigrationReview({
         review,
         archiveBase64,
-        sourceFileName: file.name
+        sourceFileName: file.name,
+        idempotencyKey: crypto.randomUUID()
       });
       setExternalMigrationStatus(`외부 디자인 검토됨 · ${review.sourceLabel}`);
     } catch (error) {
@@ -15085,6 +15550,7 @@ export function App() {
       const imported = await runProjectDocumentTransition(async (transitionToken) => {
         const nextImported = await importExternalMigrationArchive({
           archiveBase64: externalMigrationReview.archiveBase64,
+          idempotencyKey: externalMigrationReview.idempotencyKey,
           fileName: externalMigrationReview.sourceFileName,
           sourceHint: externalMigrationReview.review.source,
           name: importName
@@ -15608,7 +16074,8 @@ export function App() {
       setProjectArchiveReview({
         review,
         archiveBase64,
-        sourceFileName: file.name
+        sourceFileName: file.name,
+        idempotencyKey: crypto.randomUUID()
       });
       setProjectArchiveImportName(review.suggestedName || review.originalName);
       setProjectArchiveStatus(`${review.suggestedName || review.originalName} 검토됨`);
@@ -15645,6 +16112,7 @@ export function App() {
       const imported = await runProjectDocumentTransition(async (transitionToken) => {
         const nextImported = await importProjectArchive({
           archiveBase64: projectArchiveReview.archiveBase64,
+          idempotencyKey: projectArchiveReview.idempotencyKey,
           name: archiveName
         });
         const nextProjects = [
@@ -15671,7 +16139,12 @@ export function App() {
     }
 
     try {
-      const project = await updateProject(currentProject.projectId, { name: projectNameDraft });
+      const project = await updateProject(
+        currentProject.projectId,
+        { name: projectNameDraft },
+        fetch,
+        activeLibraryRegistryCredentials
+      );
       setCurrentProject(project);
       setProjects((current) =>
         current.map((candidate) => (candidate.projectId === project.projectId ? project : candidate))
@@ -15695,9 +16168,14 @@ export function App() {
       await runProjectDocumentTransition(async (transitionToken) => {
         const project = await enqueueDocumentSnapshotBarrier(
           sourceProject.currentDocumentId,
-          () => duplicateProject(sourceProject.projectId, {
-            name: `${sourceProject.name} 사본`
-          })
+          () => duplicateProject(
+            sourceProject.projectId,
+            {
+              name: `${sourceProject.name} 사본`
+            },
+            fetch,
+            activeLibraryRegistryCredentials
+          )
         );
         const nextProjects = [project, ...projects.filter((candidate) => candidate.projectId !== project.projectId)];
         await requireProjectDocumentLoad(project, nextProjects, transitionToken);
@@ -15724,7 +16202,11 @@ export function App() {
     try {
       const deletedProject = currentProject;
       await runProjectDocumentTransition(async (transitionToken) => {
-        await deleteProject(currentProject.projectId);
+        await deleteProject(
+          currentProject.projectId,
+          fetch,
+          activeLibraryRegistryCredentials
+        );
         const nextProjects = projects.filter((candidate) => candidate.projectId !== deletedProject.projectId);
         const nextProject = nextProjects[0] ?? null;
         if (nextProject) {
@@ -15752,10 +16234,15 @@ export function App() {
     }
 
     try {
-      const project = await setProjectSharing(currentProject.projectId, {
-        mode: "team",
-        teamId: activeTeamContext.teamId
-      });
+      const project = await setProjectSharing(
+        currentProject.projectId,
+        {
+          mode: "team",
+          teamId: activeTeamContext.teamId
+        },
+        fetch,
+        projectSharingCredentials
+      );
       const documentSummaries = project.documents.map((document) => ({
         documentId: document.documentId,
         name: document.name,
@@ -16449,9 +16936,10 @@ export function App() {
       await createCommentThread(currentProject.currentDocumentId, {
         nodeId,
         body,
-        authorName: "사용자",
+        authorId: commentActorId,
+        authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
-      });
+      }, fetch, activeLibraryRegistryCredentials ?? undefined);
       setCommentBody("");
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 추가됨"),
@@ -16478,9 +16966,10 @@ export function App() {
     try {
       await addCommentReply(currentProject.currentDocumentId, threadId, {
         body,
-        authorName: "사용자",
+        authorId: commentActorId,
+        authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
-      });
+      }, fetch, activeLibraryRegistryCredentials ?? undefined);
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "답글 추가됨"),
@@ -16493,6 +16982,163 @@ export function App() {
     }
   };
 
+  const handleCommentMutationError = async (
+    error: unknown,
+    fileId: string,
+    fallback: string
+  ): Promise<"stale" | "failed"> => {
+    if (error instanceof DocumentRequestError && error.status === 409) {
+      await refreshCommentThreads(
+        fileId,
+        "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
+      );
+      return "stale";
+    }
+    const message = error instanceof Error ? error.message : fallback;
+    setCommentStatus(message);
+    return "failed";
+  };
+
+  const updateSelectedNodeComment = async (
+    threadId: string,
+    bodyValue: string,
+    expectedModifiedAt: string
+  ): Promise<"applied" | "stale" | "failed"> => {
+    if (!currentProject) {
+      setCommentStatus("프로젝트 없음");
+      return "failed";
+    }
+    const body = bodyValue.trim();
+    if (!body) {
+      setCommentStatus("코멘트 내용을 입력하세요");
+      return "failed";
+    }
+    const fileId = currentProject.currentDocumentId;
+    try {
+      await updateCommentThread(
+        fileId,
+        threadId,
+        {
+          body,
+          actorId: commentActorId,
+          expectedModifiedAt,
+          mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
+        },
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      await Promise.all([
+        refreshCommentThreads(fileId, "코멘트 수정됨"),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+      return "applied";
+    } catch (error) {
+      return handleCommentMutationError(error, fileId, "코멘트를 수정하지 못했습니다");
+    }
+  };
+
+  const deleteSelectedNodeComment = async (
+    threadId: string,
+    expectedModifiedAt: string
+  ): Promise<boolean> => {
+    if (!currentProject) {
+      setCommentStatus("프로젝트 없음");
+      return false;
+    }
+    const fileId = currentProject.currentDocumentId;
+    try {
+      await deleteCommentThread(
+        fileId,
+        threadId,
+        { actorId: commentActorId, expectedModifiedAt },
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      await Promise.all([
+        refreshCommentThreads(fileId, "코멘트 삭제됨"),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+      return true;
+    } catch (error) {
+      await handleCommentMutationError(error, fileId, "코멘트를 삭제하지 못했습니다");
+      return false;
+    }
+  };
+
+  const updateSelectedNodeCommentReply = async (
+    threadId: string,
+    replyId: string,
+    bodyValue: string,
+    expectedModifiedAt: string
+  ): Promise<"applied" | "stale" | "failed"> => {
+    if (!currentProject) {
+      setCommentStatus("프로젝트 없음");
+      return "failed";
+    }
+    const body = bodyValue.trim();
+    if (!body) {
+      setCommentStatus("답글 내용을 입력하세요");
+      return "failed";
+    }
+    const fileId = currentProject.currentDocumentId;
+    try {
+      await updateCommentReply(
+        fileId,
+        threadId,
+        replyId,
+        {
+          body,
+          actorId: commentActorId,
+          expectedModifiedAt,
+          mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
+        },
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      await Promise.all([
+        refreshCommentThreads(fileId, "답글 수정됨"),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+      return "applied";
+    } catch (error) {
+      return handleCommentMutationError(error, fileId, "답글을 수정하지 못했습니다");
+    }
+  };
+
+  const deleteSelectedNodeCommentReply = async (
+    threadId: string,
+    replyId: string,
+    expectedModifiedAt: string
+  ): Promise<boolean> => {
+    if (!currentProject) {
+      setCommentStatus("프로젝트 없음");
+      return false;
+    }
+    const fileId = currentProject.currentDocumentId;
+    try {
+      await deleteCommentReply(
+        fileId,
+        threadId,
+        replyId,
+        { actorId: commentActorId, expectedModifiedAt },
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
+      await Promise.all([
+        refreshCommentThreads(fileId, "답글 삭제됨"),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+      return true;
+    } catch (error) {
+      await handleCommentMutationError(error, fileId, "답글을 삭제하지 못했습니다");
+      return false;
+    }
+  };
+
   const resolveSelectedNodeComment = async (threadId: string) => {
     if (!currentProject) {
       setCommentStatus("프로젝트 없음");
@@ -16500,7 +17146,12 @@ export function App() {
     }
 
     try {
-      await resolveCommentThread(currentProject.currentDocumentId, threadId);
+      await resolveCommentThread(
+        currentProject.currentDocumentId,
+        threadId,
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 해결됨"),
         refreshCommentNotifications(),
@@ -16519,7 +17170,13 @@ export function App() {
     }
 
     try {
-      await markCommentThreadRead(currentProject.currentDocumentId, threadId, LOCAL_COMMENT_VIEWER_ID);
+      await markCommentThreadRead(
+        currentProject.currentDocumentId,
+        threadId,
+        commentActorId,
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
         refreshCommentNotifications()
@@ -16537,7 +17194,12 @@ export function App() {
     }
 
     try {
-      await markFileCommentsRead(currentProject.currentDocumentId, LOCAL_COMMENT_VIEWER_ID);
+      await markFileCommentsRead(
+        currentProject.currentDocumentId,
+        commentActorId,
+        fetch,
+        activeLibraryRegistryCredentials ?? undefined
+      );
       await Promise.all([
         refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
         refreshCommentNotifications()
@@ -18438,7 +19100,7 @@ export function App() {
                           <span className="comment-activity-meta">
                             {formatCommentActivityType(event.type)} · {event.fileName}
                           </span>
-                          <strong>{event.actorName}</strong>
+                          <strong>{commentAuthorNames[event.actorName] ?? event.actorName}</strong>
                           <span className="comment-activity-body">{event.body}</span>
                         </li>
                       ))
@@ -19880,6 +20542,8 @@ export function App() {
         commentReplyBodies={commentReplyBodies}
         commentStatus={commentStatus}
         canComment={Boolean(currentProject && editor && selectedNode)}
+        commentActorId={commentActorId}
+        commentAuthorNames={commentAuthorNames}
         onTokenDtcgDraftChange={setTokenDtcgDraft}
         onExportTokensDtcg={() => void exportCurrentDocumentTokensDtcg()}
         onImportTokensDtcg={() => void importCurrentDocumentTokensDtcg()}
@@ -19895,6 +20559,10 @@ export function App() {
         }
         onCreateComment={(nodeId) => void createSelectedNodeComment(nodeId)}
         onCreateCommentReply={(threadId) => void createSelectedNodeCommentReply(threadId)}
+        onUpdateComment={updateSelectedNodeComment}
+        onDeleteComment={deleteSelectedNodeComment}
+        onUpdateCommentReply={updateSelectedNodeCommentReply}
+        onDeleteCommentReply={deleteSelectedNodeCommentReply}
         onResolveComment={(threadId) => void resolveSelectedNodeComment(threadId)}
         onMarkCommentRead={(threadId) => void markSelectedNodeCommentRead(threadId)}
         onDownloadSelectedPng={downloadSelectedNodePngFromDevPanel}

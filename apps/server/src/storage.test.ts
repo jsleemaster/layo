@@ -1,11 +1,35 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { validateDocument as validateDesignFile } from "./agent-control";
 import { FileStorage } from "./storage";
 
 let tempRoot: string | undefined;
+
+function storageMutationLockDir(rootDir: string, storagePath: string) {
+  const resourceHash = createHash("sha256")
+    .update(path.resolve(storagePath))
+    .digest("hex");
+  return path.join(rootDir, "locks", `storage-mutation-${resourceHash}.lock`);
+}
+
+async function waitForPath(targetPath: string) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await stat(targetPath);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for path: ${targetPath}`);
+}
 
 afterEach(async () => {
   if (tempRoot) {
@@ -74,6 +98,408 @@ describe("FileStorage", () => {
     const projects = await storage.listProjects();
 
     expect(projects).toEqual([]);
+  });
+
+  test("concurrent project creation reserves an explicit document id exactly once", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const sharedDocumentId = "shared-explicit-file";
+    const sharedFilePath = path.join(tempRoot, "files", `${sharedDocumentId}.json`);
+    const sharedFileLockDir = storageMutationLockDir(tempRoot, sharedFilePath);
+    await mkdir(sharedFileLockDir, { recursive: true });
+    await writeFile(
+      path.join(sharedFileLockDir, "owner.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        token: "test-file-lock",
+        pid: process.pid,
+        hostname: hostname(),
+        acquiredAt: new Date().toISOString()
+      }),
+      "utf8"
+    );
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const firstCreation = firstStorage.createProject({
+      projectId: "concurrent-project-a",
+      name: "동시 프로젝트 A",
+      documentId: sharedDocumentId,
+      documentName: "동시 문서 A"
+    });
+    const secondCreation = secondStorage.createProject({
+      projectId: "concurrent-project-b",
+      name: "동시 프로젝트 B",
+      documentId: sharedDocumentId,
+      documentName: "동시 문서 B"
+    });
+
+    try {
+      await Promise.all([
+        waitForPath(
+          storageMutationLockDir(
+            tempRoot,
+            path.join(tempRoot, "projects", "concurrent-project-a.json")
+          )
+        ),
+        waitForPath(
+          storageMutationLockDir(
+            tempRoot,
+            path.join(tempRoot, "projects", "concurrent-project-b.json")
+          )
+        )
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } finally {
+      await rm(sharedFileLockDir, { recursive: true, force: true });
+    }
+
+    const results = await Promise.allSettled([firstCreation, secondCreation]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(rejected?.reason).toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    const verifier = new FileStorage(tempRoot);
+    const projects = await verifier.listProjects();
+    expect(projects).toHaveLength(1);
+    expect(projects[0].documents).toEqual([
+      expect.objectContaining({ documentId: sharedDocumentId })
+    ]);
+    await expect(verifier.readFile(sharedDocumentId)).resolves.toMatchObject({
+      id: sharedDocumentId,
+      name: projects[0].documents[0].name
+    });
+  });
+
+  test("project reservation rejects case-folded manifest collisions", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "Shared-Project",
+      name: "대소문자 프로젝트 원본",
+      documentId: "project-case-file-a",
+      documentName: "원본 문서"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "shared-project",
+        name: "대소문자 프로젝트 충돌",
+        documentId: "project-case-file-b",
+        documentName: "충돌 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect((await storage.listProjects()).map((project) => project.projectId)).toEqual([
+      "Shared-Project"
+    ]);
+    await expect(storage.readFile("project-case-file-b")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  test("document reservation rejects case-folded cross-project collisions", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-project-a",
+      name: "대소문자 프로젝트 A",
+      documentId: "Shared-File",
+      documentName: "대소문자 문서 A"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "case-project-b",
+        name: "대소문자 프로젝트 B",
+        documentId: "shared-file",
+        documentName: "대소문자 문서 B"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect((await storage.listProjects()).map((project) => project.projectId)).toEqual([
+      "case-project-a"
+    ]);
+    expect((await storage.listFiles()).map((file) => file.id)).toEqual([
+      "Shared-File"
+    ]);
+  });
+
+  test("project duplication reserves every destination document before writing", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createProjectDocument("test-project", {
+      documentId: "second-file",
+      name: "두 번째 문서"
+    });
+    await storage.createProject({
+      projectId: "collision-owner",
+      name: "충돌 소유 프로젝트",
+      documentId: "copy-second-file",
+      documentName: "보존할 충돌 문서"
+    });
+
+    await expect(
+      storage.duplicateProject("test-project", {
+        projectId: "copy-project",
+        documentIdPrefix: "copy"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(storage.readProject("copy-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(storage.readFile("copy-sample-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(storage.readFile("copy-second-file")).resolves.toMatchObject({
+      id: "copy-second-file",
+      name: "보존할 충돌 문서"
+    });
+  });
+
+  test("concurrent deletion cannot remove both remaining projects", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const creator = new FileStorage(tempRoot);
+    await creator.createProject({
+      projectId: "delete-project-a",
+      name: "삭제 프로젝트 A",
+      documentId: "delete-file-a",
+      documentName: "삭제 문서 A"
+    });
+    await creator.createProject({
+      projectId: "delete-project-b",
+      name: "삭제 프로젝트 B",
+      documentId: "delete-file-b",
+      documentName: "삭제 문서 B"
+    });
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const firstListProjects = firstStorage.listProjects.bind(firstStorage);
+    const secondListProjects = secondStorage.listProjects.bind(secondStorage);
+    let listArrivals = 0;
+    let releaseLists!: () => void;
+    const bothListsArrived = new Promise<void>((resolve) => {
+      releaseLists = resolve;
+    });
+    const holdList = (listProjects: () => ReturnType<FileStorage["listProjects"]>) =>
+      async () => {
+        const projects = await listProjects();
+        listArrivals += 1;
+        if (listArrivals === 2) {
+          releaseLists();
+        }
+        await Promise.race([
+          bothListsArrived,
+          new Promise<void>((resolve) => setTimeout(resolve, 500))
+        ]);
+        return projects;
+      };
+    firstStorage.listProjects = holdList(firstListProjects);
+    secondStorage.listProjects = holdList(secondListProjects);
+
+    const results = await Promise.allSettled([
+      firstStorage.deleteProject("delete-project-a"),
+      secondStorage.deleteProject("delete-project-b")
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const verifier = new FileStorage(tempRoot);
+    const projects = await verifier.listProjects();
+    expect(projects).toHaveLength(1);
+    await expect(
+      verifier.readFile(projects[0].currentDocumentId)
+    ).resolves.toMatchObject({ id: projects[0].currentDocumentId });
+  });
+
+  test("cannot replace an existing shared project through project creation", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "existing-project",
+      name: "기존 프로젝트",
+      documentId: "existing-file",
+      documentName: "기존 문서"
+    });
+    await storage.setProjectSharing("existing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+
+    await expect(
+      storage.createProject({
+        projectId: "existing-project",
+        name: "덮어쓴 프로젝트",
+        documentId: "replacement-file",
+        documentName: "덮어쓴 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(storage.readProject("existing-project")).resolves.toMatchObject({
+      name: "기존 프로젝트",
+      sharing: { mode: "team", teamId: "team-alpha" },
+      documents: [expect.objectContaining({ documentId: "existing-file" })]
+    });
+    await expect(storage.readFile("replacement-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  test("serializes project sharing compare-and-set across storage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const firstStorage = new FileStorage(tempRoot);
+    await firstStorage.createProject({
+      projectId: "shared-project",
+      name: "공유 프로젝트",
+      documentId: "shared-file",
+      documentName: "공유 문서"
+    });
+    await firstStorage.setProjectSharing("shared-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const secondStorage = new FileStorage(tempRoot);
+    const expectedSharing = { mode: "team", teamId: "team-alpha" } as const;
+
+    const results = await Promise.allSettled([
+      firstStorage.setProjectSharing(
+        "shared-project",
+        { mode: "team", teamId: "team-beta" },
+        { expectedSharing }
+      ),
+      secondStorage.setProjectSharing(
+        "shared-project",
+        { mode: "team", teamId: "team-gamma" },
+        { expectedSharing }
+      )
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(rejected?.reason).toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    expect((await firstStorage.readProject("shared-project")).sharing).toEqual(
+      expect.objectContaining({
+        mode: "team",
+        teamId: expect.stringMatching(/^team-(beta|gamma)$/)
+      })
+    );
+  });
+
+  test("project mutations reject a sharing boundary that changed after authorization", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "guarded-project",
+      name: "보호 프로젝트",
+      documentId: "guarded-file",
+      documentName: "보호 문서"
+    });
+    await storage.createProject({
+      projectId: "retained-project",
+      name: "유지 프로젝트",
+      documentId: "retained-file",
+      documentName: "유지 문서"
+    });
+    await storage.setProjectSharing("guarded-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const expectedSharing = { mode: "team", teamId: "team-alpha" } as const;
+    await storage.setProjectSharing("guarded-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+
+    await expect(
+      storage.updateProject(
+        "guarded-project",
+        { name: "오래된 권한 변경" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.createProjectDocument(
+        "guarded-project",
+        { documentId: "stale-file", name: "오래된 권한 문서" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.duplicateProject(
+        "guarded-project",
+        { projectId: "stale-copy", documentIdPrefix: "stale-copy" },
+        { expectedSharing }
+      )
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+    await expect(
+      storage.deleteProject("guarded-project", { expectedSharing })
+    ).rejects.toMatchObject({ code: "ECONFLICT", statusCode: 409 });
+
+    await expect(storage.readProject("guarded-project")).resolves.toMatchObject({
+      name: "보호 프로젝트",
+      sharing: { mode: "team", teamId: "team-beta" }
+    });
+    await expect(storage.readFile("stale-file")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(storage.readProject("stale-copy")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("project document creation cannot restore stale private sharing after an owner shares it", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const ownerStorage = new FileStorage(tempRoot);
+    await ownerStorage.createProject({
+      projectId: "sharing-race-project",
+      name: "공유 경계 경쟁 프로젝트",
+      documentId: "sharing-race-file",
+      documentName: "기존 문서"
+    });
+    const staleWriter = new FileStorage(tempRoot);
+    const internalStaleWriter = staleWriter as unknown as {
+      writeFileWithoutMutationLock: FileStorage["writeFile"];
+    };
+    const originalWriteFile =
+      internalStaleWriter.writeFileWithoutMutationLock.bind(staleWriter);
+    let signalWriteStarted!: () => void;
+    let releaseWrite!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve;
+    });
+    const writeRelease = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    internalStaleWriter.writeFileWithoutMutationLock = async (fileId, document) => {
+      signalWriteStarted();
+      await writeRelease;
+      return originalWriteFile(fileId, document);
+    };
+
+    const documentCreation = staleWriter.createProjectDocument("sharing-race-project", {
+      documentId: "sharing-race-new-file",
+      name: "새 문서"
+    });
+    await writeStarted;
+    const sharing = ownerStorage.setProjectSharing("sharing-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const sharingFinishedBeforeRelease = await Promise.race([
+      sharing.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100))
+    ]);
+    releaseWrite();
+    await Promise.all([documentCreation, sharing]);
+
+    expect(sharingFinishedBeforeRelease).toBe(false);
+    await expect(ownerStorage.readProject("sharing-race-project")).resolves.toMatchObject({
+      sharing: { mode: "team", teamId: "team-alpha" },
+      documents: expect.arrayContaining([
+        expect.objectContaining({ documentId: "sharing-race-new-file" })
+      ])
+    });
   });
 
   test("merges independent stale document snapshots without losing either browser edit", async () => {
@@ -470,6 +896,135 @@ describe("FileStorage", () => {
     expect(importedAsset.data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
   });
 
+  test("file archive import atomically replaces an explicitly targeted project placeholder", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    await source.createNode("sample-file", "page-1", {
+      id: "imported-placeholder-replacement",
+      kind: "rectangle",
+      name: "가져온 레이어",
+      transform: { x: 32, y: 48, rotation: 0 },
+      size: { width: 120, height: 80 },
+      style: { fill: "#22c55e", stroke: null, stroke_width: 0, opacity: 1 },
+      content: { type: "empty" },
+      children: []
+    });
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = await storageWithDocument(path.join(tempRoot, "target"));
+    expect(
+      (await target.readFile("sample-file")).pages[0].children.some(
+        (node) => node.id === "imported-placeholder-replacement"
+      )
+    ).toBe(false);
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "sample-file",
+        name: "가져온 placeholder"
+      })
+    ).resolves.toMatchObject({
+      fileId: "sample-file",
+      name: "가져온 placeholder",
+      originalFileId: "sample-file"
+    });
+
+    const replaced = await target.readFile("sample-file");
+    expect(replaced.name).toBe("가져온 placeholder");
+    expect(
+      replaced.pages[0].children.some(
+        (node) => node.id === "imported-placeholder-replacement"
+      )
+    ).toBe(true);
+  });
+
+  test("file archive import rejects a case-folded alias without replacing the existing document", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    await target.createProject({
+      projectId: "case-archive-project",
+      name: "대소문자 대상 프로젝트",
+      documentId: "Shared-File",
+      documentName: "보존할 문서"
+    });
+    const original = await target.readFile("Shared-File");
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "shared-file",
+        name: "덮어쓰면 안 되는 문서"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    expect(await target.readFile("Shared-File")).toEqual(original);
+    expect((await target.listFiles()).map((file) => file.id)).toEqual([
+      "Shared-File"
+    ]);
+  });
+
+  test("file archive replacement rolls back the document and imported assets when commit fails", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "rollback.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "archive-rollback-image",
+      kind: "image",
+      name: "롤백 이미지",
+      transform: { x: 24, y: 36, rotation: 0 },
+      size: { width: 80, height: 60 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportFileArchive("sample-file");
+
+    const target = await storageWithDocument(path.join(tempRoot, "target"));
+    const original = await target.readFile("sample-file");
+    const internals = target as unknown as {
+      writeFileDurablyWithoutMutationLock(
+        fileId: string,
+        document: unknown
+      ): Promise<unknown>;
+    };
+    const writeFileDurably = internals.writeFileDurablyWithoutMutationLock.bind(
+      target
+    );
+    internals.writeFileDurablyWithoutMutationLock = async (
+      fileId,
+      document
+    ) => {
+      await writeFileDurably(fileId, document);
+      throw new Error("injected file archive commit failure");
+    };
+
+    await expect(
+      target.importFileArchive(exported.archive, {
+        fileId: "sample-file",
+        name: "실패할 가져오기"
+      })
+    ).rejects.toThrow("injected file archive commit failure");
+
+    expect(await target.readFile("sample-file")).toEqual(original);
+    await expect(target.readAsset(asset.assetId)).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   test("reviews a file archive without writing the imported file", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const source = await storageWithDocument(path.join(tempRoot, "source"));
@@ -579,6 +1134,141 @@ describe("FileStorage", () => {
       }
     );
     expect((await target.readAsset(asset.assetId)).data.equals(Buffer.from(pixelPng, "base64"))).toBe(true);
+
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "imported-project",
+        name: "덮어쓴 복원 프로젝트",
+        documentIdPrefix: "replacement"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+    await expect(target.readProject("imported-project")).resolves.toMatchObject({
+      name: "복원 프로젝트",
+      sharing: { mode: "private" }
+    });
+  });
+
+  test("project archive import preserves a conflicting global asset and leaves no partial project", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "archive.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "archive-conflict-image",
+      kind: "image",
+      name: "충돌 이미지",
+      transform: { x: 80, y: 120, rotation: 0 },
+      size: { width: 120, height: 90 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportProjectArchive("test-project");
+
+    const target = new FileStorage(path.join(tempRoot, "target"));
+    const conflictingData = Buffer.from(pixelPng, "base64");
+    const lastByteIndex = conflictingData.length - 1;
+    conflictingData[lastByteIndex] = conflictingData[lastByteIndex]! ^ 0xff;
+    const internals = target as unknown as {
+      writeAsset(
+        metadata: {
+          assetId: string;
+          name: string;
+          mimeType: string;
+          byteLength: number;
+          url: string;
+        },
+        data: Buffer
+      ): Promise<unknown>;
+    };
+    await internals.writeAsset(
+      {
+        assetId: asset.assetId,
+        name: "보존할 기존 이미지",
+        mimeType: "image/png",
+        byteLength: conflictingData.length,
+        url: `/assets/${asset.assetId}`
+      },
+      conflictingData
+    );
+
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "asset-conflict-project",
+        documentIdPrefix: "asset-conflict"
+      })
+    ).rejects.toMatchObject({ code: "EEXIST", statusCode: 409 });
+
+    await expect(target.readProject("asset-conflict-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(target.readFile("asset-conflict-sample-file")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    const retainedAsset = await target.readAsset(asset.assetId);
+    expect(retainedAsset.name).toBe("보존할 기존 이미지");
+    expect(retainedAsset.data.equals(conflictingData)).toBe(true);
+  });
+
+  test("project archive import reuses a byte-identical global asset across new projects", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const source = await storageWithDocument(path.join(tempRoot, "source"));
+    const pixelPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    const asset = await source.createAsset({
+      name: "shared.png",
+      mimeType: "image/png",
+      dataBase64: pixelPng
+    });
+    await source.createNode("sample-file", "page-1", {
+      id: "shared-archive-image",
+      kind: "image",
+      name: "공유 이미지",
+      transform: { x: 80, y: 120, rotation: 0 },
+      size: { width: 120, height: 90 },
+      style: { fill: "#f3f4f6", stroke: null, stroke_width: 0, opacity: 1 },
+      content: {
+        type: "image",
+        asset_id: asset.assetId,
+        natural_width: 1,
+        natural_height: 1,
+        fit_mode: "fit"
+      },
+      children: []
+    });
+    const exported = await source.exportProjectArchive("test-project");
+    const target = new FileStorage(path.join(tempRoot, "target"));
+
+    await target.importProjectArchive(exported.archive, {
+      projectId: "asset-reuse-project-a",
+      documentIdPrefix: "asset-reuse-a"
+    });
+    await expect(
+      target.importProjectArchive(exported.archive, {
+        projectId: "asset-reuse-project-b",
+        documentIdPrefix: "asset-reuse-b"
+      })
+    ).resolves.toMatchObject({
+      project: { projectId: "asset-reuse-project-b" },
+      assetCount: 1
+    });
+
+    expect(
+      (await target.readAsset(asset.assetId)).data.equals(
+        Buffer.from(pixelPng, "base64")
+      )
+    ).toBe(true);
   });
 
   test("library archive exports reviews and imports components tokens and assets without overwriting ids", async () => {
@@ -1125,6 +1815,85 @@ describe("FileStorage", () => {
     expect(targetDocument.components ?? []).toEqual([]);
   });
 
+  test("library registry token import rolls back when subscription persistence fails", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.importTokensDtcg("sample-file", {
+      source: {
+        Brand: {
+          Primary: {
+            $type: "color",
+            $value: "#2563eb"
+          }
+        }
+      }
+    });
+    await storage.publishLibraryToRegistry("sample-file", {
+      libraryId: "token-rollback-kit",
+      name: "Token Rollback Kit"
+    });
+
+    const target = await storage.createProject({
+      projectId: "token-rollback-project",
+      name: "토큰 롤백 프로젝트",
+      documentId: "token-rollback-file",
+      documentName: "토큰 롤백 문서"
+    });
+    await storage.importTokensDtcg(target.currentDocumentId, {
+      legacy: {
+        Surface: {
+          $type: "color",
+          $value: "#111827"
+        }
+      }
+    });
+    const beforeTarget = await storage.readFile(target.currentDocumentId);
+    const beforeSubscriptions =
+      await storage.listLibraryRegistryTokenSubscriptions();
+    const internals = storage as unknown as {
+      writeLibraryRegistryTokenSubscriptions(
+        subscriptions: unknown[]
+      ): Promise<void>;
+    };
+    const writeSubscriptions =
+      internals.writeLibraryRegistryTokenSubscriptions.bind(storage);
+    let failAfterSubscriptionWrite = true;
+    internals.writeLibraryRegistryTokenSubscriptions = async (
+      subscriptions
+    ) => {
+      await writeSubscriptions(subscriptions);
+      if (failAfterSubscriptionWrite) {
+        failAfterSubscriptionWrite = false;
+        throw new Error("injected token subscription commit failure");
+      }
+    };
+
+    await expect(
+      storage.importLibraryRegistryTokens(
+        target.currentDocumentId,
+        "token-rollback-kit"
+      )
+    ).rejects.toThrow("injected token subscription commit failure");
+
+    expect(await storage.readFile(target.currentDocumentId)).toEqual(
+      beforeTarget
+    );
+    expect(
+      await storage.listLibraryRegistryTokenSubscriptions()
+    ).toEqual(beforeSubscriptions);
+
+    await expect(
+      storage.importLibraryRegistryTokens(
+        target.currentDocumentId,
+        "token-rollback-kit"
+      )
+    ).resolves.toMatchObject({
+      fileId: target.currentDocumentId,
+      libraryId: "token-rollback-kit",
+      tokenCount: 1
+    });
+  });
+
   test("library registry token bundle subscriptions report and apply republished token updates", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -1538,6 +2307,67 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("deleting a document's last project reference prevents cross-team comment reuse", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-comment-delete-reuse-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-delete-alpha",
+      name: "Alpha project",
+      documentId: "Deleted-Shared-File",
+      documentName: "Alpha document"
+    });
+    await storage.setProjectSharing("comment-delete-alpha", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createProject({
+      projectId: "comment-delete-retained",
+      name: "Retained project",
+      documentId: "comment-delete-retained-file",
+      documentName: "Retained document"
+    });
+    await storage.createCommentThread("Deleted-Shared-File", {
+      nodeId: "text-1",
+      body: "team-alpha only secret",
+      authorId: "alpha-owner",
+      authorName: "alpha-owner"
+    });
+
+    await storage.deleteProject("comment-delete-alpha");
+    await storage.createProject({
+      projectId: "comment-delete-beta",
+      name: "Beta project",
+      documentId: "Deleted-Shared-File",
+      documentName: "Beta document"
+    });
+    await storage.setProjectSharing("comment-delete-beta", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    const betaBoundary = {
+      projectId: "comment-delete-beta",
+      expectedSharing: { mode: "team", teamId: "team-beta" }
+    } as const;
+
+    await expect(
+      storage.listCommentThreads("Deleted-Shared-File", {
+        includeResolved: true,
+        authorizationBoundary: betaBoundary
+      })
+    ).resolves.toEqual([]);
+    await expect(
+      storage.listCommentActivity({
+        authorizationBoundaries: [betaBoundary]
+      })
+    ).resolves.toMatchObject({ events: [] });
+    await expect(
+      storage.listCommentLiveEvents({
+        fileId: "Deleted-Shared-File",
+        authorizationBoundary: betaBoundary
+      })
+    ).resolves.toEqual([]);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -1572,6 +2402,136 @@ describe("FileStorage", () => {
     });
     expect(await storage.listCommentThreads("sample-file")).toEqual([]);
     expect(await storage.listCommentThreads("sample-file", { includeResolved: true })).toHaveLength(1);
+  });
+
+  test("comment sidecars and team lookup share a canonical file identity", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-comment-project",
+      name: "대소문자 코멘트 프로젝트",
+      documentId: "Shared-File",
+      documentName: "대소문자 코멘트 문서"
+    });
+    await storage.setProjectSharing("case-comment-project", {
+      mode: "team",
+      teamId: "team-case"
+    });
+
+    expect(await storage.getTeamIdForFile("shared-file")).toBe("team-case");
+    await storage.createCommentThread("Shared-File", {
+      nodeId: "text-1",
+      body: "대소문자 잠금 경계",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    const sidecar = JSON.parse(
+      await readFile(
+        path.join(tempRoot, "comments", "shared-file.json"),
+        "utf8"
+      )
+    );
+    expect(sidecar).toMatchObject({
+      fileId: "Shared-File",
+      threads: [expect.objectContaining({ body: "대소문자 잠금 경계" })]
+    });
+    await expect(
+      readFile(path.join(tempRoot, "comments", "Shared-File.json"), "utf8")
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("comment sidecars migrate a legacy case-sensitive path without losing threads", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "legacy-comment-project",
+      name: "기존 코멘트 프로젝트",
+      documentId: "Legacy-File",
+      documentName: "기존 코멘트 문서"
+    });
+    await storage.createCommentThread("Legacy-File", {
+      nodeId: "text-1",
+      body: "보존할 기존 코멘트",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    const canonicalPath = path.join(
+      tempRoot,
+      "comments",
+      "legacy-file.json"
+    );
+    const legacyPath = path.join(
+      tempRoot,
+      "comments",
+      "Legacy-File.json"
+    );
+    await writeFile(legacyPath, await readFile(canonicalPath));
+    await rm(canonicalPath);
+
+    const reloaded = new FileStorage(tempRoot);
+    await expect(
+      reloaded.listCommentThreads("Legacy-File")
+    ).resolves.toEqual([
+      expect.objectContaining({ body: "보존할 기존 코멘트" })
+    ]);
+    await reloaded.createCommentThread("Legacy-File", {
+      nodeId: "text-1",
+      body: "마이그레이션 뒤 코멘트",
+      authorId: "reviewer",
+      authorName: "reviewer"
+    });
+
+    const migrated = JSON.parse(await readFile(canonicalPath, "utf8"));
+    expect(migrated.threads).toHaveLength(2);
+    await expect(readFile(legacyPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  test("keeps the canonical comment sidecar when a legacy spelling resolves to the same entry", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "alias-comment-project",
+      name: "경로 별칭 코멘트 프로젝트",
+      documentId: "Alias-File",
+      documentName: "경로 별칭 코멘트 문서"
+    });
+
+    const commentsDir = path.join(tempRoot!, "comments");
+    const commentsAliasDir = path.join(tempRoot!, "comments-alias");
+    await mkdir(commentsDir, { recursive: true });
+    await symlink(commentsDir, commentsAliasDir, "dir");
+
+    const internals = storage as unknown as {
+      legacyCommentThreadsPathFor(fileId: string): string;
+    };
+    internals.legacyCommentThreadsPathFor = () =>
+      path.join(commentsAliasDir, "alias-file.json");
+
+    const created = await storage.createCommentThread("Alias-File", {
+      nodeId: "text-1",
+      body: "같은 엔트리를 지우면 안 됨",
+      authorId: "owner",
+      authorName: "owner"
+    });
+
+    await expect(
+      storage.listCommentThreads("Alias-File", { includeResolved: true })
+    ).resolves.toEqual([
+      expect.objectContaining({
+        threadId: created.threadId,
+        body: "같은 엔트리를 지우면 안 됨"
+      })
+    ]);
+    await expect(
+      readFile(
+        path.join(tempRoot, "comments", "alias-file.json"),
+        "utf8"
+      )
+    ).resolves.toContain("같은 엔트리를 지우면 안 됨");
   });
 
   test("comment threads keep replies in the sidecar store", async () => {
@@ -1934,6 +2894,385 @@ describe("FileStorage", () => {
       expect.objectContaining({ sequence: 3, type: "read" }),
       expect.objectContaining({ sequence: 4, type: "resolved" })
     ]);
+  });
+
+  test("comment live event pagination returns the oldest retained events before newer events", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "백로그 기준 이벤트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const firstEvent = sidecar.events[0];
+    const firstCreatedAt = Date.parse(firstEvent.createdAt);
+    sidecar.events = Array.from({ length: 150 }, (_, index) => ({
+      ...firstEvent,
+      eventId: `event-${index + 1}`,
+      sequence: index + 1,
+      createdAt: new Date(firstCreatedAt + index).toISOString()
+    }));
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const firstBatch = await storage.listCommentLiveEvents({
+      fileId: "sample-file",
+      after: 0,
+      limit: 100
+    });
+    expect(firstBatch.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1)
+    );
+
+    const secondBatch = await storage.listCommentLiveEvents({
+      fileId: "sample-file",
+      after: firstBatch[firstBatch.length - 1].sequence,
+      limit: 100
+    });
+    expect(secondBatch.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 50 }, (_, index) => index + 101)
+    );
+    await expect(storage.listCommentLiveEvents({})).rejects.toMatchObject({
+      statusCode: 400
+    });
+  });
+
+  test("comment mutations preserve concurrent writers across FileStorage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const creator = await storageWithDocument(tempRoot);
+    const writers = Array.from({ length: 8 }, () => new FileStorage(tempRoot));
+
+    await Promise.all(
+      writers.map((writer, index) =>
+        writer.createCommentThread("sample-file", {
+          nodeId: "text-1",
+          body: `동시 코멘트 ${index + 1}`,
+          authorId: `user-${index + 1}`,
+          authorName: `사용자 ${index + 1}`
+        })
+      )
+    );
+
+    const threads = await creator.listCommentThreads("sample-file");
+    expect(threads).toHaveLength(8);
+    expect(new Set(threads.map((thread) => thread.body))).toEqual(
+      new Set(Array.from({ length: 8 }, (_, index) => `동시 코멘트 ${index + 1}`))
+    );
+    await expect(creator.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toHaveLength(8);
+  });
+
+  test("comment authors can edit a thread with optimistic concurrency while other users cannot", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "@민지 처음 검수",
+      authorId: "user-minji",
+      authorName: "민지",
+      mentionTargets: [{ userId: "user-minji", displayName: "민지", role: "editor" }]
+    });
+    await storage.markCommentThreadRead("sample-file", created.threadId, { viewerId: "user-reviewer" });
+
+    expect(created).toMatchObject({
+      authorId: "user-minji",
+      modifiedAt: created.createdAt,
+      readBy: ["user-minji"]
+    });
+
+    await expect(
+      storage.updateCommentThread("sample-file", created.threadId, {
+        body: "권한 없는 수정",
+        actorId: "user-reviewer",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(storage.listCommentThreads("sample-file")).resolves.toEqual([
+      expect.objectContaining({ body: "@민지 처음 검수" })
+    ]);
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "@준호 수정된 검수",
+      actorId: "user-minji",
+      expectedModifiedAt: created.modifiedAt,
+      mentionTargets: [{ userId: "user-junho", displayName: "준호", role: "viewer" }]
+    });
+    expect(updated).toMatchObject({
+      body: "@준호 수정된 검수",
+      authorId: "user-minji",
+      mentions: ["준호"],
+      mentionTargets: [{ userId: "user-junho", displayName: "준호", role: "viewer" }],
+      readBy: ["user-minji"]
+    });
+    expect(updated.modifiedAt).not.toBe(created.modifiedAt);
+
+    await expect(
+      storage.updateCommentThread("sample-file", created.threadId, {
+        body: "오래된 화면의 수정",
+        actorId: "user-minji",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+    await expect(storage.listCommentThreads("sample-file")).resolves.toEqual([
+      expect.objectContaining({ body: "@준호 수정된 검수", modifiedAt: updated.modifiedAt })
+    ]);
+    await expect(storage.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "edited", threadId: created.threadId })
+      ])
+    );
+    await expect(storage.listCommentActivity({ viewerId: "user-reviewer" })).resolves.toMatchObject({
+      events: [
+        {
+          type: "edited",
+          threadId: created.threadId,
+          actorName: "민지",
+          body: "@준호 수정된 검수"
+        },
+        {
+          type: "created",
+          threadId: created.threadId,
+          body: "@준호 수정된 검수"
+        }
+      ]
+    });
+  });
+
+  test("comment versions advance past a sidecar timestamp written by another process", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "프로세스 경계 버전",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalModifiedAt = new Date(Date.now() + 60_000).toISOString();
+    sidecar.threads[0].modifiedAt = externalModifiedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "프로세스 경계 이후 수정",
+      actorId: "user-owner",
+      expectedModifiedAt: externalModifiedAt
+    });
+
+    expect(updated.modifiedAt > externalModifiedAt).toBe(true);
+  });
+
+  test("comment mutations advance past the latest persisted sidecar event", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "저장소 전체 시간순서",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalCreatedAt = new Date(Date.now() + 86_400_000).toISOString();
+    sidecar.activity[0].createdAt = externalCreatedAt;
+    sidecar.events[0].createdAt = externalCreatedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const updated = await storage.updateCommentThread("sample-file", created.threadId, {
+      body: "외부 이벤트 이후 수정",
+      actorId: "user-owner",
+      expectedModifiedAt: created.modifiedAt
+    });
+    const persisted = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    expect(updated.modifiedAt > externalCreatedAt).toBe(true);
+    expect(persisted.activity[0].createdAt > externalCreatedAt).toBe(true);
+    expect(persisted.events[persisted.events.length - 1].createdAt > externalCreatedAt).toBe(true);
+  });
+
+  test("new comments advance past the latest persisted sidecar event", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "기존 코멘트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    const externalCreatedAt = new Date(Date.now() + 172_800_000).toISOString();
+    sidecar.activity[0].createdAt = externalCreatedAt;
+    sidecar.events[0].createdAt = externalCreatedAt;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "외부 이벤트 이후 새 코멘트",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+
+    expect(created.createdAt > externalCreatedAt).toBe(true);
+  });
+
+  test("resolving an already resolved comment does not duplicate audit events", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "한 번만 해결",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const first = await storage.resolveCommentThread("sample-file", created.threadId, "검수자");
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const afterFirstResolve = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    const second = await storage.resolveCommentThread("sample-file", created.threadId, "검수자");
+    const afterSecondResolve = JSON.parse(await readFile(sidecarPath, "utf8"));
+
+    expect(second).toEqual(first);
+    expect(afterSecondResolve.activity).toEqual(afterFirstResolve.activity);
+    expect(afterSecondResolve.events).toEqual(afterFirstResolve.events);
+  });
+
+  test("comment reply owners can edit and delete replies without leaking deleted content", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "검수 요청",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "삭제될 원문",
+      authorId: "user-replier",
+      authorName: "답글 작성자"
+    });
+    const reply = replied.replies[0];
+
+    expect(replied.modifiedAt).not.toBe(created.modifiedAt);
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    expect(reply).toMatchObject({
+      authorId: "user-replier",
+      modifiedAt: reply.createdAt
+    });
+    await expect(
+      storage.updateCommentReply("sample-file", created.threadId, reply.replyId, {
+        body: "권한 없는 답글 수정",
+        actorId: "user-owner",
+        expectedModifiedAt: reply.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    const edited = await storage.updateCommentReply("sample-file", created.threadId, reply.replyId, {
+      body: "@민지 수정된 답글",
+      actorId: "user-replier",
+      expectedModifiedAt: reply.modifiedAt,
+      mentionTargets: [{ userId: "user-minji", displayName: "민지", role: "editor" }]
+    });
+    expect(edited.replies[0]).toMatchObject({
+      body: "@민지 수정된 답글",
+      mentions: ["민지"],
+      authorId: "user-replier"
+    });
+    expect(edited.modifiedAt).not.toBe(replied.modifiedAt);
+
+    await expect(
+      storage.deleteCommentReply("sample-file", created.threadId, reply.replyId, {
+        actorId: "user-owner",
+        expectedModifiedAt: edited.replies[0].modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    const deleted = await storage.deleteCommentReply("sample-file", created.threadId, reply.replyId, {
+      actorId: "user-replier",
+      expectedModifiedAt: edited.replies[0].modifiedAt
+    });
+    expect(deleted.replies).toEqual([]);
+    expect(deleted.modifiedAt).not.toBe(edited.modifiedAt);
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 원문");
+    expect(JSON.stringify(sidecar.activity)).not.toContain("수정된 답글");
+    expect(sidecar.activity[0]).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId,
+      replyId: reply.replyId,
+      actorName: "답글 작성자",
+      body: "답글이 삭제되었습니다",
+      mentions: [],
+      mentionTargets: []
+    });
+    expect(sidecar.events.at(-1)).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId,
+      replyId: reply.replyId
+    });
+  });
+
+  test("only a thread owner can delete the thread at its current version", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "삭제될 스레드 본문",
+      authorId: "user-owner",
+      authorName: "소유자"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "삭제될 답글 본문",
+      authorId: "user-replier",
+      authorName: "답글 작성자"
+    });
+
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-other",
+        expectedModifiedAt: created.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: "2026-01-01T00:00:00.000Z"
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await expect(
+      storage.deleteCommentThread("sample-file", created.threadId, {
+        actorId: "user-owner",
+        expectedModifiedAt: replied.modifiedAt
+      })
+    ).resolves.toEqual({ threadId: created.threadId, deleted: true });
+    await expect(storage.listCommentThreads("sample-file", { includeResolved: true })).resolves.toEqual([]);
+
+    const sidecar = JSON.parse(await readFile(path.join(tempRoot, "comments", "sample-file.json"), "utf8"));
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 스레드 본문");
+    expect(JSON.stringify(sidecar.activity)).not.toContain("삭제될 답글 본문");
+    expect(sidecar.activity).toEqual([
+      expect.objectContaining({
+        type: "deleted",
+        threadId: created.threadId,
+        actorName: "소유자",
+        body: "코멘트가 삭제되었습니다",
+        mentions: [],
+        mentionTargets: []
+      })
+    ]);
+    expect(sidecar.events.at(-1)).toMatchObject({
+      type: "deleted",
+      threadId: created.threadId
+    });
   });
 
   test("comment threads reject a missing body with a validation error", async () => {
