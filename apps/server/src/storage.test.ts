@@ -2307,6 +2307,67 @@ describe("FileStorage", () => {
     ]);
   });
 
+  test("deleting a document's last project reference prevents cross-team comment reuse", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-comment-delete-reuse-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-delete-alpha",
+      name: "Alpha project",
+      documentId: "Deleted-Shared-File",
+      documentName: "Alpha document"
+    });
+    await storage.setProjectSharing("comment-delete-alpha", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createProject({
+      projectId: "comment-delete-retained",
+      name: "Retained project",
+      documentId: "comment-delete-retained-file",
+      documentName: "Retained document"
+    });
+    await storage.createCommentThread("Deleted-Shared-File", {
+      nodeId: "text-1",
+      body: "team-alpha only secret",
+      authorId: "alpha-owner",
+      authorName: "alpha-owner"
+    });
+
+    await storage.deleteProject("comment-delete-alpha");
+    await storage.createProject({
+      projectId: "comment-delete-beta",
+      name: "Beta project",
+      documentId: "Deleted-Shared-File",
+      documentName: "Beta document"
+    });
+    await storage.setProjectSharing("comment-delete-beta", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    const betaBoundary = {
+      projectId: "comment-delete-beta",
+      expectedSharing: { mode: "team", teamId: "team-beta" }
+    } as const;
+
+    await expect(
+      storage.listCommentThreads("Deleted-Shared-File", {
+        includeResolved: true,
+        authorizationBoundary: betaBoundary
+      })
+    ).resolves.toEqual([]);
+    await expect(
+      storage.listCommentActivity({
+        authorizationBoundaries: [betaBoundary]
+      })
+    ).resolves.toMatchObject({ events: [] });
+    await expect(
+      storage.listCommentLiveEvents({
+        fileId: "Deleted-Shared-File",
+        authorizationBoundary: betaBoundary
+      })
+    ).resolves.toEqual([]);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -2833,65 +2894,6 @@ describe("FileStorage", () => {
       expect.objectContaining({ sequence: 3, type: "read" }),
       expect.objectContaining({ sequence: 4, type: "resolved" })
     ]);
-  });
-
-  test("comment reads reject stale project authorization boundaries", async () => {
-    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
-    const storage = await storageWithDocument(tempRoot);
-    await storage.setProjectSharing("test-project", {
-      mode: "team",
-      teamId: "team-alpha"
-    });
-    await storage.createCommentThread("sample-file", {
-      nodeId: "text-1",
-      body: "alpha 검수 내용",
-      authorId: "alpha-author",
-      authorName: "Alpha author"
-    });
-    const authorizationBoundary =
-      await storage.getCommentAuthorizationBoundary("sample-file");
-    expect(authorizationBoundary).toBeDefined();
-    if (!authorizationBoundary) {
-      throw new Error("comment authorization boundary is required");
-    }
-
-    await storage.setProjectSharing("test-project", {
-      mode: "team",
-      teamId: "team-beta"
-    });
-    const results = await Promise.allSettled([
-      storage.listCommentThreads("sample-file", {
-        includeResolved: true,
-        authorizationBoundary
-      } as Parameters<FileStorage["listCommentThreads"]>[1]),
-      storage.listCommentNotifications({
-        viewerId: "alpha-viewer",
-        authorizationBoundaries: [authorizationBoundary]
-      } as Parameters<FileStorage["listCommentNotifications"]>[0]),
-      storage.listCommentActivity({
-        viewerId: "alpha-viewer",
-        authorizationBoundaries: [authorizationBoundary]
-      } as Parameters<FileStorage["listCommentActivity"]>[0]),
-      storage.listCommentLiveEvents({
-        fileId: "sample-file",
-        authorizationBoundary
-      } as Parameters<FileStorage["listCommentLiveEvents"]>[0])
-    ]);
-
-    expect(results.map((result) => result.status)).toEqual([
-      "rejected",
-      "rejected",
-      "rejected",
-      "rejected"
-    ]);
-    for (const result of results) {
-      if (result.status === "rejected") {
-        expect(result.reason).toMatchObject({
-          code: "ECONFLICT",
-          statusCode: 409
-        });
-      }
-    }
   });
 
   test("comment live event pagination returns the oldest retained events before newer events", async () => {

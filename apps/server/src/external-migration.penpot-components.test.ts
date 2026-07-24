@@ -1824,6 +1824,290 @@ describe("Penpot component instance migration", () => {
     }
   }, 20_000);
 
+  test.each([
+    "rename",
+    "sharing",
+    "document"
+  ] as const)(
+    "recovers an interrupted external import before a cold %s project mutation",
+    async (mutation) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), `layo-project-metadata-recovery-${mutation}-`)
+      );
+      try {
+        const archivePath = path.join(root, "metadata-recovery-input.penpot");
+        await writeRawFile(archivePath, packagedLibrarySwapArchive());
+        await expectStorageWorkerCrash(
+          root,
+          "external-import-crash-after-publication",
+          [
+            archivePath,
+            "metadata-recovery-project",
+            "metadata-recovery-target"
+          ],
+          89,
+          "external-import-crashing"
+        );
+
+        const restarted = new FileStorage(root);
+        const projectMutation =
+          mutation === "rename"
+            ? restarted.updateProject("metadata-recovery-project", {
+                name: "Must not preserve partial import"
+              })
+            : mutation === "sharing"
+              ? restarted.setProjectSharing("metadata-recovery-project", {
+                  mode: "team",
+                  teamId: "team-metadata-recovery"
+                })
+              : restarted.createProjectDocument(
+                  "metadata-recovery-project",
+                  {
+                    documentId: "metadata-recovery-extra",
+                    name: "Must not extend partial import"
+                  }
+                );
+
+        await expect(projectMutation).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(restarted.prepareProjects()).resolves.toBeUndefined();
+        await expect(
+          restarted.readProject("metadata-recovery-project")
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(
+          restarted.readFile("metadata-recovery-target")
+        ).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(
+          restarted.readFile("metadata-recovery-extra")
+        ).rejects.toMatchObject({ code: "ENOENT" });
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    20_000
+  );
+
+  test("acquires the storage transaction coordinator before a cold library target update", async () => {
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-cold-library-lock-order-")
+    );
+    try {
+      const setup = new FileStorage(root);
+      await setup.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "cold-lock-library-project",
+          documentId: "cold-lock-library-file",
+          documentName: "Cold lock library",
+          fileName: "cold-lock-library.penpot"
+        }
+      );
+      const libraryId = `penpot-library-${libraryFileId}`;
+      await setup.createProject({
+        projectId: "cold-lock-target-project",
+        name: "Cold lock target project",
+        documentId: "cold-lock-target",
+        documentName: "Cold lock target"
+      });
+      await setup.importLibraryRegistryItem(
+        "cold-lock-target",
+        libraryId,
+        { idPrefix: "cold-lock" }
+      );
+
+      const publishedLibrary = await setup.readFile(libraryId);
+      const publishedCircle = publishedLibrary.components?.find(
+        (component) =>
+          component.id === `penpot-component-${circleComponentId}`
+      );
+      publishedCircle!.source_node.style.fill = "#0284c7";
+      await setup.writeFile(libraryId, publishedLibrary);
+      await setup.publishLibraryToRegistry(libraryId, {
+        libraryId,
+        name: "Cold lock library"
+      });
+
+      const cold = new FileStorage(root);
+      const internals = cold as unknown as {
+        isStorageTransactionCoordinatorHeld(): boolean;
+        withStorageTransactionCoordinatorLock<T>(
+          operation: () => Promise<T>
+        ): Promise<T>;
+        withLibraryRegistryTargetMutationLock<T>(
+          fileId: string,
+          operation: () => Promise<T>
+        ): Promise<T>;
+      };
+      const originalCoordinator =
+        internals.withStorageTransactionCoordinatorLock.bind(cold) as
+          typeof internals.withStorageTransactionCoordinatorLock;
+      const originalTarget =
+        internals.withLibraryRegistryTargetMutationLock.bind(cold) as
+          typeof internals.withLibraryRegistryTargetMutationLock;
+      let targetHeld = false;
+
+      internals.withStorageTransactionCoordinatorLock = async <T>(
+        operation: () => Promise<T>
+      ) => {
+        if (
+          targetHeld
+          && !internals.isStorageTransactionCoordinatorHeld()
+        ) {
+          throw new Error(
+            "library target lock acquired before storage transaction coordinator"
+          );
+        }
+        return originalCoordinator(operation);
+      };
+      internals.withLibraryRegistryTargetMutationLock = async <T>(
+        targetFileId: string,
+        operation: () => Promise<T>
+      ) =>
+        originalTarget(targetFileId, async () => {
+          targetHeld = true;
+          try {
+            return await operation();
+          } finally {
+            targetHeld = false;
+          }
+        });
+
+      await expect(
+        cold.updateLibraryRegistryItem("cold-lock-target", libraryId)
+      ).resolves.toMatchObject({
+        fileId: "cold-lock-target",
+        libraryId
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  test.each([
+    [
+      "project-delete-crash-before-subscription",
+      95,
+      "project-delete-before-subscription-crashing"
+    ],
+    [
+      "project-delete-crash-after-subscription",
+      96,
+      "project-delete-after-subscription-crashing"
+    ]
+  ] as const)(
+    "recovers project deletion after process exit at %s",
+    async (mode, exitCode, marker) => {
+      const root = await mkdtemp(
+        path.join(tmpdir(), `layo-project-delete-crash-${exitCode}-`)
+      );
+      try {
+        const setup = new FileStorage(root);
+        await setup.importExternalMigrationArchive(
+          packagedLibrarySwapArchive(),
+          {
+            projectId: "delete-crash-library-project",
+            documentId: "delete-crash-library-file",
+            documentName: "Delete crash library",
+            fileName: "delete-crash-library.penpot"
+          }
+        );
+        const libraryId = `penpot-library-${libraryFileId}`;
+        await setup.createProject({
+          projectId: "delete-crash-project",
+          name: "Delete crash project",
+          documentId: "Delete-Crash-Target",
+          documentName: "Delete crash target"
+        });
+        await setup.setProjectSharing("delete-crash-project", {
+          mode: "team",
+          teamId: "team-delete-crash"
+        });
+        await setup.importLibraryRegistryItem(
+          "Delete-Crash-Target",
+          libraryId,
+          { idPrefix: "delete-crash" }
+        );
+        await setup.importLibraryRegistryTokens(
+          "Delete-Crash-Target",
+          libraryId
+        );
+        await setup.createCommentThread("Delete-Crash-Target", {
+          nodeId: "text-1",
+          body: "복구되어야 할 삭제 중 댓글",
+          authorId: "delete-crash-owner",
+          authorName: "delete-crash-owner"
+        });
+
+        const projectBefore = await setup.readProject(
+          "delete-crash-project"
+        );
+        const fileBefore = await setup.readFile("Delete-Crash-Target");
+        const subscriptionsBefore =
+          await setup.listLibraryRegistrySubscriptions();
+        const tokenSubscriptionsBefore =
+          await setup.listLibraryRegistryTokenSubscriptions();
+
+        await expectStorageWorkerCrash(
+          root,
+          mode,
+          ["delete-crash-project"],
+          exitCode,
+          marker
+        );
+
+        const restarted = new FileStorage(root);
+        await restarted.prepareProjects();
+        await expect(
+          restarted.readProject("delete-crash-project")
+        ).resolves.toEqual(projectBefore);
+        await expect(
+          restarted.readFile("Delete-Crash-Target")
+        ).resolves.toEqual(fileBefore);
+        await expect(
+          restarted.listCommentThreads("Delete-Crash-Target", {
+            includeResolved: true
+          })
+        ).resolves.toEqual([
+          expect.objectContaining({
+            body: "복구되어야 할 삭제 중 댓글"
+          })
+        ]);
+        expect(
+          await restarted.listLibraryRegistrySubscriptions()
+        ).toEqual(subscriptionsBefore);
+        expect(
+          await restarted.listLibraryRegistryTokenSubscriptions()
+        ).toEqual(tokenSubscriptionsBefore);
+
+        await restarted.deleteProject("delete-crash-project");
+        await restarted.createProject({
+          projectId: "delete-crash-reuse-project",
+          name: "Delete crash reuse",
+          documentId: "Delete-Crash-Target",
+          documentName: "Reused after recovered delete"
+        });
+        await restarted.setProjectSharing(
+          "delete-crash-reuse-project",
+          { mode: "team", teamId: "team-delete-crash-reuse" }
+        );
+        await expect(
+          restarted.listCommentThreads("Delete-Crash-Target", {
+            includeResolved: true,
+            authorizationBoundary: {
+              projectId: "delete-crash-reuse-project",
+              expectedSharing: {
+                mode: "team",
+                teamId: "team-delete-crash-reuse"
+              }
+            }
+          })
+        ).resolves.toEqual([]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    25_000
+  );
+
   test("serializes a library update and product write across processes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "layo-penpot-library-process-lock-"));
     const releasePath = path.join(root, "release-update");

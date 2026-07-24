@@ -139,6 +139,26 @@ if (
     projectId,
     documentIdPrefix
   });
+} else if (
+  mode === "project-delete-crash-before-subscription"
+  || mode === "project-delete-crash-after-subscription"
+) {
+  const projectId = requiredArg(firstArg, "projectId");
+  const internals = storage as unknown as {
+    writeLibraryRegistrySubscriptions(subscriptions: unknown[]): Promise<void>;
+  };
+  if (mode === "project-delete-crash-before-subscription") {
+    internals.writeLibraryRegistrySubscriptions = () =>
+      crash("project-delete-before-subscription-crashing", 95);
+  } else {
+    const originalWriteSubscriptions =
+      internals.writeLibraryRegistrySubscriptions.bind(storage);
+    internals.writeLibraryRegistrySubscriptions = async (subscriptions) => {
+      await originalWriteSubscriptions(subscriptions);
+      await crash("project-delete-after-subscription-crashing", 96);
+    };
+  }
+  await storage.deleteProject(projectId);
 } else if (mode === "library-update-crash-before-subscription") {
   const fileId = requiredArg(firstArg, "fileId");
   const libraryId = requiredArg(secondArg, "libraryId");
