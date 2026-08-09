@@ -29,11 +29,19 @@ free to recur.
 9. Put the failure mode, regression test, live verification, and docs or memory
    update in the PR body.
 10. When external review is requested or configured automation starts review
-   after a draft becomes ready, treat that review as pending even if the first
-   re-fetch returns no review or thread. Wait for the review result or a bounded
-   timeout, then re-fetch reviews and unresolved threads immediately before
-   merge. Do not merge while the requested review is pending; after the timeout,
-   record why review was unavailable instead of assuming silence means approval.
+    after a draft becomes ready, treat that review as pending even if the first
+    re-fetch returns no review or thread. Wait for the review result or a bounded
+    timeout, then re-fetch reviews and unresolved threads immediately before
+    merge. Do not merge while the requested review is pending; after the timeout,
+    record why review was unavailable instead of assuming silence means approval.
+    Resolve the full review head with `git rev-parse HEAD`, confirm it equals
+    `gh pr view --json headRefOid`, and never construct a full SHA from
+    abbreviated command output. When the result arrives, compare its reported
+    reviewed commit with that `headRefOid`; a clean result on a superseded head
+    does not satisfy the merge gate.
+11. Before publishing CI test counts, extract them from the exact run log and
+    label local and CI evidence separately. Do not copy local counts into a CI
+    row when integration-test availability changes skipped and passed totals.
 
 ## UI Detail Checklist
 
