@@ -7737,6 +7737,56 @@ test("comments panel keeps feedback controls available to team viewers and maps 
 });
 
 test("team owners explicitly assign legacy thread and reply owners before editing", async ({ page }) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoCommentStreamUrls?: string[];
+      __layoSuppressedCommentPolling?: boolean;
+    };
+    const nativeFetch = window.fetch.bind(window);
+    const nativeSetInterval = window.setInterval.bind(window);
+
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === 2_000) {
+        instrumentedWindow.__layoSuppressedCommentPolling = true;
+        return 0;
+      }
+      return nativeSetInterval(handler, timeout, ...args);
+    }) as typeof window.setInterval;
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentStreamUrls = [
+          ...(instrumentedWindow.__layoCommentStreamUrls ?? []),
+          parsedUrl.toString()
+        ];
+      }
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+  });
+
+  const waitForCommentEventStream = (expectedDocumentId: string) =>
+    page.waitForFunction(
+      (documentId) => {
+        const instrumentedWindow = window as Window & {
+          __layoCommentStreamUrls?: string[];
+          __layoSuppressedCommentPolling?: boolean;
+        };
+        return (
+          instrumentedWindow.__layoSuppressedCommentPolling === true &&
+          (instrumentedWindow.__layoCommentStreamUrls ?? []).some((url) => {
+            const parsedUrl = new URL(url, window.location.href);
+            return (
+              parsedUrl.pathname === "/comments/events" &&
+              parsedUrl.searchParams.get("fileId") === documentId
+            );
+          })
+        );
+      },
+      expectedDocumentId
+    );
+
   const { documentId } = await createProjectFromEmptyState(page);
   const createdResponse = await page.request.post(
     `http://127.0.0.1:4317/files/${documentId}/comments`,
@@ -7791,6 +7841,7 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await openFilePanel(page);
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await waitForCommentEventStream(documentId);
 
   const commentList = page.getByTestId("comment-list");
   await expect(commentList).toContainText("소유권 없는 기존 코멘트");
@@ -7851,6 +7902,7 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await importTeamManifest();
   await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await waitForCommentEventStream(documentId);
   await expect(threadOwnerSelect).toHaveValue("team-reviewer");
   await expect(page.getByTestId(`comment-owner-assign-${created.threadId}`)).toHaveAccessibleName(
     "소유권 없는 기존 코멘트 소유자 변경"

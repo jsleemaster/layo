@@ -3108,6 +3108,56 @@ describe("FileStorage", () => {
     await expect(creator.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toHaveLength(8);
   });
 
+  test("legacy owner assignment serializes competing FileStorage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-owner-race-"));
+    const seedStorage = await storageWithDocument(tempRoot);
+    const created = await seedStorage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "동시 소유권 지정",
+      authorName: "사용자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    delete sidecar.threads[0].authorId;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const assignOwner = (storage: FileStorage, ownerId: string, ownerName: string) =>
+      (storage as unknown as {
+        assignLegacyCommentThreadOwner: (...args: unknown[]) => Promise<any>;
+      }).assignLegacyCommentThreadOwner("sample-file", created.threadId, {
+        ownerId,
+        ownerName,
+        assignedByName: "team-owner",
+        expectedModifiedAt: created.modifiedAt
+      });
+
+    const results = await Promise.allSettled([
+      assignOwner(firstStorage, "user-minji", "민지"),
+      assignOwner(secondStorage, "user-junho", "준호")
+    ]);
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<any> => result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ statusCode: 409 });
+
+    const finalStorage = new FileStorage(tempRoot);
+    const [finalThread] = await finalStorage.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(["user-minji", "user-junho"]).toContain(finalThread.authorId);
+    expect(finalThread).toMatchObject({ legacyOwnership: false });
+    const ownershipEvents = (await finalStorage.listCommentLiveEvents({ fileId: "sample-file" }))
+      .filter((event) => event.type === "ownership_assigned");
+    expect(ownershipEvents).toHaveLength(1);
+  });
+
   test("comment authors can edit a thread with optimistic concurrency while other users cannot", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);

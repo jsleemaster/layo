@@ -167,7 +167,7 @@ React, Vitest, Playwright CLI.
   and reply IDs. Selector defaults follow draft, stored owner, then first target.
   Focused coverage also verifies all four rejected MCP commits, reply
   reassignment, modern reply blocking, and team-editor control absence.
-- Latest local verification passed 521 server tests with 47 skipped, 284/284
+- Latest local verification passed 522 server tests with 47 skipped, 284/284
   web tests, workspace typecheck, production build, maturity 7/7, design rules,
   headed team reconnect 1/1 with three inspected states, and full Playwright
   255/255 without retry.
@@ -194,6 +194,14 @@ React, Vitest, Playwright CLI.
   Focused SSE RED failed with stale `team-owner` after remote `team-reviewer`;
   GREEN and headed 1/1 inspection show both selectors as `준호`, and follow-up
   requests carry `team-reviewer` plus the remote versions.
+- Final independent review of `e934249302f1d0780f99329104fc04d5a12f1fd5`
+  found no P0-P2 after Full Verification `31336227992` and all three drills
+  passed. It retained two verification risks: fallback polling could
+  mask the claimed SSE path, and no owner-specific cross-instance race existed.
+  The browser case now suppresses the 2-second poll and waits for the current
+  file event stream before both remote assignments. A storage regression races
+  two `FileStorage` instances and requires one success, one `409`, and exactly
+  one persisted ownership event.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.

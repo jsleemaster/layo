@@ -87,7 +87,7 @@ that a `v1` sidecar could already contain a persisted synthetic ID and that
 reconnect selected the first member instead of the current owner. Sidecar `v2`
 now establishes stable-owner provenance; unmarked `v1` records recover
 conservatively, and thread/reply selectors preserve the stored owner. Final
-local proof passes 521 server tests with 47 skipped, 284/284 web tests,
+local proof passes 522 server tests with 47 skipped, 284/284 web tests,
 workspace typecheck, production build, maturity 7/7, design rules, and full
 255/255 Playwright without retry. Private claim, team reconnect, and the
 receipt-focused flow each passed headed 1/1 with visual inspection. Full
@@ -104,6 +104,13 @@ three drills, but independent exact-head review found stale owner drafts could
 silently revert remote reassignment. Drafts now bind to selection-time versions;
 thread/reply SSE regressions and headed selectors prove both synchronize to
 remote owner `준호` before submission.
+The final independent exact-head review found no P0-P2. Its two residual test
+risks are now explicit regressions: the owner synchronization E2E suppresses
+the 2-second fallback poll before remote thread/reply assignments, and a
+cross-instance storage race proves one optimistic owner assignment wins while
+the stale peer receives `409` without a duplicate ownership event.
+That reviewed head passed Full Verification `31336227992` and all three drills;
+the follow-up changes test and durable evidence only.
 Final-head re-review, CI, configured review, merge, PR #319 thread resolution,
 and cleanup remain. Local PR #319
 proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
