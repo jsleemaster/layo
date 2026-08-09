@@ -3296,6 +3296,96 @@ test("component variant status waits for the newest component persistence", asyn
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
 });
 
+test("instance variant completion cannot overwrite a newer definition persistence", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+  const variants = await page.request.put(
+    `http://127.0.0.1:4317/files/${documentId}/components/component-card/variants`,
+    {
+      data: {
+        variants: [
+          {
+            id: "default",
+            name: "Default",
+            properties: [{ name: "variant", value: "Default", type: "select" }]
+          },
+          {
+            id: "alternate",
+            name: "Alternate",
+            properties: [{ name: "variant", value: "Alternate", type: "select" }]
+          }
+        ]
+      }
+    }
+  );
+  expect(variants.ok()).toBeTruthy();
+  const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
+    data: {
+      parentId: "page-1",
+      definitionId: "component-card",
+      instanceId: "instance-card",
+      x: 520,
+      y: 140
+    }
+  });
+  expect(instance.ok()).toBeTruthy();
+
+  let releaseInstancePersist = () => {};
+  const instancePersistRelease = new Promise<void>((resolve) => {
+    releaseInstancePersist = resolve;
+  });
+  let releaseDefinitionPersist = () => {};
+  const definitionPersistRelease = new Promise<void>((resolve) => {
+    releaseDefinitionPersist = resolve;
+  });
+  let instancePersistHeld = false;
+  let definitionPersistHeld = false;
+  await page.route(
+    (url) =>
+      url.pathname === `/files/${documentId}/nodes/instance-card/component-variant`
+      || url.pathname === `/files/${documentId}/components/component-card/variants`,
+    async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (!instancePersistHeld && pathname.includes("/nodes/instance-card/")) {
+        instancePersistHeld = true;
+        await instancePersistRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced instance persistence failure" })
+        });
+        return;
+      }
+      if (!definitionPersistHeld && pathname.endsWith("/components/component-card/variants")) {
+        definitionPersistHeld = true;
+        await definitionPersistRelease;
+      }
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "Card 인스턴스" }).click();
+  await page.getByTestId("inspector-component-variant-variant").selectOption("Alternate");
+  await expect.poll(() => instancePersistHeld).toBe(true);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  releaseInstancePersist();
+  await expect.poll(() => definitionPersistHeld).toBe(true);
+  try {
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 중");
+  } finally {
+    releaseDefinitionPersist();
+  }
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+});
+
 test("inspector dev panel copies generated handoff snippets to the clipboard", async ({ page }) => {
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: "http://127.0.0.1:5173"
@@ -6530,6 +6620,131 @@ test("failed background comment refresh preserves an unsent reply draft", async 
   await expect.poll(() => failedRefreshServed, { timeout: 5_000 }).toBe(true);
   await expect.poll(() => successfulRefreshServed, { timeout: 5_000 }).toBe(true);
   await expect(replyDraft).toHaveValue("전송하지 않은 답글 초안");
+});
+
+test("delayed initial comment refresh cannot overwrite foreground error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let fulfilledInitialResponses = 0;
+  let directFailureServed = false;
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() === "POST") {
+        directFailureServed = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced foreground failure" })
+        });
+        return;
+      }
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        const response = await route.fetch();
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldInitialResponses += 1;
+        heldResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({ response });
+        fulfilledInitialResponses += 1;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  await expect.poll(() => heldInitialResponses).toBe(2);
+  try {
+    await openFilePanel(page);
+    await page.getByRole("button", { name: "헤드라인" }).click();
+    await page.getByTestId("comment-body").fill("실패할 코멘트");
+    await page.getByRole("button", { name: "코멘트 추가" }).click();
+    await expect.poll(() => directFailureServed).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("forced foreground failure");
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => fulfilledInitialResponses).toBe(2);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-status")).toContainText("forced foreground failure");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    releaseLaterResponses();
+  }
+});
+
+test("initial comment summary survives a later preserve-status poll", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "초기 읽지 않은 코멘트",
+      authorName: "디자인 팀"
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let pollingResponseServed = false;
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        const response = await route.fetch();
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldInitialResponses += 1;
+        heldResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({ response });
+        return;
+      }
+      pollingResponseServed = true;
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => pollingResponseServed, { timeout: 6_000 }).toBe(true);
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    await expect(page.getByTestId("comment-list")).toContainText("초기 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+  }
 });
 
 test("deleting the last comment clears its canvas bubble and keeps a content-free activity tombstone", async ({ page }) => {
