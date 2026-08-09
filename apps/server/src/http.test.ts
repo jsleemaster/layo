@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createZipArchive } from "./file-archive";
 import { createHttpServer } from "./http";
 import { FileStorage } from "./storage";
+import type { TeamAuthorizationConfig } from "./team-authorization";
 
 let tempRoot: string | undefined;
 
@@ -299,19 +300,40 @@ describe("HTTP server", () => {
     const server = createHttpServer(storage);
     const fixture = penpotComponentHttpArchive();
 
+    const importPayload = {
+      archiveBase64: fixture.archive.toString("base64"),
+      fileName: "components.penpot",
+      projectId: "penpot-component-project",
+      documentId: "penpot-component-document",
+      name: "Penpot components"
+    };
+    const missingIdempotencyKey = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      payload: importPayload
+    });
+    expect(missingIdempotencyKey.statusCode).toBe(400);
+
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
-      payload: {
-        archiveBase64: fixture.archive.toString("base64"),
-        fileName: "components.penpot",
-        projectId: "penpot-component-project",
-        documentId: "penpot-component-document",
-        name: "Penpot components"
-      }
+      headers: {
+        "idempotency-key": "penpot-component-http-v1"
+      },
+      payload: importPayload
     });
 
     expect(response.statusCode).toBe(200);
+    const retried = await server.inject({
+      method: "POST",
+      url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "penpot-component-http-v1"
+      },
+      payload: importPayload
+    });
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual(response.json());
     expect(response.json().imported.file.components).toEqual([
       expect.objectContaining({
         id: `penpot-component-${fixture.componentId}`,
@@ -422,6 +444,9 @@ describe("HTTP server", () => {
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "figma-file-http-v1"
+      },
       payload: {
         archiveBase64: figmaFile.toString("base64"),
         fileName: "landing.figma.json",
@@ -518,6 +543,9 @@ describe("HTTP server", () => {
     const response = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: {
+        "idempotency-key": "figma-image-http-v1"
+      },
       payload: {
         archiveBase64: figmaPackage.toString("base64"),
         fileName: "figma-image-package.zip",
@@ -2076,15 +2104,27 @@ describe("HTTP server", () => {
       ]
     });
 
+    const importPayload = {
+      archiveBase64: exported.rawPayload.toString("base64"),
+      projectId: "restored-project",
+      name: "복원 묶음",
+      documentIdPrefix: "restored"
+    };
+    const missingIdempotencyKey = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive",
+      payload: importPayload
+    });
+    expect(missingIdempotencyKey.statusCode).toBe(400);
+
+    const importHeaders = {
+      "idempotency-key": "restore-project-http-v1"
+    };
     const imported = await targetServer.inject({
       method: "POST",
       url: "/projects/import/archive",
-      payload: {
-        archiveBase64: exported.rawPayload.toString("base64"),
-        projectId: "restored-project",
-        name: "복원 묶음",
-        documentIdPrefix: "restored"
-      }
+      headers: importHeaders,
+      payload: importPayload
     });
     expect(imported.statusCode).toBe(200);
     expect(imported.json().imported.project).toMatchObject({
@@ -2092,6 +2132,14 @@ describe("HTTP server", () => {
       name: "복원 묶음",
       currentDocumentId: "restored-archive-file-2"
     });
+    const retried = await targetServer.inject({
+      method: "POST",
+      url: "/projects/import/archive",
+      headers: importHeaders,
+      payload: importPayload
+    });
+    expect(retried.statusCode).toBe(200);
+    expect(retried.json()).toEqual(imported.json());
   });
 
   test("updates node geometry, fill, text, and creates nodes", async () => {
@@ -2363,6 +2411,972 @@ describe("HTTP server", () => {
         }
       ]
     });
+  });
+
+  test("requires team authorization before resolving a case-folded comment file alias", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "case-comment-auth-project",
+      name: "대소문자 코멘트 인증 프로젝트",
+      documentId: "Shared-Comment-File",
+      documentName: "대소문자 코멘트 인증 문서"
+    });
+    await storage.setProjectSharing("case-comment-auth-project", {
+      mode: "team",
+      teamId: "team-case"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "owner",
+            role: "editor",
+            teamIds: ["team-case"],
+            token: "owner-token"
+          }
+        ]
+      }
+    });
+
+    const anonymous = await server.inject({
+      method: "GET",
+      url: "/files/shared-comment-file/comments"
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const authorizedExact = await server.inject({
+      method: "GET",
+      url: "/files/Shared-Comment-File/comments",
+      headers: {
+        authorization: "Bearer owner-token",
+        "x-layo-user-id": "owner"
+      }
+    });
+    expect(authorizedExact.statusCode).toBe(200);
+  });
+
+  test("authorizes team comment management and derives stable actors from credentials", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "team-comment-project",
+      name: "팀 코멘트 프로젝트",
+      documentId: "team-comment-file",
+      documentName: "팀 코멘트 문서"
+    });
+    await storage.setProjectSharing("team-comment-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createProject({
+      projectId: "private-comment-project",
+      name: "개인 코멘트 프로젝트",
+      documentId: "private-comment-file",
+      documentName: "개인 코멘트 문서"
+    });
+    await storage.createProject({
+      projectId: "other-team-comment-project",
+      name: "다른 팀 코멘트 프로젝트",
+      documentId: "other-team-comment-file",
+      documentName: "다른 팀 코멘트 문서"
+    });
+    await storage.setProjectSharing("other-team-comment-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("other-team-comment-file", {
+      nodeId: "text-1",
+      body: "다른 팀 비공개 코멘트",
+      authorId: "outsider",
+      authorName: "외부 사용자"
+    });
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "owner", role: "editor", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "peer", role: "editor", teamIds: ["team-alpha"], token: "peer-token" },
+          { userId: "viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" },
+          { userId: "outsider", role: "editor", teamIds: ["team-beta"], token: "outsider-token" }
+        ]
+      }
+    });
+    const headers = (userId: string, token: string) => ({
+      authorization: `Bearer ${token}`,
+      "x-layo-user-id": userId
+    });
+
+    expect(
+      (await server.inject({ method: "GET", url: "/files/team-comment-file/comments" })).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "GET",
+          url: "/files/team-comment-file/comments",
+          headers: headers("outsider", "outsider-token")
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "GET",
+          url: "/files/team-comment-file/comments",
+          headers: headers("viewer", "viewer-token")
+        })
+      ).statusCode
+    ).toBe(200);
+
+    const viewerWrite = await server.inject({
+      method: "POST",
+      url: "/files/team-comment-file/comments",
+      headers: headers("viewer", "viewer-token"),
+      payload: {
+        nodeId: "text-1",
+        body: "viewer도 피드백 가능",
+        authorId: "spoofed-viewer",
+        authorName: "위조된 이름"
+      }
+    });
+    expect(viewerWrite.statusCode).toBe(200);
+    expect(viewerWrite.json().thread).toMatchObject({
+      authorId: "viewer",
+      authorName: "viewer",
+      body: "viewer도 피드백 가능"
+    });
+
+    const viewerResolved = await server.inject({
+      method: "POST",
+      url: `/files/team-comment-file/comments/${viewerWrite.json().thread.threadId}/resolve`,
+      headers: headers("viewer", "viewer-token")
+    });
+    expect(viewerResolved.statusCode).toBe(200);
+    const viewerActivity = await server.inject({
+      method: "GET",
+      url: "/comments/activity?limit=8",
+      headers: headers("viewer", "viewer-token")
+    });
+    expect(viewerActivity.statusCode).toBe(200);
+    expect(
+      viewerActivity.json().feed.events.find(
+        (event: { type: string; threadId: string }) =>
+          event.type === "resolved"
+          && event.threadId === viewerWrite.json().thread.threadId
+      )
+    ).toMatchObject({
+      actorName: "viewer",
+      body: "viewer도 피드백 가능"
+    });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/files/team-comment-file/comments",
+      headers: headers("owner", "owner-token"),
+      payload: {
+        nodeId: "text-1",
+        body: "@peer 첫 검수",
+        authorId: "spoofed-user",
+        authorName: "작성자",
+        mentionTargets: [{ userId: "peer", displayName: "동료", role: "editor" }]
+      }
+    });
+    expect(created.statusCode).toBe(200);
+    expect(created.json().thread).toMatchObject({
+      authorId: "owner",
+      authorName: "owner",
+      modifiedAt: created.json().thread.createdAt,
+      readBy: ["owner"]
+    });
+    const thread = created.json().thread;
+
+    const blockedPeerEdit = await server.inject({
+      method: "PATCH",
+      url: `/files/team-comment-file/comments/${thread.threadId}`,
+      headers: headers("peer", "peer-token"),
+      payload: {
+        body: "동료가 바꿀 수 없음",
+        expectedModifiedAt: thread.modifiedAt
+      }
+    });
+    expect(blockedPeerEdit.statusCode).toBe(403);
+
+    const edited = await server.inject({
+      method: "PATCH",
+      url: `/files/team-comment-file/comments/${thread.threadId}`,
+      headers: headers("owner", "owner-token"),
+      payload: {
+        body: "@viewer 수정된 검수",
+        expectedModifiedAt: thread.modifiedAt,
+        mentionTargets: [{ userId: "viewer", displayName: "뷰어", role: "viewer" }]
+      }
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().thread).toMatchObject({
+      authorId: "owner",
+      body: "@viewer 수정된 검수",
+      mentions: ["viewer"],
+      readBy: ["owner"]
+    });
+
+    const stale = await server.inject({
+      method: "PATCH",
+      url: `/files/team-comment-file/comments/${thread.threadId}`,
+      headers: headers("owner", "owner-token"),
+      payload: {
+        body: "오래된 수정",
+        expectedModifiedAt: thread.modifiedAt
+      }
+    });
+    expect(stale.statusCode).toBe(409);
+    await expect(storage.listCommentThreads("team-comment-file")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ body: "@viewer 수정된 검수" })
+      ])
+    );
+
+    const replied = await server.inject({
+      method: "POST",
+      url: `/files/team-comment-file/comments/${thread.threadId}/replies`,
+      headers: headers("peer", "peer-token"),
+      payload: {
+        body: "동료 답글",
+        authorId: "spoofed-replier",
+        authorName: "동료"
+      }
+    });
+    expect(replied.statusCode).toBe(200);
+    const reply = replied.json().thread.replies[0];
+    expect(reply).toMatchObject({
+      authorId: "peer",
+      authorName: "peer",
+      modifiedAt: reply.createdAt
+    });
+
+    const editedReply = await server.inject({
+      method: "PATCH",
+      url: `/files/team-comment-file/comments/${thread.threadId}/replies/${reply.replyId}`,
+      headers: headers("peer", "peer-token"),
+      payload: {
+        body: "수정된 동료 답글",
+        expectedModifiedAt: reply.modifiedAt
+      }
+    });
+    expect(editedReply.statusCode).toBe(200);
+    const currentReply = editedReply.json().thread.replies[0];
+
+    expect(
+      (
+        await server.inject({
+          method: "DELETE",
+          url: `/files/team-comment-file/comments/${thread.threadId}/replies/${reply.replyId}`,
+          headers: headers("owner", "owner-token"),
+          payload: { expectedModifiedAt: currentReply.modifiedAt }
+        })
+      ).statusCode
+    ).toBe(403);
+    const deletedReply = await server.inject({
+      method: "DELETE",
+      url: `/files/team-comment-file/comments/${thread.threadId}/replies/${reply.replyId}`,
+      headers: headers("peer", "peer-token"),
+      payload: { expectedModifiedAt: currentReply.modifiedAt }
+    });
+    expect(deletedReply.statusCode).toBe(200);
+    expect(deletedReply.json().thread.replies).toEqual([]);
+
+    const deletedThread = await server.inject({
+      method: "DELETE",
+      url: `/files/team-comment-file/comments/${thread.threadId}`,
+      headers: headers("owner", "owner-token"),
+      payload: { expectedModifiedAt: deletedReply.json().thread.modifiedAt }
+    });
+    expect(deletedThread.statusCode).toBe(200);
+    expect(deletedThread.json()).toEqual({
+      deleted: { threadId: thread.threadId, deleted: true }
+    });
+
+    const local = await server.inject({
+      method: "POST",
+      url: "/files/private-comment-file/comments",
+      payload: {
+        nodeId: "text-1",
+        body: "개인 파일 로컬 코멘트",
+        authorName: "로컬 사용자"
+      }
+    });
+    expect(local.statusCode).toBe(200);
+    expect(local.json().thread).toMatchObject({
+      authorId: "로컬 사용자",
+      authorName: "로컬 사용자"
+    });
+
+    const visibleTeam = await server.inject({
+      method: "POST",
+      url: "/files/team-comment-file/comments",
+      headers: headers("peer", "peer-token"),
+      payload: {
+        nodeId: "text-1",
+        body: "팀 검수 알림",
+        authorName: "위조된 이름"
+      }
+    });
+    expect(visibleTeam.statusCode).toBe(200);
+    expect(visibleTeam.json().thread).toMatchObject({
+      authorId: "peer",
+      authorName: "peer"
+    });
+
+    const anonymousNotifications = await server.inject({
+      method: "GET",
+      url: "/comments/notifications?viewerId=observer"
+    });
+    expect(anonymousNotifications.statusCode).toBe(200);
+    expect(
+      anonymousNotifications.json().summary.projects.map(
+        (project: { projectId: string }) => project.projectId
+      )
+    ).toEqual(["private-comment-project"]);
+
+    const ownerNotifications = await server.inject({
+      method: "GET",
+      url: "/comments/notifications",
+      headers: headers("owner", "owner-token")
+    });
+    expect(ownerNotifications.statusCode).toBe(200);
+    expect(
+      new Set(
+        ownerNotifications.json().summary.projects.map(
+          (project: { projectId: string }) => project.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project", "team-comment-project"]));
+
+    const anonymousActivity = await server.inject({
+      method: "GET",
+      url: "/comments/activity?viewerId=observer&limit=1"
+    });
+    expect(anonymousActivity.statusCode).toBe(200);
+    expect(
+      new Set(
+        anonymousActivity.json().feed.events.map(
+          (event: { projectId: string }) => event.projectId
+        )
+      )
+    ).toEqual(new Set(["private-comment-project"]));
+  });
+
+  test("requires a team owner to change a team project's sharing boundary", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "sharing-project",
+      name: "공유 경계 프로젝트",
+      documentId: "sharing-file",
+      documentName: "공유 경계 문서"
+    });
+    await storage.setProjectSharing("sharing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" },
+          { userId: "team-viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" }
+        ]
+      }
+    });
+    const changeSharing = (headers?: Record<string, string>) =>
+      server.inject({
+        method: "PATCH",
+        url: "/projects/sharing-project/sharing",
+        headers,
+        payload: { mode: "private" }
+      });
+
+    expect((await changeSharing()).statusCode).toBe(401);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer viewer-token",
+          "x-layo-user-id": "team-viewer"
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer editor-token",
+          "x-layo-user-id": "team-editor"
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await changeSharing({
+          authorization: "Bearer owner-token",
+          "x-layo-user-id": "team-owner"
+        })
+      ).statusCode
+    ).toBe(200);
+    await expect(storage.readProject("sharing-project")).resolves.toMatchObject({
+      sharing: { mode: "private" }
+    });
+  });
+
+  test("authorizes shared project mutations by team role", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "team-project",
+      name: "팀 프로젝트",
+      documentId: "team-file",
+      documentName: "팀 문서"
+    });
+    await storage.setProjectSharing("team-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" },
+          { userId: "team-viewer", role: "viewer", teamIds: ["team-alpha"], token: "viewer-token" }
+        ]
+      }
+    });
+    const ownerHeaders = {
+      authorization: "Bearer owner-token",
+      "x-layo-user-id": "team-owner"
+    };
+    const editorHeaders = {
+      authorization: "Bearer editor-token",
+      "x-layo-user-id": "team-editor"
+    };
+    const viewerHeaders = {
+      authorization: "Bearer viewer-token",
+      "x-layo-user-id": "team-viewer"
+    };
+
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          payload: { name: "익명 변경" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          headers: viewerHeaders,
+          payload: { name: "뷰어 변경" }
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "PATCH",
+          url: "/projects/team-project",
+          headers: editorHeaders,
+          payload: { name: "에디터 변경" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          payload: { documentId: "anonymous-file", name: "익명 문서" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          headers: viewerHeaders,
+          payload: { documentId: "viewer-file", name: "뷰어 문서" }
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/documents",
+          headers: editorHeaders,
+          payload: { documentId: "editor-file", name: "에디터 문서" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/duplicate",
+          payload: { projectId: "anonymous-copy", documentIdPrefix: "anonymous-copy" }
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: "/projects/team-project/duplicate",
+          headers: viewerHeaders,
+          payload: { projectId: "viewer-copy", documentIdPrefix: "viewer-copy" }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    expect(
+      (
+        await server.inject({
+          method: "DELETE",
+          url: "/projects/team-project",
+          headers: editorHeaders
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await server.inject({
+          method: "DELETE",
+          url: "/projects/team-project",
+          headers: ownerHeaders
+        })
+      ).statusCode
+    ).toBe(200);
+    await expect(storage.readProject("team-project")).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  test("rejects a shared project mutation when its team changes after authorization", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "authorization-race-project",
+      name: "권한 경쟁 프로젝트",
+      documentId: "authorization-race-file",
+      documentName: "권한 경쟁 문서"
+    });
+    await storage.setProjectSharing("authorization-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const updateProject = storage.updateProject.bind(storage);
+    storage.updateProject = async (projectId, input, options) => {
+      await storage.setProjectSharing(projectId, {
+        mode: "team",
+        teamId: "team-beta"
+      });
+      return updateProject(projectId, input, options);
+    };
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" }
+        ]
+      }
+    });
+
+    const response = await server.inject({
+      method: "PATCH",
+      url: "/projects/authorization-race-project",
+      headers: {
+        authorization: "Bearer editor-token",
+        "x-layo-user-id": "team-editor"
+      },
+      payload: { name: "오래된 권한 변경" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    await expect(storage.readProject("authorization-race-project")).resolves.toMatchObject({
+      name: "권한 경쟁 프로젝트",
+      sharing: { mode: "team", teamId: "team-beta" }
+    });
+  });
+
+  test("rejects a comment write when the authorized project moves to another team before persistence", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-team-race-project",
+      name: "코멘트 팀 경쟁 프로젝트",
+      documentId: "comment-team-race-file",
+      documentName: "코멘트 팀 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-team-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+
+    const internals = storage as unknown as {
+      createCommentThread: FileStorage["createCommentThread"];
+    };
+    const originalCreate = internals.createCommentThread.bind(storage);
+    let markMutationReached!: () => void;
+    const mutationReached = new Promise<void>((resolve) => {
+      markMutationReached = resolve;
+    });
+    let releaseMutation!: () => void;
+    const mutationReleased = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    internals.createCommentThread = async (...args) => {
+      markMutationReached();
+      await mutationReleased;
+      return originalCreate(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-member",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-token"
+          }
+        ]
+      }
+    });
+
+    const pending = server.inject({
+      method: "POST",
+      url: "/files/comment-team-race-file/comments",
+      headers: {
+        authorization: "Bearer comment-token",
+        "x-layo-user-id": "comment-member"
+      },
+      payload: {
+        nodeId: "text-1",
+        body: "이동 전 권한으로 쓰면 안 됨"
+      }
+    });
+    await mutationReached;
+    await storage.setProjectSharing("comment-team-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    releaseMutation();
+
+    const response = await pending;
+    expect(response.statusCode).toBe(409);
+    await expect(
+      storage.listCommentThreads("comment-team-race-file", {
+        includeResolved: true
+      })
+    ).resolves.toEqual([]);
+  });
+
+  test("rejects a comment read when the authorized project moves to another team before sidecar access", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-read-race-project",
+      name: "코멘트 읽기 경쟁 프로젝트",
+      documentId: "comment-read-race-file",
+      documentName: "코멘트 읽기 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-read-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createCommentThread("comment-read-race-file", {
+      nodeId: "text-1",
+      body: "alpha 검수 내용",
+      authorId: "alpha-author",
+      authorName: "Alpha author"
+    });
+
+    const internals = storage as unknown as {
+      listCommentThreads: FileStorage["listCommentThreads"];
+    };
+    const originalList = internals.listCommentThreads.bind(storage);
+    let markReadReached!: () => void;
+    const readReached = new Promise<void>((resolve) => {
+      markReadReached = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    internals.listCommentThreads = async (...args) => {
+      markReadReached();
+      await readReleased;
+      return originalList(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-read-token"
+          }
+        ]
+      }
+    });
+
+    const pending = server.inject({
+      method: "GET",
+      url: "/files/comment-read-race-file/comments",
+      headers: {
+        authorization: "Bearer comment-read-token",
+        "x-layo-user-id": "comment-reader"
+      }
+    });
+    await readReached;
+    await storage.setProjectSharing("comment-read-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("comment-read-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 검수 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    releaseRead();
+
+    const response = await pending;
+    expect(response.statusCode).toBe(409);
+    expect(response.body).not.toContain("beta 전용 검수 내용");
+    await server.close();
+  });
+
+  test("rejects comment feeds when visible project authorization changes before sidecar access", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "comment-feed-race-project",
+      name: "코멘트 피드 경쟁 프로젝트",
+      documentId: "comment-feed-race-file",
+      documentName: "코멘트 피드 경쟁 문서"
+    });
+    await storage.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    await storage.createCommentThread("comment-feed-race-file", {
+      nodeId: "text-1",
+      body: "alpha 피드 내용",
+      authorId: "alpha-author",
+      authorName: "Alpha author"
+    });
+
+    const internals = storage as unknown as {
+      listCommentNotifications: FileStorage["listCommentNotifications"];
+      listCommentActivity: FileStorage["listCommentActivity"];
+    };
+    const originalNotifications =
+      internals.listCommentNotifications.bind(storage);
+    const originalActivity = internals.listCommentActivity.bind(storage);
+    let reachedCount = 0;
+    let markReadsReached!: () => void;
+    const readsReached = new Promise<void>((resolve) => {
+      markReadsReached = resolve;
+    });
+    const markReached = () => {
+      reachedCount += 1;
+      if (reachedCount === 2) {
+        markReadsReached();
+      }
+    };
+    let releaseReads!: () => void;
+    const readsReleased = new Promise<void>((resolve) => {
+      releaseReads = resolve;
+    });
+    internals.listCommentNotifications = async (...args) => {
+      markReached();
+      await readsReleased;
+      return originalNotifications(...args);
+    };
+    internals.listCommentActivity = async (...args) => {
+      markReached();
+      await readsReleased;
+      return originalActivity(...args);
+    };
+
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "comment-feed-reader",
+            role: "viewer",
+            teamIds: ["team-alpha"],
+            token: "comment-feed-token"
+          }
+        ]
+      }
+    });
+    const headers = {
+      authorization: "Bearer comment-feed-token",
+      "x-layo-user-id": "comment-feed-reader"
+    };
+    const pendingNotifications = server.inject({
+      method: "GET",
+      url: "/comments/notifications",
+      headers
+    });
+    const pendingActivity = server.inject({
+      method: "GET",
+      url: "/comments/activity",
+      headers
+    });
+    await readsReached;
+    await storage.setProjectSharing("comment-feed-race-project", {
+      mode: "team",
+      teamId: "team-beta"
+    });
+    await storage.createCommentThread("comment-feed-race-file", {
+      nodeId: "text-1",
+      body: "beta 전용 피드 내용",
+      authorId: "beta-author",
+      authorName: "Beta author"
+    });
+    releaseReads();
+
+    const [notifications, activity] = await Promise.all([
+      pendingNotifications,
+      pendingActivity
+    ]);
+    expect([notifications.statusCode, activity.statusCode]).toEqual([409, 409]);
+    expect(notifications.body).not.toContain("beta 전용 피드 내용");
+    expect(activity.body).not.toContain("beta 전용 피드 내용");
+    await server.close();
+  });
+
+  test("closes a team comment SSE stream when its owner makes the project private", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "sharing-project",
+      name: "공유 경계 프로젝트",
+      documentId: "sharing-file",
+      documentName: "공유 경계 문서"
+    });
+    await storage.setProjectSharing("sharing-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const server = createHttpServer(storage, {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" }
+        ]
+      }
+    });
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+    const headers = {
+      authorization: "Bearer owner-token",
+      "x-layo-user-id": "team-owner"
+    };
+
+    try {
+      const stream = await fetch(
+        `${address}/comments/events?fileId=sharing-file`,
+        { headers, signal: controller.signal }
+      );
+      expect(stream.status).toBe(200);
+
+      const changed = await fetch(`${address}/projects/sharing-project/sharing`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "private" })
+      });
+      expect(changed.status).toBe(200);
+      await expect(
+        readSseEvent(stream, "comment-authorization-ended")
+      ).resolves.toEqual({ code: "team_access_revoked" });
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  });
+
+  test("re-authenticates a team comment SSE stream and closes it after credential revocation", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "team-comment-project",
+      name: "팀 코멘트 프로젝트",
+      documentId: "team-comment-file",
+      documentName: "팀 코멘트 문서"
+    });
+    await storage.setProjectSharing("team-comment-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const auth: TeamAuthorizationConfig = {
+      members: [
+        {
+          userId: "owner",
+          role: "editor",
+          teamIds: ["team-alpha"],
+          token: "owner-token"
+        }
+      ]
+    };
+    const server = createHttpServer(storage, { libraryRegistryAuth: auth });
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const stream = await fetch(
+        `${address}/comments/events?fileId=team-comment-file`,
+        {
+          headers: {
+            authorization: "Bearer owner-token",
+            "x-layo-user-id": "owner"
+          },
+          signal: controller.signal
+        }
+      );
+      expect(stream.status).toBe(200);
+      expect(stream.url).not.toContain("owner-token");
+
+      auth.members[0].revokedAt = "2026-01-01T00:00:00.000Z";
+      await expect(
+        readSseEvent(stream, "comment-authorization-ended")
+      ).resolves.toEqual({ code: "credential_inactive" });
+    } finally {
+      controller.abort();
+      await server.close();
+    }
+  });
+
+  test("requires a file id for comment event streams", async () => {
+    const server = await createServerWithDocument();
+    const address = await server.listen({ host: "127.0.0.1", port: 0 });
+    const controller = new AbortController();
+
+    try {
+      const response = await fetch(`${address}/comments/events?after=0`, {
+        signal: controller.signal
+      });
+      expect(response.status).toBe(400);
+    } finally {
+      controller.abort();
+      await server.close();
+    }
   });
 
   test("streams comment mutation events to subscribed clients", async () => {

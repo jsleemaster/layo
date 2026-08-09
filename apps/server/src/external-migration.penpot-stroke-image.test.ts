@@ -214,6 +214,7 @@ test("reviews imports and persists Penpot stroke-image records through HTTP", as
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-stroke-image-1" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "stroke-images.penpot"

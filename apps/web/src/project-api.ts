@@ -11,6 +11,11 @@ export type ProjectSharing =
   | { mode: "private" }
   | { mode: "team"; teamId: string };
 
+export interface ProjectRequestCredentials {
+  userId: string;
+  memberToken: string;
+}
+
 export interface ProjectManifest {
   schemaVersion: 1;
   projectId: string;
@@ -49,6 +54,7 @@ export interface ImportedProjectArchive {
 
 export interface ImportProjectArchiveInput {
   archiveBase64: string;
+  idempotencyKey: string;
   projectId?: string;
   name?: string;
   documentIdPrefix?: string;
@@ -76,32 +82,60 @@ export async function createProject(
 export async function updateProject(
   projectId: string,
   input: { name?: string; currentDocumentId?: string },
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}`), "PATCH", input, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}`),
+    "PATCH",
+    input,
+    fetcher,
+    credentials
+  );
 }
 
 export async function duplicateProject(
   projectId: string,
   input: { projectId?: string; name?: string; documentIdPrefix?: string },
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}/duplicate`), "POST", input, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}/duplicate`),
+    "POST",
+    input,
+    fetcher,
+    credentials
+  );
 }
 
 export async function setProjectSharing(
   projectId: string,
   sharing: ProjectSharing,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}/sharing`), "PATCH", sharing, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}/sharing`),
+    "PATCH",
+    sharing,
+    fetcher,
+    credentials
+  );
 }
 
 export async function deleteProject(
   projectId: string,
-  fetcher: typeof fetch = fetch
+  fetcher: typeof fetch = fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  return writeProject(apiUrl(`/projects/${projectId}`), "DELETE", undefined, fetcher);
+  return writeProject(
+    apiUrl(`/projects/${projectId}`),
+    "DELETE",
+    undefined,
+    fetcher,
+    credentials
+  );
 }
 
 export async function reviewProjectArchive(
@@ -121,10 +155,14 @@ export async function importProjectArchive(
   input: ImportProjectArchiveInput,
   fetcher: typeof fetch = fetch
 ): Promise<ImportedProjectArchive> {
+  const { idempotencyKey, ...body } = input;
   const response = await fetcher(apiUrl("/projects/import/archive"), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input)
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify(body)
   });
   const payload = await readJson(response);
   return (payload as { imported: ImportedProjectArchive }).imported;
@@ -153,11 +191,24 @@ async function writeProject(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
   body: unknown,
-  fetcher: typeof fetch
+  fetcher: typeof fetch,
+  credentials?: ProjectRequestCredentials
 ): Promise<ProjectManifest> {
-  const init: RequestInit = { method };
+  const headers: Record<string, string> = {};
   if (body !== undefined) {
-    init.headers = { "Content-Type": "application/json" };
+    headers["Content-Type"] = "application/json";
+  }
+  const userId = credentials?.userId.trim();
+  const memberToken = credentials?.memberToken.trim();
+  if (userId && memberToken) {
+    headers["x-layo-user-id"] = userId;
+    headers.Authorization = `Bearer ${memberToken}`;
+  }
+  const init: RequestInit = {
+    method,
+    ...(Object.keys(headers).length > 0 ? { headers } : {})
+  };
+  if (body !== undefined) {
     init.body = JSON.stringify(body);
   }
   const response = await fetcher(url, init);

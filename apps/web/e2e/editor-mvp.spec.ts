@@ -591,8 +591,20 @@ test("file panel sends active team member credentials for library publish and im
       url.searchParams.get("fileId") === documentId
     );
   });
+  const sharingRequest = page.waitForRequest((request) => {
+    const url = new URL(request.url());
+    return (
+      request.method() === "PATCH" &&
+      url.pathname === `/projects/${sourceProjectId}/sharing`
+    );
+  });
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await expect(page.getByTestId("project-sharing-status")).toContainText("디자인 팀");
+  const shared = await sharingRequest;
+  expect(shared.headers()).toMatchObject({
+    authorization: "Bearer editor-member-token",
+    "x-layo-user-id": "local-user"
+  });
   const streamed = await eventStreamRequest;
   expect(streamed.headers()).toMatchObject({
     authorization: "Bearer editor-member-token",
@@ -1037,11 +1049,26 @@ test("snapshot persistence retries a server conflict and preserves an independen
 
   const readServerFields = async () => {
     const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
-    const file = (await response.json()).file;
-    return {
-      x: file.pages[0].children[0].transform.x as number,
-      text: file.pages[0].children[0].children[0].content.value as string
+    if (!response.ok()) {
+      return null;
+    }
+    const payload = (await response.json()) as {
+      file?: {
+        pages?: Array<{
+          children?: Array<{
+            transform?: { x?: number };
+            children?: Array<{ content?: { value?: string } }>;
+          }>;
+        }>;
+      };
     };
+    const frame = payload.file?.pages?.[0]?.children?.[0];
+    const x = frame?.transform?.x;
+    const text = frame?.children?.[0]?.content?.value;
+    if (typeof x !== "number" || typeof text !== "string") {
+      return null;
+    }
+    return { x, text };
   };
 
   try {
@@ -3097,6 +3124,33 @@ test("component variant property types choose toggle or select controls explicit
   });
   expect(component.ok()).toBeTruthy();
 
+  let releaseFinalVariantPersist = () => {};
+  const finalVariantPersistRelease = new Promise<void>((resolve) => {
+    releaseFinalVariantPersist = resolve;
+  });
+  let finalVariantPersistHeld = false;
+  await page.route(
+    `**/files/${documentId}/components/component-card/variants`,
+    async (route) => {
+      const payload = route.request().postDataJSON() as {
+        variants?: Array<{
+          id: string;
+          properties: Array<{ name: string; value: string; type?: string }>;
+        }>;
+      };
+      const disabledVariant = payload.variants?.find((variant) => variant.id === "variant-2");
+      if (
+        !finalVariantPersistHeld
+        && disabledVariant?.properties[0]?.value === "false"
+        && disabledVariant.properties[1]?.value === "false"
+      ) {
+        finalVariantPersistHeld = true;
+        await finalVariantPersistRelease;
+      }
+      await route.continue();
+    }
+  );
+
   await page.reload();
   await openFilePanel(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
@@ -3125,6 +3179,12 @@ test("component variant property types choose toggle or select controls explicit
   );
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("false");
+  await expect.poll(() => finalVariantPersistHeld).toBe(true);
+  try {
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 중");
+  } finally {
+    releaseFinalVariantPersist();
+  }
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
   await expect
     .poll(async () => {
@@ -3172,6 +3232,230 @@ test("component variant property types choose toggle or select controls explicit
   await toggle.click();
   await expect(toggle).not.toBeChecked();
   await expect(surfaceSelect).toHaveValue("false");
+});
+
+test("component variant status waits for the newest component persistence", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const frameComponent = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(frameComponent.ok()).toBeTruthy();
+  const textComponent = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "text-1", componentId: "component-heading", name: "Heading" }
+  });
+  expect(textComponent.ok()).toBeTruthy();
+
+  let releaseCardPersist = () => {};
+  const cardPersistRelease = new Promise<void>((resolve) => {
+    releaseCardPersist = resolve;
+  });
+  let releaseHeadingPersist = () => {};
+  const headingPersistRelease = new Promise<void>((resolve) => {
+    releaseHeadingPersist = resolve;
+  });
+  let cardPersistHeld = false;
+  let headingPersistHeld = false;
+  await page.route(
+    (url) => url.pathname.startsWith(`/files/${documentId}/components/`) && url.pathname.endsWith("/variants"),
+    async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (!cardPersistHeld && pathname.endsWith("/component-card/variants")) {
+        cardPersistHeld = true;
+        await cardPersistRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced component persistence failure" })
+        });
+        return;
+      }
+      if (!headingPersistHeld && pathname.endsWith("/component-heading/variants")) {
+        headingPersistHeld = true;
+        await headingPersistRelease;
+      }
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  await expect.poll(() => cardPersistHeld).toBe(true);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("tone");
+  releaseCardPersist();
+  await expect.poll(() => headingPersistHeld).toBe(true);
+  try {
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 중");
+  } finally {
+    releaseHeadingPersist();
+  }
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+});
+
+test("instance variant completion cannot overwrite a newer definition persistence", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const component = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(component.ok()).toBeTruthy();
+  const variants = await page.request.put(
+    `http://127.0.0.1:4317/files/${documentId}/components/component-card/variants`,
+    {
+      data: {
+        variants: [
+          {
+            id: "default",
+            name: "Default",
+            properties: [{ name: "variant", value: "Default", type: "select" }]
+          },
+          {
+            id: "alternate",
+            name: "Alternate",
+            properties: [{ name: "variant", value: "Alternate", type: "select" }]
+          }
+        ]
+      }
+    }
+  );
+  expect(variants.ok()).toBeTruthy();
+  const instance = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/component-instances`, {
+    data: {
+      parentId: "page-1",
+      definitionId: "component-card",
+      instanceId: "instance-card",
+      x: 520,
+      y: 140
+    }
+  });
+  expect(instance.ok()).toBeTruthy();
+
+  let releaseInstancePersist = () => {};
+  const instancePersistRelease = new Promise<void>((resolve) => {
+    releaseInstancePersist = resolve;
+  });
+  let releaseDefinitionPersist = () => {};
+  const definitionPersistRelease = new Promise<void>((resolve) => {
+    releaseDefinitionPersist = resolve;
+  });
+  let instancePersistHeld = false;
+  let definitionPersistHeld = false;
+  await page.route(
+    (url) =>
+      url.pathname === `/files/${documentId}/nodes/instance-card/component-variant`
+      || url.pathname === `/files/${documentId}/components/component-card/variants`,
+    async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (!instancePersistHeld && pathname.includes("/nodes/instance-card/")) {
+        instancePersistHeld = true;
+        await instancePersistRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced instance persistence failure" })
+        });
+        return;
+      }
+      if (!definitionPersistHeld && pathname.endsWith("/components/component-card/variants")) {
+        definitionPersistHeld = true;
+        await definitionPersistRelease;
+      }
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "Card 인스턴스" }).click();
+  await page.getByTestId("inspector-component-variant-variant").selectOption("Alternate");
+  await expect.poll(() => instancePersistHeld).toBe(true);
+
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  releaseInstancePersist();
+  await expect.poll(() => definitionPersistHeld).toBe(true);
+  try {
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 중");
+  } finally {
+    releaseDefinitionPersist();
+  }
+  await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
+});
+
+test("partial component persistence refreshes dev export when a newer write fails", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const frameComponent = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "frame-1", componentId: "component-card", name: "Card" }
+  });
+  expect(frameComponent.ok()).toBeTruthy();
+  const textComponent = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/components`, {
+    data: { nodeId: "text-1", componentId: "component-heading", name: "Heading" }
+  });
+  expect(textComponent.ok()).toBeTruthy();
+
+  let releaseCardPersist = () => {};
+  const cardPersistRelease = new Promise<void>((resolve) => {
+    releaseCardPersist = resolve;
+  });
+  let cardPersistHeld = false;
+  let headingFailureServed = false;
+  let codeExportRequests = 0;
+  await page.route(
+    (url) => url.pathname.startsWith(`/files/${documentId}/components/`) && url.pathname.endsWith("/variants"),
+    async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (!cardPersistHeld && pathname.endsWith("/component-card/variants")) {
+        cardPersistHeld = true;
+        await cardPersistRelease;
+        await route.continue();
+        return;
+      }
+      if (pathname.endsWith("/component-heading/variants")) {
+        headingFailureServed = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced newer component failure" })
+        });
+        return;
+      }
+      await route.continue();
+    }
+  );
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/export/code`,
+    async (route) => {
+      codeExportRequests += 1;
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("surface");
+  await expect.poll(() => cardPersistHeld).toBe(true);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("inspector-component-definition-variant-property-name-default-0").fill("tone");
+  await page.getByTestId("inspector-tab-dev").click();
+  await expect(page.getByTestId("dev-panel-status")).toContainText("코드 내보내기 준비됨");
+  const baselineExportRequests = codeExportRequests;
+  expect(baselineExportRequests).toBeGreaterThan(0);
+
+  try {
+    releaseCardPersist();
+    await expect.poll(() => headingFailureServed).toBe(true);
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 실패");
+    await expect.poll(() => codeExportRequests).toBeGreaterThan(baselineExportRequests);
+  } finally {
+    releaseCardPersist();
+  }
 });
 
 test("inspector dev panel copies generated handoff snippets to the clipboard", async ({ page }) => {
@@ -6095,6 +6379,1362 @@ test("comments panel adds replies to a selected-layer thread", async ({ page }) 
     .toBe("문구를 더 짧게 줄였어요");
 });
 
+test("comments panel lets owners edit and delete threads and replies with stale-write recovery", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("수정 전 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await page.getByRole("button", { name: "수정 전 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("수정된 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 코멘트");
+  await page.waitForTimeout(2_500);
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+
+  await page.getByTestId("comment-reply-body").fill("수정 전 답글");
+  await page.getByRole("button", { name: "답글 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+  await page.getByRole("button", { name: "수정 전 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("수정된 답글");
+  await page.getByRole("button", { name: "답글 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("수정된 답글");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 답글 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 답글");
+
+  const foreignResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "외부 소유 코멘트",
+        authorId: "reviewer",
+        authorName: "리뷰어"
+      }
+    }
+  );
+  expect(foreignResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("외부 소유 코멘트");
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 수정" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "외부 소유 코멘트 삭제" })).toHaveCount(0);
+
+  await page.getByTestId("comment-body").fill("동시 수정 전");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(threadsResponse.ok()).toBeTruthy();
+  const concurrentThread = ((await threadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "동시 수정 전");
+  expect(concurrentThread).toBeDefined();
+
+  await page.getByRole("button", { name: "동시 수정 전 수정" }).click();
+  const threadDraft = page.getByTestId("comment-thread-edit-body");
+  await threadDraft.fill("내 오래된 수정");
+  const externalUpdate = await page.request.patch(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${concurrentThread!.threadId}`,
+    {
+      data: {
+        body: "외부 최신 코멘트",
+        actorId: "사용자",
+        expectedModifiedAt: concurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalUpdate.ok()).toBeTruthy();
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
+
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
+  );
+  const latestConflict = page.getByTestId("comment-edit-latest");
+  await expect(latestConflict).toContainText("최신 서버 코멘트");
+  await expect(latestConflict).toContainText("외부 최신 코멘트");
+  await expect(page.getByTestId("comment-list")).toContainText("외부 최신 코멘트");
+  await expect(threadDraft).toHaveValue("내 오래된 수정");
+
+  await threadDraft.fill("내 충돌 후 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+  await expect(page.getByTestId("comment-list")).toContainText("내 충돌 후 수정");
+
+  const latestThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(latestThreadsResponse.ok()).toBeTruthy();
+  const latestConcurrentThread = ((await latestThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((thread) => thread.body === "내 충돌 후 수정");
+  expect(latestConcurrentThread).toBeDefined();
+
+  await page.getByTestId("comment-body").fill("기존 새 코멘트 초안");
+  await page.getByRole("button", { name: "내 충돌 후 수정 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("원격 삭제에도 보존할 초안");
+  const externalDelete = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${latestConcurrentThread!.threadId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: latestConcurrentThread!.modifiedAt
+      }
+    }
+  );
+  expect(externalDelete.ok()).toBeTruthy();
+
+  const recovery = page.getByTestId("comment-edit-recovery");
+  await expect(recovery).toContainText("원본 코멘트가 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 초안"
+  );
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 코멘트 초안과 합치기" })
+    .click();
+  const mergedRecoveredThreadBody = "기존 새 코멘트 초안\n\n원격 삭제에도 보존할 초안";
+  await expect(page.getByTestId("comment-body")).toHaveValue(mergedRecoveredThreadBody);
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("기존 새 코멘트 초안");
+  await expect(page.getByTestId("comment-list")).toContainText("원격 삭제에도 보존할 초안");
+
+  const recoveredThreadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(recoveredThreadsResponse.ok()).toBeTruthy();
+  const recoveredThread = ((await recoveredThreadsResponse.json()).threads as Array<{
+    threadId: string;
+    body: string;
+  }>).find((thread) => thread.body === mergedRecoveredThreadBody);
+  expect(recoveredThread).toBeDefined();
+
+  const createdRemoteReply = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies`,
+    {
+      data: {
+        body: "원격 삭제할 답글",
+        authorId: "사용자",
+        authorName: "사용자"
+      }
+    }
+  );
+  expect(createdRemoteReply.ok()).toBeTruthy();
+  const createdRemoteReplyPayload = await createdRemoteReply.json();
+  const remoteReply = (createdRemoteReplyPayload.thread.replies as Array<{
+    replyId: string;
+    body: string;
+    modifiedAt: string;
+  }>).find((reply) => reply.body === "원격 삭제할 답글");
+  expect(remoteReply).toBeDefined();
+
+  const recoveredThreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "기존 새 코멘트 초안" });
+  await expect(recoveredThreadRow).toHaveCount(1);
+  await recoveredThreadRow.getByTestId("comment-reply-body").fill("기존 새 답글 초안");
+
+  await page.getByRole("button", { name: "원격 삭제할 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("원격 삭제에도 보존할 답글 초안");
+  const deletedRemoteReply = await page.request.delete(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${recoveredThread!.threadId}/replies/${remoteReply!.replyId}`,
+    {
+      data: {
+        actorId: "사용자",
+        expectedModifiedAt: remoteReply!.modifiedAt
+      }
+    }
+  );
+  expect(deletedRemoteReply.ok()).toBeTruthy();
+
+  await expect(recovery).toContainText("원본 답글이 삭제되었습니다");
+  await expect(page.getByTestId("comment-edit-recovery-body")).toHaveValue(
+    "원격 삭제에도 보존할 답글 초안"
+  );
+  await expect(recovery).toContainText("기존 작성 초안과 합쳐 두 내용을 모두 보존합니다");
+  await page
+    .getByRole("button", { name: "삭제된 초안 기존 답글 초안과 합치기" })
+    .click();
+
+  await expect(recoveredThreadRow.getByTestId("comment-reply-body")).toHaveValue(
+    "기존 새 답글 초안\n\n원격 삭제에도 보존할 답글 초안"
+  );
+  await recoveredThreadRow.getByRole("button", { name: "답글 추가" }).click();
+  await expect(recoveredThreadRow).toContainText("원격 삭제에도 보존할 답글 초안");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "수정된 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-list")).not.toContainText("수정된 코멘트");
+});
+
+test("background comment refresh cannot replace a newer foreground result", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let captureNextCommentList = false;
+  let staleResponseReady = false;
+  let staleResponseFulfilled = false;
+  let foregroundResponseServed = false;
+  let releaseStaleResponse = () => {};
+  const staleResponseRelease = new Promise<void>((resolve) => {
+    releaseStaleResponse = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET" || !captureNextCommentList) {
+        await route.continue();
+        return;
+      }
+      if (!staleResponseReady) {
+        const response = await route.fetch();
+        staleResponseReady = true;
+        await staleResponseRelease;
+        await route.fulfill({ response });
+        staleResponseFulfilled = true;
+        return;
+      }
+      if (foregroundResponseServed) {
+        await laterResponsesRelease;
+        await route.abort();
+        return;
+      }
+      const response = await route.fetch();
+      const payload = await response.json() as { threads?: Array<{ body: string }> };
+      if (payload.threads?.some((thread) => thread.body === "최신 foreground 코멘트")) {
+        foregroundResponseServed = true;
+      }
+      await route.fulfill({ response });
+    }
+  );
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  captureNextCommentList = true;
+  await expect.poll(() => staleResponseReady, { timeout: 5_000 }).toBe(true);
+  try {
+    await page.getByTestId("comment-body").fill("최신 foreground 코멘트");
+    await page.getByRole("button", { name: "코멘트 추가" }).click();
+    await expect.poll(() => foregroundResponseServed).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-list")).toContainText("최신 foreground 코멘트");
+    releaseStaleResponse();
+    await expect.poll(() => staleResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-list")).toContainText("최신 foreground 코멘트");
+  } finally {
+    releaseStaleResponse();
+    releaseLaterResponses();
+  }
+});
+
+test("foreground comment refresh cannot replace a newer polling result", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const initial = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "기준 코멘트", authorName: "디자인 팀" }
+  });
+  expect(initial.ok()).toBeTruthy();
+
+  let captureForegroundResponse = false;
+  let foregroundResponseReady = false;
+  let foregroundResponseFulfilled = false;
+  let newerPollingResponseServed = false;
+  let releaseForegroundResponse = () => {};
+  const foregroundResponseRelease = new Promise<void>((resolve) => {
+    releaseForegroundResponse = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/comments/events",
+    async (route) => route.abort()
+  );
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET" || !captureForegroundResponse) {
+        await route.continue();
+        return;
+      }
+      if (newerPollingResponseServed) {
+        await laterResponsesRelease;
+        await route.abort();
+        return;
+      }
+      const response = await route.fetch();
+      const payload = await response.json() as { threads?: Array<{ body: string }> };
+      if (
+        !foregroundResponseReady
+        && payload.threads?.some((thread) => thread.body === "foreground 기준")
+      ) {
+        foregroundResponseReady = true;
+        await foregroundResponseRelease;
+        await route.fulfill({ response });
+        foregroundResponseFulfilled = true;
+        return;
+      }
+      if (payload.threads?.some((thread) => thread.body === "더 최신 polling 코멘트")) {
+        newerPollingResponseServed = true;
+      }
+      await route.fulfill({ response });
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("기준 코멘트");
+  captureForegroundResponse = true;
+  await page.getByTestId("comment-body").fill("foreground 기준");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => foregroundResponseReady).toBe(true);
+
+  const external = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "더 최신 polling 코멘트", authorName: "외부 검수자" }
+  });
+  expect(external.ok()).toBeTruthy();
+  try {
+    await expect.poll(() => newerPollingResponseServed, { timeout: 6_000 }).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("더 최신 polling 코멘트");
+    releaseForegroundResponse();
+    await expect.poll(() => foregroundResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-list")).toContainText("foreground 기준");
+    await expect(page.getByTestId("comment-list")).toContainText("더 최신 polling 코멘트");
+  } finally {
+    releaseForegroundResponse();
+    releaseLaterResponses();
+  }
+});
+
+test("failed background comment refresh preserves an unsent reply draft", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("답글 초안 보존 대상");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("답글 초안 보존 대상");
+
+  let failNextCommentList = false;
+  let failedRefreshServed = false;
+  let successfulRefreshServed = false;
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (failNextCommentList && !failedRefreshServed) {
+        failedRefreshServed = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced comment refresh failure" })
+        });
+        return;
+      }
+      if (failedRefreshServed && !successfulRefreshServed) {
+        const response = await route.fetch();
+        successfulRefreshServed = true;
+        await route.fulfill({ response });
+        return;
+      }
+      await route.continue();
+    }
+  );
+
+  const replyDraft = page.getByTestId("comment-reply-body");
+  await replyDraft.fill("전송하지 않은 답글 초안");
+  failNextCommentList = true;
+  await expect.poll(() => failedRefreshServed, { timeout: 5_000 }).toBe(true);
+  await expect.poll(() => successfulRefreshServed, { timeout: 5_000 }).toBe(true);
+  await expect(replyDraft).toHaveValue("전송하지 않은 답글 초안");
+});
+
+test("delayed initial comment refresh cannot overwrite foreground error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let fulfilledInitialResponses = 0;
+  let directFailureServed = false;
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() === "POST") {
+        directFailureServed = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced foreground failure" })
+        });
+        return;
+      }
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldResponseReleases.push(releaseResponse);
+        const response = await route.fetch();
+        await responseRelease;
+        await route.fulfill({ response });
+        fulfilledInitialResponses += 1;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  await expect.poll(() => heldInitialResponses).toBe(2);
+  try {
+    await openFilePanel(page);
+    await page.getByRole("button", { name: "헤드라인" }).click();
+    await page.getByTestId("comment-body").fill("실패할 코멘트");
+    await page.getByRole("button", { name: "코멘트 추가" }).click();
+    await expect.poll(() => directFailureServed).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("forced foreground failure");
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => fulfilledInitialResponses).toBe(2);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-status")).toContainText("forced foreground failure");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    releaseLaterResponses();
+  }
+});
+
+test("initial comment summary survives a later preserve-status poll", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: {
+      nodeId: "text-1",
+      body: "초기 읽지 않은 코멘트",
+      authorName: "디자인 팀"
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let pollingResponseServed = false;
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldResponseReleases.push(releaseResponse);
+        const response = await route.fetch();
+        await responseRelease;
+        await route.fulfill({ response });
+        return;
+      }
+      pollingResponseServed = true;
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => pollingResponseServed, { timeout: 6_000 }).toBe(true);
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    await expect(page.getByTestId("comment-list")).toContainText("초기 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+  }
+});
+
+test("failed initial comment refresh yields to a newer successful poll", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "최신 poll 코멘트", authorName: "디자인 팀" }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let failedInitialResponses = 0;
+  let successfulPollingResponseServed = false;
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced stale initial refresh failure" })
+        });
+        failedInitialResponses += 1;
+        return;
+      }
+      successfulPollingResponseServed = true;
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => successfulPollingResponseServed, { timeout: 6_000 }).toBe(true);
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    await expect(page.getByTestId("comment-list")).toContainText("최신 poll 코멘트");
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => failedInitialResponses).toBe(2);
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText("forced stale initial refresh failure");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+  }
+});
+
+test("pending successful comment poll clears an older initial refresh error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "대기 중인 최신 poll 코멘트", authorName: "디자인 팀" }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const initialResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let failedInitialResponses = 0;
+  let firstInitialResponseAt: number | null = null;
+  let pollingResponseReady = false;
+  let pollingResponseFulfilled = false;
+  let releasePollingResponse = () => {};
+  const pollingResponseRelease = new Promise<void>((resolve) => {
+    releasePollingResponse = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      firstInitialResponseAt ??= Date.now();
+      if (!pollingResponseReady && Date.now() - firstInitialResponseAt < 1_500) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        initialResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced older initial refresh failure" })
+        });
+        failedInitialResponses += 1;
+        return;
+      }
+      if (!pollingResponseReady) {
+        pollingResponseReady = true;
+        const response = await route.fetch();
+        await pollingResponseRelease;
+        await route.fulfill({ response });
+        pollingResponseFulfilled = true;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBeGreaterThan(0);
+    await expect.poll(() => pollingResponseReady, { timeout: 6_000 }).toBe(true);
+    const expectedFailedInitialResponses = heldInitialResponses;
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    for (const releaseResponse of initialResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => failedInitialResponses).toBe(expectedFailedInitialResponses);
+    await expect(page.getByTestId("comment-status")).toContainText(
+      "forced older initial refresh failure"
+    );
+
+    releasePollingResponse();
+    await expect.poll(() => pollingResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("대기 중인 최신 poll 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText(
+      "forced older initial refresh failure"
+    );
+  } finally {
+    for (const releaseResponse of initialResponseReleases) {
+      releaseResponse();
+    }
+    releasePollingResponse();
+    releaseLaterResponses();
+  }
+});
+
+test("pending successful comment poll clears a successful mutation refresh error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let captureCommentLists = false;
+  let foregroundRefreshReady = false;
+  let foregroundRefreshFailed = false;
+  let pollingRefreshReady = false;
+  let pollingRefreshFulfilled = false;
+  let releaseForegroundRefresh = () => {};
+  const foregroundRefreshRelease = new Promise<void>((resolve) => {
+    releaseForegroundRefresh = resolve;
+  });
+  let releasePollingRefresh = () => {};
+  const pollingRefreshRelease = new Promise<void>((resolve) => {
+    releasePollingRefresh = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/comments/events",
+    async (route) => route.abort()
+  );
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET" || !captureCommentLists) {
+        await route.continue();
+        return;
+      }
+      if (!foregroundRefreshReady) {
+        foregroundRefreshReady = true;
+        await foregroundRefreshRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced successful mutation refresh failure" })
+        });
+        foregroundRefreshFailed = true;
+        return;
+      }
+      if (!pollingRefreshReady) {
+        const response = await route.fetch();
+        pollingRefreshReady = true;
+        await pollingRefreshRelease;
+        await route.fulfill({ response });
+        pollingRefreshFulfilled = true;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("활성 코멘트 없음");
+  await page.waitForTimeout(250);
+  captureCommentLists = true;
+  await page.getByTestId("comment-body").fill("성공한 변경의 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+
+  try {
+    await expect.poll(() => foregroundRefreshReady).toBe(true);
+    await expect.poll(() => pollingRefreshReady, { timeout: 6_000 }).toBe(true);
+    releaseForegroundRefresh();
+    await expect.poll(() => foregroundRefreshFailed).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText(
+      "forced successful mutation refresh failure"
+    );
+
+    releasePollingRefresh();
+    await expect.poll(() => pollingRefreshFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("성공한 변경의 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 활성 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText(
+      "forced successful mutation refresh failure"
+    );
+  } finally {
+    releaseForegroundRefresh();
+    releasePollingRefresh();
+    releaseLaterResponses();
+  }
+});
+
+test("old-file comment completion cannot replace a new-file draft or thread list", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "코멘트 전환 A");
+  const secondProjectId = await createNamedProject(page, "코멘트 전환 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const secondProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${secondProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  const secondDocumentId = (await secondProjectResponse.json()).project.currentDocumentId as string;
+  const secondThread = await page.request.post(
+    `http://127.0.0.1:4317/files/${secondDocumentId}/comments`,
+    { data: { nodeId: "text-1", body: "B 파일 코멘트", authorName: "B 검수자" } }
+  );
+  expect(secondThread.ok()).toBeTruthy();
+
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 전환 A 불러옴");
+  let firstCommentResponseReady = false;
+  let firstCommentResponseFulfilled = false;
+  let releaseFirstCommentResponse = () => {};
+  const firstCommentResponseRelease = new Promise<void>((resolve) => {
+    releaseFirstCommentResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${firstDocumentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "POST" || firstCommentResponseReady) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      firstCommentResponseReady = true;
+      await firstCommentResponseRelease;
+      await route.fulfill({ response });
+      firstCommentResponseFulfilled = true;
+    }
+  );
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("A 지연 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => firstCommentResponseReady).toBe(true);
+
+  await openFilePanel(page);
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 전환 B 불러옴");
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("B 파일 코멘트");
+  await page.getByTestId("comment-body").fill("B 파일에서 작성 중인 초안");
+
+  try {
+    releaseFirstCommentResponse();
+    await expect.poll(() => firstCommentResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-body")).toHaveValue("B 파일에서 작성 중인 초안");
+    await expect(page.getByTestId("comment-list")).toContainText("B 파일 코멘트");
+    await expect(page.getByTestId("comment-list")).not.toContainText("A 지연 코멘트");
+  } finally {
+    releaseFirstCommentResponse();
+  }
+});
+
+test("new-file scope clears old comments and drafts when its refresh fails", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "코멘트 범위 A");
+  const secondProjectId = await createNamedProject(page, "코멘트 범위 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const secondProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${secondProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  const secondDocumentId = (await secondProjectResponse.json()).project.currentDocumentId as string;
+  const firstThread = await page.request.post(
+    `http://127.0.0.1:4317/files/${firstDocumentId}/comments`,
+    { data: { nodeId: "text-1", body: "A 파일에만 있는 코멘트", authorName: "A 검수자" } }
+  );
+  expect(firstThread.ok()).toBeTruthy();
+
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 범위 A 불러옴");
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("A 파일에만 있는 코멘트");
+  await page.getByTestId("comment-body").fill("A 파일의 전송하지 않은 초안");
+
+  let failedSecondFileRefreshes = 0;
+  await page.route(
+    (url) => url.pathname === `/files/${secondDocumentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      failedSecondFileRefreshes += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forced new-file comment refresh failure" })
+      });
+    }
+  );
+
+  await openFilePanel(page);
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 범위 B 불러옴");
+  await expect.poll(() => failedSecondFileRefreshes).toBeGreaterThan(0);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).not.toContainText("A 파일에만 있는 코멘트");
+  await expect(page.getByTestId("comment-body")).toHaveValue("");
+});
+
+test("delayed comment and reply completion preserve newer unsent drafts", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let commentRequestReserved = false;
+  let commentResponseReady = false;
+  let commentResponseFulfilled = false;
+  let releaseCommentResponse = () => {};
+  const commentResponseRelease = new Promise<void>((resolve) => {
+    releaseCommentResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "POST" || commentRequestReserved) {
+        await route.continue();
+        return;
+      }
+      commentRequestReserved = true;
+      const response = await route.fetch();
+      commentResponseReady = true;
+      await commentResponseRelease;
+      await route.fulfill({ response });
+      commentResponseFulfilled = true;
+    }
+  );
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("제출한 코멘트 A");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => commentResponseReady).toBe(true);
+  await page.getByTestId("comment-body").fill("아직 제출하지 않은 코멘트 B");
+  try {
+    releaseCommentResponse();
+    await expect.poll(() => commentResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-body")).toHaveValue("아직 제출하지 않은 코멘트 B");
+  } finally {
+    releaseCommentResponse();
+  }
+
+  const threadResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const thread = (await threadResponse.json()).threads.find(
+    (candidate: { body: string }) => candidate.body === "제출한 코멘트 A"
+  ) as { threadId: string } | undefined;
+  expect(thread?.threadId).toBeTruthy();
+
+  let replyRequestReserved = false;
+  let replyResponseReady = false;
+  let replyResponseFulfilled = false;
+  let releaseReplyResponse = () => {};
+  const replyResponseRelease = new Promise<void>((resolve) => {
+    releaseReplyResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${thread!.threadId}/replies`,
+    async (route) => {
+      if (route.request().method() !== "POST" || replyRequestReserved) {
+        await route.continue();
+        return;
+      }
+      replyRequestReserved = true;
+      const response = await route.fetch();
+      replyResponseReady = true;
+      await replyResponseRelease;
+      await route.fulfill({ response });
+      replyResponseFulfilled = true;
+    }
+  );
+
+  const threadRow = page.getByTestId("comment-list").getByRole("listitem").filter({
+    hasText: "제출한 코멘트 A"
+  });
+  const replyDraft = threadRow.getByTestId("comment-reply-body");
+  await replyDraft.fill("제출한 답글 A");
+  await threadRow.getByRole("button", { name: "답글 추가" }).click();
+  await expect.poll(() => replyResponseReady).toBe(true);
+  await replyDraft.fill("아직 제출하지 않은 답글 B");
+  try {
+    releaseReplyResponse();
+    await expect.poll(() => replyResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+    await expect(replyDraft).toHaveValue("아직 제출하지 않은 답글 B");
+  } finally {
+    releaseReplyResponse();
+  }
+});
+
+test("newer read mutation does not suppress delayed comment draft reconciliation", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const unread = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "별도 읽음 처리 대상", authorName: "외부 검수자" }
+  });
+  expect(unread.ok()).toBeTruthy();
+
+  let commentRequestReserved = false;
+  let commentResponseReady = false;
+  let commentResponseFulfilled = false;
+  let releaseCommentResponse = () => {};
+  const commentResponseRelease = new Promise<void>((resolve) => {
+    releaseCommentResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (
+        route.request().method() !== "POST"
+        || commentRequestReserved
+        || route.request().postDataJSON()?.body !== "지연 성공 코멘트"
+      ) {
+        await route.continue();
+        return;
+      }
+      commentRequestReserved = true;
+      const response = await route.fetch();
+      commentResponseReady = true;
+      await commentResponseRelease;
+      await route.fulfill({ response });
+      commentResponseFulfilled = true;
+    }
+  );
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("별도 읽음 처리 대상");
+  await page.getByTestId("comment-body").fill("지연 성공 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => commentResponseReady).toBe(true);
+
+  const unreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "별도 읽음 처리 대상" });
+  await unreadRow.getByRole("button", { name: "읽음 처리", exact: true }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  try {
+    releaseCommentResponse();
+    await expect.poll(() => commentResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("지연 성공 코멘트");
+    await expect(page.getByTestId("comment-body")).toHaveValue("");
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  } finally {
+    releaseCommentResponse();
+  }
+});
+
+test("newer read mutation does not suppress delayed comment edit reconciliation", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("지연 수정 전 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const editedThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "지연 수정 전 코멘트"
+  ) as { threadId: string } | undefined;
+  expect(editedThread?.threadId).toBeTruthy();
+
+  const unread = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "수정 중 읽음 처리 대상", authorName: "외부 검수자" }
+  });
+  expect(unread.ok()).toBeTruthy();
+
+  let editRequestReserved = false;
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${editedThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editRequestReserved) {
+        await route.continue();
+        return;
+      }
+      editRequestReserved = true;
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("수정 중 읽음 처리 대상");
+  await page.getByRole("button", { name: "지연 수정 전 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("지연 수정 완료 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+
+  const unreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "수정 중 읽음 처리 대상" });
+  await unreadRow.getByRole("button", { name: "읽음 처리", exact: true }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-thread-edit-body")).toHaveCount(0);
+    await expect(page.getByTestId("comment-list")).toContainText("지연 수정 완료 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  } finally {
+    releaseEditResponse();
+  }
+});
+
+test("delayed comment edit completion preserves and rebases newer text in the same editor", async ({
+  page
+}) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("같은 편집기 수정 대상");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const editedThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "같은 편집기 수정 대상"
+  ) as { threadId: string } | undefined;
+  expect(editedThread?.threadId).toBeTruthy();
+
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${editedThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editResponseReady) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.getByRole("button", { name: "같은 편집기 수정 대상 수정" }).click();
+  const editBody = page.getByTestId("comment-thread-edit-body");
+  await editBody.fill("먼저 저장한 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+  await editBody.fill("응답 대기 중 이어 쓴 수정");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(editBody).toHaveValue("응답 대기 중 이어 쓴 수정");
+    await expect(page.getByTestId("comment-edit-latest")).toContainText("먼저 저장한 수정");
+    await page.getByRole("button", { name: "코멘트 저장" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+    await expect(page.getByTestId("comment-thread-edit-body")).toHaveCount(0);
+    await expect(page.getByTestId("comment-list")).toContainText("응답 대기 중 이어 쓴 수정");
+  } finally {
+    releaseEditResponse();
+  }
+});
+
+test("delayed comment edit completion cannot close a newer thread editor", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  for (const body of ["먼저 저장할 스레드", "계속 편집할 최신 스레드"]) {
+    await page.getByTestId("comment-body").fill(body);
+    await page.getByRole("button", { name: "코멘트 추가" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  }
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const firstThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "먼저 저장할 스레드"
+  ) as { threadId: string } | undefined;
+  expect(firstThread?.threadId).toBeTruthy();
+
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${firstThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editResponseReady) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.getByRole("button", { name: "먼저 저장할 스레드 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("먼저 저장 완료");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+
+  await page.getByRole("button", { name: "계속 편집할 최신 스레드 수정" }).click();
+  const newerEditBody = page.getByTestId("comment-thread-edit-body");
+  await newerEditBody.fill("다른 스레드의 보존할 최신 초안");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(newerEditBody).toHaveValue("다른 스레드의 보존할 최신 초안");
+    await page.getByRole("button", { name: "코멘트 저장" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+    await expect(page.getByTestId("comment-list")).toContainText("먼저 저장 완료");
+    await expect(page.getByTestId("comment-list")).toContainText(
+      "다른 스레드의 보존할 최신 초안"
+    );
+  } finally {
+    releaseEditResponse();
+  }
+});
+
+test("older failed comment submission cannot replace newer success feedback", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let firstRequestReserved = false;
+  let firstFailureFulfilled = false;
+  let releaseFirstFailure = () => {};
+  const firstFailureRelease = new Promise<void>((resolve) => {
+    releaseFirstFailure = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "POST" || firstRequestReserved) {
+        await route.continue();
+        return;
+      }
+      firstRequestReserved = true;
+      await firstFailureRelease;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forced older submission failure" })
+      });
+      firstFailureFulfilled = true;
+    }
+  );
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("실패할 이전 제출");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => firstRequestReserved).toBe(true);
+
+  await page.getByTestId("comment-body").fill("성공한 최신 제출");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("성공한 최신 제출");
+  try {
+    releaseFirstFailure();
+    await expect.poll(() => firstFailureFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-status")).not.toContainText("forced older submission failure");
+  } finally {
+    releaseFirstFailure();
+  }
+});
+
+test("deleting the last comment clears its canvas bubble and keeps a content-free activity tombstone", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("삭제할 단일 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveText("1");
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "삭제할 단일 코멘트 삭제" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 삭제됨");
+  await expect(page.getByTestId("comment-bubble-text-1")).toHaveCount(0);
+
+  await openFilePanel(page);
+  const activity = page.getByTestId("comment-activity-feed");
+  await expect(activity).toContainText("삭제");
+  await expect(activity).toContainText("코멘트가 삭제되었습니다");
+  await expect(activity).not.toContainText("삭제할 단일 코멘트");
+
+  const activityResponse = await page.request.get(
+    "http://127.0.0.1:4317/comments/activity?viewerId=%EC%82%AC%EC%9A%A9%EC%9E%90&limit=8"
+  );
+  expect(activityResponse.ok()).toBeTruthy();
+  expect((await activityResponse.json()).feed.events[0]).toMatchObject({
+    type: "deleted",
+    fileId: documentId,
+    body: "코멘트가 삭제되었습니다",
+    mentions: [],
+    mentionTargets: []
+  });
+});
+
+test("comments panel keeps feedback controls available to team viewers and maps trusted actor names", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const teamManifest = {
+    schemaVersion: 1,
+    teamId: "team-comment-viewers",
+    name: "코멘트 검수 팀",
+    createdAt: "2026-07-23T00:00:00.000Z",
+    currentUserId: "team-viewer",
+    members: [
+      {
+        userId: "team-viewer",
+        displayName: "팀 뷰어",
+        color: "#2563eb",
+        role: "viewer"
+      }
+    ],
+    documents: [],
+    sync: { mode: "local", roomPrefix: "layo" },
+    permissions: { canEdit: false, canInvite: false },
+    auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
+    encryption: { mode: "none" }
+  };
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("코멘트 검수 팀");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await expect(page.getByTestId("project-sharing-status")).toContainText("코멘트 검수 팀");
+
+  const created = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "뷰어 소유 코멘트",
+        authorId: "team-viewer",
+        authorName: "team-viewer"
+      }
+    }
+  );
+  expect(created.ok()).toBeTruthy();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("뷰어 소유 코멘트");
+  await expect(page.getByTestId("comment-body")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeDisabled();
+  await expect(page.getByTestId("comment-reply-body")).toBeEnabled();
+  await expect(page.getByRole("button", { name: "답글 추가" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 수정" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 삭제" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "뷰어 소유 코멘트 해결" })).toHaveCount(1);
+
+  await page.getByTestId("comment-body").fill("뷰어가 추가한 피드백");
+  await expect(page.getByRole("button", { name: "코멘트 추가" })).toBeEnabled();
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+
+  await openFilePanel(page);
+  await expect(page.getByTestId("comment-activity-feed")).toContainText("팀 뷰어");
+  await expect(page.getByTestId("comment-activity-feed")).not.toContainText("team-viewer");
+});
+
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
@@ -6251,6 +7891,72 @@ test("file panel shows mention-targeted comment notifications", async ({ page })
   await expect(summary).toContainText("멘션 1개");
 });
 
+test("comment authorization end stops fallback polling and preserves the recovery state", async ({ page }) => {
+  await page.addInitScript(() => {
+    const instrumentedWindow = window as Window & {
+      __layoCommentListRequestCount?: number;
+      __layoCommentTerminalStreamCount?: number;
+    };
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const parsedUrl = new URL(url, window.location.href);
+      if (
+        method === "GET"
+        && /^\/files\/[^/]+\/comments$/.test(parsedUrl.pathname)
+      ) {
+        instrumentedWindow.__layoCommentListRequestCount =
+          (instrumentedWindow.__layoCommentListRequestCount ?? 0) + 1;
+        if (instrumentedWindow.__layoCommentListRequestCount === 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 400));
+        }
+      }
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentTerminalStreamCount =
+          (instrumentedWindow.__layoCommentTerminalStreamCount ?? 0) + 1;
+        return new Response(
+          'event: comment-authorization-ended\ndata: {"code":"credential_inactive"}\n\n',
+          {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" }
+          }
+        );
+      }
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
+  });
+
+  await createProjectFromEmptyState(page);
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+
+  await page.waitForTimeout(100);
+  const requestCountAfterTerminal = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+  await page.waitForTimeout(2_300);
+  const requestCountAfterFallbackWindow = await page.evaluate(
+    () => (window as Window & { __layoCommentListRequestCount?: number })
+      .__layoCommentListRequestCount ?? 0
+  );
+
+  expect(requestCountAfterFallbackWindow).toBe(requestCountAfterTerminal);
+  await expect.poll(
+    () => page.evaluate(
+      () => (window as Window & { __layoCommentTerminalStreamCount?: number })
+        .__layoCommentTerminalStreamCount ?? 0
+    )
+  ).toBe(1);
+  await expect(page.getByTestId("comment-status")).toContainText(
+    "팀 코멘트 접근 권한이 해제되었습니다"
+  );
+});
+
 test("file panel receives externally created comment notifications without reload", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
@@ -6282,11 +7988,10 @@ test("file panel receives externally created comment notifications through the e
 }) => {
   await page.addInitScript(() => {
     const instrumentedWindow = window as Window & {
-      __layoCommentEventCount?: number;
-      __layoEventSourceUrls?: string[];
+      __layoCommentStreamUrls?: string[];
       __layoSuppressedCommentPolling?: boolean;
     };
-    const NativeEventSource = window.EventSource;
+    const nativeFetch = window.fetch.bind(window);
     const nativeSetInterval = window.setInterval.bind(window);
 
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
@@ -6297,21 +8002,17 @@ test("file panel receives externally created comment notifications through the e
       return nativeSetInterval(handler, timeout, ...args);
     }) as typeof window.setInterval;
 
-    class InstrumentedEventSource extends NativeEventSource {
-      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
-        super(url, eventSourceInitDict);
-        instrumentedWindow.__layoEventSourceUrls = [
-          ...(instrumentedWindow.__layoEventSourceUrls ?? []),
-          String(url)
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const parsedUrl = new URL(url, window.location.href);
+      if (parsedUrl.pathname === "/comments/events") {
+        instrumentedWindow.__layoCommentStreamUrls = [
+          ...(instrumentedWindow.__layoCommentStreamUrls ?? []),
+          parsedUrl.toString()
         ];
-        this.addEventListener("comment", () => {
-          instrumentedWindow.__layoCommentEventCount =
-            (instrumentedWindow.__layoCommentEventCount ?? 0) + 1;
-        });
       }
-    }
-
-    window.EventSource = InstrumentedEventSource;
+      return nativeFetch(input, init);
+    }) as typeof window.fetch;
   });
 
   const { documentId } = await createProjectFromEmptyState(page);
@@ -6324,12 +8025,12 @@ test("file panel receives externally created comment notifications through the e
   await page.waitForFunction(
     ({ documentId: expectedDocumentId }) => {
       const instrumentedWindow = window as Window & {
-        __layoEventSourceUrls?: string[];
+        __layoCommentStreamUrls?: string[];
         __layoSuppressedCommentPolling?: boolean;
       };
       return (
         instrumentedWindow.__layoSuppressedCommentPolling === true &&
-        (instrumentedWindow.__layoEventSourceUrls ?? []).some((url) => {
+        (instrumentedWindow.__layoCommentStreamUrls ?? []).some((url) => {
           const parsedUrl = new URL(url, window.location.href);
           return (
             parsedUrl.pathname === "/comments/events" &&
@@ -6351,10 +8052,6 @@ test("file panel receives externally created comment notifications through the e
   });
   expect(created.ok()).toBeTruthy();
 
-  await page.waitForFunction(() => {
-    const instrumentedWindow = window as Window & { __layoCommentEventCount?: number };
-    return (instrumentedWindow.__layoCommentEventCount ?? 0) > 0;
-  });
   await expect(summary).toContainText("읽지 않은 코멘트 1개", { timeout: 1_200 });
   await expect(summary).toContainText("나를 멘션 1개");
   await expect(feed).toContainText("@사용자 이벤트 스트림 확인", { timeout: 1_200 });

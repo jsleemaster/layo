@@ -247,6 +247,7 @@ test("persists Penpot paint source metadata through HTTP import", async () => {
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-paint-source-1" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "paint-source.penpot"

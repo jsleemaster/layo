@@ -147,6 +147,7 @@ test("reviews imports and persists Penpot svg-raw assets through HTTP", async ()
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-svg-raw-1" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "svg-raw.penpot"

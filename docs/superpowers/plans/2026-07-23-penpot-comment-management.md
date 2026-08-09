@@ -1,0 +1,105 @@
+# Penpot Comment Management Implementation Plan
+
+**Goal:** Close Penpot-comparable comment ownership, edit/delete, team
+authorization, reviewability, and crash-recovery gaps without weakening Layo's
+local-first architecture.
+
+**Architecture:** Keep comment data in canonical per-file sidecars. Bind every
+read and mutation to an exact project sharing boundary, serialize sidecar and
+transaction paths across processes, expose the same contract through HTTP and
+review-first MCP, and make the Korean browser recover user drafts from stale or
+deleted remote state.
+
+**Tech Stack:** Fastify, TypeScript, filesystem transaction journals, MCP,
+React, Vitest, Playwright CLI.
+
+## Task 1: Record The Penpot Comparison
+
+- [x] Verify the current Penpot `develop` head and official comment workflow.
+- [x] Record the Adapt decision and selected-node/local-sidecar divergence.
+- [x] Map the gap to collaboration, operations, agent-safety, and failure-loop
+  maturity gates.
+
+## Task 2: Define Ownership And Concurrency RED
+
+- [x] Reproduce lost comment/event updates across concurrent storage instances.
+- [x] Require stable thread/reply owners and monotonic `modifiedAt` versions.
+- [x] Require owner-only edit/delete and stale-version no-write conflicts.
+- [x] Require edit/delete activity and content-free deletion tombstones.
+
+## Task 3: Implement Storage, HTTP, And MCP Contracts
+
+- [x] Add canonical sidecar mutation locks and durable owner/version metadata.
+- [x] Add thread/reply edit/delete storage and HTTP routes.
+- [x] Recheck exact project authorization at the locked sidecar boundary.
+- [x] Scope mixed-project feeds before limiting results.
+- [x] Derive trusted actors from team credentials and retain viewer feedback.
+- [x] Re-authenticate comment SSE and stop polling after terminal authorization.
+- [x] Add MCP review/dry-run/commit for comment mutations.
+
+## Task 4: Implement Korean Browser Management
+
+- [x] Add owner edit/delete controls for threads and replies.
+- [x] Hide owner controls for foreign comments while keeping viewer feedback.
+- [x] Show trusted team actor names instead of payload-supplied identities.
+- [x] Preserve and merge drafts after stale conflicts or remote deletion.
+- [x] Refresh edit/delete events without reloading the page.
+
+## Task 5: Close Storage Review Findings
+
+- [x] Reserve case-folded project, document, library, and comment identities.
+- [x] Make file/project/external imports atomic and explicitly idempotent.
+- [x] Serialize library snapshots, product writes, rollback, and recovery.
+- [x] Add real hard-exit seams for imports, duplication, publication, and
+  project deletion.
+- [x] Recover generic transaction journals before cold project metadata writes.
+- [x] Acquire coordinator before cold library target locks.
+- [x] Keep the transaction coordinator held through project lock acquisition and
+  the project mutation so recovery cannot overwrite a new commit.
+- [x] Replace externally queued startup recovery with a cached preflight-only
+  promise so nested cold operations cannot wait on their own active import.
+- [x] Delete canonical and legacy comment sidecars with a document's last
+  project reference while retaining comments for shared references.
+
+## Task 6: Verify The Product Slice
+
+- [x] Run focused storage, HTTP, MCP, web API, and browser regressions.
+- [x] Run the complete server suite: 562 tests, zero failures.
+- [x] Run full workspace typecheck, Rust workspace tests, and web build.
+- [x] Run direct headed Playwright CLI interaction passes at 7/7 for the latest
+  async-state set and 1/1 for the stabilized initial-refresh case.
+- [x] Run 30/30 comment product flows, 21/21 mixed ordering repetitions, and
+  10/10 stabilized initial-refresh repetitions locally.
+- [x] Run exact-code/test-head Full Verification `31318544219` at 283 web, 562
+  server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 253/253
+  Playwright cases with no retry.
+- [x] Obtain independent exact-head re-review with no P0-P2 findings.
+
+## Task 7: Document, Merge, And Clean Up
+
+- [x] Add the product delta and current Penpot source.
+- [x] Update the maturity benchmark and active-plan routing.
+- [x] Update PR #319 with failure mode, RED/GREEN, direct browser proof, and
+  remaining divergence.
+- [ ] Run Full Verification on the final documentation head.
+- [ ] Resolve review threads and mark the PR ready.
+- [ ] Merge PR #319 and confirm issue #318 state.
+- [ ] Run the required post-merge branch, worktree, and remote cleanup checks.
+- [ ] Publish the final MD cleanup state with merge evidence and no active plan.
+
+## Current Evidence
+
+- Latest Penpot reference:
+  `b5bec4f983b5540a3ed7969121badf08a14f384e`.
+- Final focused storage RED: Full Verification `31297080928`, seven intended
+  failures and 552 passing server tests.
+- Consolidated browser RED: Full Verification `31316640082`, four intended
+  failures and 249 passing Playwright cases.
+- Implementation run `31317448727` was green but retained one flaky retry and
+  therefore was not accepted as final evidence.
+- Final code/test GREEN: head
+  `a3551a84b7e2d61bda88eb3713ccea68a61f8005`, Full Verification
+  `31318544219`, 253/253 Playwright without retry, and independent P0-P2-clean
+  review.
+- Merge and post-merge cleanup evidence remain pending and therefore keep this
+  plan active.

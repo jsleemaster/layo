@@ -11,6 +11,7 @@ import {
   filterAuthorizedTeamLibraries,
   authorizeTeamLibraryWrite,
   bearerToken,
+  type AuthenticatedTeamMember,
   type TeamAccessTokenExpiryDays,
   type TeamAccessTokenMetadata,
   type TeamAuthorizationConfig,
@@ -24,11 +25,14 @@ import {
   LIBRARY_ARCHIVE_MIME_TYPE,
   PROJECT_ARCHIVE_MIME_TYPE,
   type CodeComponentMapping,
+  type CommentAuthorizationBoundary,
   type ComponentVariantArea,
   type CreateAssetInput,
+  type StoredCommentMentionTarget,
   type DesignNode,
   type DesignFile,
-  type GeometryPatch
+  type GeometryPatch,
+  type ProjectManifest
 } from "./storage.js";
 
 export function canWriteEventStream(
@@ -42,6 +46,7 @@ export interface HttpServerOptions {
   webDistDir?: string | null;
   libraryRegistryAuth?: TeamAuthorizationConfig;
   libraryRegistryAuthorizationProvider?: TeamAuthorizationProvider;
+  teamAuthorizationProvider?: TeamAuthorizationProvider;
   teamAuthorizationManager?: TeamAuthorizationFileManager;
 }
 
@@ -61,11 +66,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     eventStreamsClosing = true;
     return args.length === 0 ? closeServer() : closeServer(args[0]);
   }) as FastifyInstance["close"];
-  const libraryRegistryAuthorizationProvider =
-    options.libraryRegistryAuthorizationProvider
+  const teamAuthorizationProvider =
+    options.teamAuthorizationProvider
+    ?? options.libraryRegistryAuthorizationProvider
     ?? (options.libraryRegistryAuth
       ? createTeamAuthorizationProvider(options.libraryRegistryAuth)
       : undefined);
+  const libraryRegistryAuthorizationProvider = teamAuthorizationProvider;
 
   type LibraryRequest = {
     id: string;
@@ -75,17 +82,29 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     };
   };
 
-  const authenticateLibraryMember = async (request: LibraryRequest) => {
-    if (!libraryRegistryAuthorizationProvider) {
+  const teamPrincipalForRequest = (request: LibraryRequest) => ({
+    userId: Array.isArray(request.headers["x-layo-user-id"])
+      ? request.headers["x-layo-user-id"][0]
+      : request.headers["x-layo-user-id"],
+    memberToken: bearerToken(request.headers.authorization)
+  });
+  const authenticateTeamMember = async (request: LibraryRequest) => {
+    if (!teamAuthorizationProvider) {
       return undefined;
     }
-    return libraryRegistryAuthorizationProvider.authenticate({
-      userId: Array.isArray(request.headers["x-layo-user-id"])
-        ? request.headers["x-layo-user-id"][0]
-        : request.headers["x-layo-user-id"],
-      memberToken: bearerToken(request.headers.authorization)
-    });
+    return teamAuthorizationProvider.authenticate(teamPrincipalForRequest(request));
   };
+  const authenticateOptionalTeamMember = async (request: LibraryRequest) => {
+    if (!teamAuthorizationProvider) {
+      return undefined;
+    }
+    const principal = teamPrincipalForRequest(request);
+    if (!principal.userId && !principal.memberToken) {
+      return undefined;
+    }
+    return teamAuthorizationProvider.authenticate(principal);
+  };
+  const authenticateLibraryMember = authenticateTeamMember;
 
   const authorizeLibraryRead = async (request: LibraryRequest, fileId: string) => {
     const member = await authenticateLibraryMember(request);
@@ -101,13 +120,132 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     }
   };
 
+  const authorizeProjectRead = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    if (project.sharing.mode !== "team" || !teamAuthorizationProvider) {
+      return undefined;
+    }
+    const member = await teamAuthorizationProvider.authenticate(
+      teamPrincipalForRequest(request)
+    );
+    authorizeTeamLibraryRead(member, project.sharing.teamId);
+    return member;
+  };
+
+  const authorizeProjectWrite = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const member = await authorizeProjectRead(request, project);
+    if (member && project.sharing.mode === "team") {
+      authorizeTeamLibraryWrite(member, project.sharing.teamId);
+    }
+    return member;
+  };
+
+  const authorizeProjectOwner = async (
+    request: LibraryRequest,
+    project: ProjectManifest
+  ): Promise<AuthenticatedTeamMember | undefined> => {
+    const member = await authorizeProjectRead(request, project);
+    if (member && member.role !== "owner") {
+      throw Object.assign(new Error("only a team owner can delete a shared project"), {
+        code: "EACCES",
+        statusCode: 403
+      });
+    }
+    return member;
+  };
+
+  interface CommentAuthorization {
+    member?: AuthenticatedTeamMember;
+    authorizationBoundary?: CommentAuthorizationBoundary;
+  }
+
+  const authorizeCommentRead = async (
+    request: LibraryRequest,
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
+    }
+    const member = await authenticateTeamMember(request);
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
+  };
+
+  const authorizeCommentWrite = async (
+    request: LibraryRequest,
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorizationBoundary =
+      await storage.getCommentAuthorizationBoundary(fileId);
+    if (
+      authorizationBoundary?.expectedSharing.mode !== "team"
+      || !teamAuthorizationProvider
+    ) {
+      return { authorizationBoundary };
+    }
+    const member = await authenticateTeamMember(request);
+    if (!member) {
+      throw new Error("team comment authorization provider is unavailable");
+    }
+    // Penpot permits file readers, including team viewers, to participate in comments.
+    authorizeTeamLibraryRead(
+      member,
+      authorizationBoundary.expectedSharing.teamId
+    );
+    return { member, authorizationBoundary };
+  };
+
+  const visibleCommentProjectAuthorizationBoundaries = async (
+    member?: AuthenticatedTeamMember
+  ): Promise<CommentAuthorizationBoundary[]> => {
+    const projects = await storage.listProjects();
+    return projects.flatMap((project) =>
+      project.sharing.mode === "private"
+      || (
+        project.sharing.mode === "team"
+        && member?.teamIds.includes(project.sharing.teamId)
+      )
+        ? [{
+            projectId: project.projectId,
+            expectedSharing: project.sharing
+          }]
+        : []
+    );
+  };
+
   server.setErrorHandler((error, _request, reply) => {
     if ((error as { code?: string }).code === INPUT_VALIDATION_ERROR_CODE) {
       return reply.code(400).send({ error: (error as Error).message });
     }
 
     const code = (error as { code?: string }).code;
-    if (code === "EINVAL" || code === "EEXIST" || code === "EUNAVAILABLE") {
+    if (code === "EIDEMPOTENCY") {
+      const message = (error as Error).message;
+      return reply.code(409).send({ error: message, message });
+    }
+    if (
+      code === "EINVAL"
+      || code === "EEXIST"
+      || code === "EUNAVAILABLE"
+      || code === "EACCES"
+      || code === "ECONFLICT"
+    ) {
       const statusCode = (error as { statusCode?: number }).statusCode ?? 400;
       return reply.code(statusCode).send({ error: (error as Error).message });
     }
@@ -266,6 +404,18 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
       documentName?: string;
     };
   }>("/migrations/external/import", async (request) => {
+    const idempotencyHeader = request.headers["idempotency-key"];
+    const idempotencyKey = (
+      Array.isArray(idempotencyHeader)
+        ? idempotencyHeader[0]
+        : idempotencyHeader
+    )?.trim();
+    if (!idempotencyKey) {
+      throw Object.assign(
+        new Error("Idempotency-Key header is required for external migration imports"),
+        { code: "EINVAL", statusCode: 400 }
+      );
+    }
     return {
       imported: await storage.importExternalMigrationArchive(Buffer.from(request.body.archiveBase64, "base64"), {
         fileName: request.body.fileName,
@@ -273,7 +423,8 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         projectId: request.body.projectId,
         documentId: request.body.documentId,
         name: request.body.name,
-        documentName: request.body.documentName
+        documentName: request.body.documentName,
+        idempotencyKey
       })
     };
   });
@@ -323,11 +474,24 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.post<{
     Body: { archiveBase64: string; projectId?: string; name?: string; documentIdPrefix?: string };
   }>("/projects/import/archive", async (request) => {
+    const idempotencyHeader = request.headers["idempotency-key"];
+    const idempotencyKey = (
+      Array.isArray(idempotencyHeader)
+        ? idempotencyHeader[0]
+        : idempotencyHeader
+    )?.trim();
+    if (!idempotencyKey) {
+      throw Object.assign(
+        new Error("Idempotency-Key header is required for project archive imports"),
+        { code: "EINVAL", statusCode: 400 }
+      );
+    }
     return {
       imported: await storage.importProjectArchive(Buffer.from(request.body.archiveBase64, "base64"), {
         projectId: request.body.projectId,
         name: request.body.name,
-        documentIdPrefix: request.body.documentIdPrefix
+        documentIdPrefix: request.body.documentIdPrefix,
+        idempotencyKey
       })
     };
   });
@@ -347,14 +511,26 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.patch<{ Params: { projectId: string }; Body: { name?: string; currentDocumentId?: string } }>(
     "/projects/:projectId",
     async (request) => {
-      return { project: await storage.updateProject(request.params.projectId, request.body) };
+      const project = await storage.readProject(request.params.projectId);
+      await authorizeProjectWrite(request, project);
+      return {
+        project: await storage.updateProject(request.params.projectId, request.body, {
+          expectedSharing: project.sharing
+        })
+      };
     }
   );
 
   server.post<{ Params: { projectId: string }; Body: { documentId?: string; name?: string } }>(
     "/projects/:projectId/documents",
     async (request) => {
-      return { project: await storage.createProjectDocument(request.params.projectId, request.body) };
+      const project = await storage.readProject(request.params.projectId);
+      await authorizeProjectWrite(request, project);
+      return {
+        project: await storage.createProjectDocument(request.params.projectId, request.body, {
+          expectedSharing: project.sharing
+        })
+      };
     }
   );
 
@@ -362,20 +538,66 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { projectId: string };
     Body: { mode: "private" } | { mode: "team"; teamId: string };
   }>("/projects/:projectId/sharing", async (request) => {
-    return { project: await storage.setProjectSharing(request.params.projectId, request.body) };
+    const project = await storage.readProject(request.params.projectId);
+    const unchanged =
+      project.sharing.mode === request.body.mode
+      && (
+        project.sharing.mode === "private"
+        || (
+          request.body.mode === "team"
+          && project.sharing.teamId === request.body.teamId
+        )
+      );
+    if (unchanged) {
+      return { project };
+    }
+
+    if (teamAuthorizationProvider) {
+      const member = await teamAuthorizationProvider.authenticate(
+        teamPrincipalForRequest(request)
+      );
+      if (project.sharing.mode === "team") {
+        authorizeTeamLibraryRead(member, project.sharing.teamId);
+        if (member.role !== "owner") {
+          throw Object.assign(
+            new Error("only a team owner can move a project out of its current team"),
+            { code: "EACCES", statusCode: 403 }
+          );
+        }
+      }
+      if (request.body.mode === "team") {
+        authorizeTeamLibraryWrite(member, request.body.teamId);
+      }
+    }
+
+    return {
+      project: await storage.setProjectSharing(request.params.projectId, request.body, {
+        expectedSharing: project.sharing
+      })
+    };
   });
 
   server.post<{
     Params: { projectId: string };
     Body: { projectId?: string; name?: string; documentIdPrefix?: string };
   }>("/projects/:projectId/duplicate", async (request) => {
+    const project = await storage.readProject(request.params.projectId);
+    await authorizeProjectRead(request, project);
     return {
-      project: await storage.duplicateProject(request.params.projectId, request.body)
+      project: await storage.duplicateProject(request.params.projectId, request.body, {
+        expectedSharing: project.sharing
+      })
     };
   });
 
   server.delete<{ Params: { projectId: string } }>("/projects/:projectId", async (request) => {
-    return { project: await storage.deleteProject(request.params.projectId) };
+    const project = await storage.readProject(request.params.projectId);
+    await authorizeProjectOwner(request, project);
+    return {
+      project: await storage.deleteProject(request.params.projectId, {
+        expectedSharing: project.sharing
+      })
+    };
   });
 
   server.get<{ Querystring: { fileId?: string } }>("/libraries", async (request) => {
@@ -779,10 +1001,13 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Params: { fileId: string }; Querystring: { includeResolved?: string; viewerId?: string } }>(
     "/files/:fileId/comments",
     async (request) => {
+      const { member, authorizationBoundary } =
+        await authorizeCommentRead(request, request.params.fileId);
       return {
         threads: await storage.listCommentThreads(request.params.fileId, {
           includeResolved: request.query.includeResolved === "true",
-          viewerId: request.query.viewerId
+          viewerId: member?.userId ?? request.query.viewerId,
+          authorizationBoundary
         })
       };
     }
@@ -791,6 +1016,17 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
   server.get<{ Querystring: { viewerId?: string; fileId?: string; after?: string } }>(
     "/comments/events",
     async (request, reply) => {
+      const fileId = request.query.fileId;
+      if (!fileId) {
+        throw Object.assign(
+          new Error("comment event stream requires a file id"),
+          { code: "EINVAL", statusCode: 400 }
+        );
+      }
+      const authorizedTeamId = teamAuthorizationProvider
+        ? await storage.getTeamIdForFile(fileId)
+        : undefined;
+      await authorizeCommentRead(request, fileId);
       if (eventStreamsClosing) {
         return reply.code(503).send({ error: "server is closing" });
       }
@@ -813,25 +1049,61 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
       let lastSequence = Math.max(0, Math.floor(Number(request.query.after) || 0));
       let sending = false;
+      let heartbeatId: ReturnType<typeof setInterval> | undefined;
+      let pollId: ReturnType<typeof setInterval> | undefined;
+      const close = () => {
+        if (heartbeatId !== undefined) {
+          clearInterval(heartbeatId);
+        }
+        if (pollId !== undefined) {
+          clearInterval(pollId);
+        }
+        commentEventStreamClosers.delete(close);
+        if (canWriteEventStream(reply.raw)) {
+          reply.raw.end();
+        }
+      };
       const sendPendingEvents = async () => {
         if (sending || !canWriteEventStream(reply.raw)) {
           return;
         }
         sending = true;
         try {
+          if (
+            teamAuthorizationProvider
+            && await storage.getTeamIdForFile(fileId) !== authorizedTeamId
+          ) {
+            throw Object.assign(
+              new Error("comment stream team access changed"),
+              { code: "EACCES", statusCode: 403 }
+            );
+          }
+          const { authorizationBoundary } =
+            await authorizeCommentRead(request, fileId);
           const events = await storage.listCommentLiveEvents({
             after: lastSequence,
-            fileId: request.query.fileId,
-            limit: 100
+            fileId,
+            limit: 100,
+            authorizationBoundary
           });
           for (const event of events) {
             lastSequence = Math.max(lastSequence, event.sequence);
             sendBlock("comment", {
               ...event,
-              viewerId: request.query.viewerId ?? event.viewerId
+              viewerId: Array.isArray(request.headers["x-layo-user-id"])
+                ? request.headers["x-layo-user-id"][0] ?? request.query.viewerId ?? event.viewerId
+                : request.headers["x-layo-user-id"] ?? request.query.viewerId ?? event.viewerId
             });
           }
         } catch (error) {
+          const statusCode = (error as { statusCode?: number }).statusCode;
+          if (statusCode === 401 || statusCode === 403) {
+            sendBlock("comment-authorization-ended", {
+              code: statusCode === 401 ? "credential_inactive" : "team_access_revoked"
+            });
+            close();
+            return;
+          }
           sendBlock("comment-error", {
             message: error instanceof Error ? error.message : "comment event stream failed"
           });
@@ -840,23 +1112,14 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         }
       };
 
-      const heartbeatId = setInterval(() => {
+      heartbeatId = setInterval(() => {
         if (canWriteEventStream(reply.raw)) {
           reply.raw.write(": keepalive\n\n");
         }
       }, 25_000);
-      const pollId = setInterval(() => {
+      pollId = setInterval(() => {
         void sendPendingEvents();
       }, 250);
-
-      const close = () => {
-        clearInterval(heartbeatId);
-        clearInterval(pollId);
-        commentEventStreamClosers.delete(close);
-        if (canWriteEventStream(reply.raw)) {
-          reply.raw.end();
-        }
-      };
 
       commentEventStreamClosers.add(close);
       sendBlock("ready", { ok: true, lastSequence });
@@ -867,25 +1130,90 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
 
   server.post<{
     Params: { fileId: string };
-    Body: { nodeId: string; body: string; authorName?: string };
-  }>("/files/:fileId/comments", async (request) => {
-    const thread = await storage.createCommentThread(request.params.fileId, request.body);
-    return {
-      thread
+    Body: {
+      nodeId: string;
+      body: string;
+      authorId?: string;
+      authorName?: string;
+      mentionTargets?: StoredCommentMentionTarget[];
     };
+  }>("/files/:fileId/comments", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.createCommentThread(request.params.fileId, {
+      ...request.body,
+      authorId: member?.userId ?? request.body.authorId,
+      authorName: member?.userId ?? request.body.authorName
+    }, { authorizationBoundary });
+    return { thread };
+  });
+
+  server.patch<{
+    Params: { fileId: string; threadId: string };
+    Body: {
+      body: string;
+      actorId?: string;
+      expectedModifiedAt: string;
+      mentionTargets?: StoredCommentMentionTarget[];
+    };
+  }>("/files/:fileId/comments/:threadId", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.updateCommentThread(
+      request.params.fileId,
+      request.params.threadId,
+      {
+        body: request.body.body,
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt,
+        mentionTargets: request.body.mentionTargets
+      },
+      { authorizationBoundary }
+    );
+    return { thread };
+  });
+
+  server.delete<{
+    Params: { fileId: string; threadId: string };
+    Body: { actorId?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
+    const deleted = await storage.deleteCommentThread(
+      request.params.fileId,
+      request.params.threadId,
+      {
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
+      },
+      { authorizationBoundary }
+    );
+    return { deleted };
   });
 
   server.get<{ Querystring: { viewerId?: string } }>("/comments/notifications", async (request) => {
+    const member = await authenticateOptionalTeamMember(request);
+    const authorizationBoundaries = teamAuthorizationProvider
+      ? await visibleCommentProjectAuthorizationBoundaries(member)
+      : undefined;
     return {
-      summary: await storage.listCommentNotifications({ viewerId: request.query.viewerId })
+      summary: await storage.listCommentNotifications({
+        viewerId: member?.userId ?? request.query.viewerId,
+        authorizationBoundaries
+      })
     };
   });
 
   server.get<{ Querystring: { viewerId?: string; limit?: string } }>("/comments/activity", async (request) => {
+    const member = await authenticateOptionalTeamMember(request);
+    const authorizationBoundaries = teamAuthorizationProvider
+      ? await visibleCommentProjectAuthorizationBoundaries(member)
+      : undefined;
     return {
       feed: await storage.listCommentActivity({
-        viewerId: request.query.viewerId,
-        limit: request.query.limit ? Number(request.query.limit) : undefined
+        viewerId: member?.userId ?? request.query.viewerId,
+        limit: request.query.limit ? Number(request.query.limit) : undefined,
+        authorizationBoundaries
       })
     };
   });
@@ -894,47 +1222,112 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     Params: { fileId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/read", async (request) => {
-    const threads = await storage.markFileCommentsRead(request.params.fileId, request.body);
-    return {
-      threads
-    };
+    const { member, authorizationBoundary } =
+      await authorizeCommentRead(request, request.params.fileId);
+    const threads = await storage.markFileCommentsRead(
+      request.params.fileId,
+      { viewerId: member?.userId ?? request.body.viewerId },
+      { authorizationBoundary }
+    );
+    return { threads };
   });
 
   server.post<{
     Params: { fileId: string; threadId: string };
-    Body: { body: string; authorName?: string };
+    Body: {
+      body: string;
+      authorId?: string;
+      authorName?: string;
+      mentionTargets?: StoredCommentMentionTarget[];
+    };
   }>("/files/:fileId/comments/:threadId/replies", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
     const thread = await storage.addCommentReply(
       request.params.fileId,
       request.params.threadId,
-      request.body
+      {
+        ...request.body,
+        authorId: member?.userId ?? request.body.authorId,
+        authorName: member?.userId ?? request.body.authorName
+      },
+      { authorizationBoundary }
     );
-    return {
-      thread
+    return { thread };
+  });
+
+  server.patch<{
+    Params: { fileId: string; threadId: string; replyId: string };
+    Body: {
+      body: string;
+      actorId?: string;
+      expectedModifiedAt: string;
+      mentionTargets?: StoredCommentMentionTarget[];
     };
+  }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.updateCommentReply(
+      request.params.fileId,
+      request.params.threadId,
+      request.params.replyId,
+      {
+        body: request.body.body,
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt,
+        mentionTargets: request.body.mentionTargets
+      },
+      { authorizationBoundary }
+    );
+    return { thread };
+  });
+
+  server.delete<{
+    Params: { fileId: string; threadId: string; replyId: string };
+    Body: { actorId?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId/replies/:replyId", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentWrite(request, request.params.fileId);
+    const thread = await storage.deleteCommentReply(
+      request.params.fileId,
+      request.params.threadId,
+      request.params.replyId,
+      {
+        actorId: member?.userId ?? request.body.actorId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
+      },
+      { authorizationBoundary }
+    );
+    return { thread };
   });
 
   server.post<{
     Params: { fileId: string; threadId: string };
     Body: { viewerId?: string };
   }>("/files/:fileId/comments/:threadId/read", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentRead(request, request.params.fileId);
     const thread = await storage.markCommentThreadRead(
       request.params.fileId,
       request.params.threadId,
-      request.body
+      { viewerId: member?.userId ?? request.body.viewerId },
+      { authorizationBoundary }
     );
-    return {
-      thread
-    };
+    return { thread };
   });
 
   server.post<{ Params: { fileId: string; threadId: string } }>(
     "/files/:fileId/comments/:threadId/resolve",
     async (request) => {
-      const thread = await storage.resolveCommentThread(request.params.fileId, request.params.threadId);
-      return {
-        thread
-      };
+      const { member, authorizationBoundary } =
+        await authorizeCommentWrite(request, request.params.fileId);
+      const thread = await storage.resolveCommentThread(
+        request.params.fileId,
+        request.params.threadId,
+        member?.userId,
+        { authorizationBoundary }
+      );
+      return { thread };
     }
   );
 

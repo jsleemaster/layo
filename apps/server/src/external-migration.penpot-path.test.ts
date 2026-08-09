@@ -137,6 +137,7 @@ test("reviews imports and persists first-class Penpot paths through HTTP", async
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-path-1" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "path.penpot"

@@ -414,6 +414,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const imported = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: { "idempotency-key": "external-migration-penpot-assets-http-1" },
       payload: {
         archiveBase64: archive.toString("base64"),
         fileName: "images.penpot"
@@ -491,6 +492,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const imported = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: { "idempotency-key": "external-migration-penpot-assets-http-2" },
       payload: {
         archiveBase64: archive.toString("base64"),
         fileName: "fill-images.penpot"
@@ -546,6 +548,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const imported = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: { "idempotency-key": "external-migration-penpot-assets-http-3" },
       payload: {
         archiveBase64: archive.toString("base64"),
         fileName: "frame-backgrounds.penpot"
@@ -614,6 +617,7 @@ describe("Penpot external image asset migration HTTP routes", () => {
     const imported = await server.inject({
       method: "POST",
       url: "/migrations/external/import",
+      headers: { "idempotency-key": "external-migration-penpot-assets-http-4" },
       payload: {
         archiveBase64: archive.toString("base64"),
         fileName: "multi-fills.penpot"
@@ -745,6 +749,7 @@ test("reviews imports and persists flattened Penpot gradient fills", async () =>
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-assets-http-5" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "gradient-fills.penpot"
@@ -878,6 +883,7 @@ test("reviews imports and persists flattened Penpot stroke gradients", async () 
   const imported = await server.inject({
     method: "POST",
     url: "/migrations/external/import",
+    headers: { "idempotency-key": "external-migration-penpot-assets-http-6" },
     payload: {
       archiveBase64: archive.toString("base64"),
       fileName: "stroke-gradients.penpot"
