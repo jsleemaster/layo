@@ -81,11 +81,11 @@ React, Vitest, Playwright CLI.
 - [x] Update the maturity benchmark and active-plan routing.
 - [x] Update PR #319 with failure mode, RED/GREEN, direct browser proof, and
   remaining divergence.
-- [ ] Run Full Verification on the final documentation head.
-- [ ] Resolve review threads and mark the PR ready.
-- [ ] Merge PR #319 and confirm issue #318 state.
-- [ ] Run the required post-merge branch, worktree, and remote cleanup checks.
-- [ ] Publish the final MD cleanup state with merge evidence and no active plan.
+- [x] Run Full Verification on the final documentation head.
+- [x] Resolve review threads and mark the PR ready.
+- [x] Merge PR #319 and confirm issue #318 state.
+- [x] Run the required post-merge branch, worktree, and remote cleanup checks.
+- [x] Publish the final MD cleanup state with merge evidence and no active plan.
 
 ## Current Evidence
 
@@ -101,5 +101,23 @@ React, Vitest, Playwright CLI.
   `a3551a84b7e2d61bda88eb3713ccea68a61f8005`, Full Verification
   `31318544219`, 253/253 Playwright without retry, and independent P0-P2-clean
   review.
-- Merge and post-merge cleanup evidence remain pending and therefore keep this
-  plan active.
+- Final documentation-head GREEN: head
+  `8e8bcd4463d732d40b36abcfabd2663edc44796b`, Full Verification
+  `31319646399`, 283 web, 562 server, 18 renderer, 39 collaboration, seven
+  TypeScript relay, 117 Rust, and 253/253 Playwright without retry. Storage
+  Restore `31319646390`, Authorization Backup `31319646418`, and Retention
+  `31319646398` also passed.
+- Documentation review found no P0-P2 issue. GitHub review, comment, and thread
+  re-fetches were empty before ready and merge.
+- PR #319 squash-merged as
+  `e87fe7e0e980ba7375a734ac08767b6af2a51e14` and issue #318 closed on
+  2026-08-09. The remote feature branch was deleted separately after the
+  multi-worktree local cleanup step of `gh pr merge --delete-branch` exited
+  nonzero; the already-successful remote merge was verified before cleanup.
+- Required status, branch, worktree, and remote-ref checks completed. Active or
+  user-owned worktrees remain explicit cleanup exceptions until the closeout PR
+  finishes; no unknown changes were removed.
+- The first local closeout maturity gate failed one of seven checks because two
+  historical plan filenames sat above the canonical Completed boundary. The
+  repaired routing structure passed `pnpm check:penpot-maturity` at 7/7.
+- This plan is complete and is no longer routed as active work.

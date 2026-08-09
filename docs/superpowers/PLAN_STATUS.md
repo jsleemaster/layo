@@ -29,17 +29,23 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-[2026-07-23-penpot-comment-management.md](plans/2026-07-23-penpot-comment-management.md)
-is active on PR #319. It adapts
-Penpot comment ownership, edit/delete, team authorization, viewer feedback,
-review-first MCP, and durable delivery into Layo's local sidecar architecture.
-Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005` passed Full
-Verification `31318544219` at 253/253 Playwright with no retry, and independent
-exact-head review found no P0-P2 issue. Final documentation-head verification,
-merge, and post-merge MD cleanup remain required before this plan can move to
-Completed.
+None. Start the next Penpot maturity loop from the exact highest-priority open
+benchmark gap rather than resuming a historical plan.
 
 ## Recently Completed Plan
+
+`2026-07-23-penpot-comment-management.md` completed in PR #319. It adapts
+Penpot comment ownership, edit/delete, team authorization, viewer feedback,
+review-first MCP, durable delivery, browser ordering recovery, and crash-safe
+local sidecar storage. Final documentation head
+`8e8bcd4463d732d40b36abcfabd2663edc44796b` passed Full Verification
+`31319646399` at 253/253 Playwright with no retry, both independent reviews
+found no P0-P2 issue, and PR #319 squash-merged as
+`e87fe7e0e980ba7375a734ac08767b6af2a51e14`.
+
+## Completed Plans
+
+### Prior Recent Evidence
 
 `2026-07-16-penpot-file-version-visual-preview.md` completed in PR #316. It adapts
 Penpot's saved-version view-only workspace by rendering the complete persisted
@@ -87,10 +93,11 @@ document session is removed, and the retained team name follows the same exact m
 Target-project HTTP refreshes receive an explicitly computed credential, and polling
 restarts whenever sharing, team identity, or token scope changes.
 
-## Completed Plans
+### Completion Ledger
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-23-penpot-comment-management.md` | Completed by PR #319 merge gate | Adapts Penpot comment ownership, edit/delete, team authorization, viewer feedback, review-first MCP, durable sidecar delivery, async browser recovery, case-folded identity, transaction lock ordering, and crash recovery. Final docs head `8e8bcd4463d732d40b36abcfabd2663edc44796b` passed Full Verification `31319646399` with 283 web, 562 server, 18 renderer, 39 collaboration, seven TypeScript relay, 117 Rust, and 253/253 Playwright tests without retry; Storage Restore `31319646390`, Authorization Backup `31319646418`, and Retention `31319646398` passed. Independent code/test and documentation reviews found no P0-P2, and GitHub had no review threads. PR #319 squash-merged as `e87fe7e0e980ba7375a734ac08767b6af2a51e14`, issue #318 closed, and the remote feature branch was deleted. Deployment remains deliberately non-gating; the wider Penpot maturity benchmark remains open. |
 | `2026-07-16-penpot-file-version-visual-preview.md` | Completed by PR #316 merge gate | Adapts Penpot saved-version preview into a complete Korean-first read-only canvas and hardens ordered snapshot epochs, base-aware server/Yjs convergence, Restore compensation, project-transition mutation barriers, scoped registry/DTCG operations, watcher registration, asset cleanup, and isolated MCP/E2E storage. Final head `b35a4f67bf44343583af24641d50036122a1e338` passed Full Verification `29670879859`, Authorization Audit Archive `29670879856`, Authorization Backup `29670879844`, Storage Restore `29670879851`, and Retention `29670879833`; independent implementation review and final test-only self-review found no P0-P2, and all review threads were resolved. PR #316 squash-merged as `6b9501c61d75179929ef260ad6a8d01f1717dd8d`; the remote feature branch was deleted. Post-merge cleanup removed the clean PR #199 worktree and retained the user-owned `.playwright-mcp/` changes in the primary worktree. Deployment remains deliberately non-gating. |
 | `2026-07-16-penpot-agent-reviewed-token-mutation.md` | Completed by PR #314 merge gate | Adapts Penpot account token lifecycle into HMAC-authenticated MCP review/commit bound to principal, canonical operation, shared scope, and exact PostgreSQL generation; verifies inside the row lock before token material generation; adds forged-payload, replay, self-revoke, no-op, and two-connection concurrency coverage. It also resolves Vercel `api-deployments-free-per-day` by disabling Vercel Git deployment and making the tested Actions workflow the sole production owner. Final head `5c785e0b606e1f31d3b0346e4f607e86de2c1db1` passed Full `29481572997`, Restore `29481572958`, Retention `29481573088`, and Authorization Backup `29481573008`; independent re-review found no P0-P2. PR #314 squash-merged as `a89a814438ed9429e877f3518e8aeb18c97f8cc5` and the remote branch was deleted. Local status/branch/worktree checks remain an exit-134 cleanup exception. Production remains deferred pending quota recovery and four Actions secrets. |
 | `2026-07-15-penpot-shared-authorization-generation.md` | Completed by PR #310 merge gate | Adds a PostgreSQL-scoped monotonic authorization generation and row-locked shared mutation path. Final head `fd1783c6861a9d7bf63580e7acccc6e4a279cd73` passed Full `29397873608`, Authorization Backup `29397873842`, Restore `29397873471`, and Retention `29397873455`; independent re-review found no P0-P2. PR #310 squash-merged as `9a710fc6bbd9b81d6ef68d8d5f4421aae28803a9` and its remote branch was deleted. Local status/branch/worktree checks remain an exit-134 cleanup exception; no local state was deleted. Durable audit consumption and general account recovery remain open, while agent-reviewed token mutation was completed by PR #314. |

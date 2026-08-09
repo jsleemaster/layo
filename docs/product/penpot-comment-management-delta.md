@@ -162,8 +162,9 @@ loop, focused E2E coverage, headed browser proof, and PR evidence were updated.
 | `31316640082` | Consolidated RED: exactly four intended failures and 249 passed. |
 | `31317448727` | Implementation GREEN but not accepted as final: 252 passed and the initial-refresh regression was flaky on retry. |
 | `31318544219` | Final code/test GREEN at `a3551a84b7e2d61bda88eb3713ccea68a61f8005`: 253/253 Playwright with no retry or flaky case. |
+| `31319646399` | Final documentation-head GREEN at `8e8bcd4463d732d40b36abcfabd2663edc44796b`: 253/253 Playwright with no retry or flaky case. |
 
-Final Full Verification also passed 283 web, 562 server, 18 renderer, 39
+Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
 evidence includes 30/30 comment product flows, 21/21 mixed ordering repetitions,
 10/10 repetitions of the stabilized initial-refresh case, headed 7/7 for the
@@ -174,6 +175,30 @@ existing chunk-size warning.
 Independent exact-head review found no P0-P2 issues. It confirmed the earlier
 cross-file state leak, delayed editor closure, and sticky mutation-refresh error
 were resolved, then separately reviewed the final test-only delta.
+
+## Merge And Cleanup Evidence
+
+PR #319 squash-merged as
+`e87fe7e0e980ba7375a734ac08767b6af2a51e14` on 2026-08-09 and closed issue
+#318. Storage Restore `31319646390`, Authorization Backup `31319646418`, and
+Retention `31319646398` passed on the final documentation head. The remote
+feature branch was deleted after merge-state verification.
+
+The first `gh pr merge --admin --squash --delete-branch` invocation returned a
+local error because `main` was checked out in another worktree, although GitHub
+had already completed the remote merge. Cleanup therefore re-read the PR and
+issue state before deleting only the confirmed merged remote feature ref. The
+repository post-merge process now records this multi-worktree failure mode so a
+nonzero cleanup exit cannot cause an unsafe duplicate merge attempt.
+
+Required status, current-branch, worktree, and remote-ref checks ran after the
+merge. Active and user-owned worktrees remain explicit cleanup exceptions until
+the closeout PR finishes; no unknown local state was deleted.
+
+The first local closeout `pnpm check:penpot-maturity` run failed one of seven
+checks because two historical plan filenames were placed above the canonical
+`Completed Plans` boundary. Moving prior evidence below that boundary restored
+the one-plan routing contract, and the focused gate then passed 7/7.
 
 ## Deliberate Divergence And Remaining Gaps
 
