@@ -10011,6 +10011,7 @@ export function App() {
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
+  const componentVariantPersistenceRevisionRef = useRef(new Map<string, number>());
   const documentSnapshotRevisionRef = useRef(0);
   const documentSnapshotEpochRef = useRef(new Map<string, number>());
   const latestDocumentSnapshotRef = useRef(new Map<
@@ -13151,12 +13152,25 @@ export function App() {
     }
 
     const fileId = currentProject.currentDocumentId;
+    const persistenceKey = JSON.stringify([fileId, componentId]);
+    const persistenceRevision =
+      (componentVariantPersistenceRevisionRef.current.get(persistenceKey) ?? 0) + 1;
+    componentVariantPersistenceRevisionRef.current.set(persistenceKey, persistenceRevision);
+    setProjectStatus("컴포넌트 변형 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariants(fileId, componentId, variants))
       .then(() => {
+        if (componentVariantPersistenceRevisionRef.current.get(persistenceKey) !== persistenceRevision) {
+          return;
+        }
+        componentVariantPersistenceRevisionRef.current.delete(persistenceKey);
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
+        if (componentVariantPersistenceRevisionRef.current.get(persistenceKey) !== persistenceRevision) {
+          return;
+        }
+        componentVariantPersistenceRevisionRef.current.delete(persistenceKey);
         const message = error instanceof Error ? error.message : "컴포넌트 변형 저장 실패";
         setProjectStatus(message);
       });
