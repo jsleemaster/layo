@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -50,6 +50,12 @@ describe("MCP AI editing workflow", () => {
       openWorldHint: false
     });
     expect(byName.get("apply_agent_commands")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    });
+    expect(byName.get("assign_legacy_comment_owner")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
@@ -2334,6 +2340,434 @@ describe("MCP AI editing workflow", () => {
       dryRun: false,
       deleted: { threadId: created.thread.threadId, deleted: true }
     });
+  });
+
+  test("rejects unresolved legacy thread and reply mutation reviews before commit", async () => {
+    let legacyThreadId = "";
+    let legacyReplyId = "";
+    const client = await connectMcpClient({
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "local-legacy-comment-project",
+          name: "로컬 기존 코멘트 프로젝트",
+          documentId: "local-legacy-comment-file",
+          documentName: "로컬 기존 코멘트 문서"
+        });
+        const created = await storage.createCommentThread("local-legacy-comment-file", {
+          nodeId: "text-1",
+          body: "로컬 기존 코멘트",
+          authorName: "사용자"
+        });
+        const replied = await storage.addCommentReply(
+          "local-legacy-comment-file",
+          created.threadId,
+          { body: "로컬 기존 답글", authorName: "사용자" }
+        );
+        legacyThreadId = created.threadId;
+        legacyReplyId = replied.replies[0].replyId;
+        const rootDir = (storage as unknown as { rootDir: string }).rootDir;
+        const sidecarPath = path.join(rootDir, "comments", "local-legacy-comment-file.json");
+        const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+        delete sidecar.threads[0].authorId;
+        delete sidecar.threads[0].replies[0].authorId;
+        await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+      }
+    });
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_comment_threads",
+        arguments: { fileId: "local-legacy-comment-file", includeResolved: true }
+      })
+    );
+    const legacyThread = listed.threads.find(
+      (thread: { threadId: string }) => thread.threadId === legacyThreadId
+    );
+    expect(legacyThread).toBeTruthy();
+    const reviews = [
+      {
+        name: "update_comment_thread",
+        action: "update_thread",
+        arguments: {
+          fileId: "local-legacy-comment-file",
+          threadId: legacyThreadId,
+          body: "수정 시도",
+          expectedModifiedAt: legacyThread.modifiedAt
+        }
+      },
+      {
+        name: "delete_comment_thread",
+        action: "delete_thread",
+        arguments: {
+          fileId: "local-legacy-comment-file",
+          threadId: legacyThreadId,
+          expectedModifiedAt: legacyThread.modifiedAt
+        }
+      },
+      {
+        name: "update_comment_reply",
+        action: "update_reply",
+        arguments: {
+          fileId: "local-legacy-comment-file",
+          threadId: legacyThreadId,
+          replyId: legacyReplyId,
+          body: "답글 수정 시도",
+          expectedModifiedAt: legacyThread.replies[0].modifiedAt
+        }
+      },
+      {
+        name: "delete_comment_reply",
+        action: "delete_reply",
+        arguments: {
+          fileId: "local-legacy-comment-file",
+          threadId: legacyThreadId,
+          replyId: legacyReplyId,
+          expectedModifiedAt: legacyThread.replies[0].modifiedAt
+        }
+      }
+    ];
+    for (const reviewCase of reviews) {
+      const reviewed = parseToolJson(
+        await client.callTool({
+          name: reviewCase.name,
+          arguments: reviewCase.arguments
+        })
+      );
+      expect(reviewed.review).toMatchObject({
+        action: reviewCase.action,
+        canApply: false,
+        reason: "legacy_owner_unassigned"
+      });
+      await expect(
+        client.callTool({
+          name: reviewCase.name,
+          arguments: { ...reviewCase.arguments, dryRun: false }
+        })
+      ).resolves.toMatchObject({ isError: true });
+    }
+  });
+
+  test("reviews and assigns legacy comment ownership through owner-only MCP", async () => {
+    let legacyThreadId = "";
+    let legacyReplyId = "";
+    let modernThreadId = "";
+    let modernThreadModifiedAt = "";
+    let modernReplyId = "";
+    let modernReplyModifiedAt = "";
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          {
+            userId: "team-owner",
+            role: "owner",
+            teamIds: ["team-alpha"],
+            token: "owner-token"
+          },
+          {
+            userId: "team-editor",
+            role: "editor",
+            teamIds: ["team-alpha"],
+            token: "editor-token"
+          }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "team-owner",
+        memberToken: "owner-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "legacy-comment-project",
+          name: "기존 코멘트 프로젝트",
+          documentId: "legacy-comment-file",
+          documentName: "기존 코멘트 문서"
+        });
+        await storage.setProjectSharing("legacy-comment-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        const created = await storage.createCommentThread("legacy-comment-file", {
+          nodeId: "text-1",
+          body: "MCP 기존 코멘트",
+          authorName: "사용자"
+        });
+        const replied = await storage.addCommentReply(
+          "legacy-comment-file",
+          created.threadId,
+          { body: "MCP 기존 답글", authorName: "사용자" }
+        );
+        legacyThreadId = created.threadId;
+        legacyReplyId = replied.replies[0].replyId;
+        const rootDir = (storage as unknown as { rootDir: string }).rootDir;
+        const sidecarPath = path.join(rootDir, "comments", "legacy-comment-file.json");
+        const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+        delete sidecar.threads[0].authorId;
+        delete sidecar.threads[0].replies[0].authorId;
+        await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+        const modern = await storage.createCommentThread("legacy-comment-file", {
+          nodeId: "text-1",
+          body: "MCP 현대 코멘트",
+          authorId: "team-owner",
+          authorName: "팀 소유자"
+        });
+        modernThreadId = modern.threadId;
+        const modernReplied = await storage.addCommentReply(
+          "legacy-comment-file",
+          modern.threadId,
+          {
+            body: "MCP 현대 답글",
+            authorId: "team-owner",
+            authorName: "팀 소유자"
+          }
+        );
+        modernThreadModifiedAt = modernReplied.modifiedAt;
+        modernReplyId = modernReplied.replies[0].replyId;
+        modernReplyModifiedAt = modernReplied.replies[0].modifiedAt;
+      }
+    });
+
+    const listed = parseToolJson(
+      await client.callTool({
+        name: "list_comment_threads",
+        arguments: { fileId: "legacy-comment-file", includeResolved: true }
+      })
+    );
+    const legacyThread = listed.threads.find(
+      (thread: { threadId: string }) => thread.threadId === legacyThreadId
+    );
+    expect(legacyThread).toBeTruthy();
+    expect(legacyThread).toMatchObject({
+      legacyOwnership: true,
+      replies: [expect.objectContaining({ legacyOwnership: true })]
+    });
+
+    const reviewedThread = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "thread",
+          threadId: legacyThreadId,
+          ownerId: "team-editor",
+          ownerName: "팀 편집자",
+          expectedModifiedAt: legacyThread.modifiedAt
+        }
+      })
+    );
+    expect(reviewedThread).toMatchObject({
+      dryRun: true,
+      review: {
+        action: "assign_thread_owner",
+        canApply: true,
+        reason: null,
+        previousOwnerId: "사용자",
+        ownerId: "team-editor"
+      }
+    });
+
+    const assignedThread = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "thread",
+          threadId: legacyThreadId,
+          ownerId: "team-editor",
+          ownerName: "팀 편집자",
+          expectedModifiedAt: legacyThread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(assignedThread.thread).toMatchObject({
+      authorId: "team-editor",
+      authorName: "팀 편집자",
+      legacyOwnership: false
+    });
+
+    const reviewedReassignment = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "thread",
+          threadId: legacyThreadId,
+          ownerId: "team-owner",
+          expectedModifiedAt: assignedThread.thread.modifiedAt
+        }
+      })
+    );
+    expect(reviewedReassignment.review).toMatchObject({
+      canApply: true,
+      reason: null,
+      previousOwnerId: "team-editor"
+    });
+
+    const reassignedThread = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "thread",
+          threadId: legacyThreadId,
+          ownerId: "team-owner",
+          ownerName: "팀 소유자",
+          expectedModifiedAt: assignedThread.thread.modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(reassignedThread.thread).toMatchObject({
+      authorId: "team-owner",
+      authorName: "팀 소유자",
+      legacyOwnership: false
+    });
+
+    const reviewedModernThread = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "thread",
+          threadId: modernThreadId,
+          ownerId: "team-editor",
+          expectedModifiedAt: modernThreadModifiedAt
+        }
+      })
+    );
+    expect(reviewedModernThread.review).toMatchObject({
+      canApply: false,
+      reason: "not_legacy",
+      previousOwnerId: "team-owner"
+    });
+
+    const reviewedModernReply = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "reply",
+          threadId: modernThreadId,
+          replyId: modernReplyId,
+          ownerId: "team-editor",
+          expectedModifiedAt: modernReplyModifiedAt
+        }
+      })
+    );
+    expect(reviewedModernReply.review).toMatchObject({
+      canApply: false,
+      reason: "not_legacy",
+      previousOwnerId: "team-owner"
+    });
+
+    const reviewedStaleReply = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "reply",
+          threadId: legacyThreadId,
+          replyId: legacyReplyId,
+          ownerId: "team-editor",
+          expectedModifiedAt: "2026-08-09T00:00:00.000Z"
+        }
+      })
+    );
+    expect(reviewedStaleReply.review).toMatchObject({
+      canApply: false,
+      reason: "stale_version"
+    });
+
+    const assignedReply = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "reply",
+          threadId: legacyThreadId,
+          replyId: legacyReplyId,
+          ownerId: "team-editor",
+          ownerName: "팀 편집자",
+          expectedModifiedAt: legacyThread.replies[0].modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(assignedReply.thread.replies[0]).toMatchObject({
+      authorId: "team-editor",
+      authorName: "팀 편집자",
+      legacyOwnership: false
+    });
+
+    const reassignedReply = parseToolJson(
+      await client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-comment-file",
+          target: "reply",
+          threadId: legacyThreadId,
+          replyId: legacyReplyId,
+          ownerId: "team-owner",
+          ownerName: "팀 소유자",
+          expectedModifiedAt: assignedReply.thread.replies[0].modifiedAt,
+          dryRun: false
+        }
+      })
+    );
+    expect(reassignedReply.thread.replies[0]).toMatchObject({
+      authorId: "team-owner",
+      authorName: "팀 소유자",
+      legacyOwnership: false
+    });
+  });
+
+  test("blocks team editors from assigning legacy comment ownership through MCP", async () => {
+    let threadId = "";
+    let modifiedAt = "";
+    const client = await connectMcpClient({
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" }
+        ]
+      },
+      libraryRegistryPrincipal: {
+        userId: "team-editor",
+        memberToken: "editor-token"
+      },
+      setupStorage: async (storage) => {
+        await storage.createProject({
+          projectId: "legacy-editor-project",
+          name: "기존 코멘트 편집자 프로젝트",
+          documentId: "legacy-editor-file",
+          documentName: "기존 코멘트 편집자 문서"
+        });
+        await storage.setProjectSharing("legacy-editor-project", {
+          mode: "team",
+          teamId: "team-alpha"
+        });
+        const created = await storage.createCommentThread("legacy-editor-file", {
+          nodeId: "text-1",
+          body: "편집자가 배정하려는 코멘트",
+          authorName: "사용자"
+        });
+        threadId = created.threadId;
+        modifiedAt = created.modifiedAt;
+      }
+    });
+
+    await expect(
+      client.callTool({
+        name: "assign_legacy_comment_owner",
+        arguments: {
+          fileId: "legacy-editor-file",
+          target: "thread",
+          threadId,
+          ownerId: "team-editor",
+          expectedModifiedAt: modifiedAt,
+          dryRun: false
+        }
+      })
+    ).resolves.toMatchObject({ isError: true });
   });
 
   test("allows team viewers to own and manage MCP comments without design writes", async () => {

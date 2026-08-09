@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
 import {
   addCommentReply,
+  assignLegacyCommentReplyOwner,
+  assignLegacyCommentThreadOwner,
   createCommentThread,
   deleteCommentReply,
   deleteCommentThread,
@@ -1907,6 +1909,77 @@ describe("comment API helpers", () => {
       [expect.stringContaining("/files/sample-file/comments/comment-1/replies/reply-1"), "DELETE"],
       [expect.stringContaining("/files/sample-file/comments/comment-1"), "DELETE"],
       [expect.stringContaining("/files/sample-file/comments/comment-1"), "PATCH"]
+    ]);
+  });
+
+  test("assigns legacy comment owners through owner-authenticated routes", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const credentials = { userId: "team-owner", memberToken: "owner-token" };
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      expect(init?.method).toBe("PATCH");
+      expect(init?.headers).toEqual({
+        Authorization: "Bearer owner-token",
+        "Content-Type": "application/json",
+        "X-Layo-User-Id": "team-owner"
+      });
+      return jsonResponse({
+        thread: {
+          threadId: "comment-1",
+          authorId: "team-editor",
+          legacyOwnership: false,
+          replies: [{ replyId: "reply-1", authorId: "team-editor", legacyOwnership: false }]
+        }
+      });
+    };
+
+    await expect(
+      assignLegacyCommentThreadOwner(
+        "sample-file",
+        "comment-1",
+        {
+          ownerId: "team-editor",
+          ownerName: "민지",
+          expectedModifiedAt: "2026-08-09T00:00:00.000Z"
+        },
+        fetcher as typeof fetch,
+        credentials
+      )
+    ).resolves.toMatchObject({ authorId: "team-editor", legacyOwnership: false });
+    await expect(
+      assignLegacyCommentReplyOwner(
+        "sample-file",
+        "comment-1",
+        "reply-1",
+        {
+          ownerId: "team-editor",
+          ownerName: "민지",
+          expectedModifiedAt: "2026-08-09T00:01:00.000Z"
+        },
+        fetcher as typeof fetch,
+        credentials
+      )
+    ).resolves.toMatchObject({
+      replies: [expect.objectContaining({ authorId: "team-editor", legacyOwnership: false })]
+    });
+
+    expect(calls.map((call) => [new URL(call.url).pathname, JSON.parse(String(call.init?.body))])).toEqual([
+      [
+        "/files/sample-file/comments/comment-1/owner",
+        {
+          ownerId: "team-editor",
+          ownerName: "민지",
+          expectedModifiedAt: "2026-08-09T00:00:00.000Z"
+        }
+      ],
+      [
+        "/files/sample-file/comments/comment-1/replies/reply-1/owner",
+        {
+          ownerId: "team-editor",
+          ownerName: "민지",
+          expectedModifiedAt: "2026-08-09T00:01:00.000Z"
+        }
+      ]
     ]);
   });
 });

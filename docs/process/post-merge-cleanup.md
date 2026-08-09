@@ -13,6 +13,8 @@ dirty states that can mislead the next task.
 ## Required Loop
 
 1. Verify the PR is merged with `gh pr view <number> --json state,mergedAt,mergeCommit,url`.
+   If a merge command exits nonzero, run this check before retrying. GitHub may
+   have completed the remote merge even when a later local cleanup step failed.
 2. Synchronize the working branch with the merged base branch. Confirm the active
    branch with `git branch --show-current` and status with
    `git status --short --branch`.
@@ -21,7 +23,9 @@ dirty states that can mislead the next task.
 4. Inspect all worktrees with `git worktree list`.
 5. Remove only safe stale worktrees:
    - the worktree is clean,
-   - the branch is already merged or the remote feature branch was deleted,
+   - the local worktree HEAD equals the confirmed PR head, or its branch tip is
+     proven integrated with `git merge-base --is-ancestor` against the merged
+     base (account for squash merges by comparing the confirmed PR head first),
    - no user-owned uncommitted files are present.
 6. Prune stale worktree metadata after removal with `git worktree prune`.
 7. Leave dirty, unmerged, or ambiguous worktrees in place and report them as
@@ -49,6 +53,14 @@ git -C <worktree-path> status --short --branch
 git worktree remove <worktree-path>
 git worktree prune
 ```
+
+In a multi-worktree repository, prefer a merge command without
+`--delete-branch`, then delete the remote feature ref only after the merged PR
+state is confirmed. `gh pr merge --delete-branch` can complete the remote merge
+and still exit nonzero when its local cleanup cannot switch to a base branch
+already checked out elsewhere. Never retry the merge from that exit code alone.
+Remote branch deletion alone is never proof that a local worktree is safe to
+remove.
 
 ## Cleanup Exceptions
 

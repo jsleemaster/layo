@@ -3108,6 +3108,56 @@ describe("FileStorage", () => {
     await expect(creator.listCommentLiveEvents({ fileId: "sample-file" })).resolves.toHaveLength(8);
   });
 
+  test("legacy owner assignment serializes competing FileStorage instances", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-owner-race-"));
+    const seedStorage = await storageWithDocument(tempRoot);
+    const created = await seedStorage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "동시 소유권 지정",
+      authorName: "사용자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    delete sidecar.threads[0].authorId;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const firstStorage = new FileStorage(tempRoot);
+    const secondStorage = new FileStorage(tempRoot);
+    const assignOwner = (storage: FileStorage, ownerId: string, ownerName: string) =>
+      (storage as unknown as {
+        assignLegacyCommentThreadOwner: (...args: unknown[]) => Promise<any>;
+      }).assignLegacyCommentThreadOwner("sample-file", created.threadId, {
+        ownerId,
+        ownerName,
+        assignedByName: "team-owner",
+        expectedModifiedAt: created.modifiedAt
+      });
+
+    const results = await Promise.allSettled([
+      assignOwner(firstStorage, "user-minji", "민지"),
+      assignOwner(secondStorage, "user-junho", "준호")
+    ]);
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<any> => result.status === "fulfilled"
+    );
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toMatchObject({ statusCode: 409 });
+
+    const finalStorage = new FileStorage(tempRoot);
+    const [finalThread] = await finalStorage.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(["user-minji", "user-junho"]).toContain(finalThread.authorId);
+    expect(finalThread).toMatchObject({ legacyOwnership: false });
+    const ownershipEvents = (await finalStorage.listCommentLiveEvents({ fileId: "sample-file" }))
+      .filter((event) => event.type === "ownership_assigned");
+    expect(ownershipEvents).toHaveLength(1);
+  });
+
   test("comment authors can edit a thread with optimistic concurrency while other users cannot", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -3181,6 +3231,222 @@ describe("FileStorage", () => {
           body: "@준호 수정된 검수"
         }
       ]
+    });
+  });
+
+  test("schema v1 comments resaved with synthetic owner ids remain explicitly recoverable", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-resaved-legacy-comment-owner-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "재저장된 기존 코멘트",
+      authorName: "기존 표시 이름"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "재저장된 기존 답글",
+      authorName: "기존 답글 작성자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    sidecar.schemaVersion = 1;
+    sidecar.threads[0].authorId = sidecar.threads[0].authorName;
+    sidecar.threads[0].replies[0].authorId = sidecar.threads[0].replies[0].authorName;
+    delete sidecar.threads[0].legacyOwnership;
+    delete sidecar.threads[0].replies[0].legacyOwnership;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const reloaded = new FileStorage(tempRoot);
+    const [legacyThread] = await reloaded.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(legacyThread).toMatchObject({
+      threadId: created.threadId,
+      authorId: "기존 표시 이름",
+      legacyOwnership: true,
+      replies: [
+        expect.objectContaining({
+          replyId: replied.replies[0].replyId,
+          authorId: "기존 답글 작성자",
+          legacyOwnership: true
+        })
+      ]
+    });
+
+    await reloaded.markCommentThreadRead("sample-file", created.threadId, {
+      viewerId: "team-owner"
+    });
+    const migratedSidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    expect(migratedSidecar).toMatchObject({
+      schemaVersion: 2,
+      threads: [
+        expect.objectContaining({
+          legacyOwnership: true,
+          replies: [expect.objectContaining({ legacyOwnership: true })]
+        })
+      ]
+    });
+  });
+
+  test("legacy comment owners must be explicitly assigned before thread and reply edits", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-comment-owner-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "기존 코멘트",
+      authorName: "사용자"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "기존 답글",
+      authorName: "사용자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    delete sidecar.threads[0].authorId;
+    delete sidecar.threads[0].replies[0].authorId;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const reloaded = new FileStorage(tempRoot);
+    const legacyOwnershipStorage = reloaded as unknown as {
+      assignLegacyCommentThreadOwner: (...args: unknown[]) => Promise<any>;
+      assignLegacyCommentReplyOwner: (...args: unknown[]) => Promise<any>;
+    };
+    const [legacyThread] = await reloaded.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(legacyThread).toMatchObject({
+      threadId: created.threadId,
+      authorId: "사용자",
+      legacyOwnership: true,
+      replies: [
+        expect.objectContaining({
+          replyId: replied.replies[0].replyId,
+          authorId: "사용자",
+          legacyOwnership: true
+        })
+      ]
+    });
+    await expect(
+      reloaded.updateCommentThread("sample-file", created.threadId, {
+        body: "지정 전 수정",
+        actorId: "user-minji",
+        expectedModifiedAt: legacyThread.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    const readLegacyThread = await reloaded.markCommentThreadRead(
+      "sample-file",
+      created.threadId,
+      { viewerId: "user-reviewer" }
+    );
+    expect(readLegacyThread.readBy).toEqual(["사용자", "user-reviewer"]);
+
+    const assignedThread = await legacyOwnershipStorage.assignLegacyCommentThreadOwner(
+      "sample-file",
+      created.threadId,
+      {
+        ownerId: "missing-member",
+        ownerName: "잘못 지정된 사용자",
+        assignedByName: "team-owner",
+        expectedModifiedAt: readLegacyThread.modifiedAt
+      }
+    );
+    expect(assignedThread).toMatchObject({
+      authorId: "missing-member",
+      authorName: "잘못 지정된 사용자",
+      legacyOwnership: false,
+      readBy: ["사용자", "user-reviewer", "missing-member"]
+    });
+    expect(assignedThread.modifiedAt).not.toBe(legacyThread.modifiedAt);
+
+    const correctedThread = await legacyOwnershipStorage.assignLegacyCommentThreadOwner(
+      "sample-file",
+      created.threadId,
+      {
+        ownerId: "user-minji",
+        ownerName: "민지",
+        assignedByName: "team-owner",
+        expectedModifiedAt: assignedThread.modifiedAt
+      }
+    );
+    expect(correctedThread).toMatchObject({
+      authorId: "user-minji",
+      authorName: "민지",
+      legacyOwnership: false,
+      readBy: ["사용자", "user-reviewer", "missing-member", "user-minji"]
+    });
+    expect(correctedThread.modifiedAt).not.toBe(assignedThread.modifiedAt);
+
+    const assignedReplyThread = await legacyOwnershipStorage.assignLegacyCommentReplyOwner(
+      "sample-file",
+      created.threadId,
+      replied.replies[0].replyId,
+      {
+        ownerId: "user-junho",
+        ownerName: "준호",
+        assignedByName: "team-owner",
+        expectedModifiedAt: legacyThread.replies[0].modifiedAt
+      }
+    );
+    expect(assignedReplyThread.replies[0]).toMatchObject({
+      authorId: "user-junho",
+      authorName: "준호",
+      legacyOwnership: false
+    });
+
+    await expect(
+      reloaded.updateCommentThread("sample-file", created.threadId, {
+        body: "민지가 수정한 기존 코멘트",
+        actorId: "user-minji",
+        expectedModifiedAt: assignedReplyThread.modifiedAt
+      })
+    ).resolves.toMatchObject({ body: "민지가 수정한 기존 코멘트" });
+    await expect(
+      reloaded.updateCommentReply(
+        "sample-file",
+        created.threadId,
+        replied.replies[0].replyId,
+        {
+          body: "준호가 수정한 기존 답글",
+          actorId: "user-junho",
+          expectedModifiedAt: assignedReplyThread.replies[0].modifiedAt
+        }
+      )
+    ).resolves.toMatchObject({
+      replies: [expect.objectContaining({ body: "준호가 수정한 기존 답글" })]
+    });
+    const modernThread = await reloaded.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "현대 코멘트",
+      authorId: "user-modern",
+      authorName: "현대 사용자"
+    });
+    await expect(
+      legacyOwnershipStorage.assignLegacyCommentThreadOwner("sample-file", modernThread.threadId, {
+        ownerId: "user-other",
+        ownerName: "다른 사용자",
+        assignedByName: "team-owner",
+        expectedModifiedAt: modernThread.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await expect(reloaded.listCommentActivity()).resolves.toMatchObject({
+      events: expect.arrayContaining([
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          body: "잘못 지정된 사용자에게 코멘트 소유자가 지정되었습니다"
+        }),
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          body: "민지에게 코멘트 소유자가 지정되었습니다"
+        }),
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          replyId: replied.replies[0].replyId,
+          body: "준호에게 답글 소유자가 지정되었습니다"
+        })
+      ])
     });
   });
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -2764,6 +2764,147 @@ describe("HTTP server", () => {
         )
       )
     ).toEqual(new Set(["private-comment-project"]));
+  });
+
+  test("requires a team owner to assign legacy thread and reply ownership before member edits", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-comment-http-"));
+    const storage = new FileStorage(tempRoot);
+    await storage.createProject({
+      projectId: "legacy-comment-project",
+      name: "기존 코멘트 프로젝트",
+      documentId: "legacy-comment-file",
+      documentName: "기존 코멘트 문서"
+    });
+    await storage.setProjectSharing("legacy-comment-project", {
+      mode: "team",
+      teamId: "team-alpha"
+    });
+    const created = await storage.createCommentThread("legacy-comment-file", {
+      nodeId: "text-1",
+      body: "소유권 없는 기존 코멘트",
+      authorName: "사용자"
+    });
+    const replied = await storage.addCommentReply("legacy-comment-file", created.threadId, {
+      body: "소유권 없는 기존 답글",
+      authorName: "사용자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "legacy-comment-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    delete sidecar.threads[0].authorId;
+    delete sidecar.threads[0].replies[0].authorId;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const server = createHttpServer(new FileStorage(tempRoot), {
+      libraryRegistryAuth: {
+        members: [
+          { userId: "team-owner", role: "owner", teamIds: ["team-alpha"], token: "owner-token" },
+          { userId: "team-editor", role: "editor", teamIds: ["team-alpha"], token: "editor-token" }
+        ]
+      }
+    });
+    const headers = (userId: string, token: string) => ({
+      authorization: `Bearer ${token}`,
+      "x-layo-user-id": userId
+    });
+    const listed = await server.inject({
+      method: "GET",
+      url: "/files/legacy-comment-file/comments?includeResolved=true",
+      headers: headers("team-editor", "editor-token")
+    });
+    expect(listed.statusCode).toBe(200);
+    const legacyThread = listed.json().threads[0];
+    expect(legacyThread).toMatchObject({
+      legacyOwnership: true,
+      replies: [expect.objectContaining({ legacyOwnership: true })]
+    });
+
+    const blockedAssignment = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/owner`,
+      headers: headers("team-editor", "editor-token"),
+      payload: {
+        ownerId: "team-editor",
+        ownerName: "팀 편집자",
+        expectedModifiedAt: legacyThread.modifiedAt
+      }
+    });
+    expect(blockedAssignment.statusCode).toBe(403);
+
+    const assignedThread = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/owner`,
+      headers: headers("team-owner", "owner-token"),
+      payload: {
+        ownerId: "missing-member",
+        ownerName: "잘못 지정된 사용자",
+        expectedModifiedAt: legacyThread.modifiedAt
+      }
+    });
+    expect(assignedThread.statusCode).toBe(200);
+    expect(assignedThread.json().thread).toMatchObject({
+      authorId: "missing-member",
+      authorName: "잘못 지정된 사용자",
+      legacyOwnership: false
+    });
+
+    const correctedThread = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/owner`,
+      headers: headers("team-owner", "owner-token"),
+      payload: {
+        ownerId: "team-editor",
+        ownerName: "팀 편집자",
+        expectedModifiedAt: assignedThread.json().thread.modifiedAt
+      }
+    });
+    expect(correctedThread.statusCode).toBe(200);
+    expect(correctedThread.json().thread).toMatchObject({
+      authorId: "team-editor",
+      authorName: "팀 편집자",
+      legacyOwnership: false
+    });
+
+    const assignedReply = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/replies/${replied.replies[0].replyId}/owner`,
+      headers: headers("team-owner", "owner-token"),
+      payload: {
+        ownerId: "team-editor",
+        ownerName: "팀 편집자",
+        expectedModifiedAt: legacyThread.replies[0].modifiedAt
+      }
+    });
+    expect(assignedReply.statusCode).toBe(200);
+    expect(assignedReply.json().thread.replies[0]).toMatchObject({
+      authorId: "team-editor",
+      authorName: "팀 편집자",
+      legacyOwnership: false
+    });
+
+    const editedThread = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}`,
+      headers: headers("team-editor", "editor-token"),
+      payload: {
+        body: "편집자가 복구한 기존 코멘트",
+        expectedModifiedAt: assignedReply.json().thread.modifiedAt
+      }
+    });
+    expect(editedThread.statusCode).toBe(200);
+    const editedReply = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/replies/${replied.replies[0].replyId}`,
+      headers: headers("team-editor", "editor-token"),
+      payload: {
+        body: "편집자가 복구한 기존 답글",
+        expectedModifiedAt: assignedReply.json().thread.replies[0].modifiedAt
+      }
+    });
+    expect(editedReply.statusCode).toBe(200);
+    expect(editedReply.json().thread).toMatchObject({
+      body: "편집자가 복구한 기존 코멘트",
+      replies: [expect.objectContaining({ body: "편집자가 복구한 기존 답글" })]
+    });
   });
 
   test("requires a team owner to change a team project's sharing boundary", async () => {

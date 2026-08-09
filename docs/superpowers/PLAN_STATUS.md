@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-08-09
+Last audited: 2026-08-10
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -30,16 +30,47 @@ Use this order when entering the repo:
 ## Current Active Plan
 
 [2026-07-23-penpot-comment-management.md](plans/2026-07-23-penpot-comment-management.md)
-is active on PR #319. It adapts
-Penpot comment ownership, edit/delete, team authorization, viewer feedback,
-review-first MCP, and durable delivery into Layo's local sidecar architecture.
-Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005` passed Full
-Verification `31318544219` at 253/253 Playwright with no retry, and independent
-exact-head review found no P0-P2 issue. Final documentation-head verification,
-merge, and post-merge MD cleanup remain required before this plan can move to
-Completed.
+is reopened on draft PR #320 for the exact post-merge P1 found on PR #319.
+The repair now preserves missing-owner provenance, blocks ambiguous edits, and
+requires explicit assignment by a team owner or the private file's local
+operator before a legacy thread or reply becomes editable. Migrated legacy
+records remain reassignable, while modern records cannot enter the migration
+route; MCP dry-run now matches commit rejection for unresolved ownership.
+Sidecar `v2` now proves modern provenance and unmarked `v1` records recover
+conservatively even after a prior parser persisted a synthetic ID. Reconnect
+selectors preserve the current thread/reply owner. Storage, HTTP, MCP, Korean
+browser, private-file, and full Playwright evidence are green locally. A later
+configured review found thread assignment discarded prior read receipts; the
+focused storage/browser repair now preserves them, and the final local server,
+web, typecheck, build, maturity, design, full E2E, and headed receipt checks are
+green. The next independent review found later edits corrupted ownership audit
+messages despite green CI; an activity-type allowlist plus storage/browser RED
+and headed feed proof now preserves them. The following exact-head review found
+stale owner drafts could silently revert remote assignments despite another
+green CI; version-bound drafts plus thread/reply SSE RED and headed selector
+proof now synchronize to remote state. The final independent review found no
+P0-P2; its residual verification risks are closed by disabling fallback polling
+in that browser flow and racing owner assignment across two storage instances.
+Reviewed head `e934249` passed Full Verification `31336227992` and all three
+drills before that test-only follow-up.
+Another exact-head re-review, final CI,
+configured review, merge, PR #319 thread resolution, and cleanup remain.
 
 ## Recently Completed Plan
+
+The original `2026-07-23-penpot-comment-management.md` implementation shipped in
+PR #319. It adapts
+Penpot comment ownership, edit/delete, team authorization, viewer feedback,
+review-first MCP, durable delivery, browser ordering recovery, and crash-safe
+local sidecar storage. Final documentation head
+`8e8bcd4463d732d40b36abcfabd2663edc44796b` passed Full Verification
+`31319646399` at 253/253 Playwright with no retry, and PR #319 squash-merged as
+`e87fe7e0e980ba7375a734ac08767b6af2a51e14`. A configured review arrived after
+merge and exposed the legacy ownership P1 now active on PR #320.
+
+## Completed Plans
+
+### Prior Recent Evidence
 
 `2026-07-16-penpot-file-version-visual-preview.md` completed in PR #316. It adapts
 Penpot's saved-version view-only workspace by rendering the complete persisted
@@ -87,10 +118,11 @@ document session is removed, and the retained team name follows the same exact m
 Target-project HTTP refreshes receive an explicitly computed credential, and polling
 restarts whenever sharing, team identity, or token scope changes.
 
-## Completed Plans
+### Completion Ledger
 
 | Plan | Status | Evidence |
 | --- | --- | --- |
+| `2026-07-23-penpot-comment-management.md` | Reopened on PR #320 after PR #319 | PR #319 shipped owner-safe modern comments and passed Full Verification `31319646399` with 253/253 Playwright tests, but a configured post-ready review arrived after merge and found that legacy sidecars without `authorId` fall back to a display name that no authenticated team member can own. PR #320 adds explicit team-owner plus private local-operator recovery across storage, HTTP, review-first MCP, and Korean browser controls. Review rounds found irreversible mistaken-owner assignment, MCP dry-run mismatch, already-reserialized synthetic IDs, reconnect selector drift, lost thread read receipts, ownership-audit bodies overwritten by later edits, and stale owner drafts reverting remote assignments. The current repair keeps migrated records reassignable, aligns review/commit, establishes sidecar `v2` provenance with conservative `v1` recovery, preserves the current owner after reconnect and prior readers during assignment, restricts activity-body refresh to content snapshots, and binds owner drafts to selection-time versions. Final local proof passes 522 server tests with 47 skipped, 284/284 web tests, workspace typecheck, production build, maturity 7/7, design rules, full 255/255 Playwright, plus receipt-, audit-, and remote-draft-focused headed 1/1 visual checks. The latest independent review found no P0-P2; its residual SSE and storage-race test risks are covered by polling suppression plus a two-instance optimistic assignment regression. The plan cannot return to Completed until another exact-head re-review, CI, configured review, merge, PR #319 thread resolution, and cleanup finish. Deployment remains deliberately non-gating; the wider Penpot maturity benchmark remains open. |
 | `2026-07-16-penpot-file-version-visual-preview.md` | Completed by PR #316 merge gate | Adapts Penpot saved-version preview into a complete Korean-first read-only canvas and hardens ordered snapshot epochs, base-aware server/Yjs convergence, Restore compensation, project-transition mutation barriers, scoped registry/DTCG operations, watcher registration, asset cleanup, and isolated MCP/E2E storage. Final head `b35a4f67bf44343583af24641d50036122a1e338` passed Full Verification `29670879859`, Authorization Audit Archive `29670879856`, Authorization Backup `29670879844`, Storage Restore `29670879851`, and Retention `29670879833`; independent implementation review and final test-only self-review found no P0-P2, and all review threads were resolved. PR #316 squash-merged as `6b9501c61d75179929ef260ad6a8d01f1717dd8d`; the remote feature branch was deleted. Post-merge cleanup removed the clean PR #199 worktree and retained the user-owned `.playwright-mcp/` changes in the primary worktree. Deployment remains deliberately non-gating. |
 | `2026-07-16-penpot-agent-reviewed-token-mutation.md` | Completed by PR #314 merge gate | Adapts Penpot account token lifecycle into HMAC-authenticated MCP review/commit bound to principal, canonical operation, shared scope, and exact PostgreSQL generation; verifies inside the row lock before token material generation; adds forged-payload, replay, self-revoke, no-op, and two-connection concurrency coverage. It also resolves Vercel `api-deployments-free-per-day` by disabling Vercel Git deployment and making the tested Actions workflow the sole production owner. Final head `5c785e0b606e1f31d3b0346e4f607e86de2c1db1` passed Full `29481572997`, Restore `29481572958`, Retention `29481573088`, and Authorization Backup `29481573008`; independent re-review found no P0-P2. PR #314 squash-merged as `a89a814438ed9429e877f3518e8aeb18c97f8cc5` and the remote branch was deleted. Local status/branch/worktree checks remain an exit-134 cleanup exception. Production remains deferred pending quota recovery and four Actions secrets. |
 | `2026-07-15-penpot-shared-authorization-generation.md` | Completed by PR #310 merge gate | Adds a PostgreSQL-scoped monotonic authorization generation and row-locked shared mutation path. Final head `fd1783c6861a9d7bf63580e7acccc6e4a279cd73` passed Full `29397873608`, Authorization Backup `29397873842`, Restore `29397873471`, and Retention `29397873455`; independent re-review found no P0-P2. PR #310 squash-merged as `9a710fc6bbd9b81d6ef68d8d5f4421aae28803a9` and its remote branch was deleted. Local status/branch/worktree checks remain an exit-134 cleanup exception; no local state was deleted. Durable audit consumption and general account recovery remain open, while agent-reviewed token mutation was completed by PR #314. |

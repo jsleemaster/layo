@@ -39,7 +39,9 @@ implementation slice reveals a new gap.
 
 ## Current Comment Management Evidence
 
-PR #319 adapts the current Penpot comment workflow at `develop` commit
+PR #319, squash-merged as
+`e87fe7e0e980ba7375a734ac08767b6af2a51e14`, adapts the current Penpot comment
+workflow at `develop` commit
 `b5bec4f983b5540a3ed7969121badf08a14f384e`. Stable thread/reply ownership,
 optimistic edit/delete versions, viewer feedback participation, trusted team
 actors, content-free deletion tombstones, terminal SSE reauthorization, and
@@ -67,10 +69,53 @@ passed but retained one retry-only flaky case, so it was not accepted as final.
 Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005`
 passed Full Verification `31318544219`: 283 web, 562 server, 18 renderer, 39
 collaboration, seven relay, 117 Rust, and 253/253 Playwright cases with no retry.
-Independent exact-head review found no P0-P2 issue. Local proof includes 30/30
-comment product flows, 21/21 mixed ordering repetitions, 10/10 stabilized
-initial-refresh repetitions, headed 7/7 for the latest interaction set, and
-headed 1/1 for the stabilized case.
+Final PR #319 documentation head `8e8bcd4463d732d40b36abcfabd2663edc44796b`
+repeated the same counts in Full Verification `31319646399`; Restore
+`31319646390`, Authorization Backup `31319646418`, and Retention `31319646398`
+also passed. A configured review that began after ready then found a legacy
+ownership P1 after merge: missing stable `authorId` values were replaced by a
+display-name fallback that authenticated team actors could not match. PR #320
+now preserves missing-owner provenance and adds explicit team-owner plus private
+local-operator assignment through storage, HTTP, review-first MCP, and Korean
+browser controls. Implementation Full Verification `31324584270` passed 284
+web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and
+254/254 Playwright. Independent review then exposed irreversible mistaken-owner
+assignment and an MCP dry-run/commit mismatch; the local follow-up keeps migrated
+legacy records reassignable, rejects unresolved edit/delete reviews consistently,
+and passed Full Verification `31328690712`, but the next exact-head review found
+that a `v1` sidecar could already contain a persisted synthetic ID and that
+reconnect selected the first member instead of the current owner. Sidecar `v2`
+now establishes stable-owner provenance; unmarked `v1` records recover
+conservatively, and thread/reply selectors preserve the stored owner. Final
+local proof passes 522 server tests with 47 skipped, 284/284 web tests,
+workspace typecheck, production build, maturity 7/7, design rules, and full
+255/255 Playwright without retry. Private claim, team reconnect, and the
+receipt-focused flow each passed headed 1/1 with visual inspection. Full
+Verification `31331290743` and independent review were
+green, but configured review then found that thread assignment discarded prior
+read receipts and created false unread notifications. Storage and browser RED
+now preserve all readers while adding the new owner. Superseded head `83e6c3a`
+then passed Full Verification `31333603394` and all three drills, but independent
+exact-head review found later edits overwrote ownership-assignment audit bodies.
+An explicit content-activity allowlist now preserves thread/reply assignment
+messages; focused storage/browser RED and headed activity-feed proof are green.
+Superseded head `26042fe` then passed Full Verification `31334871380` and all
+three drills, but independent exact-head review found stale owner drafts could
+silently revert remote reassignment. Drafts now bind to selection-time versions;
+thread/reply SSE regressions and headed selectors prove both synchronize to
+remote owner `준호` before submission.
+The final independent exact-head review found no P0-P2. Its two residual test
+risks are now explicit regressions: the owner synchronization E2E suppresses
+the 2-second fallback poll before remote thread/reply assignments, and a
+cross-instance storage race proves one optimistic owner assignment wins while
+the stale peer receives `409` without a duplicate ownership event.
+That reviewed head passed Full Verification `31336227992` and all three drills;
+the follow-up changes test and durable evidence only.
+Final-head re-review, CI, configured review, merge, PR #319 thread resolution,
+and cleanup remain. Local PR #319
+proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
+repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
+latest interaction set, and headed 1/1 for the stabilized case.
 
 This is evidence toward gates 2, 8, 9, and 10, not closure of the whole maturity
 benchmark. Arbitrary canvas-coordinate comments, hide/show preference, full

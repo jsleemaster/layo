@@ -2437,6 +2437,31 @@ button:disabled {
   gap: var(--editor-space-xxs);
 }
 
+.comment-summary .comment-owner-unassigned {
+  width: fit-content;
+  color: var(--editor-color-warning);
+  font-weight: var(--editor-text-control-weight);
+}
+
+.comment-owner-assignment {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--editor-space-xxs);
+  min-width: 0;
+}
+
+.comment-owner-assignment select {
+  width: 100%;
+  min-width: 0;
+  height: var(--editor-space-xl);
+}
+
+.comment-owner-assignment button {
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xxs) var(--editor-space-xs);
+  white-space: nowrap;
+}
+
 
 .comment-row button,
 .comment-reply-compose button {
