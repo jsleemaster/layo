@@ -174,6 +174,94 @@ describe("FileStorage", () => {
     });
   });
 
+  test("cold project listing cannot queue recovery behind its own active mutation", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
+    const setup = new FileStorage(tempRoot);
+    await setup.createProject({
+      projectId: "cold-recovery-project",
+      name: "Cold recovery project",
+      documentId: "cold-recovery-file",
+      documentName: "Cold recovery file"
+    });
+
+    const storage = new FileStorage(tempRoot);
+    const internals = storage as unknown as {
+      isStorageTransactionCoordinatorHeld(): boolean;
+      recoverInterruptedLibraryUpdatesOnce(): Promise<void>;
+      recoverInterruptedStorageTransactionsOnce(): Promise<void>;
+    };
+    const originalLibraryRecovery =
+      internals.recoverInterruptedLibraryUpdatesOnce.bind(storage);
+    const originalStorageRecovery =
+      internals.recoverInterruptedStorageTransactionsOnce.bind(storage);
+    let markMutationPaused!: () => void;
+    const mutationPaused = new Promise<void>((resolve) => {
+      markMutationPaused = resolve;
+    });
+    let releaseMutation!: () => void;
+    const mutationReleased = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+    let markListingQueued!: () => void;
+    const listingQueued = new Promise<void>((resolve) => {
+      markListingQueued = resolve;
+    });
+    let pauseFirstMutation = true;
+    let queuedListingRecovery: Promise<void> | undefined;
+
+    internals.recoverInterruptedLibraryUpdatesOnce = async () => {
+      const recovery = originalLibraryRecovery();
+      if (
+        pauseFirstMutation
+        && internals.isStorageTransactionCoordinatorHeld()
+      ) {
+        pauseFirstMutation = false;
+        markMutationPaused();
+        await mutationReleased;
+      }
+      await recovery;
+    };
+    internals.recoverInterruptedStorageTransactionsOnce = () => {
+      const coordinatorHeld = internals.isStorageTransactionCoordinatorHeld();
+      const recovery = originalStorageRecovery();
+      if (!coordinatorHeld && !queuedListingRecovery) {
+        queuedListingRecovery = recovery;
+        markListingQueued();
+      } else if (coordinatorHeld && recovery === queuedListingRecovery) {
+        throw new Error(
+          "project mutation awaited recovery queued behind its coordinator"
+        );
+      }
+      return recovery;
+    };
+
+    const mutation = storage.updateProject("cold-recovery-project", {
+      name: "Cold recovery project updated"
+    });
+    await mutationPaused;
+    const listing = storage.listProjects();
+    await listingQueued;
+    releaseMutation();
+
+    const [mutationResult, listingResult] = await Promise.allSettled([
+      mutation,
+      listing
+    ]);
+    expect(mutationResult).toMatchObject({
+      status: "fulfilled",
+      value: { name: "Cold recovery project updated" }
+    });
+    expect(listingResult).toMatchObject({
+      status: "fulfilled",
+      value: [
+        expect.objectContaining({
+          projectId: "cold-recovery-project",
+          name: "Cold recovery project updated"
+        })
+      ]
+    });
+  });
+
   test("project reservation rejects case-folded manifest collisions", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = new FileStorage(tempRoot);
