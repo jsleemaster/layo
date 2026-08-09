@@ -10011,7 +10011,7 @@ export function App() {
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
-  const componentVariantPersistenceRevisionRef = useRef(new Map<string, number>());
+  const componentVariantPersistenceRevisionRef = useRef(0);
   const documentSnapshotRevisionRef = useRef(0);
   const documentSnapshotEpochRef = useRef(new Map<string, number>());
   const latestDocumentSnapshotRef = useRef(new Map<
@@ -10040,6 +10040,8 @@ export function App() {
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const commentAccessGenerationRef = useRef(0);
+  const commentThreadBackgroundRefreshRevisionRef = useRef(0);
+  const commentThreadStatusRevisionRef = useRef(0);
   const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
   const libraryRegistryAccessGenerationRef = useRef(0);
@@ -10372,6 +10374,16 @@ export function App() {
     options: { preserveStatus?: boolean } = {}
   ) => {
     const accessGeneration = commentAccessGenerationRef.current;
+    const statusRevision = status === undefined
+      ? commentThreadStatusRevisionRef.current
+      : commentThreadStatusRevisionRef.current + 1;
+    let backgroundRefreshRevision: number | null = null;
+    if (status !== undefined) {
+      commentThreadStatusRevisionRef.current = statusRevision;
+    } else {
+      backgroundRefreshRevision = commentThreadBackgroundRefreshRevisionRef.current + 1;
+      commentThreadBackgroundRefreshRevisionRef.current = backgroundRefreshRevision;
+    }
     try {
       const threads = await listCommentThreads(
         fileId,
@@ -10386,16 +10398,30 @@ export function App() {
       ) {
         return;
       }
-      const unreadCount = threads.filter((thread) => thread.unread).length;
-      setCommentThreads(threads);
-      if (!options.preserveStatus) {
+      const isCurrentRefresh = commentThreadStatusRevisionRef.current === statusRevision
+        && (
+          status !== undefined
+          || commentThreadBackgroundRefreshRevisionRef.current === backgroundRefreshRevision
+        );
+      if (isCurrentRefresh) {
+        setCommentThreads(threads);
+      }
+      if (status !== undefined) {
+        if (commentThreadStatusRevisionRef.current === statusRevision) {
+          setCommentStatus(status);
+        }
+      } else if (
+        !options.preserveStatus
+        && isCurrentRefresh
+        && commentThreadStatusRevisionRef.current === statusRevision
+      ) {
+        const unreadCount = threads.filter((thread) => thread.unread).length;
         setCommentStatus(
-          status ??
-            (unreadCount > 0
-              ? `${unreadCount}개 읽지 않은 코멘트`
-              : threads.length > 0
-                ? `${threads.length}개 활성 코멘트`
-                : "활성 코멘트 없음")
+          unreadCount > 0
+            ? `${unreadCount}개 읽지 않은 코멘트`
+            : threads.length > 0
+              ? `${threads.length}개 활성 코멘트`
+              : "활성 코멘트 없음"
         );
       }
     } catch (error) {
@@ -10406,10 +10432,17 @@ export function App() {
         return;
       }
       const message = error instanceof Error ? error.message : "코멘트를 불러오지 못했습니다";
-      setCommentThreads([]);
-      setCommentReplyBodies({});
-      if (!options.preserveStatus) {
-        setCommentStatus(message);
+      if (status !== undefined) {
+        if (commentThreadStatusRevisionRef.current === statusRevision) {
+          setCommentStatus(message);
+        }
+      } else if (!options.preserveStatus) {
+        if (
+          commentThreadStatusRevisionRef.current === statusRevision
+          && commentThreadBackgroundRefreshRevisionRef.current === backgroundRefreshRevision
+        ) {
+          setCommentStatus(message);
+        }
       }
     }
   };
@@ -13152,25 +13185,27 @@ export function App() {
     }
 
     const fileId = currentProject.currentDocumentId;
-    const persistenceKey = JSON.stringify([fileId, componentId]);
-    const persistenceRevision =
-      (componentVariantPersistenceRevisionRef.current.get(persistenceKey) ?? 0) + 1;
-    componentVariantPersistenceRevisionRef.current.set(persistenceKey, persistenceRevision);
+    const persistenceRevision = componentVariantPersistenceRevisionRef.current + 1;
+    componentVariantPersistenceRevisionRef.current = persistenceRevision;
     setProjectStatus("컴포넌트 변형 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariants(fileId, componentId, variants))
       .then(() => {
-        if (componentVariantPersistenceRevisionRef.current.get(persistenceKey) !== persistenceRevision) {
+        if (
+          componentVariantPersistenceRevisionRef.current !== persistenceRevision
+          || currentProjectRef.current?.currentDocumentId !== fileId
+        ) {
           return;
         }
-        componentVariantPersistenceRevisionRef.current.delete(persistenceKey);
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
-        if (componentVariantPersistenceRevisionRef.current.get(persistenceKey) !== persistenceRevision) {
+        if (
+          componentVariantPersistenceRevisionRef.current !== persistenceRevision
+          || currentProjectRef.current?.currentDocumentId !== fileId
+        ) {
           return;
         }
-        componentVariantPersistenceRevisionRef.current.delete(persistenceKey);
         const message = error instanceof Error ? error.message : "컴포넌트 변형 저장 실패";
         setProjectStatus(message);
       });
