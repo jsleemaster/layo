@@ -86,11 +86,16 @@ and passed Full Verification `31328690712`, but the next exact-head review found
 that a `v1` sidecar could already contain a persisted synthetic ID and that
 reconnect selected the first member instead of the current owner. Sidecar `v2`
 now establishes stable-owner provenance; unmarked `v1` records recover
-conservatively, and thread/reply selectors preserve the stored owner. Latest
-local proof passes 568 server and 284 web tests, focused storage/MCP/browser
-coverage, both private and team headed 1/1 visual checks, and full 255/255
-without retry. Final-head re-review, CI, merge, PR #319 thread resolution, and
-cleanup remain. Local PR #319
+conservatively, and thread/reply selectors preserve the stored owner. Final
+local proof passes 521 server tests with 47 skipped, 284/284 web tests,
+workspace typecheck, production build, maturity 7/7, design rules, and full
+255/255 Playwright without retry. Private claim, team reconnect, and the
+receipt-focused flow each passed headed 1/1 with visual inspection. Full
+Verification `31331290743` and independent review were
+green, but configured review then found that thread assignment discarded prior
+read receipts and created false unread notifications. Storage and browser RED
+now preserve all readers while adding the new owner. Final-head re-review, CI,
+configured review, merge, PR #319 thread resolution, and cleanup remain. Local PR #319
 proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
 repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
 latest interaction set, and headed 1/1 for the stabilized case.

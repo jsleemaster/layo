@@ -58,8 +58,10 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
   events, and changes `legacyOwnership` to `false`. That value means explicitly
   migrated and remains owner-reassignable so an incorrect target cannot strand
   the record; `undefined` identifies a modern record that is not a migration
-  target. The browser hides dead edit/delete controls before assignment and
-  reveals them only for the assigned actor afterward.
+  target. Thread assignment preserves every existing `readBy` receipt and adds
+  the new owner without duplication, preventing false unread notifications.
+  The browser hides dead edit/delete controls before assignment and reveals
+  them only for the assigned actor afterward.
 
 ### Team Authorization And Delivery
 
@@ -186,12 +188,19 @@ catalog is:
 27. reconnecting after assignment cleared the browser draft and selected the
     first team member instead of the stored current owner. Thread and reply
     selectors now resolve `draft -> current authorId -> first target`, with
-    reload and team-manifest reimport coverage.
+    reload and team-manifest reimport coverage; and
+28. configured final-head review found that thread owner assignment replaced
+    the entire `readBy` list while reply assignment already preserved it. This
+    made prior readers falsely unread after migration. Thread assignment now
+    appends the owner through the same unique-reader contract, with focused
+    storage and browser notification regressions.
 
 No personal memory note was added: the new misses are captured as product and
 repository-process regressions in focused E2E, this durable delta, the review
 timing rule, and the PR body. Headed pre/post screenshots verified that owner
 selectors, status labels, and edit/delete controls remain visible without overlap.
+The final receipt-focused headed pass also showed the unread badge disappear
+before assignment and stay absent after the owner changed to `민지`.
 
 ## Verification Evidence
 
@@ -229,7 +238,8 @@ selectors, status labels, and edit/delete controls remain visible without overla
 | `31323183601` | PR #320 RED at `b6e174028116a0891f4c248417ccfbd9701a2063`: storage provenance, HTTP assignment, MCP assignment, and browser owner markers were intentionally absent. |
 | `31324584270` | Implementation GREEN at `2c2954e9f9252d3bb968df50875b529af0daaf83`: 284 web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 254/254 Playwright; backup, restore, and retention drills also passed. |
 | `31328690712` | Superseded head `06fce31df5d3af751b4a2016f7cf367625a2b4b3` passed Full Verification and all three drills, but exact-head review correctly rejected it for the resaved synthetic-owner and reconnect-selection gaps. |
-| Local latest | 568 server and 284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, and editor control absence. Both private claim and team reconnect passed headed 1/1 with visual inspection; full Playwright passed 255/255 without retry. |
+| `31331290743` | Superseded head `7eccbaae9362a035dcc51848c0901bce35d9c765` passed Full Verification and all three drills; independent review was clean, but configured exact-head review correctly found lost read receipts during thread assignment. |
+| Local latest | 521 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, and read-receipt preservation. Private claim, team reconnect, and the final receipt flow each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
 
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
@@ -255,8 +265,11 @@ An independent review found and drove the reversible-assignment P1 and MCP
 review/commit-parity P2 fixes. The next exact-head review then found the
 reserialized `v1` provenance P1 and reconnect selector P2; sidecar `v2`,
 conservative `v1` recovery, and current-owner selector defaults close both
-locally. Another exact-head re-review, final CI, merge, PR #319 thread
-resolution, and closeout remain.
+locally. Configured review then found the thread read-receipt P2; matching
+storage/browser RED now passes after preserving existing readers. The final
+local server, web, typecheck, build, maturity, design, full E2E, and headed
+receipt checks are green. Another exact-head re-review, final CI, configured
+review, merge, PR #319 thread resolution, and closeout remain.
 
 ## Merge And Cleanup Evidence
 

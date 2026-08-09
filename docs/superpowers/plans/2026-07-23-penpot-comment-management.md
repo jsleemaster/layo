@@ -167,9 +167,17 @@ React, Vitest, Playwright CLI.
   and reply IDs. Selector defaults follow draft, stored owner, then first target.
   Focused coverage also verifies all four rejected MCP commits, reply
   reassignment, modern reply blocking, and team-editor control absence.
-- Latest local verification passed 568 server, 284 web, workspace typecheck,
+- Latest local verification passed 521 server tests with 47 skipped, 284/284
+  web tests, workspace typecheck, production build, maturity 7/7, design rules,
   headed team reconnect 1/1 with three inspected states, and full Playwright
   255/255 without retry.
+- Head `7eccbaae9362a035dcc51848c0901bce35d9c765` passed Full Verification
+  `31331290743`, all three drills, and independent review with no P0-P2. The
+  configured exact-head review still found that thread assignment replaced
+  `readBy`, creating false unread notifications for prior readers. Focused
+  storage and browser RED both now pass after preserving existing receipts and
+  adding the new owner uniquely. A final headed 1/1 pass visibly removed the
+  unread badge before assignment and kept it absent after assigning `민지`.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.

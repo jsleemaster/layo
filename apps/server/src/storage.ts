@@ -5515,7 +5515,7 @@ export class FileStorage {
         authorName: ownerName,
         legacyOwnership: false,
         modifiedAt,
-        readBy: [ownerId]
+        readBy: uniqueNames([...thread.readBy, ownerId])
       };
       await this.writeCommentThreadFile({
         ...store,

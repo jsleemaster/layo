@@ -7795,6 +7795,9 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(commentList).toContainText("소유권 없는 기존 코멘트");
   await expect(commentList.getByText("소유자 미지정", { exact: true })).toHaveCount(2);
   await expect(page.getByRole("button", { name: "소유권 없는 기존 코멘트 수정" })).toHaveCount(0);
+  await expect(commentList.getByText("읽지 않음", { exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "읽음 처리" }).click();
+  await expect(commentList.getByText("읽지 않음", { exact: true })).toHaveCount(0);
 
   const threadOwnerSelect = page.getByTestId(`comment-owner-select-${created.threadId}`);
   await threadOwnerSelect.selectOption("team-editor");
@@ -7811,6 +7814,7 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   });
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
   await expect(commentList).toContainText("민지");
+  await expect(commentList.getByText("읽지 않음", { exact: true })).toHaveCount(0);
 
   await page.reload();
   await importTeamManifest();

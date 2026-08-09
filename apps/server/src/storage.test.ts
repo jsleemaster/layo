@@ -3282,6 +3282,12 @@ describe("FileStorage", () => {
         expectedModifiedAt: legacyThread.modifiedAt
       })
     ).rejects.toMatchObject({ statusCode: 403 });
+    const readLegacyThread = await reloaded.markCommentThreadRead(
+      "sample-file",
+      created.threadId,
+      { viewerId: "user-reviewer" }
+    );
+    expect(readLegacyThread.readBy).toEqual(["사용자", "user-reviewer"]);
 
     const assignedThread = await legacyOwnershipStorage.assignLegacyCommentThreadOwner(
       "sample-file",
@@ -3290,14 +3296,14 @@ describe("FileStorage", () => {
         ownerId: "missing-member",
         ownerName: "잘못 지정된 사용자",
         assignedByName: "team-owner",
-        expectedModifiedAt: legacyThread.modifiedAt
+        expectedModifiedAt: readLegacyThread.modifiedAt
       }
     );
     expect(assignedThread).toMatchObject({
       authorId: "missing-member",
       authorName: "잘못 지정된 사용자",
       legacyOwnership: false,
-      readBy: ["missing-member"]
+      readBy: ["사용자", "user-reviewer", "missing-member"]
     });
     expect(assignedThread.modifiedAt).not.toBe(legacyThread.modifiedAt);
 
@@ -3315,7 +3321,7 @@ describe("FileStorage", () => {
       authorId: "user-minji",
       authorName: "민지",
       legacyOwnership: false,
-      readBy: ["user-minji"]
+      readBy: ["사용자", "user-reviewer", "missing-member", "user-minji"]
     });
     expect(correctedThread.modifiedAt).not.toBe(assignedThread.modifiedAt);
 
