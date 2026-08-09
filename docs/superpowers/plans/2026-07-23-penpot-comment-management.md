@@ -99,8 +99,8 @@ React, Vitest, Playwright CLI.
   threads and replies through storage, HTTP, review-first MCP, and Korean
   browser controls.
 - [x] Run focused and full verification plus direct Playwright CLI interaction.
-- [ ] Obtain exact-head independent and configured GitHub review on PR #320.
-- [ ] Merge PR #320, resolve the PR #319 finding, publish final MD cleanup, and
+- [x] Obtain exact-head independent and configured GitHub review on PR #320.
+- [x] Merge PR #320, resolve the PR #319 finding, publish final MD cleanup, and
   run the strengthened post-merge worktree checks.
 
 ## Current Evidence
@@ -138,6 +138,11 @@ React, Vitest, Playwright CLI.
 - The first local closeout maturity gate failed one of seven checks because two
   historical plan filenames sat above the canonical Completed boundary. The
   repaired routing structure passed `pnpm check:penpot-maturity` at 7/7.
+- The final documentation cleanup initially repeated that routing failure when
+  active-plan guidance added a backticked benchmark `.md` path beside the
+  recently completed plan. The existing focused gate reproduced it at 6/7;
+  replacing that token with a regular link restored direct navigation and the
+  no-active-plan contract at 7/7.
 - PR #320 RED head `b6e174028116a0891f4c248417ccfbd9701a2063`
   failed the missing storage provenance, HTTP route, MCP tool, and two browser
   owner markers in Full Verification `31323183601`.
@@ -202,8 +207,20 @@ React, Vitest, Playwright CLI.
   file event stream before both remote assignments. A storage regression races
   two `FileStorage` instances and requires one success, one `409`, and exactly
   one persisted ownership event.
+- Final test/evidence head `93d0603e9a9fcd187a5da110cb624d07dae4146e`
+  passed Full Verification `31337599959`, Authorization Backup `31337599968`,
+  Restore `31337599960`, Retention `31337599958`, and 255/255 Playwright without
+  retry. Exact-head independent review found no P0-P2, and configured Codex
+  review reported no major issues on the same commit.
+- PR #320 squash-merged as `8196efb95fce9519baa4456fca29bcad07325e2a`.
+  The original PR #319 P1 thread was answered with final evidence and resolved.
+  Status, branch, worktree, and remote-ref checks proved the PR #319/#320
+  worktrees clean at their exact heads before both worktrees and local branches
+  were removed; the PR #320 remote branch was deleted. User-owned
+  `.playwright-mcp/` state and the unrelated maturity worktree were retained.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.
-- Another exact-head independent re-review/configured review, final CI, merge, PR #319 thread
-  resolution, and post-merge MD/worktree cleanup remain. PR #320 is still active.
+- The reopened failure case is complete. The wider Penpot maturity benchmark,
+  including richer comment placement, CRDT editing, hosted delivery, design
+  review workflow, and the other benchmark lanes, remains open under a new plan.

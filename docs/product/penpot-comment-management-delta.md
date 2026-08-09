@@ -220,7 +220,29 @@ catalog is:
     browser regression now disables that poll and waits for the file-scoped
     event stream before both remote assignments. A storage race starts the same
     legacy assignment from two `FileStorage` instances and proves exactly one
-    succeeds, one receives `409`, and one ownership event persists.
+    succeeds, one receives `409`, and one ownership event persists; and
+32. the final documentation cleanup repeated the canonical-plan routing failure:
+    the active-plan guidance used a backticked benchmark `.md` path while the
+    parser's boundary also included the recently completed plan filename. The
+    existing focused maturity gate failed 6/7 before publication. Replacing the
+    plan-like token with a regular benchmark link restores the no-active-plan
+    contract while preserving direct navigation and one historical plan token;
+    and
+33. the first final review request constructed a full-looking SHA from the
+    abbreviated amend output instead of querying Git. The comment was corrected
+    before review completed. The repository process now requires
+    `git rev-parse HEAD` and `gh pr view --json headRefOid` to agree before an
+    exact-head review request is posted; and
+34. configured Codex review responses then arrived one commit behind the current
+    PR head after successive force updates. Clean results for `ad8d5b9` and
+    `7a872b8` did not satisfy the then-current `e7e8cbd` merge gate. The process
+    now also requires the result's reported reviewed commit to match
+    `headRefOid` before that review counts; and
+35. the final evidence table initially copied the local server result, 522
+    passed with 47 integration cases skipped, into the PR #320 CI row. The exact
+    Full Verification log reports 569 passed because those integration cases
+    run in CI. Local and CI counts are now labeled separately, and the process
+    requires counts to come from the exact run log before publication.
 
 No personal memory note was added: the new misses are captured as product and
 repository-process regressions in focused E2E, this durable delta, the review
@@ -274,6 +296,7 @@ fallback polling, so those visible updates require the live event stream.
 | `31333603394` | Superseded head `83e6c3a0fcf49dbd8d921cb39d34b21e0133fb48` passed Full Verification and all three drills, but independent exact-head review reproduced ownership audit messages being overwritten by later edits. |
 | `31334871380` | Superseded head `26042fe2d4839c6e707946fd386b7aaac962bbf2` passed Full Verification and all three drills, but independent exact-head review reproduced stale owner drafts silently reverting remote thread/reply assignments. |
 | `31336227992` | Superseded head `e934249302f1d0780f99329104fc04d5a12f1fd5` passed Full Verification and all three drills. Independent exact-head review found no P0-P2, but its residual SSE and cross-instance race risks drove the final test-only proof. |
+| `31337599959` | Final head `93d0603e9a9fcd187a5da110cb624d07dae4146e` passed Full Verification with 569 server, 284 web, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 255/255 Playwright cases. Authorization Backup `31337599968`, Restore `31337599960`, and Retention `31337599958` also passed. |
 | Local latest | 522 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, read-receipt preservation, immutable ownership-audit messages after edits, and version-bound owner drafts after remote SSE reassignment. Private claim, team reconnect, receipt preservation, audit preservation, and remote draft synchronization each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
 
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
@@ -310,8 +333,10 @@ reassignments even though `26042fe` CI was green. Drafts now bind to selection-
 time versions, and exact thread/reply SSE RED plus headed selector proof close
 that race locally.
 The final local server, web, typecheck, build, maturity, design, full E2E, and
-headed checks are green. Another exact-head re-review, final CI, configured
-review, merge, PR #319 thread resolution, and closeout remain.
+headed checks are green. Exact-head independent review found no P0-P2, and the
+configured Codex review reported no major issues on `93d0603e9a`. PR #320 then
+squash-merged, and the original PR #319 P1 thread was answered with final proof
+and resolved.
 
 ## Merge And Cleanup Evidence
 
@@ -320,6 +345,14 @@ PR #319 squash-merged as
 #318. Storage Restore `31319646390`, Authorization Backup `31319646418`, and
 Retention `31319646398` passed on the final documentation head. The remote
 feature branch was deleted after merge-state verification.
+
+PR #320 final head `93d0603e9a9fcd187a5da110cb624d07dae4146e`
+passed Full Verification `31337599959` plus Authorization Backup
+`31337599968`, Restore `31337599960`, and Retention `31337599958`. Independent
+review found no P0-P2, configured review reported no major issues on the same
+head, and all PR #320 review threads were resolved before the admin squash merge
+created `8196efb95fce9519baa4456fca29bcad07325e2a` on 2026-08-10 KST. The original
+PR #319 P1 thread was then answered with that evidence and resolved.
 
 The first `gh pr merge --admin --squash --delete-branch` invocation returned a
 local error because `main` was checked out in another worktree, although GitHub
@@ -333,14 +366,20 @@ Cleanup must also prove the clean worktree's HEAD is the confirmed PR head or
 that its branch tip is integrated into the merged base, with explicit handling
 for squash merges.
 
-Required status, current-branch, worktree, and remote-ref checks ran after the
-merge. Active and user-owned worktrees remain explicit cleanup exceptions until
-the closeout PR finishes; no unknown local state was deleted.
+Required status, current-branch, worktree, and remote-ref checks ran after both
+merges. The clean PR #319 and PR #320 worktrees matched their exact confirmed PR
+heads before removal; their local branches and the PR #320 remote branch were
+deleted. The primary worktree remains untouched with user-owned
+`.playwright-mcp/`, and the unrelated `codex-penpot-next-maturity-gap` worktree
+remains retained. No unknown local state was deleted.
 
 The first local closeout `pnpm check:penpot-maturity` run failed one of seven
 checks because two historical plan filenames were placed above the canonical
 `Completed Plans` boundary. Moving prior evidence below that boundary restored
-the one-plan routing contract, and the focused gate then passed 7/7.
+the one-plan routing contract. The final documentation cleanup repeated the
+same parser-level failure with one benchmark path and one recently completed
+plan filename; replacing the backticked path with a regular link restored the
+focused gate to 7/7.
 
 ## Deliberate Divergence And Remaining Gaps
 

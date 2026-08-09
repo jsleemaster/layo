@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-08-09
+Last checked: 2026-08-10
 
 ## Product Target
 
@@ -111,11 +111,15 @@ cross-instance storage race proves one optimistic owner assignment wins while
 the stale peer receives `409` without a duplicate ownership event.
 That reviewed head passed Full Verification `31336227992` and all three drills;
 the follow-up changes test and durable evidence only.
-Final-head re-review, CI, configured review, merge, PR #319 thread resolution,
-and cleanup remain. Local PR #319
-proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
-repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
-latest interaction set, and headed 1/1 for the stabilized case.
+Final head `93d0603e9a9fcd187a5da110cb624d07dae4146e` passed Full
+Verification `31337599959`, Authorization Backup `31337599968`, Restore
+`31337599960`, and Retention `31337599958`. Exact-head independent review found
+no P0-P2, configured review reported no major issues, and PR #320 squash-merged
+as `8196efb95fce9519baa4456fca29bcad07325e2a`. The original PR #319 P1 thread
+is resolved, and the clean PR #319/#320 branches and worktrees were removed.
+Local PR #319 proof otherwise includes 30/30 comment product flows, 21/21 mixed
+ordering repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7
+for the latest interaction set, and headed 1/1 for the stabilized case.
 
 This is evidence toward gates 2, 8, 9, and 10, not closure of the whole maturity
 benchmark. Arbitrary canvas-coordinate comments, hide/show preference, full
