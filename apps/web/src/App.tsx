@@ -10423,7 +10423,7 @@ export function App() {
       return;
     }
 
-    const refreshCurrentCommentScope = () => {
+    const refreshCurrentCommentScope = (preserveStatus = false) => {
       if (
         commentAuthorizationEndedRef.current
         || commentAccessGenerationRef.current !== accessGeneration
@@ -10431,7 +10431,7 @@ export function App() {
         return;
       }
       void Promise.all([
-        refreshCommentThreads(fileId),
+        refreshCommentThreads(fileId, undefined, { preserveStatus }),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
@@ -10439,7 +10439,7 @@ export function App() {
 
     refreshCurrentCommentScope();
     const intervalId = window.setInterval(
-      refreshCurrentCommentScope,
+      () => refreshCurrentCommentScope(true),
       COMMENT_LIVE_REFRESH_INTERVAL_MS
     );
 
