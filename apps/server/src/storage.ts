@@ -2381,7 +2381,14 @@ export class FileStorage {
 
   private async recoverInterruptedStorageTransactionsBeforeMutation(): Promise<void> {
     await this.recoverInterruptedLibraryUpdatesOnce();
-    await this.recoverInterruptedStorageTransactionsOnce();
+    if (this.isStorageTransactionCoordinatorHeld()) {
+      // Replace recovery queued behind our coordinator, and cache it for nested preparation.
+      this.storageTransactionRecoveryPromise =
+        this.recoverInterruptedStorageTransactions();
+      await this.storageTransactionRecoveryPromise;
+    } else {
+      await this.recoverInterruptedStorageTransactionsOnce();
+    }
     await this.recoverInterruptedLibraryUpdates();
     await this.recoverInterruptedStorageTransactions();
   }
