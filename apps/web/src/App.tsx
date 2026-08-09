@@ -6897,9 +6897,14 @@ function Inspector({
   const [commentEditBody, setCommentEditBody] = useState("");
   const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
   const [commentEditLatestBody, setCommentEditLatestBody] = useState<string | null>(null);
+  const commentEditSessionRevisionRef = useRef(0);
+  const commentEditBodyRevisionRef = useRef(0);
+  const commentEditSaveRevisionRef = useRef(0);
   const strokeStyleDraftRef = useRef<{ nodeId: string; style: RendererNode["style"] } | null>(null);
 
   useEffect(() => {
+    commentEditSessionRevisionRef.current += 1;
+    commentEditSaveRevisionRef.current += 1;
     setPendingStyleKind(null);
     setStyleNameDraft("");
     setCommentEditTarget(null);
@@ -6952,6 +6957,11 @@ function Inspector({
     setCommentEditRebasePending(false);
   }, [commentEditRebasePending, commentEditTarget, commentThreads]);
 
+  const updateCommentEditBodyDraft = (value: string) => {
+    commentEditBodyRevisionRef.current += 1;
+    setCommentEditBody(value);
+  };
+
   const beginCommentEdit = (
     target: {
       kind: "thread" | "reply";
@@ -6961,15 +6971,19 @@ function Inspector({
     },
     body: string
   ) => {
+    commentEditSessionRevisionRef.current += 1;
+    commentEditSaveRevisionRef.current += 1;
     setCommentEditTarget(target);
-    setCommentEditBody(body);
+    updateCommentEditBodyDraft(body);
     setCommentEditRebasePending(false);
     setCommentEditLatestBody(null);
   };
 
   const cancelCommentEdit = () => {
+    commentEditSessionRevisionRef.current += 1;
+    commentEditSaveRevisionRef.current += 1;
     setCommentEditTarget(null);
-    setCommentEditBody("");
+    updateCommentEditBodyDraft("");
     setCommentEditRebasePending(false);
     setCommentEditLatestBody(null);
   };
@@ -6979,6 +6993,10 @@ function Inspector({
     if (!commentEditTarget || !body) {
       return;
     }
+    const editSessionRevision = commentEditSessionRevisionRef.current;
+    const editBodyRevision = commentEditBodyRevisionRef.current;
+    const editSaveRevision = commentEditSaveRevisionRef.current + 1;
+    commentEditSaveRevisionRef.current = editSaveRevision;
     const result =
       commentEditTarget.kind === "thread"
         ? await onUpdateComment(
@@ -6992,8 +7010,18 @@ function Inspector({
             body,
             commentEditTarget.expectedModifiedAt
           );
+    if (
+      commentEditSessionRevisionRef.current !== editSessionRevision
+      || commentEditSaveRevisionRef.current !== editSaveRevision
+    ) {
+      return;
+    }
     if (result === "applied") {
-      cancelCommentEdit();
+      if (commentEditBodyRevisionRef.current === editBodyRevision) {
+        cancelCommentEdit();
+      } else {
+        setCommentEditRebasePending(true);
+      }
     } else if (result === "stale") {
       setCommentEditRebasePending(true);
     }
@@ -8970,7 +8998,7 @@ function Inspector({
                   : "보존된 코멘트 초안"
               }
               value={commentEditBody}
-              onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+              onChange={(event) => updateCommentEditBodyDraft(event.currentTarget.value)}
             />
             <span className="comment-inline-actions">
               <button
@@ -9019,7 +9047,7 @@ function Inspector({
                             aria-label="코멘트 내용 수정"
                             autoFocus
                             value={commentEditBody}
-                            onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+                            onChange={(event) => updateCommentEditBodyDraft(event.currentTarget.value)}
                           />
                           {commentEditLatestBody !== null ? (
                             <span className="comment-edit-latest" data-testid="comment-edit-latest">
@@ -9102,7 +9130,7 @@ function Inspector({
                                       aria-label="답글 내용 수정"
                                       autoFocus
                                       value={commentEditBody}
-                                      onChange={(event) => setCommentEditBody(event.currentTarget.value)}
+                                      onChange={(event) => updateCommentEditBodyDraft(event.currentTarget.value)}
                                     />
                                     {commentEditLatestBody !== null ? (
                                       <span className="comment-edit-latest" data-testid="comment-edit-latest">
@@ -10047,7 +10075,7 @@ export function App() {
   const commentThreadAppliedRefreshRevisionRef = useRef(0);
   const commentThreadAppliedThreadsRef = useRef<CommentThread[]>([]);
   const commentThreadBackgroundStatusRevisionRef = useRef(0);
-  const commentThreadAppliedBackgroundStatusRef = useRef<{
+  const commentThreadRecoverableStatusRef = useRef<{
     refreshRevision: number;
     statusRevision: number;
   } | null>(null);
@@ -10482,18 +10510,18 @@ export function App() {
         const summaryThreads = commentThreadAppliedRefreshRevisionRef.current > refreshRevision
           ? commentThreadAppliedThreadsRef.current
           : threads;
-        commentThreadAppliedBackgroundStatusRef.current = {
+        commentThreadRecoverableStatusRef.current = {
           refreshRevision,
           statusRevision
         };
         setCommentStatus(commentThreadSummaryStatus(summaryThreads));
       } else if (options.preserveStatus && isCurrentRefresh) {
-        const appliedBackgroundStatus = commentThreadAppliedBackgroundStatusRef.current;
+        const recoverableStatus = commentThreadRecoverableStatusRef.current;
         if (
-          appliedBackgroundStatus?.statusRevision === statusRevision
-          && appliedBackgroundStatus.refreshRevision < refreshRevision
+          recoverableStatus?.statusRevision === statusRevision
+          && recoverableStatus.refreshRevision < refreshRevision
         ) {
-          commentThreadAppliedBackgroundStatusRef.current = {
+          commentThreadRecoverableStatusRef.current = {
             refreshRevision,
             statusRevision
           };
@@ -10512,14 +10540,22 @@ export function App() {
       const newerThreadsApplied = commentThreadAppliedRefreshRevisionRef.current > refreshRevision;
       if (status !== undefined) {
         if (commentThreadStatusRevisionRef.current === statusRevision) {
-          setCommentStatus(newerThreadsApplied ? status : message);
+          if (newerThreadsApplied) {
+            setCommentStatus(status);
+          } else {
+            commentThreadRecoverableStatusRef.current = {
+              refreshRevision,
+              statusRevision
+            };
+            setCommentStatus(message);
+          }
         }
       } else if (!options.preserveStatus) {
         if (
           commentThreadStatusRevisionRef.current === statusRevision
           && commentThreadBackgroundStatusRevisionRef.current === backgroundStatusRevision
         ) {
-          commentThreadAppliedBackgroundStatusRef.current = {
+          commentThreadRecoverableStatusRef.current = {
             refreshRevision,
             statusRevision
           };
@@ -11037,7 +11073,12 @@ export function App() {
         return false;
       }
       const nextEditor = createEditorState(parseDocumentPayload(payload));
+      const switchesCommentScope =
+        currentProjectRef.current?.currentDocumentId !== project.currentDocumentId;
       deactivateCollaborationForDocumentSwitch(project.currentDocumentId);
+      if (switchesCommentScope) {
+        resetCommentThreads("코멘트 불러오는 중");
+      }
       currentProjectRef.current = project;
       editorRef.current = nextEditor;
       setProjects(projectList);

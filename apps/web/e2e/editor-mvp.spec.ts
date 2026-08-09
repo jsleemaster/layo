@@ -7124,7 +7124,7 @@ test("pending successful comment poll clears a successful mutation refresh error
     releasePollingRefresh();
     await expect.poll(() => pollingRefreshFulfilled).toBe(true);
     await expect(page.getByTestId("comment-list")).toContainText("성공한 변경의 코멘트");
-    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 활성 코멘트");
     await expect(page.getByTestId("comment-status")).not.toContainText(
       "forced successful mutation refresh failure"
     );
