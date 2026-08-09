@@ -7048,6 +7048,93 @@ test("pending successful comment poll clears an older initial refresh error", as
   }
 });
 
+test("pending successful comment poll clears a successful mutation refresh error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let captureCommentLists = false;
+  let foregroundRefreshReady = false;
+  let foregroundRefreshFailed = false;
+  let pollingRefreshReady = false;
+  let pollingRefreshFulfilled = false;
+  let releaseForegroundRefresh = () => {};
+  const foregroundRefreshRelease = new Promise<void>((resolve) => {
+    releaseForegroundRefresh = resolve;
+  });
+  let releasePollingRefresh = () => {};
+  const pollingRefreshRelease = new Promise<void>((resolve) => {
+    releasePollingRefresh = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === "/comments/events",
+    async (route) => route.abort()
+  );
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET" || !captureCommentLists) {
+        await route.continue();
+        return;
+      }
+      if (!foregroundRefreshReady) {
+        foregroundRefreshReady = true;
+        await foregroundRefreshRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced successful mutation refresh failure" })
+        });
+        foregroundRefreshFailed = true;
+        return;
+      }
+      if (!pollingRefreshReady) {
+        const response = await route.fetch();
+        pollingRefreshReady = true;
+        await pollingRefreshRelease;
+        await route.fulfill({ response });
+        pollingRefreshFulfilled = true;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("활성 코멘트 없음");
+  await page.waitForTimeout(250);
+  captureCommentLists = true;
+  await page.getByTestId("comment-body").fill("성공한 변경의 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+
+  try {
+    await expect.poll(() => foregroundRefreshReady).toBe(true);
+    await expect.poll(() => pollingRefreshReady, { timeout: 6_000 }).toBe(true);
+    releaseForegroundRefresh();
+    await expect.poll(() => foregroundRefreshFailed).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText(
+      "forced successful mutation refresh failure"
+    );
+
+    releasePollingRefresh();
+    await expect.poll(() => pollingRefreshFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("성공한 변경의 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText(
+      "forced successful mutation refresh failure"
+    );
+  } finally {
+    releaseForegroundRefresh();
+    releasePollingRefresh();
+    releaseLaterResponses();
+  }
+});
+
 test("old-file comment completion cannot replace a new-file draft or thread list", async ({ page }) => {
   await openEmptyEditor(page);
   const firstProjectId = await createNamedProject(page, "코멘트 전환 A");
@@ -7111,6 +7198,56 @@ test("old-file comment completion cannot replace a new-file draft or thread list
   } finally {
     releaseFirstCommentResponse();
   }
+});
+
+test("new-file scope clears old comments and drafts when its refresh fails", async ({ page }) => {
+  await openEmptyEditor(page);
+  const firstProjectId = await createNamedProject(page, "코멘트 범위 A");
+  const secondProjectId = await createNamedProject(page, "코멘트 범위 B");
+  const firstProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${firstProjectId}`
+  );
+  const secondProjectResponse = await page.request.get(
+    `http://127.0.0.1:4317/projects/${secondProjectId}`
+  );
+  const firstDocumentId = (await firstProjectResponse.json()).project.currentDocumentId as string;
+  const secondDocumentId = (await secondProjectResponse.json()).project.currentDocumentId as string;
+  const firstThread = await page.request.post(
+    `http://127.0.0.1:4317/files/${firstDocumentId}/comments`,
+    { data: { nodeId: "text-1", body: "A 파일에만 있는 코멘트", authorName: "A 검수자" } }
+  );
+  expect(firstThread.ok()).toBeTruthy();
+
+  await page.getByTestId("project-switcher").selectOption(firstProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 범위 A 불러옴");
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("A 파일에만 있는 코멘트");
+  await page.getByTestId("comment-body").fill("A 파일의 전송하지 않은 초안");
+
+  let failedSecondFileRefreshes = 0;
+  await page.route(
+    (url) => url.pathname === `/files/${secondDocumentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      failedSecondFileRefreshes += 1;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forced new-file comment refresh failure" })
+      });
+    }
+  );
+
+  await openFilePanel(page);
+  await page.getByTestId("project-switcher").selectOption(secondProjectId);
+  await expect(page.getByTestId("project-status")).toContainText("코멘트 범위 B 불러옴");
+  await expect.poll(() => failedSecondFileRefreshes).toBeGreaterThan(0);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).not.toContainText("A 파일에만 있는 코멘트");
+  await expect(page.getByTestId("comment-body")).toHaveValue("");
 });
 
 test("delayed comment and reply completion preserve newer unsent drafts", async ({ page }) => {
