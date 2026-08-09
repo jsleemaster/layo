@@ -172,9 +172,18 @@ latest interaction set, and headed 1/1 for the stabilized case. Web typecheck,
 283/283 unit tests, and the production build passed; the build retains only the
 existing chunk-size warning.
 
-Independent exact-head review found no P0-P2 issues. It confirmed the earlier
+Independent pre-merge review found no P0-P2 issues and confirmed the earlier
 cross-file state leak, delayed editor closure, and sticky mutation-refresh error
-were resolved, then separately reviewed the final test-only delta.
+were resolved. A configured review started only after the draft became ready
+and posted a P1 after merge: sidecars created before stable `authorId` ownership
+fall back to `authorName`, so authenticated team members cannot edit or delete
+their actual legacy threads or replies.
+
+PR #320 reopens this slice from that exact failed case. Its RED coverage spans
+storage, HTTP authorization, review-first MCP, and browser interaction. Layo
+will preserve missing-author provenance and require a team owner to assign each
+legacy thread or reply to a stable member identity; it will not infer or
+auto-claim ownership from a non-unique display name.
 
 ## Merge And Cleanup Evidence
 
@@ -190,6 +199,11 @@ had already completed the remote merge. Cleanup therefore re-read the PR and
 issue state before deleting only the confirmed merged remote feature ref. The
 repository post-merge process now records this multi-worktree failure mode so a
 nonzero cleanup exit cannot cause an unsafe duplicate merge attempt.
+
+Remote branch deletion is not sufficient evidence for local worktree removal.
+Cleanup must also prove the clean worktree's HEAD is the confirmed PR head or
+that its branch tip is integrated into the merged base, with explicit handling
+for squash merges.
 
 Required status, current-branch, worktree, and remote-ref checks ran after the
 merge. Active and user-owned worktrees remain explicit cleanup exceptions until

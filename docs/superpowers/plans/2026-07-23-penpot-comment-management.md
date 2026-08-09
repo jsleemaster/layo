@@ -87,6 +87,21 @@ React, Vitest, Playwright CLI.
 - [x] Run the required post-merge branch, worktree, and remote cleanup checks.
 - [x] Publish the final MD cleanup state with merge evidence and no active plan.
 
+## Task 8: Repair Legacy Ownership And Review Timing
+
+- [x] Reproduce the post-merge P1 with focused storage, HTTP, MCP, and browser
+  RED coverage.
+- [x] Record that a configured review can begin only after a draft becomes
+  ready and must remain pending until a result or bounded timeout.
+- [ ] Preserve missing-author provenance as `legacyOwnership` instead of
+  treating a display-name fallback as a stable owner.
+- [ ] Add explicit team-owner assignment for legacy threads and replies through
+  storage, HTTP, review-first MCP, and Korean browser controls.
+- [ ] Run focused and full verification plus direct Playwright CLI interaction.
+- [ ] Obtain exact-head independent and configured GitHub review on PR #320.
+- [ ] Merge PR #320, resolve the PR #319 finding, publish final MD cleanup, and
+  run the strengthened post-merge worktree checks.
+
 ## Current Evidence
 
 - Latest Penpot reference:
@@ -107,8 +122,10 @@ React, Vitest, Playwright CLI.
   TypeScript relay, 117 Rust, and 253/253 Playwright without retry. Storage
   Restore `31319646390`, Authorization Backup `31319646418`, and Retention
   `31319646398` also passed.
-- Documentation review found no P0-P2 issue. GitHub review, comment, and thread
-  re-fetches were empty before ready and merge.
+- Pre-ready review re-fetches were empty, but the configured Codex review began
+  after ready and posted an unresolved P1 after merge: legacy sidecars without
+  `authorId` are parsed with the display name `사용자`, which cannot match a
+  stable authenticated team user ID for edit or delete.
 - PR #319 squash-merged as
   `e87fe7e0e980ba7375a734ac08767b6af2a51e14` and issue #318 closed on
   2026-08-09. The remote feature branch was deleted separately after the
@@ -120,4 +137,6 @@ React, Vitest, Playwright CLI.
 - The first local closeout maturity gate failed one of seven checks because two
   historical plan filenames sat above the canonical Completed boundary. The
   repaired routing structure passed `pnpm check:penpot-maturity` at 7/7.
-- This plan is complete and is no longer routed as active work.
+- Focused local RED now fails at the missing legacy provenance in storage, HTTP,
+  and MCP. Browser RED requires explicit owner-assignment controls. PR #320 is
+  the active repair and this plan is not complete.

@@ -23,7 +23,9 @@ dirty states that can mislead the next task.
 4. Inspect all worktrees with `git worktree list`.
 5. Remove only safe stale worktrees:
    - the worktree is clean,
-   - the branch is already merged or the remote feature branch was deleted,
+   - the local worktree HEAD equals the confirmed PR head, or its branch tip is
+     proven integrated with `git merge-base --is-ancestor` against the merged
+     base (account for squash merges by comparing the confirmed PR head first),
    - no user-owned uncommitted files are present.
 6. Prune stale worktree metadata after removal with `git worktree prune`.
 7. Leave dirty, unmerged, or ambiguous worktrees in place and report them as
@@ -57,6 +59,8 @@ In a multi-worktree repository, prefer a merge command without
 state is confirmed. `gh pr merge --delete-branch` can complete the remote merge
 and still exit nonzero when its local cleanup cannot switch to a base branch
 already checked out elsewhere. Never retry the merge from that exit code alone.
+Remote branch deletion alone is never proof that a local worktree is safe to
+remove.
 
 ## Cleanup Exceptions
 

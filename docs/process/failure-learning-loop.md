@@ -28,10 +28,12 @@ free to recur.
    vendor documentation whether canceled or ignored work still consumes quota.
 9. Put the failure mode, regression test, live verification, and docs or memory
    update in the PR body.
-10. When external review is requested, re-fetch reviews and unresolved threads
-   immediately before merge. Do not merge while the requested review is still
-   pending; after a bounded wait, record why review was unavailable instead of
-   assuming silence means approval.
+10. When external review is requested or configured automation starts review
+   after a draft becomes ready, treat that review as pending even if the first
+   re-fetch returns no review or thread. Wait for the review result or a bounded
+   timeout, then re-fetch reviews and unresolved threads immediately before
+   merge. Do not merge while the requested review is pending; after the timeout,
+   record why review was unavailable instead of assuming silence means approval.
 
 ## UI Detail Checklist
 

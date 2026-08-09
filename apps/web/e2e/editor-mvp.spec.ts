@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { Buffer } from "node:buffer";
 import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createZipArchive } from "../../server/src/file-archive";
 import { resetE2eStorage } from "./test-storage";
 
@@ -7733,6 +7734,98 @@ test("comments panel keeps feedback controls available to team viewers and maps 
   await openFilePanel(page);
   await expect(page.getByTestId("comment-activity-feed")).toContainText("팀 뷰어");
   await expect(page.getByTestId("comment-activity-feed")).not.toContainText("team-viewer");
+});
+
+test("team owners explicitly assign legacy thread and reply owners before editing", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const createdResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "소유권 없는 기존 코멘트",
+        authorName: "사용자"
+      }
+    }
+  );
+  expect(createdResponse.ok()).toBeTruthy();
+  const created = (await createdResponse.json()).thread;
+  const repliedResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${created.threadId}/replies`,
+    { data: { body: "소유권 없는 기존 답글", authorName: "사용자" } }
+  );
+  expect(repliedResponse.ok()).toBeTruthy();
+  const replied = (await repliedResponse.json()).thread;
+  const storageRoot = process.env.LAYO_E2E_STORAGE_DIR;
+  expect(storageRoot).toBeTruthy();
+  const sidecarPath = path.join(storageRoot!, "comments", `${documentId.toLowerCase()}.json`);
+  const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+  delete sidecar.threads[0].authorId;
+  delete sidecar.threads[0].replies[0].authorId;
+  await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+  const teamManifest = {
+    schemaVersion: 1,
+    teamId: "team-legacy-comments",
+    name: "기존 코멘트 복구 팀",
+    createdAt: "2026-08-09T00:00:00.000Z",
+    currentUserId: "team-owner",
+    members: [
+      { userId: "team-owner", displayName: "팀 소유자", color: "#0f766e", role: "owner" },
+      { userId: "team-editor", displayName: "민지", color: "#2563eb", role: "editor" }
+    ],
+    documents: [],
+    sync: { mode: "local", roomPrefix: "layo" },
+    permissions: { canEdit: true, canInvite: true },
+    auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
+    encryption: { mode: "none" }
+  };
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("tab", { name: "팀 설정" }).click();
+  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
+  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "현재 팀과 공유" }).click();
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+
+  const commentList = page.getByTestId("comment-list");
+  await expect(commentList).toContainText("소유권 없는 기존 코멘트");
+  await expect(commentList.getByText("소유자 미지정", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "소유권 없는 기존 코멘트 수정" })).toHaveCount(0);
+
+  const threadOwnerSelect = page.getByTestId(`comment-owner-select-${created.threadId}`);
+  await threadOwnerSelect.selectOption("team-editor");
+  const threadAssignmentRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "PATCH" &&
+      new URL(request.url()).pathname === `/files/${documentId}/comments/${created.threadId}/owner`
+  );
+  await page.getByRole("button", { name: "소유권 없는 기존 코멘트 소유자 지정" }).click();
+  expect((await threadAssignmentRequest).postDataJSON()).toMatchObject({
+    ownerId: "team-editor",
+    ownerName: "민지",
+    expectedModifiedAt: replied.modifiedAt
+  });
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
+  await expect(commentList).toContainText("민지");
+
+  const legacyReply = replied.replies[0];
+  const replyOwnerSelect = page.getByTestId(`comment-owner-select-${legacyReply.replyId}`);
+  await replyOwnerSelect.selectOption("team-owner");
+  const replyAssignmentRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "PATCH" &&
+      new URL(request.url()).pathname ===
+        `/files/${documentId}/comments/${created.threadId}/replies/${legacyReply.replyId}/owner`
+  );
+  await page.getByRole("button", { name: "소유권 없는 기존 답글 소유자 지정" }).click();
+  expect((await replyAssignmentRequest).postDataJSON()).toMatchObject({
+    ownerId: "team-owner",
+    ownerName: "팀 소유자",
+    expectedModifiedAt: legacyReply.modifiedAt
+  });
+  await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
+  await expect(page.getByRole("button", { name: "소유권 없는 기존 답글 수정" })).toHaveCount(1);
 });
 
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {

@@ -69,11 +69,14 @@ passed but retained one retry-only flaky case, so it was not accepted as final.
 Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005`
 passed Full Verification `31318544219`: 283 web, 562 server, 18 renderer, 39
 collaboration, seven relay, 117 Rust, and 253/253 Playwright cases with no retry.
-Final documentation head `8e8bcd4463d732d40b36abcfabd2663edc44796b`
+Final PR #319 documentation head `8e8bcd4463d732d40b36abcfabd2663edc44796b`
 repeated the same counts in Full Verification `31319646399`; Restore
 `31319646390`, Authorization Backup `31319646418`, and Retention `31319646398`
-also passed. Independent code/test and documentation reviews found no P0-P2
-issue. Local proof includes 30/30
+also passed. A configured review that began after ready then found a legacy
+ownership P1 after merge: missing stable `authorId` values are replaced by a
+display-name fallback that authenticated team actors cannot match. PR #320 is
+the active repair and requires explicit team-owner assignment rather than
+identity inference. Local PR #319 proof otherwise includes 30/30
 comment product flows, 21/21 mixed ordering repetitions, 10/10 stabilized
 initial-refresh repetitions, headed 7/7 for the latest interaction set, and
 headed 1/1 for the stabilized case.

@@ -3184,6 +3184,129 @@ describe("FileStorage", () => {
     });
   });
 
+  test("legacy comment owners must be explicitly assigned before thread and reply edits", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-comment-owner-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "기존 코멘트",
+      authorName: "사용자"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "기존 답글",
+      authorName: "사용자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    delete sidecar.threads[0].authorId;
+    delete sidecar.threads[0].replies[0].authorId;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const reloaded = new FileStorage(tempRoot);
+    const legacyOwnershipStorage = reloaded as unknown as {
+      assignLegacyCommentThreadOwner: (...args: unknown[]) => Promise<any>;
+      assignLegacyCommentReplyOwner: (...args: unknown[]) => Promise<any>;
+    };
+    const [legacyThread] = await reloaded.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(legacyThread).toMatchObject({
+      threadId: created.threadId,
+      authorId: "사용자",
+      legacyOwnership: true,
+      replies: [
+        expect.objectContaining({
+          replyId: replied.replies[0].replyId,
+          authorId: "사용자",
+          legacyOwnership: true
+        })
+      ]
+    });
+    await expect(
+      reloaded.updateCommentThread("sample-file", created.threadId, {
+        body: "지정 전 수정",
+        actorId: "user-minji",
+        expectedModifiedAt: legacyThread.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    const assignedThread = await legacyOwnershipStorage.assignLegacyCommentThreadOwner(
+      "sample-file",
+      created.threadId,
+      {
+        ownerId: "user-minji",
+        ownerName: "민지",
+        assignedByName: "team-owner",
+        expectedModifiedAt: legacyThread.modifiedAt
+      }
+    );
+    expect(assignedThread).toMatchObject({
+      authorId: "user-minji",
+      authorName: "민지",
+      legacyOwnership: false,
+      readBy: ["user-minji"]
+    });
+    expect(assignedThread.modifiedAt).not.toBe(legacyThread.modifiedAt);
+
+    const assignedReplyThread = await legacyOwnershipStorage.assignLegacyCommentReplyOwner(
+      "sample-file",
+      created.threadId,
+      replied.replies[0].replyId,
+      {
+        ownerId: "user-junho",
+        ownerName: "준호",
+        assignedByName: "team-owner",
+        expectedModifiedAt: legacyThread.replies[0].modifiedAt
+      }
+    );
+    expect(assignedReplyThread.replies[0]).toMatchObject({
+      authorId: "user-junho",
+      authorName: "준호",
+      legacyOwnership: false
+    });
+
+    await expect(
+      reloaded.updateCommentThread("sample-file", created.threadId, {
+        body: "민지가 수정한 기존 코멘트",
+        actorId: "user-minji",
+        expectedModifiedAt: assignedReplyThread.modifiedAt
+      })
+    ).resolves.toMatchObject({ body: "민지가 수정한 기존 코멘트" });
+    await expect(
+      reloaded.updateCommentReply(
+        "sample-file",
+        created.threadId,
+        replied.replies[0].replyId,
+        {
+          body: "준호가 수정한 기존 답글",
+          actorId: "user-junho",
+          expectedModifiedAt: assignedReplyThread.replies[0].modifiedAt
+        }
+      )
+    ).resolves.toMatchObject({
+      replies: [expect.objectContaining({ body: "준호가 수정한 기존 답글" })]
+    });
+    await expect(
+      legacyOwnershipStorage.assignLegacyCommentThreadOwner("sample-file", created.threadId, {
+        ownerId: "user-other",
+        ownerName: "다른 사용자",
+        assignedByName: "team-owner",
+        expectedModifiedAt: assignedThread.modifiedAt
+      })
+    ).rejects.toMatchObject({ statusCode: 409 });
+
+    await expect(reloaded.listCommentActivity()).resolves.toMatchObject({
+      events: expect.arrayContaining([
+        expect.objectContaining({ type: "ownership_assigned", threadId: created.threadId }),
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          replyId: replied.replies[0].replyId
+        })
+      ])
+    });
+  });
+
   test("comment versions advance past a sidecar timestamp written by another process", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
