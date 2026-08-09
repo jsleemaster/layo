@@ -10040,7 +10040,8 @@ export function App() {
   const pathEditorDragSessionRef = useRef<PathEditorDragSession | null>(null);
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const commentAccessGenerationRef = useRef(0);
-  const commentThreadBackgroundRefreshRevisionRef = useRef(0);
+  const commentThreadRefreshRevisionRef = useRef(0);
+  const commentThreadAppliedRefreshRevisionRef = useRef(0);
   const commentThreadBackgroundStatusRevisionRef = useRef(0);
   const commentThreadStatusRevisionRef = useRef(0);
   const commentAuthorizationEndedRef = useRef(false);
@@ -10306,6 +10307,12 @@ export function App() {
     setCommentStatus(status);
   };
 
+  const isCurrentCommentScope = (fileId: string, accessGeneration: number) => (
+    !commentAuthorizationEndedRef.current
+    && commentAccessGenerationRef.current === accessGeneration
+    && currentProjectRef.current?.currentDocumentId === fileId
+  );
+
   const resetCommentThreads = (status = "코멘트 대기 중") => {
     setCommentThreads([]);
     setCommentBody("");
@@ -10380,16 +10387,15 @@ export function App() {
     options: { preserveStatus?: boolean } = {}
   ) => {
     const accessGeneration = commentAccessGenerationRef.current;
+    const refreshRevision = commentThreadRefreshRevisionRef.current + 1;
+    commentThreadRefreshRevisionRef.current = refreshRevision;
     const statusRevision = status === undefined
       ? commentThreadStatusRevisionRef.current
       : commentThreadStatusRevisionRef.current + 1;
-    let backgroundRefreshRevision: number | null = null;
     let backgroundStatusRevision: number | null = null;
     if (status !== undefined) {
       commentThreadStatusRevisionRef.current = statusRevision;
     } else {
-      backgroundRefreshRevision = commentThreadBackgroundRefreshRevisionRef.current + 1;
-      commentThreadBackgroundRefreshRevisionRef.current = backgroundRefreshRevision;
       if (!options.preserveStatus) {
         backgroundStatusRevision = commentThreadBackgroundStatusRevisionRef.current + 1;
         commentThreadBackgroundStatusRevisionRef.current = backgroundStatusRevision;
@@ -10406,15 +10412,14 @@ export function App() {
       if (
         commentAuthorizationEndedRef.current
         || commentAccessGenerationRef.current !== accessGeneration
+        || currentProjectRef.current?.currentDocumentId !== fileId
       ) {
         return;
       }
       const isCurrentRefresh = commentThreadStatusRevisionRef.current === statusRevision
-        && (
-          status !== undefined
-          || commentThreadBackgroundRefreshRevisionRef.current === backgroundRefreshRevision
-        );
+        && commentThreadAppliedRefreshRevisionRef.current < refreshRevision;
       if (isCurrentRefresh) {
+        commentThreadAppliedRefreshRevisionRef.current = refreshRevision;
         setCommentThreads(threads);
       }
       if (status !== undefined) {
@@ -10439,6 +10444,7 @@ export function App() {
       if (
         commentAuthorizationEndedRef.current
         || commentAccessGenerationRef.current !== accessGeneration
+        || currentProjectRef.current?.currentDocumentId !== fileId
       ) {
         return;
       }
@@ -13177,6 +13183,12 @@ export function App() {
     );
   };
 
+  const refreshCodeExportForCurrentFile = (fileId: string) => {
+    if (currentProjectRef.current?.currentDocumentId === fileId) {
+      setCodeExportRevision((current) => current + 1);
+    }
+  };
+
   const updateComponentInstanceVariant = (nodeId: string, variantId: string) => {
     if (!dispatchWithoutSnapshotPersistence({ type: "set_component_instance_variant", nodeId, variantId })) {
       return;
@@ -13190,11 +13202,11 @@ export function App() {
       persistComponentInstanceVariant(fileId, nodeId, variantId)
     )
       .then(() => {
+        refreshCodeExportForCurrentFile(fileId);
         if (!isCurrentPersistence()) {
           return;
         }
         setProjectStatus("컴포넌트 변형 저장됨");
-        setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
         if (!isCurrentPersistence()) {
@@ -13217,11 +13229,11 @@ export function App() {
     const isCurrentPersistence = beginComponentVariantPersistence(fileId, "컴포넌트 변형 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariants(fileId, componentId, variants))
       .then(() => {
+        refreshCodeExportForCurrentFile(fileId);
         if (!isCurrentPersistence()) {
           return;
         }
         setProjectStatus("컴포넌트 변형 저장됨");
-        setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
         if (!isCurrentPersistence()) {
@@ -13244,11 +13256,11 @@ export function App() {
     const isCurrentPersistence = beginComponentVariantPersistence(fileId, "컴포넌트 변형 영역 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariantArea(fileId, componentId, area))
       .then(() => {
+        refreshCodeExportForCurrentFile(fileId);
         if (!isCurrentPersistence()) {
           return;
         }
         setProjectStatus("컴포넌트 변형 영역 저장됨");
-        setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
         if (!isCurrentPersistence()) {
@@ -17008,22 +17020,30 @@ export function App() {
       setCommentForegroundStatus("코멘트 내용을 입력하세요");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
 
     try {
-      await createCommentThread(currentProject.currentDocumentId, {
+      await createCommentThread(fileId, {
         nodeId,
         body,
         authorId: commentActorId,
         authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       }, fetch, activeLibraryRegistryCredentials ?? undefined);
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       setCommentBody("");
       await Promise.all([
-        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 추가됨"),
+        refreshCommentThreads(fileId, "코멘트 추가됨"),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
     } catch (error) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "코멘트를 추가하지 못했습니다";
       setCommentForegroundStatus(message);
     }
@@ -17039,21 +17059,29 @@ export function App() {
       setCommentForegroundStatus("답글 내용을 입력하세요");
       return;
     }
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
 
     try {
-      await addCommentReply(currentProject.currentDocumentId, threadId, {
+      await addCommentReply(fileId, threadId, {
         body,
         authorId: commentActorId,
         authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       }, fetch, activeLibraryRegistryCredentials ?? undefined);
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       setCommentReplyBodies((current) => ({ ...current, [threadId]: "" }));
       await Promise.all([
-        refreshCommentThreads(currentProject.currentDocumentId, "답글 추가됨"),
+        refreshCommentThreads(fileId, "답글 추가됨"),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
     } catch (error) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "답글을 추가하지 못했습니다";
       setCommentForegroundStatus(message);
     }
@@ -17062,8 +17090,12 @@ export function App() {
   const handleCommentMutationError = async (
     error: unknown,
     fileId: string,
+    accessGeneration: number,
     fallback: string
   ): Promise<"stale" | "failed"> => {
+    if (!isCurrentCommentScope(fileId, accessGeneration)) {
+      return "failed";
+    }
     if (error instanceof DocumentRequestError && error.status === 409) {
       await refreshCommentThreads(
         fileId,
@@ -17091,6 +17123,7 @@ export function App() {
       return "failed";
     }
     const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await updateCommentThread(
         fileId,
@@ -17104,6 +17137,9 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return "failed";
+      }
       await Promise.all([
         refreshCommentThreads(fileId, "코멘트 수정됨"),
         refreshCommentNotifications(),
@@ -17111,7 +17147,12 @@ export function App() {
       ]);
       return "applied";
     } catch (error) {
-      return handleCommentMutationError(error, fileId, "코멘트를 수정하지 못했습니다");
+      return handleCommentMutationError(
+        error,
+        fileId,
+        accessGeneration,
+        "코멘트를 수정하지 못했습니다"
+      );
     }
   };
 
@@ -17124,6 +17165,7 @@ export function App() {
       return false;
     }
     const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await deleteCommentThread(
         fileId,
@@ -17132,6 +17174,9 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return false;
+      }
       await Promise.all([
         refreshCommentThreads(fileId, "코멘트 삭제됨"),
         refreshCommentNotifications(),
@@ -17139,7 +17184,12 @@ export function App() {
       ]);
       return true;
     } catch (error) {
-      await handleCommentMutationError(error, fileId, "코멘트를 삭제하지 못했습니다");
+      await handleCommentMutationError(
+        error,
+        fileId,
+        accessGeneration,
+        "코멘트를 삭제하지 못했습니다"
+      );
       return false;
     }
   };
@@ -17160,6 +17210,7 @@ export function App() {
       return "failed";
     }
     const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await updateCommentReply(
         fileId,
@@ -17174,6 +17225,9 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return "failed";
+      }
       await Promise.all([
         refreshCommentThreads(fileId, "답글 수정됨"),
         refreshCommentNotifications(),
@@ -17181,7 +17235,12 @@ export function App() {
       ]);
       return "applied";
     } catch (error) {
-      return handleCommentMutationError(error, fileId, "답글을 수정하지 못했습니다");
+      return handleCommentMutationError(
+        error,
+        fileId,
+        accessGeneration,
+        "답글을 수정하지 못했습니다"
+      );
     }
   };
 
@@ -17195,6 +17254,7 @@ export function App() {
       return false;
     }
     const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await deleteCommentReply(
         fileId,
@@ -17204,6 +17264,9 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return false;
+      }
       await Promise.all([
         refreshCommentThreads(fileId, "답글 삭제됨"),
         refreshCommentNotifications(),
@@ -17211,7 +17274,12 @@ export function App() {
       ]);
       return true;
     } catch (error) {
-      await handleCommentMutationError(error, fileId, "답글을 삭제하지 못했습니다");
+      await handleCommentMutationError(
+        error,
+        fileId,
+        accessGeneration,
+        "답글을 삭제하지 못했습니다"
+      );
       return false;
     }
   };
@@ -17222,19 +17290,27 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await resolveCommentThread(
-        currentProject.currentDocumentId,
+        fileId,
         threadId,
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       await Promise.all([
-        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 해결됨"),
+        refreshCommentThreads(fileId, "코멘트 해결됨"),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
     } catch (error) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "코멘트를 해결하지 못했습니다";
       setCommentForegroundStatus(message);
     }
@@ -17246,19 +17322,27 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await markCommentThreadRead(
-        currentProject.currentDocumentId,
+        fileId,
         threadId,
         commentActorId,
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       await Promise.all([
-        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
+        refreshCommentThreads(fileId, "코멘트 읽음"),
         refreshCommentNotifications()
       ]);
     } catch (error) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "코멘트를 읽음 처리하지 못했습니다";
       setCommentForegroundStatus(message);
     }
@@ -17270,19 +17354,27 @@ export function App() {
       return;
     }
 
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
     try {
       await markFileCommentsRead(
-        currentProject.currentDocumentId,
+        fileId,
         commentActorId,
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       await Promise.all([
-        refreshCommentThreads(currentProject.currentDocumentId, "코멘트 읽음"),
+        refreshCommentThreads(fileId, "코멘트 읽음"),
         refreshCommentNotifications()
       ]);
       setProjectStatus("현재 파일 코멘트 읽음");
     } catch (error) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
       const message = error instanceof Error ? error.message : "현재 파일 코멘트를 읽음 처리하지 못했습니다";
       setProjectStatus(message);
     }
