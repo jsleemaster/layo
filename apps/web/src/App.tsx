@@ -10041,6 +10041,7 @@ export function App() {
   const commentEventSequenceByFileRef = useRef(new Map<string, number>());
   const commentAccessGenerationRef = useRef(0);
   const commentThreadBackgroundRefreshRevisionRef = useRef(0);
+  const commentThreadBackgroundStatusRevisionRef = useRef(0);
   const commentThreadStatusRevisionRef = useRef(0);
   const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
@@ -10300,11 +10301,16 @@ export function App() {
     }
   };
 
+  const setCommentForegroundStatus = (status: string) => {
+    commentThreadStatusRevisionRef.current += 1;
+    setCommentStatus(status);
+  };
+
   const resetCommentThreads = (status = "코멘트 대기 중") => {
     setCommentThreads([]);
     setCommentBody("");
     setCommentReplyBodies({});
-    setCommentStatus(status);
+    setCommentForegroundStatus(status);
   };
 
   const resetCommentNotifications = () => {
@@ -10378,11 +10384,16 @@ export function App() {
       ? commentThreadStatusRevisionRef.current
       : commentThreadStatusRevisionRef.current + 1;
     let backgroundRefreshRevision: number | null = null;
+    let backgroundStatusRevision: number | null = null;
     if (status !== undefined) {
       commentThreadStatusRevisionRef.current = statusRevision;
     } else {
       backgroundRefreshRevision = commentThreadBackgroundRefreshRevisionRef.current + 1;
       commentThreadBackgroundRefreshRevisionRef.current = backgroundRefreshRevision;
+      if (!options.preserveStatus) {
+        backgroundStatusRevision = commentThreadBackgroundStatusRevisionRef.current + 1;
+        commentThreadBackgroundStatusRevisionRef.current = backgroundStatusRevision;
+      }
     }
     try {
       const threads = await listCommentThreads(
@@ -10412,8 +10423,8 @@ export function App() {
         }
       } else if (
         !options.preserveStatus
-        && isCurrentRefresh
         && commentThreadStatusRevisionRef.current === statusRevision
+        && commentThreadBackgroundStatusRevisionRef.current === backgroundStatusRevision
       ) {
         const unreadCount = threads.filter((thread) => thread.unread).length;
         setCommentStatus(
@@ -10439,7 +10450,7 @@ export function App() {
       } else if (!options.preserveStatus) {
         if (
           commentThreadStatusRevisionRef.current === statusRevision
-          && commentThreadBackgroundRefreshRevisionRef.current === backgroundRefreshRevision
+          && commentThreadBackgroundStatusRevisionRef.current === backgroundStatusRevision
         ) {
           setCommentStatus(message);
         }
@@ -13156,6 +13167,16 @@ export function App() {
 
   gridTrackDispatchRef.current = dispatch;
 
+  const beginComponentVariantPersistence = (fileId: string, pendingStatus: string) => {
+    const persistenceRevision = componentVariantPersistenceRevisionRef.current + 1;
+    componentVariantPersistenceRevisionRef.current = persistenceRevision;
+    setProjectStatus(pendingStatus);
+    return () => (
+      componentVariantPersistenceRevisionRef.current === persistenceRevision
+      && currentProjectRef.current?.currentDocumentId === fileId
+    );
+  };
+
   const updateComponentInstanceVariant = (nodeId: string, variantId: string) => {
     if (!dispatchWithoutSnapshotPersistence({ type: "set_component_instance_variant", nodeId, variantId })) {
       return;
@@ -13163,14 +13184,22 @@ export function App() {
     if (!currentProject) {
       return;
     }
-    void enqueueDocumentPersistence(currentProject.currentDocumentId, () =>
-      persistComponentInstanceVariant(currentProject.currentDocumentId, nodeId, variantId)
+    const fileId = currentProject.currentDocumentId;
+    const isCurrentPersistence = beginComponentVariantPersistence(fileId, "컴포넌트 변형 저장 중");
+    void enqueueDocumentPersistence(fileId, () =>
+      persistComponentInstanceVariant(fileId, nodeId, variantId)
     )
       .then(() => {
+        if (!isCurrentPersistence()) {
+          return;
+        }
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
+        if (!isCurrentPersistence()) {
+          return;
+        }
         const message = error instanceof Error ? error.message : "컴포넌트 변형 저장 실패";
         setProjectStatus(message);
       });
@@ -13185,25 +13214,17 @@ export function App() {
     }
 
     const fileId = currentProject.currentDocumentId;
-    const persistenceRevision = componentVariantPersistenceRevisionRef.current + 1;
-    componentVariantPersistenceRevisionRef.current = persistenceRevision;
-    setProjectStatus("컴포넌트 변형 저장 중");
+    const isCurrentPersistence = beginComponentVariantPersistence(fileId, "컴포넌트 변형 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariants(fileId, componentId, variants))
       .then(() => {
-        if (
-          componentVariantPersistenceRevisionRef.current !== persistenceRevision
-          || currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPersistence()) {
           return;
         }
         setProjectStatus("컴포넌트 변형 저장됨");
         setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
-        if (
-          componentVariantPersistenceRevisionRef.current !== persistenceRevision
-          || currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPersistence()) {
           return;
         }
         const message = error instanceof Error ? error.message : "컴포넌트 변형 저장 실패";
@@ -13220,12 +13241,19 @@ export function App() {
     }
 
     const fileId = currentProject.currentDocumentId;
+    const isCurrentPersistence = beginComponentVariantPersistence(fileId, "컴포넌트 변형 영역 저장 중");
     void enqueueDocumentPersistence(fileId, () => persistComponentVariantArea(fileId, componentId, area))
       .then(() => {
+        if (!isCurrentPersistence()) {
+          return;
+        }
         setProjectStatus("컴포넌트 변형 영역 저장됨");
         setCodeExportRevision((current) => current + 1);
       })
       .catch((error) => {
+        if (!isCurrentPersistence()) {
+          return;
+        }
         const message = error instanceof Error ? error.message : "컴포넌트 변형 영역 저장 실패";
         setProjectStatus(message);
       });
@@ -16972,12 +17000,12 @@ export function App() {
 
   const createSelectedNodeComment = async (nodeId: string) => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return;
     }
     const body = commentBody.trim();
     if (!body) {
-      setCommentStatus("코멘트 내용을 입력하세요");
+      setCommentForegroundStatus("코멘트 내용을 입력하세요");
       return;
     }
 
@@ -16997,18 +17025,18 @@ export function App() {
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 추가하지 못했습니다";
-      setCommentStatus(message);
+      setCommentForegroundStatus(message);
     }
   };
 
   const createSelectedNodeCommentReply = async (threadId: string) => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return;
     }
     const body = (commentReplyBodies[threadId] ?? "").trim();
     if (!body) {
-      setCommentStatus("답글 내용을 입력하세요");
+      setCommentForegroundStatus("답글 내용을 입력하세요");
       return;
     }
 
@@ -17027,7 +17055,7 @@ export function App() {
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "답글을 추가하지 못했습니다";
-      setCommentStatus(message);
+      setCommentForegroundStatus(message);
     }
   };
 
@@ -17044,7 +17072,7 @@ export function App() {
       return "stale";
     }
     const message = error instanceof Error ? error.message : fallback;
-    setCommentStatus(message);
+    setCommentForegroundStatus(message);
     return "failed";
   };
 
@@ -17054,12 +17082,12 @@ export function App() {
     expectedModifiedAt: string
   ): Promise<"applied" | "stale" | "failed"> => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return "failed";
     }
     const body = bodyValue.trim();
     if (!body) {
-      setCommentStatus("코멘트 내용을 입력하세요");
+      setCommentForegroundStatus("코멘트 내용을 입력하세요");
       return "failed";
     }
     const fileId = currentProject.currentDocumentId;
@@ -17092,7 +17120,7 @@ export function App() {
     expectedModifiedAt: string
   ): Promise<boolean> => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return false;
     }
     const fileId = currentProject.currentDocumentId;
@@ -17123,12 +17151,12 @@ export function App() {
     expectedModifiedAt: string
   ): Promise<"applied" | "stale" | "failed"> => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return "failed";
     }
     const body = bodyValue.trim();
     if (!body) {
-      setCommentStatus("답글 내용을 입력하세요");
+      setCommentForegroundStatus("답글 내용을 입력하세요");
       return "failed";
     }
     const fileId = currentProject.currentDocumentId;
@@ -17163,7 +17191,7 @@ export function App() {
     expectedModifiedAt: string
   ): Promise<boolean> => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return false;
     }
     const fileId = currentProject.currentDocumentId;
@@ -17190,7 +17218,7 @@ export function App() {
 
   const resolveSelectedNodeComment = async (threadId: string) => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return;
     }
 
@@ -17208,13 +17236,13 @@ export function App() {
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 해결하지 못했습니다";
-      setCommentStatus(message);
+      setCommentForegroundStatus(message);
     }
   };
 
   const markSelectedNodeCommentRead = async (threadId: string) => {
     if (!currentProject) {
-      setCommentStatus("프로젝트 없음");
+      setCommentForegroundStatus("프로젝트 없음");
       return;
     }
 
@@ -17232,7 +17260,7 @@ export function App() {
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "코멘트를 읽음 처리하지 못했습니다";
-      setCommentStatus(message);
+      setCommentForegroundStatus(message);
     }
   };
 
