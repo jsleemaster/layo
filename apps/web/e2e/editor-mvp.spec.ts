@@ -6901,6 +6901,66 @@ test("initial comment summary survives a later preserve-status poll", async ({ p
   }
 });
 
+test("failed initial comment refresh yields to a newer successful poll", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "최신 poll 코멘트", authorName: "디자인 팀" }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const heldResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let failedInitialResponses = 0;
+  let successfulPollingResponseServed = false;
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        heldResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced stale initial refresh failure" })
+        });
+        failedInitialResponses += 1;
+        return;
+      }
+      successfulPollingResponseServed = true;
+      await route.continue();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => successfulPollingResponseServed, { timeout: 6_000 }).toBe(true);
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    await expect(page.getByTestId("comment-list")).toContainText("최신 poll 코멘트");
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => failedInitialResponses).toBe(2);
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText("forced stale initial refresh failure");
+  } finally {
+    for (const releaseResponse of heldResponseReleases) {
+      releaseResponse();
+    }
+  }
+});
+
 test("old-file comment completion cannot replace a new-file draft or thread list", async ({ page }) => {
   await openEmptyEditor(page);
   const firstProjectId = await createNamedProject(page, "코멘트 전환 A");
@@ -6963,6 +7023,142 @@ test("old-file comment completion cannot replace a new-file draft or thread list
     await expect(page.getByTestId("comment-list")).not.toContainText("A 지연 코멘트");
   } finally {
     releaseFirstCommentResponse();
+  }
+});
+
+test("delayed comment and reply completion preserve newer unsent drafts", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let commentRequestReserved = false;
+  let commentResponseReady = false;
+  let commentResponseFulfilled = false;
+  let releaseCommentResponse = () => {};
+  const commentResponseRelease = new Promise<void>((resolve) => {
+    releaseCommentResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "POST" || commentRequestReserved) {
+        await route.continue();
+        return;
+      }
+      commentRequestReserved = true;
+      const response = await route.fetch();
+      commentResponseReady = true;
+      await commentResponseRelease;
+      await route.fulfill({ response });
+      commentResponseFulfilled = true;
+    }
+  );
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("제출한 코멘트 A");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => commentResponseReady).toBe(true);
+  await page.getByTestId("comment-body").fill("아직 제출하지 않은 코멘트 B");
+  try {
+    releaseCommentResponse();
+    await expect.poll(() => commentResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-body")).toHaveValue("아직 제출하지 않은 코멘트 B");
+  } finally {
+    releaseCommentResponse();
+  }
+
+  const threadResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const thread = (await threadResponse.json()).threads.find(
+    (candidate: { body: string }) => candidate.body === "제출한 코멘트 A"
+  ) as { threadId: string } | undefined;
+  expect(thread?.threadId).toBeTruthy();
+
+  let replyRequestReserved = false;
+  let replyResponseReady = false;
+  let replyResponseFulfilled = false;
+  let releaseReplyResponse = () => {};
+  const replyResponseRelease = new Promise<void>((resolve) => {
+    releaseReplyResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${thread!.threadId}/replies`,
+    async (route) => {
+      if (route.request().method() !== "POST" || replyRequestReserved) {
+        await route.continue();
+        return;
+      }
+      replyRequestReserved = true;
+      const response = await route.fetch();
+      replyResponseReady = true;
+      await replyResponseRelease;
+      await route.fulfill({ response });
+      replyResponseFulfilled = true;
+    }
+  );
+
+  const threadRow = page.getByTestId("comment-list").getByRole("listitem").filter({
+    hasText: "제출한 코멘트 A"
+  });
+  const replyDraft = threadRow.getByTestId("comment-reply-body");
+  await replyDraft.fill("제출한 답글 A");
+  await threadRow.getByRole("button", { name: "답글 추가" }).click();
+  await expect.poll(() => replyResponseReady).toBe(true);
+  await replyDraft.fill("아직 제출하지 않은 답글 B");
+  try {
+    releaseReplyResponse();
+    await expect.poll(() => replyResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-status")).toContainText("답글 추가됨");
+    await expect(replyDraft).toHaveValue("아직 제출하지 않은 답글 B");
+  } finally {
+    releaseReplyResponse();
+  }
+});
+
+test("older failed comment submission cannot replace newer success feedback", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  let firstRequestReserved = false;
+  let firstFailureFulfilled = false;
+  let releaseFirstFailure = () => {};
+  const firstFailureRelease = new Promise<void>((resolve) => {
+    releaseFirstFailure = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "POST" || firstRequestReserved) {
+        await route.continue();
+        return;
+      }
+      firstRequestReserved = true;
+      await firstFailureRelease;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "forced older submission failure" })
+      });
+      firstFailureFulfilled = true;
+    }
+  );
+
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("실패할 이전 제출");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => firstRequestReserved).toBe(true);
+
+  await page.getByTestId("comment-body").fill("성공한 최신 제출");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  await expect(page.getByTestId("comment-list")).toContainText("성공한 최신 제출");
+  try {
+    releaseFirstFailure();
+    await expect.poll(() => firstFailureFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+    await expect(page.getByTestId("comment-status")).not.toContainText("forced older submission failure");
+  } finally {
+    releaseFirstFailure();
   }
 });
 
