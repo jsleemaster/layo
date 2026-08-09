@@ -792,6 +792,7 @@ export interface StoredCommentThread {
   body: string;
   authorId: string;
   authorName: string;
+  legacyOwnership?: boolean;
   createdAt: string;
   modifiedAt: string;
   resolvedAt: string | null;
@@ -808,13 +809,20 @@ export interface StoredCommentReply {
   body: string;
   authorId: string;
   authorName: string;
+  legacyOwnership?: boolean;
   createdAt: string;
   modifiedAt: string;
   mentions: string[];
   mentionTargets: StoredCommentMentionTarget[];
 }
 
-export type CommentActivityType = "created" | "replied" | "resolved" | "edited" | "deleted";
+export type CommentActivityType =
+  | "created"
+  | "replied"
+  | "resolved"
+  | "edited"
+  | "deleted"
+  | "ownership_assigned";
 export type CommentLiveEventType = CommentActivityType | "read";
 export type CommentMentionTargetRole = "owner" | "editor" | "viewer";
 
@@ -876,6 +884,13 @@ export interface UpdateCommentThreadInput {
 
 export interface DeleteCommentThreadInput {
   actorId: string;
+  expectedModifiedAt: string;
+}
+
+export interface AssignLegacyCommentOwnerInput {
+  ownerId: string;
+  ownerName?: string;
+  assignedByName?: string;
   expectedModifiedAt: string;
 }
 
@@ -5422,7 +5437,7 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      assertCommentOwner(thread.authorId, actorId);
+      assertCommentOwner(thread.authorId, actorId, thread.legacyOwnership);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
 
       const modifiedAt = createMonotonicCommentTimestamp(
@@ -5474,6 +5489,62 @@ export class FileStorage {
     });
   }
 
+  async assignLegacyCommentThreadOwner(
+    fileId: string,
+    threadId: string,
+    input: AssignLegacyCommentOwnerInput,
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    const ownerId = normalizeCommentActorId(input.ownerId);
+    const ownerName = normalizeName(input.ownerName, ownerId);
+    const assignedByName = normalizeName(input.assignedByName, ownerName);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      assertLegacyCommentOwnership(thread.legacyOwnership);
+      assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt
+      );
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        authorId: ownerId,
+        authorName: ownerName,
+        legacyOwnership: false,
+        modifiedAt,
+        readBy: [ownerId]
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "ownership_assigned",
+          fileId: store.fileId,
+          threadId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: assignedByName,
+          body: `${ownerName}에게 코멘트 소유자가 지정되었습니다`,
+          mentions: [],
+          mentionTargets: [],
+          createdAt: modifiedAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "ownership_assigned",
+          fileId: store.fileId,
+          threadId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
   async deleteCommentThread(
     fileId: string,
     threadId: string,
@@ -5485,7 +5556,7 @@ export class FileStorage {
     return this.withCommentMutationLock(fileId, options, async () => {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
-      assertCommentOwner(thread.authorId, actorId);
+      assertCommentOwner(thread.authorId, actorId, thread.legacyOwnership);
       assertCommentVersion(thread.modifiedAt, input.expectedModifiedAt);
       const deletedAt = createMonotonicCommentTimestamp(
         latestCommentStoreTimestamp(store),
@@ -5600,7 +5671,7 @@ export class FileStorage {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const reply = requireCommentReply(thread, replyId);
-      assertCommentOwner(reply.authorId, actorId);
+      assertCommentOwner(reply.authorId, actorId, reply.legacyOwnership);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
       const modifiedAt = createMonotonicCommentTimestamp(
@@ -5662,6 +5733,75 @@ export class FileStorage {
     });
   }
 
+  async assignLegacyCommentReplyOwner(
+    fileId: string,
+    threadId: string,
+    replyId: string,
+    input: AssignLegacyCommentOwnerInput,
+    options: CommentMutationOptions = {}
+  ): Promise<StoredCommentThread> {
+    assertSafeStorageId(threadId);
+    assertSafeStorageId(replyId);
+    const ownerId = normalizeCommentActorId(input.ownerId);
+    const ownerName = normalizeName(input.ownerName, ownerId);
+    const assignedByName = normalizeName(input.assignedByName, ownerName);
+    return this.withCommentMutationLock(fileId, options, async () => {
+      const store = await this.readCommentThreadFile(fileId);
+      const thread = requireCommentThread(store, threadId);
+      const reply = requireCommentReply(thread, replyId);
+      assertLegacyCommentOwnership(reply.legacyOwnership);
+      assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
+
+      const modifiedAt = createMonotonicCommentTimestamp(
+        latestCommentStoreTimestamp(store),
+        thread.modifiedAt,
+        reply.modifiedAt
+      );
+      const updatedReply: StoredCommentReply = {
+        ...reply,
+        authorId: ownerId,
+        authorName: ownerName,
+        legacyOwnership: false,
+        modifiedAt
+      };
+      const updatedThread: StoredCommentThread = {
+        ...thread,
+        modifiedAt,
+        readBy: uniqueNames([...thread.readBy, ownerId]),
+        replies: thread.replies.map((candidate) =>
+          candidate.replyId === replyId ? updatedReply : candidate
+        )
+      };
+      await this.writeCommentThreadFile({
+        ...store,
+        threads: store.threads.map((candidate) =>
+          candidate.threadId === threadId ? updatedThread : candidate
+        ),
+        activity: prependCommentActivity(store.activity, {
+          type: "ownership_assigned",
+          fileId: store.fileId,
+          threadId,
+          replyId,
+          nodeId: thread.nodeId,
+          nodeName: thread.nodeName,
+          actorName: assignedByName,
+          body: `${ownerName}에게 답글 소유자가 지정되었습니다`,
+          mentions: [],
+          mentionTargets: [],
+          createdAt: modifiedAt
+        }),
+        events: appendCommentLiveEvent(store.events, {
+          type: "ownership_assigned",
+          fileId: store.fileId,
+          threadId,
+          replyId,
+          createdAt: modifiedAt
+        })
+      });
+      return updatedThread;
+    });
+  }
+
   async deleteCommentReply(
     fileId: string,
     threadId: string,
@@ -5676,7 +5816,7 @@ export class FileStorage {
       const store = await this.readCommentThreadFile(fileId);
       const thread = requireCommentThread(store, threadId);
       const reply = requireCommentReply(thread, replyId);
-      assertCommentOwner(reply.authorId, actorId);
+      assertCommentOwner(reply.authorId, actorId, reply.legacyOwnership);
       assertCommentVersion(reply.modifiedAt, input.expectedModifiedAt);
 
       const deletedAt = createMonotonicCommentTimestamp(
@@ -7180,9 +7320,18 @@ function requireCommentReply(
   return reply;
 }
 
-function assertCommentOwner(authorId: string, actorId: string) {
-  if (authorId !== actorId) {
+function assertCommentOwner(authorId: string, actorId: string, legacyOwnership?: boolean) {
+  if (legacyOwnership || authorId !== actorId) {
     throw forbiddenError("only the comment author can modify this comment");
+  }
+}
+
+function assertLegacyCommentOwnership(legacyOwnership: boolean | undefined) {
+  if (!legacyOwnership) {
+    throw Object.assign(new Error("comment already has a stable owner"), {
+      code: "ECONFLICT",
+      statusCode: 409
+    });
   }
 }
 
@@ -8780,6 +8929,7 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
 
   const body = normalizeCommentBody(candidate.body);
   const authorName = normalizeName(candidate.authorName, "사용자");
+  const hasStableAuthorId = typeof candidate.authorId === "string" && Boolean(candidate.authorId.trim());
   const authorId = normalizeName(candidate.authorId, authorName);
   const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
@@ -8792,6 +8942,11 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     body,
     authorId,
     authorName,
+    ...(!hasStableAuthorId || candidate.legacyOwnership === true
+      ? { legacyOwnership: true }
+      : candidate.legacyOwnership === false
+        ? { legacyOwnership: false }
+        : {}),
     createdAt,
     modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     resolvedAt: candidate.resolvedAt ? normalizeName(candidate.resolvedAt, "") : null,
@@ -8817,6 +8972,7 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
 
   const body = normalizeCommentBody(candidate.body);
   const authorName = normalizeName(candidate.authorName, "사용자");
+  const hasStableAuthorId = typeof candidate.authorId === "string" && Boolean(candidate.authorId.trim());
   const authorId = normalizeName(candidate.authorId, authorName);
   const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
 
@@ -8826,6 +8982,11 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
     body,
     authorId,
     authorName,
+    ...(!hasStableAuthorId || candidate.legacyOwnership === true
+      ? { legacyOwnership: true }
+      : candidate.legacyOwnership === false
+        ? { legacyOwnership: false }
+        : {}),
     createdAt,
     modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     mentions: normalizeCommentMentionList(candidate.mentions, body),
@@ -8855,7 +9016,7 @@ function parseStoredCommentActivityEvent(
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment activity file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved", "edited", "deleted"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "edited", "deleted", "ownership_assigned"].includes(candidate.type)) {
     throw new Error(`unsupported comment activity type: ${String(candidate.type)}`);
   }
 
@@ -8900,7 +9061,7 @@ function parseStoredCommentLiveEvent(
   if (candidate.fileId !== expectedFileId) {
     throw new Error(`comment live event file mismatch: ${candidate.fileId}`);
   }
-  if (!["created", "replied", "resolved", "read", "edited", "deleted"].includes(candidate.type)) {
+  if (!["created", "replied", "resolved", "read", "edited", "deleted", "ownership_assigned"].includes(candidate.type)) {
     throw new Error(`unsupported comment live event type: ${String(candidate.type)}`);
   }
 

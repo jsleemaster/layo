@@ -64,6 +64,8 @@ import { isCurrentAccountTokenOperation as isAccountTokenOperationCurrent } from
 import { isSidewaysVerticalCanvasGlyph } from "./vertical-text-orientation";
 import {
   addCommentReply,
+  assignLegacyCommentReplyOwner,
+  assignLegacyCommentThreadOwner,
   createCommentThread,
   deleteCommentReply,
   deleteCommentThread,
@@ -276,6 +278,8 @@ function formatCommentActivityType(type: CommentActivityFeed["events"][number]["
       return "수정";
     case "deleted":
       return "삭제";
+    case "ownership_assigned":
+      return "소유자 지정";
   }
 }
 
@@ -6745,6 +6749,8 @@ function Inspector({
   canComment,
   commentActorId,
   commentAuthorNames,
+  commentOwnerTargets,
+  canAssignCommentOwners,
   onTokenDtcgDraftChange,
   onExportTokensDtcg,
   onImportTokensDtcg,
@@ -6762,6 +6768,7 @@ function Inspector({
   onDeleteComment,
   onUpdateCommentReply,
   onDeleteCommentReply,
+  onAssignCommentOwner,
   onResolveComment,
   onMarkCommentRead,
   onDownloadSelectedPng,
@@ -6831,6 +6838,8 @@ function Inspector({
   canComment: boolean;
   commentActorId: string;
   commentAuthorNames: Record<string, string>;
+  commentOwnerTargets: Array<{ userId: string; displayName: string }>;
+  canAssignCommentOwners: boolean;
   onTokenDtcgDraftChange: (value: string) => void;
   onExportTokensDtcg: () => void;
   onImportTokensDtcg: () => void;
@@ -6861,6 +6870,12 @@ function Inspector({
     replyId: string,
     expectedModifiedAt: string
   ) => Promise<boolean>;
+  onAssignCommentOwner: (
+    threadId: string,
+    replyId: string | undefined,
+    ownerId: string,
+    expectedModifiedAt: string
+  ) => Promise<void>;
   onResolveComment: (threadId: string) => void;
   onMarkCommentRead: (threadId: string) => void;
   onDownloadSelectedPng: (scale: PngExportScale) => string | null;
@@ -6897,6 +6912,7 @@ function Inspector({
   const [commentEditBody, setCommentEditBody] = useState("");
   const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
   const [commentEditLatestBody, setCommentEditLatestBody] = useState<string | null>(null);
+  const [commentOwnerDrafts, setCommentOwnerDrafts] = useState<Record<string, string>>({});
   const commentEditSessionRevisionRef = useRef(0);
   const commentEditBodyRevisionRef = useRef(0);
   const commentEditSaveRevisionRef = useRef(0);
@@ -6911,6 +6927,7 @@ function Inspector({
     setCommentEditBody("");
     setCommentEditRebasePending(false);
     setCommentEditLatestBody(null);
+    setCommentOwnerDrafts({});
   }, [selectedNode?.id]);
 
   useEffect(() => {
@@ -9035,6 +9052,12 @@ function Inspector({
               const editingThread =
                 commentEditTarget?.kind === "thread" &&
                 commentEditTarget.threadId === thread.threadId;
+              const threadOwnerDraft = commentOwnerDrafts[thread.threadId];
+              const threadOwnerId = commentOwnerTargets.some(
+                (member) => member.userId === threadOwnerDraft
+              )
+                ? threadOwnerDraft!
+                : commentOwnerTargets[0]?.userId ?? "";
               return (
                 <li className="comment-row" key={thread.threadId}>
                   <div className="comment-row-header">
@@ -9070,6 +9093,49 @@ function Inspector({
                       <span>
                         {thread.nodeId} · {commentAuthorNames[thread.authorId] ?? thread.authorName}
                       </span>
+                      {thread.legacyOwnership ? (
+                        <>
+                          <span className="comment-owner-unassigned">소유자 미지정</span>
+                          {canAssignCommentOwners && commentOwnerTargets.length > 0 ? (
+                            <div className="comment-owner-assignment">
+                              <select
+                                data-testid={`comment-owner-select-${thread.threadId}`}
+                                aria-label={`${thread.body} 소유자`}
+                                value={threadOwnerId}
+                                onChange={(event) => {
+                                  const ownerId = event.currentTarget.value;
+                                  setCommentOwnerDrafts((current) => ({
+                                    ...current,
+                                    [thread.threadId]: ownerId
+                                  }));
+                                }}
+                              >
+                                {commentOwnerTargets.map((member) => (
+                                  <option key={member.userId} value={member.userId}>
+                                    {member.displayName}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                data-testid={`comment-owner-assign-${thread.threadId}`}
+                                aria-label={`${thread.body} 소유자 지정`}
+                                disabled={!threadOwnerId}
+                                onClick={() =>
+                                  void onAssignCommentOwner(
+                                    thread.threadId,
+                                    undefined,
+                                    threadOwnerId,
+                                    thread.modifiedAt
+                                  )
+                                }
+                              >
+                                지정
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : null}
                       <CommentMentionChips mentions={thread.mentions} mentionTargets={thread.mentionTargets} />
                       {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
                     </div>
@@ -9118,6 +9184,12 @@ function Inspector({
                           commentEditTarget?.kind === "reply" &&
                           commentEditTarget.threadId === thread.threadId &&
                           commentEditTarget.replyId === reply.replyId;
+                        const replyOwnerDraft = commentOwnerDrafts[reply.replyId];
+                        const replyOwnerId = commentOwnerTargets.some(
+                          (member) => member.userId === replyOwnerDraft
+                        )
+                          ? replyOwnerDraft!
+                          : commentOwnerTargets[0]?.userId ?? "";
                         return (
                           <li className="comment-reply" key={reply.replyId}>
                             <div className="comment-reply-header">
@@ -9151,6 +9223,49 @@ function Inspector({
                                   <strong>{reply.body}</strong>
                                 )}
                                 <span>{commentAuthorNames[reply.authorId] ?? reply.authorName}</span>
+                                {reply.legacyOwnership ? (
+                                  <>
+                                    <span className="comment-owner-unassigned">소유자 미지정</span>
+                                    {canAssignCommentOwners && commentOwnerTargets.length > 0 ? (
+                                      <div className="comment-owner-assignment">
+                                        <select
+                                          data-testid={`comment-owner-select-${reply.replyId}`}
+                                          aria-label={`${reply.body} 소유자`}
+                                          value={replyOwnerId}
+                                          onChange={(event) => {
+                                            const ownerId = event.currentTarget.value;
+                                            setCommentOwnerDrafts((current) => ({
+                                              ...current,
+                                              [reply.replyId]: ownerId
+                                            }));
+                                          }}
+                                        >
+                                          {commentOwnerTargets.map((member) => (
+                                            <option key={member.userId} value={member.userId}>
+                                              {member.displayName}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          data-testid={`comment-owner-assign-${reply.replyId}`}
+                                          aria-label={`${reply.body} 소유자 지정`}
+                                          disabled={!replyOwnerId}
+                                          onClick={() =>
+                                            void onAssignCommentOwner(
+                                              thread.threadId,
+                                              reply.replyId,
+                                              replyOwnerId,
+                                              reply.modifiedAt
+                                            )
+                                          }
+                                        >
+                                          지정
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : null}
                               </div>
                               {reply.authorId === commentActorId && !editingReply ? (
                                 <span className="comment-inline-actions">
@@ -9996,6 +10111,13 @@ export function App() {
     (activeProjectTeamContext?.members ?? []).map((member) => [member.userId, member.displayName])
   );
   const commentAuthorName = commentAuthorNames[commentActorId] ?? "사용자";
+  const commentOwnerTargets = (activeProjectTeamContext?.members ?? []).map((member) => ({
+    userId: member.userId,
+    displayName: member.displayName
+  }));
+  const canAssignCommentOwners = activeProjectTeamContext?.members.some(
+    (member) => member.userId === commentActorId && member.role === "owner"
+  ) ?? false;
   const libraryRegistryAccessScopeKey = JSON.stringify([
     currentProject?.currentDocumentId ?? null,
     currentProject?.sharing.mode ?? null,
@@ -17459,6 +17581,67 @@ export function App() {
     }
   };
 
+  const assignSelectedNodeCommentOwner = async (
+    threadId: string,
+    replyId: string | undefined,
+    ownerId: string,
+    expectedModifiedAt: string
+  ): Promise<void> => {
+    if (!currentProject || !activeProjectTeamContext || !canAssignCommentOwners) {
+      setCommentForegroundStatus("팀 소유자만 기존 코멘트 소유자를 지정할 수 있습니다");
+      return;
+    }
+    const owner = activeProjectTeamContext.members.find((member) => member.userId === ownerId);
+    if (!owner) {
+      setCommentForegroundStatus("지정할 팀 구성원을 찾지 못했습니다");
+      return;
+    }
+    const fileId = currentProject.currentDocumentId;
+    const accessGeneration = commentAccessGenerationRef.current;
+    const mutationRevision = beginCommentMutation();
+    try {
+      if (replyId) {
+        await assignLegacyCommentReplyOwner(
+          fileId,
+          threadId,
+          replyId,
+          { ownerId: owner.userId, ownerName: owner.displayName, expectedModifiedAt },
+          fetch,
+          activeLibraryRegistryCredentials ?? undefined
+        );
+      } else {
+        await assignLegacyCommentThreadOwner(
+          fileId,
+          threadId,
+          { ownerId: owner.userId, ownerName: owner.displayName, expectedModifiedAt },
+          fetch,
+          activeLibraryRegistryCredentials ?? undefined
+        );
+      }
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
+        return;
+      }
+      await Promise.all([
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          replyId ? "답글 소유자 지정됨" : "코멘트 소유자 지정됨"
+        ),
+        refreshCommentNotifications(),
+        refreshCommentActivity()
+      ]);
+    } catch (error) {
+      await handleCommentMutationError(
+        error,
+        fileId,
+        accessGeneration,
+        mutationRevision,
+        replyId ? "답글 소유자를 지정하지 못했습니다" : "코멘트 소유자를 지정하지 못했습니다"
+      );
+    }
+  };
+
   const resolveSelectedNodeComment = async (threadId: string) => {
     if (!currentProject) {
       setCommentForegroundStatus("프로젝트 없음");
@@ -20908,6 +21091,8 @@ export function App() {
         canComment={Boolean(currentProject && editor && selectedNode)}
         commentActorId={commentActorId}
         commentAuthorNames={commentAuthorNames}
+        commentOwnerTargets={commentOwnerTargets}
+        canAssignCommentOwners={canAssignCommentOwners}
         onTokenDtcgDraftChange={setTokenDtcgDraft}
         onExportTokensDtcg={() => void exportCurrentDocumentTokensDtcg()}
         onImportTokensDtcg={() => void importCurrentDocumentTokensDtcg()}
@@ -20925,6 +21110,7 @@ export function App() {
         onDeleteComment={deleteSelectedNodeComment}
         onUpdateCommentReply={updateSelectedNodeCommentReply}
         onDeleteCommentReply={deleteSelectedNodeCommentReply}
+        onAssignCommentOwner={assignSelectedNodeCommentOwner}
         onResolveComment={(threadId) => void resolveSelectedNodeComment(threadId)}
         onMarkCommentRead={(threadId) => void markSelectedNodeCommentRead(threadId)}
         onDownloadSelectedPng={downloadSelectedNodePngFromDevPanel}

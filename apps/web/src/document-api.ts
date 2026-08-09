@@ -52,6 +52,7 @@ export interface CommentThread {
   body: string;
   authorId: string;
   authorName: string;
+  legacyOwnership?: boolean;
   createdAt: string;
   modifiedAt: string;
   resolvedAt: string | null;
@@ -68,6 +69,7 @@ export interface CommentReply {
   body: string;
   authorId: string;
   authorName: string;
+  legacyOwnership?: boolean;
   createdAt: string;
   modifiedAt: string;
   mentions: string[];
@@ -96,7 +98,13 @@ export interface CommentNotificationSummary {
   projects: CommentNotificationProjectSummary[];
 }
 
-export type CommentActivityType = "created" | "replied" | "resolved" | "edited" | "deleted";
+export type CommentActivityType =
+  | "created"
+  | "replied"
+  | "resolved"
+  | "edited"
+  | "deleted"
+  | "ownership_assigned";
 
 export interface CommentActivityEvent {
   schemaVersion: 1;
@@ -128,7 +136,8 @@ export type CommentLiveEventType =
   | "resolved"
   | "read"
   | "edited"
-  | "deleted";
+  | "deleted"
+  | "ownership_assigned";
 
 export interface CommentLiveEvent {
   schemaVersion: 1;
@@ -183,6 +192,12 @@ export interface UpdateCommentInput {
 
 export interface DeleteCommentInput {
   actorId: string;
+  expectedModifiedAt: string;
+}
+
+export interface AssignLegacyCommentOwnerInput {
+  ownerId: string;
+  ownerName?: string;
   expectedModifiedAt: string;
 }
 
@@ -1145,6 +1160,22 @@ export async function updateCommentThread(
   return (payload as { thread: CommentThread }).thread;
 }
 
+export async function assignLegacyCommentThreadOwner(
+  fileId: string,
+  threadId: string,
+  input: AssignLegacyCommentOwnerInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<CommentThread> {
+  const response = await fetcher(apiUrl(`/files/${fileId}/comments/${threadId}/owner`), {
+    method: "PATCH",
+    headers: libraryRegistryWriteHeaders(credentials),
+    body: JSON.stringify(input)
+  });
+  const payload = await readDocumentJson(response);
+  return (payload as { thread: CommentThread }).thread;
+}
+
 export async function deleteCommentThread(
   fileId: string,
   threadId: string,
@@ -1187,6 +1218,26 @@ export async function updateCommentReply(
 ): Promise<CommentThread> {
   const response = await fetcher(
     apiUrl(`/files/${fileId}/comments/${threadId}/replies/${replyId}`),
+    {
+      method: "PATCH",
+      headers: libraryRegistryWriteHeaders(credentials),
+      body: JSON.stringify(input)
+    }
+  );
+  const payload = await readDocumentJson(response);
+  return (payload as { thread: CommentThread }).thread;
+}
+
+export async function assignLegacyCommentReplyOwner(
+  fileId: string,
+  threadId: string,
+  replyId: string,
+  input: AssignLegacyCommentOwnerInput,
+  fetcher: typeof fetch = fetch,
+  credentials?: LibraryRegistryCredentials
+): Promise<CommentThread> {
+  const response = await fetcher(
+    apiUrl(`/files/${fileId}/comments/${threadId}/replies/${replyId}/owner`),
     {
       method: "PATCH",
       headers: libraryRegistryWriteHeaders(credentials),

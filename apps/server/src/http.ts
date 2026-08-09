@@ -211,6 +211,20 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return { member, authorizationBoundary };
   };
 
+  const authorizeCommentOwnerMigration = async (
+    request: LibraryRequest,
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorization = await authorizeCommentWrite(request, fileId);
+    if (authorization.member && authorization.member.role !== "owner") {
+      throw Object.assign(new Error("only a team owner can assign legacy comment ownership"), {
+        code: "EACCES",
+        statusCode: 403
+      });
+    }
+    return authorization;
+  };
+
   const visibleCommentProjectAuthorizationBoundaries = async (
     member?: AuthenticatedTeamMember
   ): Promise<CommentAuthorizationBoundary[]> => {
@@ -1173,6 +1187,26 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
     return { thread };
   });
 
+  server.patch<{
+    Params: { fileId: string; threadId: string };
+    Body: { ownerId: string; ownerName?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId/owner", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentOwnerMigration(request, request.params.fileId);
+    const thread = await storage.assignLegacyCommentThreadOwner(
+      request.params.fileId,
+      request.params.threadId,
+      {
+        ownerId: request.body.ownerId,
+        ownerName: request.body.ownerName,
+        assignedByName: member?.userId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
+      },
+      { authorizationBoundary }
+    );
+    return { thread };
+  });
+
   server.delete<{
     Params: { fileId: string; threadId: string };
     Body: { actorId?: string; expectedModifiedAt: string };
@@ -1276,6 +1310,27 @@ export function createHttpServer(storage = new FileStorage(), options: HttpServe
         actorId: member?.userId ?? request.body.actorId ?? "사용자",
         expectedModifiedAt: request.body.expectedModifiedAt,
         mentionTargets: request.body.mentionTargets
+      },
+      { authorizationBoundary }
+    );
+    return { thread };
+  });
+
+  server.patch<{
+    Params: { fileId: string; threadId: string; replyId: string };
+    Body: { ownerId: string; ownerName?: string; expectedModifiedAt: string };
+  }>("/files/:fileId/comments/:threadId/replies/:replyId/owner", async (request) => {
+    const { member, authorizationBoundary } =
+      await authorizeCommentOwnerMigration(request, request.params.fileId);
+    const thread = await storage.assignLegacyCommentReplyOwner(
+      request.params.fileId,
+      request.params.threadId,
+      request.params.replyId,
+      {
+        ownerId: request.body.ownerId,
+        ownerName: request.body.ownerName,
+        assignedByName: member?.userId ?? "사용자",
+        expectedModifiedAt: request.body.expectedModifiedAt
       },
       { authorizationBoundary }
     );

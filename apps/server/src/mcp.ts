@@ -522,6 +522,17 @@ interface CommentMutationReview {
   replyId?: string;
 }
 
+interface CommentOwnershipAssignmentReview {
+  action: "assign_thread_owner" | "assign_reply_owner";
+  canApply: boolean;
+  reason: "not_legacy" | "stale_version" | null;
+  previousOwnerId: string;
+  ownerId: string;
+  expectedModifiedAt: string;
+  currentModifiedAt: string;
+  replyId?: string;
+}
+
 function reviewCommentMutation(
   thread: StoredCommentThread,
   action: CommentMutationAction,
@@ -554,6 +565,39 @@ function reviewCommentMutation(
     beforeBody: target.body,
     ...(options.afterBody !== undefined ? { afterBody: options.afterBody } : {}),
     ...(options.replyId ? { replyId: options.replyId } : {})
+  };
+}
+
+function reviewCommentOwnershipAssignment(
+  thread: StoredCommentThread,
+  target: "thread" | "reply",
+  ownerId: string,
+  expectedModifiedAt: string,
+  replyId?: string
+): CommentOwnershipAssignmentReview {
+  const assignmentTarget = target === "reply"
+    ? thread.replies.find((reply) => reply.replyId === replyId)
+    : thread;
+  if (!assignmentTarget) {
+    throw Object.assign(new Error(`comment reply not found: ${replyId}`), {
+      code: "ENOENT",
+      statusCode: 404
+    });
+  }
+  const reason = !assignmentTarget.legacyOwnership
+    ? "not_legacy"
+    : assignmentTarget.modifiedAt !== expectedModifiedAt
+      ? "stale_version"
+      : null;
+  return {
+    action: target === "reply" ? "assign_reply_owner" : "assign_thread_owner",
+    canApply: reason === null,
+    reason,
+    previousOwnerId: assignmentTarget.authorId,
+    ownerId,
+    expectedModifiedAt,
+    currentModifiedAt: assignmentTarget.modifiedAt,
+    ...(target === "reply" && replyId ? { replyId } : {})
   };
 }
 
@@ -688,6 +732,19 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
       authorizationBoundary.expectedSharing.teamId
     );
     return { member, authorizationBoundary };
+  };
+
+  const authorizeCommentOwnerMigration = async (
+    fileId: string
+  ): Promise<CommentAuthorization> => {
+    const authorization = await authorizeCommentWrite(fileId);
+    if (authorization.member && authorization.member.role !== "owner") {
+      throw Object.assign(new Error("only a team owner can assign legacy comment ownership"), {
+        code: "EACCES",
+        statusCode: 403
+      });
+    }
+    return authorization;
   };
 
   const commentActorId = (
@@ -2441,6 +2498,82 @@ export function createMcpServer(storage = new FileStorage(), options: McpServerO
                         { authorizationBoundary }
                       )
                     })
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+  );
+
+  server.registerTool(
+    "assign_legacy_comment_owner",
+    {
+      description: "Review or apply a team-owner assignment of a legacy comment thread or reply to a stable member id. Dry-run is the default.",
+      annotations: writeToolAnnotations,
+      inputSchema: {
+        fileId: z.string().describe("Design file id returned by list_files"),
+        target: z.enum(["thread", "reply"]).describe("Legacy ownership target"),
+        threadId: z.string().describe("Comment thread id returned by list_comment_threads"),
+        replyId: z.string().optional().describe("Required when target is reply"),
+        ownerId: z.string().trim().min(1).describe("Stable team member id to assign"),
+        ownerName: z.string().trim().min(1).optional().describe("Display name for the assigned member"),
+        expectedModifiedAt: z.string().trim().min(1).describe("Current target modifiedAt returned by list_comment_threads"),
+        dryRun: z.boolean().optional().describe("Defaults to true; pass false to persist the assignment")
+      }
+    },
+    async ({ fileId, target, threadId, replyId, ownerId, ownerName, expectedModifiedAt, dryRun }) => {
+      if (target === "reply" && !replyId?.trim()) {
+        throw new Error("replyId is required when assigning a legacy reply owner");
+      }
+      const { member, authorizationBoundary } =
+        await authorizeCommentOwnerMigration(fileId);
+      const review = reviewCommentOwnershipAssignment(
+        await commentThreadForReview(fileId, threadId, authorizationBoundary),
+        target,
+        ownerId,
+        expectedModifiedAt,
+        replyId
+      );
+      const isDryRun = dryRun !== false;
+      const thread = isDryRun
+        ? undefined
+        : target === "reply"
+          ? await storage.assignLegacyCommentReplyOwner(
+              fileId,
+              threadId,
+              replyId!,
+              {
+                ownerId,
+                ownerName,
+                assignedByName: member?.userId ?? "사용자",
+                expectedModifiedAt
+              },
+              { authorizationBoundary }
+            )
+          : await storage.assignLegacyCommentThreadOwner(
+              fileId,
+              threadId,
+              {
+                ownerId,
+                ownerName,
+                assignedByName: member?.userId ?? "사용자",
+                expectedModifiedAt
+              },
+              { authorizationBoundary }
+            );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                fileId,
+                dryRun: isDryRun,
+                review,
+                ...(thread ? { thread } : {})
               },
               null,
               2
