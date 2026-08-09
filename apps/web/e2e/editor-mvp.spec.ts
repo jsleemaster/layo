@@ -7329,6 +7329,127 @@ test("newer read mutation does not suppress delayed comment edit reconciliation"
   }
 });
 
+test("delayed comment edit completion preserves and rebases newer text in the same editor", async ({
+  page
+}) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("같은 편집기 수정 대상");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const editedThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "같은 편집기 수정 대상"
+  ) as { threadId: string } | undefined;
+  expect(editedThread?.threadId).toBeTruthy();
+
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${editedThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editResponseReady) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.getByRole("button", { name: "같은 편집기 수정 대상 수정" }).click();
+  const editBody = page.getByTestId("comment-thread-edit-body");
+  await editBody.fill("먼저 저장한 수정");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+  await editBody.fill("응답 대기 중 이어 쓴 수정");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(editBody).toHaveValue("응답 대기 중 이어 쓴 수정");
+    await expect(page.getByTestId("comment-edit-latest")).toContainText("먼저 저장한 수정");
+    await page.getByRole("button", { name: "코멘트 저장" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+    await expect(page.getByTestId("comment-thread-edit-body")).toHaveCount(0);
+    await expect(page.getByTestId("comment-list")).toContainText("응답 대기 중 이어 쓴 수정");
+  } finally {
+    releaseEditResponse();
+  }
+});
+
+test("delayed comment edit completion cannot close a newer thread editor", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  for (const body of ["먼저 저장할 스레드", "계속 편집할 최신 스레드"]) {
+    await page.getByTestId("comment-body").fill(body);
+    await page.getByRole("button", { name: "코멘트 추가" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  }
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const firstThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "먼저 저장할 스레드"
+  ) as { threadId: string } | undefined;
+  expect(firstThread?.threadId).toBeTruthy();
+
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${firstThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editResponseReady) {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.getByRole("button", { name: "먼저 저장할 스레드 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("먼저 저장 완료");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+
+  await page.getByRole("button", { name: "계속 편집할 최신 스레드 수정" }).click();
+  const newerEditBody = page.getByTestId("comment-thread-edit-body");
+  await newerEditBody.fill("다른 스레드의 보존할 최신 초안");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await page.waitForTimeout(250);
+    await expect(newerEditBody).toHaveValue("다른 스레드의 보존할 최신 초안");
+    await page.getByRole("button", { name: "코멘트 저장" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
+    await expect(page.getByTestId("comment-list")).toContainText("먼저 저장 완료");
+    await expect(page.getByTestId("comment-list")).toContainText(
+      "다른 스레드의 보존할 최신 초안"
+    );
+  } finally {
+    releaseEditResponse();
+  }
+});
+
 test("older failed comment submission cannot replace newer success feedback", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
