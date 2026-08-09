@@ -1886,6 +1886,123 @@ describe("Penpot component instance migration", () => {
     20_000
   );
 
+  test("keeps a project mutation ahead of a concurrently interrupted project import", async () => {
+    const sourceRoot = await mkdtemp(
+      path.join(tmpdir(), "layo-project-mutation-race-source-")
+    );
+    const root = await mkdtemp(
+      path.join(tmpdir(), "layo-project-mutation-race-target-")
+    );
+    let releaseMutation!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseMutation = resolve;
+    });
+
+    try {
+      const sourceStorage = new FileStorage(sourceRoot);
+      const source = await sourceStorage.importExternalMigrationArchive(
+        packagedLibrarySwapArchive(),
+        {
+          projectId: "project-mutation-race-source",
+          documentId: "project-mutation-race-source-file",
+          fileName: "project-mutation-race-source.penpot"
+        }
+      );
+      const archive = await sourceStorage.exportProjectArchive(
+        source.project.projectId
+      );
+      const archivePath = path.join(root, "project-mutation-race.layo-project.zip");
+      await writeRawFile(archivePath, archive.archive);
+
+      const waitingStorage = new FileStorage(root);
+      const internals = waitingStorage as unknown as {
+        isStorageTransactionCoordinatorHeld(): boolean;
+        withProjectMutationLock<T>(
+          projectId: string,
+          operation: () => Promise<T>
+        ): Promise<T>;
+      };
+      const originalProjectLock =
+        internals.withProjectMutationLock.bind(waitingStorage);
+      let markMutationWaiting!: () => void;
+      const mutationWaiting = new Promise<void>((resolve) => {
+        markMutationWaiting = resolve;
+      });
+      let pauseMutation = true;
+      let coordinatorHeldBeforeProjectLock = false;
+      internals.withProjectMutationLock = async (projectId, operation) => {
+        if (pauseMutation && projectId === "project-mutation-race-target") {
+          pauseMutation = false;
+          coordinatorHeldBeforeProjectLock =
+            internals.isStorageTransactionCoordinatorHeld();
+          markMutationWaiting();
+          await released;
+        }
+        return originalProjectLock(projectId, operation);
+      };
+
+      const mutationResult = waitingStorage
+        .updateProject("project-mutation-race-target", {
+          name: "Must not overwrite interrupted import intent"
+        })
+        .then(
+          (value) => ({ status: "fulfilled" as const, value }),
+          (reason: unknown) => ({ status: "rejected" as const, reason })
+        );
+      await mutationWaiting;
+
+      const crashPromise = expectStorageWorkerCrash(
+        root,
+        "project-import-crash-after-project",
+        [
+          archivePath,
+          "project-mutation-race-target",
+          "project-mutation-race-target-file"
+        ],
+        88,
+        "project-import-crashing"
+      );
+      const importCrashedBeforeMutationContinued = await Promise.race([
+        crashPromise.then(() => true),
+        delay(2_000).then(() => false)
+      ]);
+      releaseMutation();
+
+      const [mutation, crash] = await Promise.all([
+        mutationResult,
+        crashPromise.then(
+          () => ({ status: "fulfilled" as const }),
+          (reason: unknown) => ({ status: "rejected" as const, reason })
+        )
+      ]);
+
+      expect(coordinatorHeldBeforeProjectLock).toBe(true);
+      expect(importCrashedBeforeMutationContinued).toBe(false);
+      expect(mutation).toMatchObject({
+        status: "rejected",
+        reason: { code: "ENOENT" }
+      });
+      expect(crash).toEqual({ status: "fulfilled" });
+
+      const restarted = new FileStorage(root);
+      await expect(restarted.prepareProjects()).resolves.toBeUndefined();
+      await expect(
+        restarted.readProject("project-mutation-race-target")
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        restarted.readFile(
+          `project-mutation-race-target-file-${source.project.currentDocumentId}`
+        )
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      releaseMutation();
+      await Promise.all([
+        rm(sourceRoot, { recursive: true, force: true }),
+        rm(root, { recursive: true, force: true })
+      ]);
+    }
+  }, 25_000);
+
   test("acquires the storage transaction coordinator before a cold library target update", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "layo-cold-library-lock-order-")
