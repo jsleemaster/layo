@@ -513,7 +513,7 @@ type CommentMutationAction =
 interface CommentMutationReview {
   action: CommentMutationAction;
   canApply: boolean;
-  reason: "not_owner" | "stale_version" | null;
+  reason: "legacy_owner_unassigned" | "not_owner" | "stale_version" | null;
   ownerId: string;
   expectedModifiedAt: string;
   currentModifiedAt: string;
@@ -550,11 +550,13 @@ function reviewCommentMutation(
     });
   }
   const reason =
-    target.authorId !== actorId
-      ? "not_owner"
-      : target.modifiedAt !== expectedModifiedAt
-        ? "stale_version"
-        : null;
+    target.legacyOwnership === true
+      ? "legacy_owner_unassigned"
+      : target.authorId !== actorId
+        ? "not_owner"
+        : target.modifiedAt !== expectedModifiedAt
+          ? "stale_version"
+          : null;
   return {
     action,
     canApply: reason === null,
@@ -584,7 +586,7 @@ function reviewCommentOwnershipAssignment(
       statusCode: 404
     });
   }
-  const reason = !assignmentTarget.legacyOwnership
+  const reason = assignmentTarget.legacyOwnership === undefined
     ? "not_legacy"
     : assignmentTarget.modifiedAt !== expectedModifiedAt
       ? "stale_version"

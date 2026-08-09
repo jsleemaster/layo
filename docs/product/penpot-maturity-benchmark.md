@@ -73,13 +73,21 @@ Final PR #319 documentation head `8e8bcd4463d732d40b36abcfabd2663edc44796b`
 repeated the same counts in Full Verification `31319646399`; Restore
 `31319646390`, Authorization Backup `31319646418`, and Retention `31319646398`
 also passed. A configured review that began after ready then found a legacy
-ownership P1 after merge: missing stable `authorId` values are replaced by a
-display-name fallback that authenticated team actors cannot match. PR #320 is
-the active repair and requires explicit team-owner assignment rather than
-identity inference. Local PR #319 proof otherwise includes 30/30
-comment product flows, 21/21 mixed ordering repetitions, 10/10 stabilized
-initial-refresh repetitions, headed 7/7 for the latest interaction set, and
-headed 1/1 for the stabilized case.
+ownership P1 after merge: missing stable `authorId` values were replaced by a
+display-name fallback that authenticated team actors could not match. PR #320
+now preserves missing-owner provenance and adds explicit team-owner plus private
+local-operator assignment through storage, HTTP, review-first MCP, and Korean
+browser controls. Implementation Full Verification `31324584270` passed 284
+web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and
+254/254 Playwright. Independent review then exposed irreversible mistaken-owner
+assignment and an MCP dry-run/commit mismatch; the local follow-up keeps migrated
+legacy records reassignable, rejects unresolved edit/delete reviews consistently,
+passes 567 server and 284 web tests, focused 2/2, both private and team headed
+1/1 visual checks, and full 255/255 without retry. Final-head re-review, CI,
+merge, PR #319 thread resolution, and cleanup remain. Local PR #319
+proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
+repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
+latest interaction set, and headed 1/1 for the stabilized case.
 
 This is evidence toward gates 2, 8, 9, and 10, not closure of the whole maturity
 benchmark. Arbitrary canvas-coordinate comments, hide/show preference, full

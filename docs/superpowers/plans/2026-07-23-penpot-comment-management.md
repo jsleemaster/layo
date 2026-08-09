@@ -93,11 +93,12 @@ React, Vitest, Playwright CLI.
   RED coverage.
 - [x] Record that a configured review can begin only after a draft becomes
   ready and must remain pending until a result or bounded timeout.
-- [ ] Preserve missing-author provenance as `legacyOwnership` instead of
+- [x] Preserve missing-author provenance as `legacyOwnership` instead of
   treating a display-name fallback as a stable owner.
-- [ ] Add explicit team-owner assignment for legacy threads and replies through
-  storage, HTTP, review-first MCP, and Korean browser controls.
-- [ ] Run focused and full verification plus direct Playwright CLI interaction.
+- [x] Add explicit team-owner and private local-operator assignment for legacy
+  threads and replies through storage, HTTP, review-first MCP, and Korean
+  browser controls.
+- [x] Run focused and full verification plus direct Playwright CLI interaction.
 - [ ] Obtain exact-head independent and configured GitHub review on PR #320.
 - [ ] Merge PR #320, resolve the PR #319 finding, publish final MD cleanup, and
   run the strengthened post-merge worktree checks.
@@ -137,6 +138,27 @@ React, Vitest, Playwright CLI.
 - The first local closeout maturity gate failed one of seven checks because two
   historical plan filenames sat above the canonical Completed boundary. The
   repaired routing structure passed `pnpm check:penpot-maturity` at 7/7.
-- Focused local RED now fails at the missing legacy provenance in storage, HTTP,
-  and MCP. Browser RED requires explicit owner-assignment controls. PR #320 is
-  the active repair and this plan is not complete.
+- PR #320 RED head `b6e174028116a0891f4c248417ccfbd9701a2063`
+  failed the missing storage provenance, HTTP route, MCP tool, and two browser
+  owner markers in Full Verification `31323183601`.
+- Implementation head `2c2954e9f9252d3bb968df50875b529af0daaf83`
+  passed Full Verification `31324584270`: 284 web, 566 server, 18 renderer, 39
+  collaboration, seven TypeScript relay, 117 Rust, and 254/254 Playwright.
+  Authorization Backup `31324584256`, Restore `31324584258`, and Retention
+  `31324584257` also passed.
+- Local review found that the first repair left private legacy comments blocked
+  without an assignment UI. The focused team/private browser pair passed 2/2;
+  the private flow passed headed 1/1 with visible pre/post assignment controls.
+- Independent review then found that an arbitrary mistaken owner could not be
+  corrected after assignment and that MCP edit/delete dry-run approved unresolved
+  legacy items that commit rejected. Migrated legacy records now remain
+  reassignable, modern records remain ineligible, and all four mutation reviews
+  return `legacy_owner_unassigned` before commit.
+- Final local verification passed 567 server and 284 web tests. Team reassignment
+  passed headed 1/1 with pre/post visual inspection, and the complete browser
+  suite passed 255/255 without retry.
+- The first local full browser run also exposed a transient boolean-path polling
+  reader that dereferenced a non-success response. Returning an empty poll
+  sample made the exact case pass 10/10 and the complete 255/255 run.
+- Exact-head independent re-review/configured review, final CI, merge, PR #319 thread
+  resolution, and post-merge MD/worktree cleanup remain. PR #320 is still active.

@@ -1,6 +1,6 @@
 # Penpot Comment Management Delta
 
-Last checked: 2026-08-09
+Last checked: 2026-08-10
 
 ## Reference And Decision
 
@@ -38,12 +38,31 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
 - Delete activity keeps a content-free tombstone, so audit history remains
   useful without retaining deleted comment text.
 
+### Legacy Ownership Recovery
+
+- A missing or blank historical `authorId` is retained as
+  `legacyOwnership: true`; the display-name fallback remains presentation data,
+  not an inferred stable identity.
+- Legacy threads and replies reject edit/delete until an explicit assignment
+  succeeds against their current `modifiedAt` version.
+- A team owner can assign a legacy item to a stable team member through HTTP,
+  review-first MCP, or Korean browser controls. A private file exposes the same
+  explicit operation to its local operator so local-first projects are not
+  stranded by the team-only migration path.
+- Assignment advances the monotonic version, emits durable activity and live
+  events, and changes `legacyOwnership` to `false`. That value means explicitly
+  migrated and remains owner-reassignable so an incorrect target cannot strand
+  the record; `undefined` identifies a modern record that is not a migration
+  target. The browser hides dead edit/delete controls before assignment and
+  reveals them only for the assigned actor afterward.
+
 ### Team Authorization And Delivery
 
 - HTTP, MCP, sidecar reads/writes, activity feeds, notification feeds, and SSE
   replay carry an exact project sharing boundary into the storage operation.
-- Team credentials determine the stable actor identity. Request payloads cannot
-  impersonate another team member's owner identity or display name.
+- Team credentials determine the stable actor identity for ordinary comment
+  mutations. The separate legacy migration route is owner-only and names its
+  target explicitly instead of treating a payload display name as proof.
 - Mixed-project feeds authorize and scope projects before applying `limit`, so
   hidden projects cannot consume the visible result budget or leak metadata.
 - Comment SSE re-authenticates and re-authorizes the file during replay. A
@@ -56,6 +75,11 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
 
 - MCP exposes review-first thread/reply edit and delete operations with explicit
   `dryRun` and commit behavior.
+- `assign_legacy_comment_owner` reviews thread/reply target, legacy provenance,
+  requested stable owner, and expected version; dry-run remains the default.
+- Thread/reply edit and delete review returns `legacy_owner_unassigned` while
+  legacy ownership is unresolved, matching the commit path instead of approving
+  a mutation that storage will reject.
 - Review validates actor, target, body, and expected version before returning an
   approval surface. Blank or malformed mutation reviews fail without storage
   writes.
@@ -129,11 +153,31 @@ catalog is:
     different thread editor; and
 20. the first regression assumed exactly two initial GETs. StrictMode and access
     scope initialization produced two or three, creating a retry-only CI pass;
-    the final test separates the initial request burst from the two-second poll.
+    the final test separates the initial request burst from the two-second poll;
+21. configured review began only after ready and reported the missing legacy
+    ownership path after PR #319 had already merged, so review is now pending
+    from ready until a result or bounded timeout;
+22. the first team-owner repair marked private legacy comments ambiguous but
+    exposed no local assignment control, leaving local-first files stranded;
+    private local-operator assignment and pre-assignment control hiding close
+    that regression; and
+23. a full-suite boolean-path poll dereferenced one transient non-success file
+    response. The reader now returns an empty sample so `expect.poll` retries
+    instead of terminating the entire browser suite;
+24. the first assignment API accepted an arbitrary target and then rejected a
+    correction because the legacy marker had been cleared, allowing a typo or
+    stale member ID to orphan the record permanently. Explicitly migrated
+    legacy records now remain owner-reassignable while modern records stay
+    ineligible; and
+25. MCP edit/delete dry-run checked actor and version but not unresolved legacy
+    ownership, so it could return `canApply: true` before the commit failed.
+    All four thread/reply edit/delete reviews now return the same
+    `legacy_owner_unassigned` reason enforced by storage.
 
-No memory note was added: these were product concurrency and test-ordering gaps,
-not a reusable agent-process or missed visual-state rule. The repository failure
-loop, focused E2E coverage, headed browser proof, and PR evidence were updated.
+No personal memory note was added: the new misses are captured as product and
+repository-process regressions in focused E2E, this durable delta, the review
+timing rule, and the PR body. Headed pre/post screenshots verified that owner
+selectors, status labels, and edit/delete controls remain visible without overlap.
 
 ## Verification Evidence
 
@@ -164,6 +208,14 @@ loop, focused E2E coverage, headed browser proof, and PR evidence were updated.
 | `31318544219` | Final code/test GREEN at `a3551a84b7e2d61bda88eb3713ccea68a61f8005`: 253/253 Playwright with no retry or flaky case. |
 | `31319646399` | Final documentation-head GREEN at `8e8bcd4463d732d40b36abcfabd2663edc44796b`: 253/253 Playwright with no retry or flaky case. |
 
+### Legacy Ownership Repair Runs
+
+| Run | Evidence |
+| --- | --- |
+| `31323183601` | PR #320 RED at `b6e174028116a0891f4c248417ccfbd9701a2063`: storage provenance, HTTP assignment, MCP assignment, and browser owner markers were intentionally absent. |
+| `31324584270` | Implementation GREEN at `2c2954e9f9252d3bb968df50875b529af0daaf83`: 284 web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 254/254 Playwright; backup, restore, and retention drills also passed. |
+| Local final | 567 server and 284 web tests passed. Team/private focused browser paths passed 2/2, both private claim and team reassignment passed headed 1/1 with pre/post visual inspection, the transient boolean poll passed 10/10, and the complete suite passed 255/255 without retry. |
+
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
 evidence includes 30/30 comment product flows, 21/21 mixed ordering repetitions,
@@ -179,11 +231,14 @@ and posted a P1 after merge: sidecars created before stable `authorId` ownership
 fall back to `authorName`, so authenticated team members cannot edit or delete
 their actual legacy threads or replies.
 
-PR #320 reopens this slice from that exact failed case. Its RED coverage spans
-storage, HTTP authorization, review-first MCP, and browser interaction. Layo
-will preserve missing-author provenance and require a team owner to assign each
-legacy thread or reply to a stable member identity; it will not infer or
-auto-claim ownership from a non-unique display name.
+PR #320 reopens this slice from that exact failed case. Its repair preserves
+missing-author provenance and requires a team owner or private local operator to
+assign each legacy thread or reply explicitly; Layo does not infer or auto-claim
+ownership from a non-unique display name. Storage, HTTP, review-first MCP,
+Korean browser, focused repetition, full E2E, and headed local proof are green.
+An independent review found and drove the reversible-assignment P1 and MCP
+review/commit-parity P2 fixes. Exact-head re-review, final CI, merge, PR #319
+thread resolution, and closeout remain.
 
 ## Merge And Cleanup Evidence
 

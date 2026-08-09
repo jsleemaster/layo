@@ -7809,6 +7809,14 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
   await expect(commentList).toContainText("민지");
 
+  await expect(page.getByTestId(`comment-owner-assign-${created.threadId}`)).toHaveAccessibleName(
+    "소유권 없는 기존 코멘트 소유자 변경"
+  );
+  await threadOwnerSelect.selectOption("team-owner");
+  await page.getByTestId(`comment-owner-assign-${created.threadId}`).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
+  await expect(page.getByRole("button", { name: "소유권 없는 기존 코멘트 수정" })).toHaveCount(1);
+
   const legacyReply = replied.replies[0];
   const replyOwnerSelect = page.getByTestId(`comment-owner-select-${legacyReply.replyId}`);
   await replyOwnerSelect.selectOption("team-owner");
@@ -7828,6 +7836,63 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(page.getByRole("button", { name: "소유권 없는 기존 답글 수정" })).toHaveCount(1);
   await openFilePanel(page);
   await expect(page.getByTestId("comment-activity-feed")).toContainText("소유자 지정");
+});
+
+test("local operators explicitly claim private legacy thread and reply ownership", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const createdResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments`,
+    {
+      data: {
+        nodeId: "text-1",
+        body: "로컬 소유권 없는 기존 코멘트",
+        authorName: "사용자"
+      }
+    }
+  );
+  expect(createdResponse.ok()).toBeTruthy();
+  const created = (await createdResponse.json()).thread;
+  const repliedResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/comments/${created.threadId}/replies`,
+    { data: { body: "로컬 소유권 없는 기존 답글", authorName: "사용자" } }
+  );
+  expect(repliedResponse.ok()).toBeTruthy();
+  const replied = (await repliedResponse.json()).thread;
+  const storageRoot = process.env.LAYO_E2E_STORAGE_DIR;
+  expect(storageRoot).toBeTruthy();
+  const sidecarPath = path.join(storageRoot!, "comments", `${documentId.toLowerCase()}.json`);
+  const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+  delete sidecar.threads[0].authorId;
+  delete sidecar.threads[0].replies[0].authorId;
+  await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  const commentList = page.getByTestId("comment-list");
+  await expect(commentList.getByText("소유자 미지정", { exact: true })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "로컬 소유권 없는 기존 코멘트 수정" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "로컬 소유권 없는 기존 답글 수정" })).toHaveCount(0);
+
+  await expect(page.getByTestId(`comment-owner-select-${created.threadId}`)).toHaveValue("사용자");
+  await page.getByTestId(`comment-owner-assign-${created.threadId}`).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
+  await expect(page.getByRole("button", { name: "로컬 소유권 없는 기존 코멘트 수정" })).toHaveCount(1);
+
+  const legacyReply = replied.replies[0];
+  await expect(page.getByTestId(`comment-owner-select-${legacyReply.replyId}`)).toHaveValue("사용자");
+  await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
+  await expect(page.getByRole("button", { name: "로컬 소유권 없는 기존 답글 수정" })).toHaveCount(1);
+
+  const storedResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  expect(storedResponse.ok()).toBeTruthy();
+  expect((await storedResponse.json()).threads[0]).toMatchObject({
+    authorId: "사용자",
+    legacyOwnership: false,
+    replies: [expect.objectContaining({ authorId: "사용자", legacyOwnership: false })]
+  });
 });
 
 test("comments panel shows mentions and marks unread threads read", async ({ page }) => {

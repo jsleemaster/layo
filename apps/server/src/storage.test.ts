@@ -3234,19 +3234,37 @@ describe("FileStorage", () => {
       "sample-file",
       created.threadId,
       {
-        ownerId: "user-minji",
-        ownerName: "민지",
+        ownerId: "missing-member",
+        ownerName: "잘못 지정된 사용자",
         assignedByName: "team-owner",
         expectedModifiedAt: legacyThread.modifiedAt
       }
     );
     expect(assignedThread).toMatchObject({
+      authorId: "missing-member",
+      authorName: "잘못 지정된 사용자",
+      legacyOwnership: false,
+      readBy: ["missing-member"]
+    });
+    expect(assignedThread.modifiedAt).not.toBe(legacyThread.modifiedAt);
+
+    const correctedThread = await legacyOwnershipStorage.assignLegacyCommentThreadOwner(
+      "sample-file",
+      created.threadId,
+      {
+        ownerId: "user-minji",
+        ownerName: "민지",
+        assignedByName: "team-owner",
+        expectedModifiedAt: assignedThread.modifiedAt
+      }
+    );
+    expect(correctedThread).toMatchObject({
       authorId: "user-minji",
       authorName: "민지",
       legacyOwnership: false,
       readBy: ["user-minji"]
     });
-    expect(assignedThread.modifiedAt).not.toBe(legacyThread.modifiedAt);
+    expect(correctedThread.modifiedAt).not.toBe(assignedThread.modifiedAt);
 
     const assignedReplyThread = await legacyOwnershipStorage.assignLegacyCommentReplyOwner(
       "sample-file",
@@ -3286,12 +3304,18 @@ describe("FileStorage", () => {
     ).resolves.toMatchObject({
       replies: [expect.objectContaining({ body: "준호가 수정한 기존 답글" })]
     });
+    const modernThread = await reloaded.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "현대 코멘트",
+      authorId: "user-modern",
+      authorName: "현대 사용자"
+    });
     await expect(
-      legacyOwnershipStorage.assignLegacyCommentThreadOwner("sample-file", created.threadId, {
+      legacyOwnershipStorage.assignLegacyCommentThreadOwner("sample-file", modernThread.threadId, {
         ownerId: "user-other",
         ownerName: "다른 사용자",
         assignedByName: "team-owner",
-        expectedModifiedAt: assignedThread.modifiedAt
+        expectedModifiedAt: modernThread.modifiedAt
       })
     ).rejects.toMatchObject({ statusCode: 409 });
 

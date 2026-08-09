@@ -41,8 +41,11 @@ test("non-destructive boolean controls preserve operands through every operation
 
   const readParentChildren = async () => {
     const response = await page.request.get("http://127.0.0.1:4317/files/" + fileId);
+    if (!response.ok()) {
+      return [];
+    }
     const payload = await response.json();
-    return payload.file.pages[0].children[0].children as Array<{
+    return (payload.file?.pages?.[0]?.children?.[0]?.children ?? []) as Array<{
       id: string;
       content: {
         type: string;

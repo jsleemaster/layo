@@ -7327,8 +7327,8 @@ function assertCommentOwner(authorId: string, actorId: string, legacyOwnership?:
 }
 
 function assertLegacyCommentOwnership(legacyOwnership: boolean | undefined) {
-  if (!legacyOwnership) {
-    throw Object.assign(new Error("comment already has a stable owner"), {
+  if (legacyOwnership === undefined) {
+    throw Object.assign(new Error("comment is not a legacy ownership record"), {
       code: "ECONFLICT",
       statusCode: 409
     });

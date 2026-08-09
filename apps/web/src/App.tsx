@@ -9093,9 +9093,11 @@ function Inspector({
                       <span>
                         {thread.nodeId} · {commentAuthorNames[thread.authorId] ?? thread.authorName}
                       </span>
-                      {thread.legacyOwnership ? (
+                      {thread.legacyOwnership !== undefined ? (
                         <>
-                          <span className="comment-owner-unassigned">소유자 미지정</span>
+                          {thread.legacyOwnership ? (
+                            <span className="comment-owner-unassigned">소유자 미지정</span>
+                          ) : null}
                           {canAssignCommentOwners && commentOwnerTargets.length > 0 ? (
                             <div className="comment-owner-assignment">
                               <select
@@ -9119,7 +9121,7 @@ function Inspector({
                               <button
                                 type="button"
                                 data-testid={`comment-owner-assign-${thread.threadId}`}
-                                aria-label={`${thread.body} 소유자 지정`}
+                                aria-label={`${thread.body} 소유자 ${thread.legacyOwnership ? "지정" : "변경"}`}
                                 disabled={!threadOwnerId}
                                 onClick={() =>
                                   void onAssignCommentOwner(
@@ -9130,7 +9132,7 @@ function Inspector({
                                   )
                                 }
                               >
-                                지정
+                                {thread.legacyOwnership ? "지정" : "변경"}
                               </button>
                             </div>
                           ) : null}
@@ -9140,7 +9142,7 @@ function Inspector({
                       {thread.unread ? <span className="comment-unread-badge">읽지 않음</span> : null}
                     </div>
                     <span className="comment-row-actions">
-                      {thread.authorId === commentActorId && !editingThread ? (
+                      {thread.authorId === commentActorId && !thread.legacyOwnership && !editingThread ? (
                         <>
                           <button
                             type="button"
@@ -9223,9 +9225,11 @@ function Inspector({
                                   <strong>{reply.body}</strong>
                                 )}
                                 <span>{commentAuthorNames[reply.authorId] ?? reply.authorName}</span>
-                                {reply.legacyOwnership ? (
+                                {reply.legacyOwnership !== undefined ? (
                                   <>
-                                    <span className="comment-owner-unassigned">소유자 미지정</span>
+                                    {reply.legacyOwnership ? (
+                                      <span className="comment-owner-unassigned">소유자 미지정</span>
+                                    ) : null}
                                     {canAssignCommentOwners && commentOwnerTargets.length > 0 ? (
                                       <div className="comment-owner-assignment">
                                         <select
@@ -9249,7 +9253,7 @@ function Inspector({
                                         <button
                                           type="button"
                                           data-testid={`comment-owner-assign-${reply.replyId}`}
-                                          aria-label={`${reply.body} 소유자 지정`}
+                                          aria-label={`${reply.body} 소유자 ${reply.legacyOwnership ? "지정" : "변경"}`}
                                           disabled={!replyOwnerId}
                                           onClick={() =>
                                             void onAssignCommentOwner(
@@ -9260,14 +9264,14 @@ function Inspector({
                                             )
                                           }
                                         >
-                                          지정
+                                          {reply.legacyOwnership ? "지정" : "변경"}
                                         </button>
                                       </div>
                                     ) : null}
                                   </>
                                 ) : null}
                               </div>
-                              {reply.authorId === commentActorId && !editingReply ? (
+                              {reply.authorId === commentActorId && !reply.legacyOwnership && !editingReply ? (
                                 <span className="comment-inline-actions">
                                   <button
                                     type="button"
@@ -10111,13 +10115,19 @@ export function App() {
     (activeProjectTeamContext?.members ?? []).map((member) => [member.userId, member.displayName])
   );
   const commentAuthorName = commentAuthorNames[commentActorId] ?? "사용자";
-  const commentOwnerTargets = (activeProjectTeamContext?.members ?? []).map((member) => ({
-    userId: member.userId,
-    displayName: member.displayName
-  }));
-  const canAssignCommentOwners = activeProjectTeamContext?.members.some(
-    (member) => member.userId === commentActorId && member.role === "owner"
-  ) ?? false;
+  const commentOwnerTargets = activeProjectTeamContext
+    ? activeProjectTeamContext.members.map((member) => ({
+        userId: member.userId,
+        displayName: member.displayName
+      }))
+    : currentProject?.sharing.mode === "private"
+      ? [{ userId: LOCAL_COMMENT_VIEWER_ID, displayName: "사용자" }]
+      : [];
+  const canAssignCommentOwners = currentProject?.sharing.mode === "private" || (
+    activeProjectTeamContext?.members.some(
+      (member) => member.userId === commentActorId && member.role === "owner"
+    ) ?? false
+  );
   const libraryRegistryAccessScopeKey = JSON.stringify([
     currentProject?.currentDocumentId ?? null,
     currentProject?.sharing.mode ?? null,
@@ -17587,11 +17597,16 @@ export function App() {
     ownerId: string,
     expectedModifiedAt: string
   ): Promise<void> => {
-    if (!currentProject || !activeProjectTeamContext || !canAssignCommentOwners) {
-      setCommentForegroundStatus("팀 소유자만 기존 코멘트 소유자를 지정할 수 있습니다");
+    if (!currentProject || !canAssignCommentOwners) {
+      setCommentForegroundStatus("로컬 작업자 또는 팀 소유자만 기존 코멘트 소유자를 지정할 수 있습니다");
       return;
     }
-    const owner = activeProjectTeamContext.members.find((member) => member.userId === ownerId);
+    const owner = activeProjectTeamContext?.members.find((member) => member.userId === ownerId)
+      ?? (
+        currentProject.sharing.mode === "private" && ownerId === LOCAL_COMMENT_VIEWER_ID
+          ? { userId: LOCAL_COMMENT_VIEWER_ID, displayName: "사용자" }
+          : undefined
+      );
     if (!owner) {
       setCommentForegroundStatus("지정할 팀 구성원을 찾지 못했습니다");
       return;

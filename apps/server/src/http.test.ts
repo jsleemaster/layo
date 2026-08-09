@@ -2835,13 +2835,30 @@ describe("HTTP server", () => {
       url: `/files/legacy-comment-file/comments/${created.threadId}/owner`,
       headers: headers("team-owner", "owner-token"),
       payload: {
-        ownerId: "team-editor",
-        ownerName: "팀 편집자",
+        ownerId: "missing-member",
+        ownerName: "잘못 지정된 사용자",
         expectedModifiedAt: legacyThread.modifiedAt
       }
     });
     expect(assignedThread.statusCode).toBe(200);
     expect(assignedThread.json().thread).toMatchObject({
+      authorId: "missing-member",
+      authorName: "잘못 지정된 사용자",
+      legacyOwnership: false
+    });
+
+    const correctedThread = await server.inject({
+      method: "PATCH",
+      url: `/files/legacy-comment-file/comments/${created.threadId}/owner`,
+      headers: headers("team-owner", "owner-token"),
+      payload: {
+        ownerId: "team-editor",
+        ownerName: "팀 편집자",
+        expectedModifiedAt: assignedThread.json().thread.modifiedAt
+      }
+    });
+    expect(correctedThread.statusCode).toBe(200);
+    expect(correctedThread.json().thread).toMatchObject({
       authorId: "team-editor",
       authorName: "팀 편집자",
       legacyOwnership: false
