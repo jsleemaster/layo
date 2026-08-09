@@ -3124,6 +3124,33 @@ test("component variant property types choose toggle or select controls explicit
   });
   expect(component.ok()).toBeTruthy();
 
+  let releaseFinalVariantPersist = () => {};
+  const finalVariantPersistRelease = new Promise<void>((resolve) => {
+    releaseFinalVariantPersist = resolve;
+  });
+  let finalVariantPersistHeld = false;
+  await page.route(
+    `**/files/${documentId}/components/component-card/variants`,
+    async (route) => {
+      const payload = route.request().postDataJSON() as {
+        variants?: Array<{
+          id: string;
+          properties: Array<{ name: string; value: string; type?: string }>;
+        }>;
+      };
+      const disabledVariant = payload.variants?.find((variant) => variant.id === "variant-2");
+      if (
+        !finalVariantPersistHeld
+        && disabledVariant?.properties[0]?.value === "false"
+        && disabledVariant.properties[1]?.value === "false"
+      ) {
+        finalVariantPersistHeld = true;
+        await finalVariantPersistRelease;
+      }
+      await route.continue();
+    }
+  );
+
   await page.reload();
   await openFilePanel(page);
   await page.getByRole("button", { name: "랜딩 프레임" }).click();
@@ -3152,6 +3179,12 @@ test("component variant property types choose toggle or select controls explicit
   );
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-0").fill("false");
   await page.getByTestId("inspector-component-definition-variant-property-value-variant-2-1").fill("false");
+  await expect.poll(() => finalVariantPersistHeld).toBe(true);
+  try {
+    await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장 중");
+  } finally {
+    releaseFinalVariantPersist();
+  }
   await expect(page.getByTestId("project-status")).toContainText("컴포넌트 변형 저장됨");
   await expect
     .poll(async () => {
