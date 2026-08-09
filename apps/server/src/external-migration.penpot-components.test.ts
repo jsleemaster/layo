@@ -1902,11 +1902,19 @@ describe("Penpot component instance migration", () => {
         }
       );
       const libraryId = `penpot-library-${libraryFileId}`;
+      await setup.setProjectSharing("cold-lock-library-project", {
+        mode: "team",
+        teamId: "team-cold-lock"
+      });
       await setup.createProject({
         projectId: "cold-lock-target-project",
         name: "Cold lock target project",
         documentId: "cold-lock-target",
         documentName: "Cold lock target"
+      });
+      await setup.setProjectSharing("cold-lock-target-project", {
+        mode: "team",
+        teamId: "team-cold-lock"
       });
       await setup.importLibraryRegistryItem(
         "cold-lock-target",
