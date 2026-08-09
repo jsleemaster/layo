@@ -99,6 +99,11 @@ then passed Full Verification `31333603394` and all three drills, but independen
 exact-head review found later edits overwrote ownership-assignment audit bodies.
 An explicit content-activity allowlist now preserves thread/reply assignment
 messages; focused storage/browser RED and headed activity-feed proof are green.
+Superseded head `26042fe` then passed Full Verification `31334871380` and all
+three drills, but independent exact-head review found stale owner drafts could
+silently revert remote reassignment. Drafts now bind to selection-time versions;
+thread/reply SSE regressions and headed selectors prove both synchronize to
+remote owner `준호` before submission.
 Final-head re-review, CI, configured review, merge, PR #319 thread resolution,
 and cleanup remain. Local PR #319
 proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering

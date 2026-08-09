@@ -6912,7 +6912,9 @@ function Inspector({
   const [commentEditBody, setCommentEditBody] = useState("");
   const [commentEditRebasePending, setCommentEditRebasePending] = useState(false);
   const [commentEditLatestBody, setCommentEditLatestBody] = useState<string | null>(null);
-  const [commentOwnerDrafts, setCommentOwnerDrafts] = useState<Record<string, string>>({});
+  const [commentOwnerDrafts, setCommentOwnerDrafts] = useState<
+    Record<string, { ownerId: string; expectedModifiedAt: string }>
+  >({});
   const commentEditSessionRevisionRef = useRef(0);
   const commentEditBodyRevisionRef = useRef(0);
   const commentEditSaveRevisionRef = useRef(0);
@@ -9053,10 +9055,14 @@ function Inspector({
                 commentEditTarget?.kind === "thread" &&
                 commentEditTarget.threadId === thread.threadId;
               const threadOwnerDraft = commentOwnerDrafts[thread.threadId];
+              const currentThreadOwnerDraft =
+                threadOwnerDraft?.expectedModifiedAt === thread.modifiedAt
+                  ? threadOwnerDraft
+                  : undefined;
               const threadOwnerId = commentOwnerTargets.some(
-                (member) => member.userId === threadOwnerDraft
+                (member) => member.userId === currentThreadOwnerDraft?.ownerId
               )
-                ? threadOwnerDraft!
+                ? currentThreadOwnerDraft!.ownerId
                 : commentOwnerTargets.some((member) => member.userId === thread.authorId)
                   ? thread.authorId
                   : commentOwnerTargets[0]?.userId ?? "";
@@ -9110,7 +9116,10 @@ function Inspector({
                                   const ownerId = event.currentTarget.value;
                                   setCommentOwnerDrafts((current) => ({
                                     ...current,
-                                    [thread.threadId]: ownerId
+                                    [thread.threadId]: {
+                                      ownerId,
+                                      expectedModifiedAt: thread.modifiedAt
+                                    }
                                   }));
                                 }}
                               >
@@ -9130,7 +9139,7 @@ function Inspector({
                                     thread.threadId,
                                     undefined,
                                     threadOwnerId,
-                                    thread.modifiedAt
+                                    currentThreadOwnerDraft?.expectedModifiedAt ?? thread.modifiedAt
                                   )
                                 }
                               >
@@ -9189,10 +9198,14 @@ function Inspector({
                           commentEditTarget.threadId === thread.threadId &&
                           commentEditTarget.replyId === reply.replyId;
                         const replyOwnerDraft = commentOwnerDrafts[reply.replyId];
+                        const currentReplyOwnerDraft =
+                          replyOwnerDraft?.expectedModifiedAt === reply.modifiedAt
+                            ? replyOwnerDraft
+                            : undefined;
                         const replyOwnerId = commentOwnerTargets.some(
-                          (member) => member.userId === replyOwnerDraft
+                          (member) => member.userId === currentReplyOwnerDraft?.ownerId
                         )
-                          ? replyOwnerDraft!
+                          ? currentReplyOwnerDraft!.ownerId
                           : commentOwnerTargets.some((member) => member.userId === reply.authorId)
                             ? reply.authorId
                             : commentOwnerTargets[0]?.userId ?? "";
@@ -9244,7 +9257,10 @@ function Inspector({
                                             const ownerId = event.currentTarget.value;
                                             setCommentOwnerDrafts((current) => ({
                                               ...current,
-                                              [reply.replyId]: ownerId
+                                              [reply.replyId]: {
+                                                ownerId,
+                                                expectedModifiedAt: reply.modifiedAt
+                                              }
                                             }));
                                           }}
                                         >
@@ -9264,7 +9280,7 @@ function Inspector({
                                               thread.threadId,
                                               reply.replyId,
                                               replyOwnerId,
-                                              reply.modifiedAt
+                                              currentReplyOwnerDraft?.expectedModifiedAt ?? reply.modifiedAt
                                             )
                                           }
                                         >

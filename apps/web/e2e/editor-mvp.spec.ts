@@ -7772,7 +7772,8 @@ test("team owners explicitly assign legacy thread and reply owners before editin
     currentUserId: "team-owner",
     members: [
       { userId: "team-owner", displayName: "팀 소유자", color: "#0f766e", role: "owner" },
-      { userId: "team-editor", displayName: "민지", color: "#2563eb", role: "editor" }
+      { userId: "team-editor", displayName: "민지", color: "#2563eb", role: "editor" },
+      { userId: "team-reviewer", displayName: "준호", color: "#7c3aed", role: "editor" }
     ],
     documents: [],
     sync: { mode: "local", roomPrefix: "layo" },
@@ -7800,14 +7801,16 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(commentList.getByText("읽지 않음", { exact: true })).toHaveCount(0);
 
   const threadOwnerSelect = page.getByTestId(`comment-owner-select-${created.threadId}`);
+  const threadOwnerPath = `/files/${documentId}/comments/${created.threadId}/owner`;
   await threadOwnerSelect.selectOption("team-editor");
   const threadAssignmentRequest = page.waitForRequest(
     (request) =>
       request.method() === "PATCH" &&
-      new URL(request.url()).pathname === `/files/${documentId}/comments/${created.threadId}/owner`
+      new URL(request.url()).pathname === threadOwnerPath
   );
   await page.getByTestId(`comment-owner-assign-${created.threadId}`).click();
-  expect((await threadAssignmentRequest).postDataJSON()).toMatchObject({
+  const firstThreadAssignmentRequest = await threadAssignmentRequest;
+  expect(firstThreadAssignmentRequest.postDataJSON()).toMatchObject({
     ownerId: "team-editor",
     ownerName: "민지",
     expectedModifiedAt: replied.modifiedAt
@@ -7815,12 +7818,40 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
   await expect(commentList).toContainText("민지");
   await expect(commentList.getByText("읽지 않음", { exact: true })).toHaveCount(0);
+  const firstThreadAssignmentResponse = await firstThreadAssignmentRequest.response();
+  expect(firstThreadAssignmentResponse?.ok()).toBeTruthy();
+  const firstAssignedThread = (await firstThreadAssignmentResponse!.json()).thread;
+
+  await threadOwnerSelect.selectOption("team-owner");
+  const remoteThreadAssignmentResponse = await page.request.patch(
+    `http://127.0.0.1:4317${threadOwnerPath}`,
+    {
+      data: {
+        ownerId: "team-reviewer",
+        ownerName: "준호",
+        expectedModifiedAt: firstAssignedThread.modifiedAt
+      }
+    }
+  );
+  expect(remoteThreadAssignmentResponse.ok()).toBeTruthy();
+  const remotelyAssignedThread = (await remoteThreadAssignmentResponse.json()).thread;
+  await expect(threadOwnerSelect).toHaveValue("team-reviewer");
+  const synchronizedThreadAssignmentRequest = page.waitForRequest(
+    (request) => request.method() === "PATCH" && new URL(request.url()).pathname === threadOwnerPath
+  );
+  await page.getByTestId(`comment-owner-assign-${created.threadId}`).click();
+  expect((await synchronizedThreadAssignmentRequest).postDataJSON()).toMatchObject({
+    ownerId: "team-reviewer",
+    ownerName: "준호",
+    expectedModifiedAt: remotelyAssignedThread.modifiedAt
+  });
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
 
   await page.reload();
   await importTeamManifest();
   await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
-  await expect(threadOwnerSelect).toHaveValue("team-editor");
+  await expect(threadOwnerSelect).toHaveValue("team-reviewer");
   await expect(page.getByTestId(`comment-owner-assign-${created.threadId}`)).toHaveAccessibleName(
     "소유권 없는 기존 코멘트 소유자 변경"
   );
@@ -7835,25 +7866,63 @@ test("team owners explicitly assign legacy thread and reply owners before editin
 
   const legacyReply = replied.replies[0];
   const replyOwnerSelect = page.getByTestId(`comment-owner-select-${legacyReply.replyId}`);
+  const replyOwnerPath =
+    `/files/${documentId}/comments/${created.threadId}/replies/${legacyReply.replyId}/owner`;
   await replyOwnerSelect.selectOption("team-editor");
   const replyAssignmentRequest = page.waitForRequest(
     (request) =>
       request.method() === "PATCH" &&
-      new URL(request.url()).pathname ===
-        `/files/${documentId}/comments/${created.threadId}/replies/${legacyReply.replyId}/owner`
+      new URL(request.url()).pathname === replyOwnerPath
   );
   await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
-  expect((await replyAssignmentRequest).postDataJSON()).toMatchObject({
+  const firstReplyAssignmentRequest = await replyAssignmentRequest;
+  expect(firstReplyAssignmentRequest.postDataJSON()).toMatchObject({
     ownerId: "team-editor",
     ownerName: "민지",
     expectedModifiedAt: legacyReply.modifiedAt
+  });
+  await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
+  const firstReplyAssignmentResponse = await firstReplyAssignmentRequest.response();
+  expect(firstReplyAssignmentResponse?.ok()).toBeTruthy();
+  const firstAssignedReplyThread = (await firstReplyAssignmentResponse!.json()).thread;
+  const firstAssignedReply = firstAssignedReplyThread.replies.find(
+    (candidate: { replyId: string }) => candidate.replyId === legacyReply.replyId
+  );
+  expect(firstAssignedReply).toBeDefined();
+
+  await replyOwnerSelect.selectOption("team-owner");
+  const remoteReplyAssignmentResponse = await page.request.patch(
+    `http://127.0.0.1:4317${replyOwnerPath}`,
+    {
+      data: {
+        ownerId: "team-reviewer",
+        ownerName: "준호",
+        expectedModifiedAt: firstAssignedReply!.modifiedAt
+      }
+    }
+  );
+  expect(remoteReplyAssignmentResponse.ok()).toBeTruthy();
+  const remotelyAssignedReplyThread = (await remoteReplyAssignmentResponse.json()).thread;
+  const remotelyAssignedReply = remotelyAssignedReplyThread.replies.find(
+    (candidate: { replyId: string }) => candidate.replyId === legacyReply.replyId
+  );
+  expect(remotelyAssignedReply).toBeDefined();
+  await expect(replyOwnerSelect).toHaveValue("team-reviewer");
+  const synchronizedReplyAssignmentRequest = page.waitForRequest(
+    (request) => request.method() === "PATCH" && new URL(request.url()).pathname === replyOwnerPath
+  );
+  await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
+  expect((await synchronizedReplyAssignmentRequest).postDataJSON()).toMatchObject({
+    ownerId: "team-reviewer",
+    ownerName: "준호",
+    expectedModifiedAt: remotelyAssignedReply!.modifiedAt
   });
   await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
   await page.reload();
   await importTeamManifest();
   await openFilePanel(page);
   await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
-  await expect(replyOwnerSelect).toHaveValue("team-editor");
+  await expect(replyOwnerSelect).toHaveValue("team-reviewer");
   await expect(page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`)).toHaveAccessibleName(
     "소유권 없는 기존 답글 소유자 변경"
   );

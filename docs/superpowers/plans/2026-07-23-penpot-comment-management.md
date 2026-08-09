@@ -186,6 +186,14 @@ React, Vitest, Playwright CLI.
   allowlist now keeps ownership/deletion messages immutable; focused GREEN and
   headed 1/1 activity-feed inspection preserve both thread and reply assignment
   messages after edits.
+- Superseded head `26042fe2d4839c6e707946fd386b7aaac962bbf2`
+  passed Full Verification `31334871380` and all three drills, but independent
+  exact-head review found stale owner selector drafts survived remote
+  reassignment and could silently revert it with the new persisted version.
+  Thread/reply drafts now bind owner intent to selection-time `modifiedAt`.
+  Focused SSE RED failed with stale `team-owner` after remote `team-reviewer`;
+  GREEN and headed 1/1 inspection show both selectors as `준호`, and follow-up
+  requests carry `team-reviewer` plus the remote versions.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.

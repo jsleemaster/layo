@@ -62,6 +62,10 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
   the new owner without duplication, preventing false unread notifications.
   Later thread/reply edits refresh only prior content-snapshot activity bodies;
   ownership-assignment and deletion audit messages remain immutable.
+  Owner selector drafts bind to the thread/reply `modifiedAt` observed when the
+  user selected a member. A remote owner/version change invalidates that draft
+  before both rendering and submission, so stale local intent cannot silently
+  revert another owner's assignment.
   The browser hides dead edit/delete controls before assignment and reveals
   them only for the assigned actor afterward.
 
@@ -201,7 +205,15 @@ catalog is:
     The activity feed therefore mislabeled edited content as the original
     ownership audit. Content refresh now uses an explicit activity-type
     allowlist, while storage and browser regressions preserve thread and reply
-    assignment messages after both items are edited.
+    assignment messages after both items are edited; and
+30. the next exact-head review found owner selector drafts survived remote
+    reassignment. The UI showed stale member A while using remote member B's new
+    `modifiedAt`, so clicking Change silently reassigned the item back to A
+    instead of conflicting. Thread/reply drafts now carry the version observed
+    at selection and are ignored when persisted state advances. A real SSE E2E
+    reassigns both items to `준호` while stale `팀 소유자` drafts are open,
+    then proves the selectors and follow-up requests use `준호` plus the remote
+    versions.
 
 No personal memory note was added: the new misses are captured as product and
 repository-process regressions in focused E2E, this durable delta, the review
@@ -211,6 +223,8 @@ The final receipt-focused headed pass also showed the unread badge disappear
 before assignment and stay absent after the owner changed to `민지`. The final
 audit-focused headed pass showed edited bodies under `수정` while the separate
 `소유자 지정` rows retained the exact team-owner and `민지` assignment messages.
+The version-bound draft headed pass visibly changed both stale thread/reply
+selectors to `준호` after the external assignments.
 
 ## Verification Evidence
 
@@ -250,7 +264,8 @@ audit-focused headed pass showed edited bodies under `수정` while the separate
 | `31328690712` | Superseded head `06fce31df5d3af751b4a2016f7cf367625a2b4b3` passed Full Verification and all three drills, but exact-head review correctly rejected it for the resaved synthetic-owner and reconnect-selection gaps. |
 | `31331290743` | Superseded head `7eccbaae9362a035dcc51848c0901bce35d9c765` passed Full Verification and all three drills; independent review was clean, but configured exact-head review correctly found lost read receipts during thread assignment. |
 | `31333603394` | Superseded head `83e6c3a0fcf49dbd8d921cb39d34b21e0133fb48` passed Full Verification and all three drills, but independent exact-head review reproduced ownership audit messages being overwritten by later edits. |
-| Local latest | 521 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, read-receipt preservation, and immutable ownership-audit messages after edits. Private claim, team reconnect, receipt preservation, and audit preservation each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
+| `31334871380` | Superseded head `26042fe2d4839c6e707946fd386b7aaac962bbf2` passed Full Verification and all three drills, but independent exact-head review reproduced stale owner drafts silently reverting remote thread/reply assignments. |
+| Local latest | 521 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, read-receipt preservation, immutable ownership-audit messages after edits, and version-bound owner drafts after remote SSE reassignment. Private claim, team reconnect, receipt preservation, audit preservation, and remote draft synchronization each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
 
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
@@ -281,6 +296,10 @@ storage/browser RED now passes after preserving existing readers. The final
 independent review then found ownership audit messages overwritten by later
 edits even though `83e6c3a` CI was green. An activity-type allowlist plus exact
 storage/browser RED and headed activity-feed proof now preserves those audits.
+The next independent review found stale owner drafts could still revert remote
+reassignments even though `26042fe` CI was green. Drafts now bind to selection-
+time versions, and exact thread/reply SSE RED plus headed selector proof close
+that race locally.
 The final local server, web, typecheck, build, maturity, design, full E2E, and
 headed checks are green. Another exact-head re-review, final CI, configured
 review, merge, PR #319 thread resolution, and closeout remain.
