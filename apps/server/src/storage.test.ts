@@ -134,7 +134,7 @@ describe("FileStorage", () => {
     });
 
     try {
-      await Promise.all([
+      await Promise.race([
         waitForPath(
           storageMutationLockDir(
             tempRoot,

@@ -1911,7 +1911,10 @@ describe("Penpot component instance migration", () => {
       const archive = await sourceStorage.exportProjectArchive(
         source.project.projectId
       );
-      const archivePath = path.join(root, "project-mutation-race.layo-project.zip");
+      const archivePath = path.join(
+        root,
+        "project-mutation-race.layo-project.zip"
+      );
       await writeRawFile(archivePath, archive.archive);
 
       const waitingStorage = new FileStorage(root);

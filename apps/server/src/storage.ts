@@ -1701,10 +1701,10 @@ export class FileStorage {
     projectId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    await this.withStorageTransactionCoordinatorLock(async () => {
+    return this.withStorageTransactionCoordinatorLock(async () => {
       await this.recoverInterruptedStorageTransactionsBeforeMutation();
+      return this.withProjectMutationLock(projectId, operation);
     });
-    return this.withProjectMutationLock(projectId, operation);
   }
 
   private assertExpectedProjectSharing(
