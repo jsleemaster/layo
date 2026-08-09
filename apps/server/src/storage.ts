@@ -1697,6 +1697,16 @@ export class FileStorage {
     );
   }
 
+  private async withRecoveredProjectMutationLock<T>(
+    projectId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    await this.withStorageTransactionCoordinatorLock(async () => {
+      await this.recoverInterruptedStorageTransactionsBeforeMutation();
+    });
+    return this.withProjectMutationLock(projectId, operation);
+  }
+
   private assertExpectedProjectSharing(
     project: ProjectManifest,
     expectedSharing?: ProjectSharing
@@ -2001,14 +2011,16 @@ export class FileStorage {
     fileId: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    await this.recoverInterruptedLibraryUpdatesOnce();
-    return this.withLibraryRegistryTargetMutationLock(
-      fileId,
-      async () => {
-        await this.recoverInterruptedLibraryUpdateForTarget(fileId);
-        return operation();
-      }
-    );
+    return this.withStorageTransactionCoordinatorLock(async () => {
+      await this.recoverInterruptedStorageTransactionsBeforeMutation();
+      return this.withLibraryRegistryTargetMutationLock(
+        fileId,
+        async () => {
+          await this.recoverInterruptedLibraryUpdateForTarget(fileId);
+          return operation();
+        }
+      );
+    });
   }
 
   private async withLibraryRegistryTargetMutationLocks<T>(
@@ -2175,16 +2187,16 @@ export class FileStorage {
 
   async prepareFiles() {
     await this.adoptPriorDefaultStoreIfNeeded();
-    await this.recoverInterruptedLibraryUpdatesOnce();
     await this.recoverInterruptedStorageTransactionsOnce();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await this.removeUnreferencedLegacySampleDocument();
   }
 
   async prepareProjects() {
     await this.adoptPriorDefaultStoreIfNeeded();
-    await this.recoverInterruptedLibraryUpdatesOnce();
     await this.recoverInterruptedStorageTransactionsOnce();
+    await this.recoverInterruptedLibraryUpdatesOnce();
     await mkdir(this.filesDir, { recursive: true });
     await mkdir(this.projectsDir, { recursive: true });
     await this.removeLegacySampleProject();
@@ -2513,7 +2525,14 @@ export class FileStorage {
               () =>
                 this.withOrderedFileMutationLocks(
                   orderedFileIds,
-                  recover
+                  () =>
+                    withOrderedStoragePathMutationLocks(
+                      orderedFileIds.flatMap((fileId) => [
+                        this.commentThreadsPathFor(fileId),
+                        this.legacyCommentThreadsPathFor(fileId)
+                      ]),
+                      recover
+                    )
                 )
             )
         );
@@ -2802,7 +2821,7 @@ export class FileStorage {
     const projectName = normalizeName(input.name, "새 프로젝트");
     const documentName = normalizeName(input.documentName, `${projectName} 문서`);
 
-    return this.withProjectMutationLock(projectId, async () => {
+    return this.withRecoveredProjectMutationLock(projectId, async () => {
       if (
         await this.canonicalStorageIdExists(
           this.projectsDir,
@@ -2853,7 +2872,7 @@ export class FileStorage {
     input: UpdateProjectInput,
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    return this.withProjectMutationLock(projectId, async () => {
+    return this.withRecoveredProjectMutationLock(projectId, async () => {
       const project = await this.readProject(projectId);
       this.assertExpectedProjectSharing(project, options.expectedSharing);
       const currentDocumentId = input.currentDocumentId ?? project.currentDocumentId;
@@ -2875,7 +2894,7 @@ export class FileStorage {
     input: CreateProjectDocumentInput = {},
     options: ProjectMutationOptions = {}
   ): Promise<ProjectManifest> {
-    return this.withProjectMutationLock(projectId, async () => {
+    return this.withRecoveredProjectMutationLock(projectId, async () => {
       const project = await this.readProject(projectId);
       this.assertExpectedProjectSharing(project, options.expectedSharing);
       const now = new Date().toISOString();
@@ -2921,7 +2940,7 @@ export class FileStorage {
     sharing: ProjectSharing,
     options: SetProjectSharingOptions = {}
   ): Promise<ProjectManifest> {
-    return this.withProjectMutationLock(projectId, async () => {
+    return this.withRecoveredProjectMutationLock(projectId, async () => {
       const project = await this.readProject(projectId);
       this.assertExpectedProjectSharing(project, options.expectedSharing);
 
@@ -3119,6 +3138,14 @@ export class FileStorage {
             !otherDocumentIds.has(canonicalStorageId(documentId))
         );
         const deletedFileIds = new Set(fileIds.map(canonicalStorageId));
+        const commentPaths = [
+          ...new Set(
+            fileIds.flatMap((fileId) => [
+              this.commentThreadsPathFor(fileId),
+              this.legacyCommentThreadsPathFor(fileId)
+            ])
+          )
+        ];
 
         return this.withOrderedLibraryRegistryTargetMutationLocks(
           projectFileIds,
@@ -3134,114 +3161,130 @@ export class FileStorage {
               () =>
                 this.withOrderedFileMutationLocks(
                   projectFileIds,
-                  async () => {
-                    const subscriptions =
-                      await this.readLibraryRegistrySubscriptions();
-                    const nextSubscriptions = subscriptions.filter(
-                      (subscription) =>
-                        !deletedFileIds.has(
-                          canonicalStorageId(subscription.fileId)
-                        )
-                    );
-                    const tokenSubscriptions =
-                      await this.readLibraryRegistryTokenSubscriptions();
-                    const nextTokenSubscriptions = tokenSubscriptions.filter(
-                      (subscription) =>
-                        !deletedFileIds.has(
-                          canonicalStorageId(subscription.fileId)
-                        )
-                    );
-                    const subscriptionsChanged =
-                      nextSubscriptions.length !== subscriptions.length;
-                    const tokenSubscriptionsChanged =
-                      nextTokenSubscriptions.length
-                        !== tokenSubscriptions.length;
-                    const originalPaths = [
-                      this.projectPathFor(project.projectId),
-                      ...fileIds.map((fileId) =>
-                        this.filePathFor(fileId)
-                      ),
-                      ...(subscriptionsChanged
-                        ? [this.librarySubscriptionsPath()]
-                        : []),
-                      ...(tokenSubscriptionsChanged
-                        ? [this.libraryTokenSubscriptionsPath()]
-                        : [])
-                    ];
-                    const intended: StoragePathSnapshot[] = [
-                      {
-                        filePath: this.projectPathFor(project.projectId),
-                        data: null
-                      },
-                      ...fileIds.map((fileId) => ({
-                        filePath: this.filePathFor(fileId),
-                        data: null
-                      })),
-                      ...(subscriptionsChanged
-                        ? [{
-                            filePath: this.librarySubscriptionsPath(),
-                            data: Buffer.from(
-                              `${JSON.stringify(
-                                {
-                                  schemaVersion: 1,
-                                  subscriptions: nextSubscriptions
-                                },
-                                null,
-                                2
-                              )}\n`,
-                              "utf8"
-                            )
-                          }]
-                        : []),
-                      ...(tokenSubscriptionsChanged
-                        ? [{
-                            filePath:
-                              this.libraryTokenSubscriptionsPath(),
-                            data: Buffer.from(
-                              `${JSON.stringify(
-                                {
-                                  schemaVersion: 1,
-                                  subscriptions: nextTokenSubscriptions
-                                },
-                                null,
-                                2
-                              )}\n`,
-                              "utf8"
-                            )
-                          }]
-                        : [])
-                    ];
-  
-                    return this.withStorageTransactionRecovery(
-                      "project-delete",
-                      project.projectId,
-                      projectFileIds,
-                      originalPaths,
-                      intended,
+                  () =>
+                    withOrderedStoragePathMutationLocks(
+                      commentPaths,
                       async () => {
-                        await rm(
-                          this.projectPathFor(project.projectId),
-                          { force: true }
+                        const subscriptions =
+                          await this.readLibraryRegistrySubscriptions();
+                        const nextSubscriptions = subscriptions.filter(
+                          (subscription) =>
+                            !deletedFileIds.has(
+                              canonicalStorageId(subscription.fileId)
+                            )
                         );
-                        for (const fileId of fileIds) {
-                          await rm(this.filePathFor(fileId), {
-                            force: true
-                          });
-                        }
-                        if (subscriptionsChanged) {
-                          await this.writeLibraryRegistrySubscriptions(
-                            nextSubscriptions
-                          );
-                        }
-                        if (tokenSubscriptionsChanged) {
-                          await this.writeLibraryRegistryTokenSubscriptions(
-                            nextTokenSubscriptions
-                          );
-                        }
-                        return project;
+                        const tokenSubscriptions =
+                          await this.readLibraryRegistryTokenSubscriptions();
+                        const nextTokenSubscriptions = tokenSubscriptions.filter(
+                          (subscription) =>
+                            !deletedFileIds.has(
+                              canonicalStorageId(subscription.fileId)
+                            )
+                        );
+                        const subscriptionsChanged =
+                          nextSubscriptions.length !== subscriptions.length;
+                        const tokenSubscriptionsChanged =
+                          nextTokenSubscriptions.length
+                            !== tokenSubscriptions.length;
+                        const originalPaths = [
+                          this.projectPathFor(project.projectId),
+                          ...fileIds.map((fileId) => this.filePathFor(fileId)),
+                          ...commentPaths,
+                          ...(subscriptionsChanged
+                            ? [this.librarySubscriptionsPath()]
+                            : []),
+                          ...(tokenSubscriptionsChanged
+                            ? [this.libraryTokenSubscriptionsPath()]
+                            : [])
+                        ];
+                        const intended: StoragePathSnapshot[] = [
+                          {
+                            filePath: this.projectPathFor(project.projectId),
+                            data: null
+                          },
+                          ...fileIds.map((fileId) => ({
+                            filePath: this.filePathFor(fileId),
+                            data: null
+                          })),
+                          ...commentPaths.map((filePath) => ({
+                            filePath,
+                            data: null
+                          })),
+                          ...(subscriptionsChanged
+                            ? [{
+                                filePath: this.librarySubscriptionsPath(),
+                                data: Buffer.from(
+                                  `${JSON.stringify(
+                                    {
+                                      schemaVersion: 1,
+                                      subscriptions: nextSubscriptions
+                                    },
+                                    null,
+                                    2
+                                  )}\n`,
+                                  "utf8"
+                                )
+                              }]
+                            : []),
+                          ...(tokenSubscriptionsChanged
+                            ? [{
+                                filePath:
+                                  this.libraryTokenSubscriptionsPath(),
+                                data: Buffer.from(
+                                  `${JSON.stringify(
+                                    {
+                                      schemaVersion: 1,
+                                      subscriptions: nextTokenSubscriptions
+                                    },
+                                    null,
+                                    2
+                                  )}\n`,
+                                  "utf8"
+                                )
+                              }]
+                            : [])
+                        ];
+
+                        return this.withStorageTransactionRecovery(
+                          "project-delete",
+                          project.projectId,
+                          projectFileIds,
+                          originalPaths,
+                          intended,
+                          async () => {
+                            await rm(
+                              this.projectPathFor(project.projectId),
+                              { force: true }
+                            );
+                            await syncDirectory(this.projectsDir);
+                            for (const fileId of fileIds) {
+                              await rm(this.filePathFor(fileId), {
+                                force: true
+                              });
+                            }
+                            await syncDirectory(this.filesDir);
+                            for (const commentPath of commentPaths) {
+                              await rm(commentPath, { force: true });
+                            }
+                            if (await pathExists(this.commentsDir)) {
+                              await syncDirectory(this.commentsDir);
+                            }
+                            if (subscriptionsChanged) {
+                              await this.writeLibraryRegistrySubscriptions(
+                                nextSubscriptions
+                              );
+                            }
+                            if (tokenSubscriptionsChanged) {
+                              await this.writeLibraryRegistryTokenSubscriptions(
+                                nextTokenSubscriptions
+                              );
+                            }
+                            return project;
+                          }
+                        );
                       }
-                    );
-                  })
+                    )
+                )
             );
           }
         );

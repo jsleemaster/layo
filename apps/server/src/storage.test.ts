@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { hostname, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -150,7 +150,9 @@ describe("FileStorage", () => {
       ]);
       await new Promise((resolve) => setTimeout(resolve, 100));
     } finally {
-      await rm(sharedFileLockDir, { recursive: true, force: true });
+      const releasedFileLockDir = `${sharedFileLockDir}.test-release`;
+      await rename(sharedFileLockDir, releasedFileLockDir);
+      await rm(releasedFileLockDir, { recursive: true, force: true });
     }
 
     const results = await Promise.allSettled([firstCreation, secondCreation]);
@@ -2368,6 +2370,50 @@ describe("FileStorage", () => {
     ).resolves.toEqual([]);
   });
 
+  test("deleting a project preserves comments for a document referenced by another project", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-comment-delete-shared-"));
+    const storage = new FileStorage(tempRoot);
+    const sourceProject = await storage.createProject({
+      projectId: "comment-shared-source",
+      name: "Shared source project",
+      documentId: "comment-shared-file",
+      documentName: "Shared document"
+    });
+    const retainedProject = await storage.createProject({
+      projectId: "comment-shared-retained",
+      name: "Retained project",
+      documentId: "comment-retained-file",
+      documentName: "Retained document"
+    });
+    await storage.createCommentThread("comment-shared-file", {
+      nodeId: "text-1",
+      body: "shared review history",
+      authorId: "reviewer",
+      authorName: "reviewer"
+    });
+    await writeFile(
+      path.join(tempRoot, "projects", "comment-shared-retained.json"),
+      `${JSON.stringify({
+        ...retainedProject,
+        documents: [...retainedProject.documents, sourceProject.documents[0]]
+      }, null, 2)}\n`,
+      "utf8"
+    );
+
+    await storage.deleteProject("comment-shared-source");
+
+    await expect(storage.readFile("comment-shared-file")).resolves.toMatchObject({
+      id: "comment-shared-file"
+    });
+    await expect(
+      storage.listCommentThreads("comment-shared-file", {
+        includeResolved: true
+      })
+    ).resolves.toEqual([
+      expect.objectContaining({ body: "shared review history" })
+    ]);
+  });
+
   test("comment threads are stored beside the design file and can be resolved", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-"));
     const storage = await storageWithDocument(tempRoot);
@@ -2436,9 +2482,9 @@ describe("FileStorage", () => {
       fileId: "Shared-File",
       threads: [expect.objectContaining({ body: "대소문자 잠금 경계" })]
     });
-    await expect(
-      readFile(path.join(tempRoot, "comments", "Shared-File.json"), "utf8")
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readdir(path.join(tempRoot, "comments"))).toEqual([
+      "shared-file.json"
+    ]);
   });
 
   test("comment sidecars migrate a legacy case-sensitive path without losing threads", async () => {
@@ -2467,8 +2513,19 @@ describe("FileStorage", () => {
       "comments",
       "Legacy-File.json"
     );
-    await writeFile(legacyPath, await readFile(canonicalPath));
-    await rm(canonicalPath);
+    const legacyAliasResolves = await readFile(legacyPath).then(
+      () => true,
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") {
+          return false;
+        }
+        throw error;
+      }
+    );
+    if (!legacyAliasResolves) {
+      await writeFile(legacyPath, await readFile(canonicalPath));
+      await rm(canonicalPath);
+    }
 
     const reloaded = new FileStorage(tempRoot);
     await expect(
@@ -2485,9 +2542,9 @@ describe("FileStorage", () => {
 
     const migrated = JSON.parse(await readFile(canonicalPath, "utf8"));
     expect(migrated.threads).toHaveLength(2);
-    await expect(readFile(legacyPath, "utf8")).rejects.toMatchObject({
-      code: "ENOENT"
-    });
+    expect(await readdir(path.join(tempRoot, "comments"))).toEqual([
+      "legacy-file.json"
+    ]);
   });
 
   test("keeps the canonical comment sidecar when a legacy spelling resolves to the same entry", async () => {
