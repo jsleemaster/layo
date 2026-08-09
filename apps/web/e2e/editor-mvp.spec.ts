@@ -6135,6 +6135,8 @@ test("comments panel lets owners edit and delete threads and replies with stale-
   await page.getByRole("button", { name: "코멘트 저장" }).click();
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
   await expect(page.getByTestId("comment-list")).toContainText("수정된 코멘트");
+  await page.waitForTimeout(2_500);
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
 
   await page.getByTestId("comment-reply-body").fill("수정 전 답글");
   await page.getByRole("button", { name: "답글 추가" }).click();
