@@ -82,9 +82,15 @@ web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and
 254/254 Playwright. Independent review then exposed irreversible mistaken-owner
 assignment and an MCP dry-run/commit mismatch; the local follow-up keeps migrated
 legacy records reassignable, rejects unresolved edit/delete reviews consistently,
-passes 567 server and 284 web tests, focused 2/2, both private and team headed
-1/1 visual checks, and full 255/255 without retry. Final-head re-review, CI,
-merge, PR #319 thread resolution, and cleanup remain. Local PR #319
+and passed Full Verification `31328690712`, but the next exact-head review found
+that a `v1` sidecar could already contain a persisted synthetic ID and that
+reconnect selected the first member instead of the current owner. Sidecar `v2`
+now establishes stable-owner provenance; unmarked `v1` records recover
+conservatively, and thread/reply selectors preserve the stored owner. Latest
+local proof passes 568 server and 284 web tests, focused storage/MCP/browser
+coverage, both private and team headed 1/1 visual checks, and full 255/255
+without retry. Final-head re-review, CI, merge, PR #319 thread resolution, and
+cleanup remain. Local PR #319
 proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
 repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
 latest interaction set, and headed 1/1 for the stabilized case.

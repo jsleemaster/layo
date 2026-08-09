@@ -9057,7 +9057,9 @@ function Inspector({
                 (member) => member.userId === threadOwnerDraft
               )
                 ? threadOwnerDraft!
-                : commentOwnerTargets[0]?.userId ?? "";
+                : commentOwnerTargets.some((member) => member.userId === thread.authorId)
+                  ? thread.authorId
+                  : commentOwnerTargets[0]?.userId ?? "";
               return (
                 <li className="comment-row" key={thread.threadId}>
                   <div className="comment-row-header">
@@ -9191,7 +9193,9 @@ function Inspector({
                           (member) => member.userId === replyOwnerDraft
                         )
                           ? replyOwnerDraft!
-                          : commentOwnerTargets[0]?.userId ?? "";
+                          : commentOwnerTargets.some((member) => member.userId === reply.authorId)
+                            ? reply.authorId
+                            : commentOwnerTargets[0]?.userId ?? "";
                         return (
                           <li className="comment-reply" key={reply.replyId}>
                             <div className="comment-reply-header">

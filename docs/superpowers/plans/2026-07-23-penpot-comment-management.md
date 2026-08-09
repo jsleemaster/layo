@@ -154,11 +154,24 @@ React, Vitest, Playwright CLI.
   legacy items that commit rejected. Migrated legacy records now remain
   reassignable, modern records remain ineligible, and all four mutation reviews
   return `legacy_owner_unassigned` before commit.
-- Final local verification passed 567 server and 284 web tests. Team reassignment
+- The first review follow-up passed 567 server and 284 web tests. Team reassignment
   passed headed 1/1 with pre/post visual inspection, and the complete browser
   suite passed 255/255 without retry.
+- Superseded head `06fce31df5d3af751b4a2016f7cf367625a2b4b3`
+  passed Full Verification `31328690712` and all three drills, but exact-head
+  review found that PR #319 could already have persisted a synthetic owner ID
+  into a `v1` sidecar and that reconnect selected the first member instead of
+  the stored owner. Green CI did not override those product findings.
+- Sidecar `v2` now establishes stable-owner provenance; every unmarked `v1`
+  record is conservatively recoverable, including already-reserialized thread
+  and reply IDs. Selector defaults follow draft, stored owner, then first target.
+  Focused coverage also verifies all four rejected MCP commits, reply
+  reassignment, modern reply blocking, and team-editor control absence.
+- Latest local verification passed 568 server, 284 web, workspace typecheck,
+  headed team reconnect 1/1 with three inspected states, and full Playwright
+  255/255 without retry.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.
-- Exact-head independent re-review/configured review, final CI, merge, PR #319 thread
+- Another exact-head independent re-review/configured review, final CI, merge, PR #319 thread
   resolution, and post-merge MD/worktree cleanup remain. PR #320 is still active.

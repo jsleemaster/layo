@@ -43,6 +43,11 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
 - A missing or blank historical `authorId` is retained as
   `legacyOwnership: true`; the display-name fallback remains presentation data,
   not an inferred stable identity.
+- Comment sidecar schema `v2` is the stable-owner provenance boundary. A `v1`
+  sidecar may already contain a display name synthesized into `authorId` by the
+  previous parser, so every unmarked `v1` thread/reply is conservatively treated
+  as unresolved legacy ownership. The next write persists `v2` plus that marker;
+  new `v2` records remain modern without requiring migration.
 - Legacy threads and replies reject edit/delete until an explicit assignment
   succeeds against their current `modifiedAt` version.
 - A team owner can assign a legacy item to a stable team member through HTTP,
@@ -172,7 +177,16 @@ catalog is:
 25. MCP edit/delete dry-run checked actor and version but not unresolved legacy
     ownership, so it could return `canApply: true` before the commit failed.
     All four thread/reply edit/delete reviews now return the same
-    `legacy_owner_unassigned` reason enforced by storage.
+    `legacy_owner_unassigned` reason enforced by storage;
+26. the next exact-head review found that PR #319 could parse a missing ID into
+    `authorName` and a later read mutation could persist that synthetic value.
+    A non-empty ID alone could no longer prove modern ownership. Sidecar `v2`
+    now establishes provenance and conservatively routes every unmarked `v1`
+    record through explicit recovery; and
+27. reconnecting after assignment cleared the browser draft and selected the
+    first team member instead of the stored current owner. Thread and reply
+    selectors now resolve `draft -> current authorId -> first target`, with
+    reload and team-manifest reimport coverage.
 
 No personal memory note was added: the new misses are captured as product and
 repository-process regressions in focused E2E, this durable delta, the review
@@ -214,7 +228,8 @@ selectors, status labels, and edit/delete controls remain visible without overla
 | --- | --- |
 | `31323183601` | PR #320 RED at `b6e174028116a0891f4c248417ccfbd9701a2063`: storage provenance, HTTP assignment, MCP assignment, and browser owner markers were intentionally absent. |
 | `31324584270` | Implementation GREEN at `2c2954e9f9252d3bb968df50875b529af0daaf83`: 284 web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 254/254 Playwright; backup, restore, and retention drills also passed. |
-| Local final | 567 server and 284 web tests passed. Team/private focused browser paths passed 2/2, both private claim and team reassignment passed headed 1/1 with pre/post visual inspection, the transient boolean poll passed 10/10, and the complete suite passed 255/255 without retry. |
+| `31328690712` | Superseded head `06fce31df5d3af751b4a2016f7cf367625a2b4b3` passed Full Verification and all three drills, but exact-head review correctly rejected it for the resaved synthetic-owner and reconnect-selection gaps. |
+| Local latest | 568 server and 284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, and editor control absence. Both private claim and team reconnect passed headed 1/1 with visual inspection; full Playwright passed 255/255 without retry. |
 
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
@@ -237,8 +252,11 @@ assign each legacy thread or reply explicitly; Layo does not infer or auto-claim
 ownership from a non-unique display name. Storage, HTTP, review-first MCP,
 Korean browser, focused repetition, full E2E, and headed local proof are green.
 An independent review found and drove the reversible-assignment P1 and MCP
-review/commit-parity P2 fixes. Exact-head re-review, final CI, merge, PR #319
-thread resolution, and closeout remain.
+review/commit-parity P2 fixes. The next exact-head review then found the
+reserialized `v1` provenance P1 and reconnect selector P2; sidecar `v2`,
+conservative `v1` recovery, and current-owner selector defaults close both
+locally. Another exact-head re-review, final CI, merge, PR #319 thread
+resolution, and closeout remain.
 
 ## Merge And Cleanup Evidence
 

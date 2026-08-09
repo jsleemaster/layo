@@ -7780,10 +7780,13 @@ test("team owners explicitly assign legacy thread and reply owners before editin
     auth: { relay: { memberTokenHashes: [], inviteTokenHashes: [] } },
     encryption: { mode: "none" }
   };
-  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
-  await page.getByRole("tab", { name: "팀 설정" }).click();
-  await page.getByTestId("team-manifest").fill(JSON.stringify(teamManifest, null, 2));
-  await page.getByRole("button", { name: "설정 가져오기" }).click();
+  const importTeamManifest = async (manifest = teamManifest) => {
+    await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+    await page.getByRole("tab", { name: "팀 설정" }).click();
+    await page.getByTestId("team-manifest").fill(JSON.stringify(manifest, null, 2));
+    await page.getByRole("button", { name: "설정 가져오기" }).click();
+  };
+  await importTeamManifest();
   await openFilePanel(page);
   await page.getByRole("button", { name: "현재 팀과 공유" }).click();
   await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
@@ -7809,6 +7812,11 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
   await expect(commentList).toContainText("민지");
 
+  await page.reload();
+  await importTeamManifest();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(threadOwnerSelect).toHaveValue("team-editor");
   await expect(page.getByTestId(`comment-owner-assign-${created.threadId}`)).toHaveAccessibleName(
     "소유권 없는 기존 코멘트 소유자 변경"
   );
@@ -7819,7 +7827,7 @@ test("team owners explicitly assign legacy thread and reply owners before editin
 
   const legacyReply = replied.replies[0];
   const replyOwnerSelect = page.getByTestId(`comment-owner-select-${legacyReply.replyId}`);
-  await replyOwnerSelect.selectOption("team-owner");
+  await replyOwnerSelect.selectOption("team-editor");
   const replyAssignmentRequest = page.waitForRequest(
     (request) =>
       request.method() === "PATCH" &&
@@ -7828,14 +7836,31 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   );
   await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
   expect((await replyAssignmentRequest).postDataJSON()).toMatchObject({
-    ownerId: "team-owner",
-    ownerName: "팀 소유자",
+    ownerId: "team-editor",
+    ownerName: "민지",
     expectedModifiedAt: legacyReply.modifiedAt
   });
+  await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
+  await page.reload();
+  await importTeamManifest();
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(replyOwnerSelect).toHaveValue("team-editor");
+  await expect(page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`)).toHaveAccessibleName(
+    "소유권 없는 기존 답글 소유자 변경"
+  );
+  await replyOwnerSelect.selectOption("team-owner");
+  await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
   await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
   await expect(page.getByRole("button", { name: "소유권 없는 기존 답글 수정" })).toHaveCount(1);
   await openFilePanel(page);
   await expect(page.getByTestId("comment-activity-feed")).toContainText("소유자 지정");
+
+  await importTeamManifest({ ...teamManifest, currentUserId: "team-editor" });
+  await openFilePanel(page);
+  await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId(`comment-owner-select-${created.threadId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`comment-owner-select-${legacyReply.replyId}`)).toHaveCount(0);
 });
 
 test("local operators explicitly claim private legacy thread and reply ownership", async ({ page }) => {

@@ -971,7 +971,7 @@ export interface CommentNotificationSummary {
 }
 
 interface StoredCommentThreadFile {
-  schemaVersion: 1;
+  schemaVersion: 2;
   fileId: string;
   threads: StoredCommentThread[];
   activity: StoredCommentActivityEvent[];
@@ -6714,7 +6714,7 @@ export class FileStorage {
       }
       if (legacyPath === canonicalPath) {
         return {
-          schemaVersion: 1,
+          schemaVersion: 2,
           fileId: storedFileId,
           threads: [],
           activity: [],
@@ -6728,7 +6728,7 @@ export class FileStorage {
           throw legacyError;
         }
         return {
-          schemaVersion: 1,
+          schemaVersion: 2,
           fileId: storedFileId,
           threads: [],
           activity: [],
@@ -8884,9 +8884,12 @@ function parseStoredCommentThreadFile(input: unknown, expectedFileId: string): S
     throw new Error("invalid comment thread file");
   }
 
-  const candidate = input as StoredCommentThreadFile;
-  if (candidate.schemaVersion !== 1) {
-    throw new Error(`unsupported comment thread file schema: ${String(candidate.schemaVersion)}`);
+  const candidate = input as Omit<StoredCommentThreadFile, "schemaVersion"> & {
+    schemaVersion?: unknown;
+  };
+  const sourceSchemaVersion = candidate.schemaVersion;
+  if (sourceSchemaVersion !== 1 && sourceSchemaVersion !== 2) {
+    throw new Error(`unsupported comment thread file schema: ${String(sourceSchemaVersion)}`);
   }
   assertSafeStorageId(candidate.fileId);
   if (candidate.fileId !== expectedFileId) {
@@ -8897,9 +8900,11 @@ function parseStoredCommentThreadFile(input: unknown, expectedFileId: string): S
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     fileId: candidate.fileId,
-    threads: candidate.threads.map((thread) => parseStoredCommentThread(thread, expectedFileId)),
+    threads: candidate.threads.map((thread) =>
+      parseStoredCommentThread(thread, expectedFileId, sourceSchemaVersion === 1)
+    ),
     activity: Array.isArray(candidate.activity)
       ? candidate.activity.map((event) => parseStoredCommentActivityEvent(event, expectedFileId))
       : [],
@@ -8911,7 +8916,11 @@ function parseStoredCommentThreadFile(input: unknown, expectedFileId: string): S
   };
 }
 
-function parseStoredCommentThread(input: unknown, expectedFileId: string): StoredCommentThread {
+function parseStoredCommentThread(
+  input: unknown,
+  expectedFileId: string,
+  legacyOwnerIdentityIsAmbiguous: boolean
+): StoredCommentThread {
   if (!input || typeof input !== "object") {
     throw new Error("invalid comment thread");
   }
@@ -8932,6 +8941,13 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
   const hasStableAuthorId = typeof candidate.authorId === "string" && Boolean(candidate.authorId.trim());
   const authorId = normalizeName(candidate.authorId, authorName);
   const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
+  const legacyOwnership = !hasStableAuthorId || candidate.legacyOwnership === true
+    ? true
+    : candidate.legacyOwnership === false
+      ? false
+      : legacyOwnerIdentityIsAmbiguous
+        ? true
+        : undefined;
 
   return {
     schemaVersion: 1,
@@ -8942,11 +8958,7 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     body,
     authorId,
     authorName,
-    ...(!hasStableAuthorId || candidate.legacyOwnership === true
-      ? { legacyOwnership: true }
-      : candidate.legacyOwnership === false
-        ? { legacyOwnership: false }
-        : {}),
+    ...(legacyOwnership === undefined ? {} : { legacyOwnership }),
     createdAt,
     modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     resolvedAt: candidate.resolvedAt ? normalizeName(candidate.resolvedAt, "") : null,
@@ -8954,12 +8966,17 @@ function parseStoredCommentThread(input: unknown, expectedFileId: string): Store
     mentionTargets: normalizeCommentMentionTargetList(candidate.mentionTargets),
     readBy: normalizeCommentReaderList(candidate.readBy, authorId),
     replies: Array.isArray(candidate.replies)
-      ? candidate.replies.map((reply) => parseStoredCommentReply(reply))
+      ? candidate.replies.map((reply) =>
+          parseStoredCommentReply(reply, legacyOwnerIdentityIsAmbiguous)
+        )
       : []
   };
 }
 
-function parseStoredCommentReply(input: unknown): StoredCommentReply {
+function parseStoredCommentReply(
+  input: unknown,
+  legacyOwnerIdentityIsAmbiguous: boolean
+): StoredCommentReply {
   if (!input || typeof input !== "object") {
     throw new Error("invalid comment reply");
   }
@@ -8975,6 +8992,13 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
   const hasStableAuthorId = typeof candidate.authorId === "string" && Boolean(candidate.authorId.trim());
   const authorId = normalizeName(candidate.authorId, authorName);
   const createdAt = normalizeName(candidate.createdAt, new Date(0).toISOString());
+  const legacyOwnership = !hasStableAuthorId || candidate.legacyOwnership === true
+    ? true
+    : candidate.legacyOwnership === false
+      ? false
+      : legacyOwnerIdentityIsAmbiguous
+        ? true
+        : undefined;
 
   return {
     schemaVersion: 1,
@@ -8982,11 +9006,7 @@ function parseStoredCommentReply(input: unknown): StoredCommentReply {
     body,
     authorId,
     authorName,
-    ...(!hasStableAuthorId || candidate.legacyOwnership === true
-      ? { legacyOwnership: true }
-      : candidate.legacyOwnership === false
-        ? { legacyOwnership: false }
-        : {}),
+    ...(legacyOwnership === undefined ? {} : { legacyOwnership }),
     createdAt,
     modifiedAt: normalizeName(candidate.modifiedAt, createdAt),
     mentions: normalizeCommentMentionList(candidate.mentions, body),

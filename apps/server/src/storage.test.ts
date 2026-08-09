@@ -3184,6 +3184,59 @@ describe("FileStorage", () => {
     });
   });
 
+  test("schema v1 comments resaved with synthetic owner ids remain explicitly recoverable", async () => {
+    tempRoot = await mkdtemp(path.join(tmpdir(), "layo-resaved-legacy-comment-owner-"));
+    const storage = await storageWithDocument(tempRoot);
+    const created = await storage.createCommentThread("sample-file", {
+      nodeId: "text-1",
+      body: "재저장된 기존 코멘트",
+      authorName: "기존 표시 이름"
+    });
+    const replied = await storage.addCommentReply("sample-file", created.threadId, {
+      body: "재저장된 기존 답글",
+      authorName: "기존 답글 작성자"
+    });
+    const sidecarPath = path.join(tempRoot, "comments", "sample-file.json");
+    const sidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    sidecar.schemaVersion = 1;
+    sidecar.threads[0].authorId = sidecar.threads[0].authorName;
+    sidecar.threads[0].replies[0].authorId = sidecar.threads[0].replies[0].authorName;
+    delete sidecar.threads[0].legacyOwnership;
+    delete sidecar.threads[0].replies[0].legacyOwnership;
+    await writeFile(sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`, "utf8");
+
+    const reloaded = new FileStorage(tempRoot);
+    const [legacyThread] = await reloaded.listCommentThreads("sample-file", {
+      includeResolved: true
+    });
+    expect(legacyThread).toMatchObject({
+      threadId: created.threadId,
+      authorId: "기존 표시 이름",
+      legacyOwnership: true,
+      replies: [
+        expect.objectContaining({
+          replyId: replied.replies[0].replyId,
+          authorId: "기존 답글 작성자",
+          legacyOwnership: true
+        })
+      ]
+    });
+
+    await reloaded.markCommentThreadRead("sample-file", created.threadId, {
+      viewerId: "team-owner"
+    });
+    const migratedSidecar = JSON.parse(await readFile(sidecarPath, "utf8"));
+    expect(migratedSidecar).toMatchObject({
+      schemaVersion: 2,
+      threads: [
+        expect.objectContaining({
+          legacyOwnership: true,
+          replies: [expect.objectContaining({ legacyOwnership: true })]
+        })
+      ]
+    });
+  });
+
   test("legacy comment owners must be explicitly assigned before thread and reply edits", async () => {
     tempRoot = await mkdtemp(path.join(tmpdir(), "layo-legacy-comment-owner-"));
     const storage = await storageWithDocument(tempRoot);
