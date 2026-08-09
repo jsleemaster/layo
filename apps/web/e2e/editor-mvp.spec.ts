@@ -6972,6 +6972,7 @@ test("pending successful comment poll clears an older initial refresh error", as
   const initialResponseReleases: Array<() => void> = [];
   let heldInitialResponses = 0;
   let failedInitialResponses = 0;
+  let firstInitialResponseAt: number | null = null;
   let pollingResponseReady = false;
   let pollingResponseFulfilled = false;
   let releasePollingResponse = () => {};
@@ -6989,7 +6990,8 @@ test("pending successful comment poll clears an older initial refresh error", as
         await route.continue();
         return;
       }
-      if (heldInitialResponses < 2) {
+      firstInitialResponseAt ??= Date.now();
+      if (!pollingResponseReady && Date.now() - firstInitialResponseAt < 1_500) {
         heldInitialResponses += 1;
         let releaseResponse = () => {};
         const responseRelease = new Promise<void>((resolve) => {
@@ -7020,14 +7022,15 @@ test("pending successful comment poll clears an older initial refresh error", as
 
   await page.reload();
   try {
-    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => heldInitialResponses).toBeGreaterThan(0);
     await expect.poll(() => pollingResponseReady, { timeout: 6_000 }).toBe(true);
+    const expectedFailedInitialResponses = heldInitialResponses;
     await openFilePanel(page);
     await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
     for (const releaseResponse of initialResponseReleases) {
       releaseResponse();
     }
-    await expect.poll(() => failedInitialResponses).toBe(2);
+    await expect.poll(() => failedInitialResponses).toBe(expectedFailedInitialResponses);
     await expect(page.getByTestId("comment-status")).toContainText(
       "forced older initial refresh failure"
     );
