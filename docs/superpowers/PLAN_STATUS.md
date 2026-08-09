@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-07-19
+Last audited: 2026-08-09
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,9 +29,15 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No plan is active. The next Penpot maturity goal must start from a newly observed
-benchmark gap or failed verification case rather than reopening the completed
-visual-preview plan.
+[2026-07-23-penpot-comment-management.md](plans/2026-07-23-penpot-comment-management.md)
+is active on PR #319. It adapts
+Penpot comment ownership, edit/delete, team authorization, viewer feedback,
+review-first MCP, and durable delivery into Layo's local sidecar architecture.
+Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005` passed Full
+Verification `31318544219` at 253/253 Playwright with no retry, and independent
+exact-head review found no P0-P2 issue. Final documentation-head verification,
+merge, and post-merge MD cleanup remain required before this plan can move to
+Completed.
 
 ## Recently Completed Plan
 

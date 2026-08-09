@@ -1,0 +1,196 @@
+# Penpot Comment Management Delta
+
+Last checked: 2026-08-09
+
+## Reference And Decision
+
+Layo **adapts** Penpot's current comment workflow at Penpot `develop`
+commit `b5bec4f983b5540a3ed7969121badf08a14f384e`:
+
+- https://help.penpot.app/user-guide/designing/workspace-basics/#comments
+- https://github.com/penpot/penpot/commit/b5bec4f983b5540a3ed7969121badf08a14f384e
+
+Penpot keeps comment bubbles visible on the canvas, allows replies and thread
+management outside comment mode, supports edit and delete, marks threads read,
+and surfaces unread file feedback in the dashboard. Layo keeps its local-first,
+selected-node sidecar model and deterministic HTTP/MCP control instead of
+copying Penpot's hosted database and free-coordinate comment storage.
+
+This slice advances maturity gates 2 (collaboration), 8 (operations), 9 (agent
+safety), and 10 (failure loop). It does not close the whole maturity benchmark.
+
+## Product Delta
+
+### Ownership And Conflict Safety
+
+- Threads and replies persist stable `authorId`, trusted display name,
+  `modifiedAt`, and durable edit/delete activity.
+- Only the owning actor can edit or delete a thread or reply. Team viewers may
+  still create, reply, resolve, and manage feedback they own, matching Penpot's
+  feedback-participation role rather than treating viewer as read-only.
+- Every edit/delete accepts `expectedModifiedAt`. A stale mutation returns an
+  explicit conflict and does not write.
+- Browser stale-edit recovery retains the user's draft, shows the latest server
+  body, supports retry against the latest version, and preserves drafts when a
+  remote actor deletes the original thread or reply.
+- Late mutation completion cannot erase newer thread/reply drafts, close a newer
+  inline editor, or overwrite feedback owned by a newer operation.
+- Delete activity keeps a content-free tombstone, so audit history remains
+  useful without retaining deleted comment text.
+
+### Team Authorization And Delivery
+
+- HTTP, MCP, sidecar reads/writes, activity feeds, notification feeds, and SSE
+  replay carry an exact project sharing boundary into the storage operation.
+- Team credentials determine the stable actor identity. Request payloads cannot
+  impersonate another team member's owner identity or display name.
+- Mixed-project feeds authorize and scope projects before applying `limit`, so
+  hidden projects cannot consume the visible result budget or leak metadata.
+- Comment SSE re-authenticates and re-authorizes the file during replay. A
+  terminal authorization event stops browser fallback polling and retains a
+  Korean recovery state.
+- Process-shared sidecar events remain replayable through sequence cursors, and
+  edit/delete events update open browser state without page reload.
+
+### Agent Review Surface
+
+- MCP exposes review-first thread/reply edit and delete operations with explicit
+  `dryRun` and commit behavior.
+- Review validates actor, target, body, and expected version before returning an
+  approval surface. Blank or malformed mutation reviews fail without storage
+  writes.
+- Private and team-visible feeds retain their original authorization boundary
+  through review and commit instead of widening to every local project.
+
+### Storage And Recovery Boundary
+
+- Canonical comment sidecar paths are locked across `FileStorage` instances and
+  processes. Versions advance beyond persisted sidecar clocks, preventing lost
+  updates and same-timestamp reuse.
+- Comment reads and mutations recheck project authorization at the locked
+  sidecar boundary, closing sharing-change and case-folded alias races.
+- Deleting the last project reference to a document removes its canonical and
+  legacy comment sidecars in the same crash-recoverable transaction. Reusing the
+  document ID in another team cannot reveal the deleted team's comments.
+- A document still referenced by another project keeps both the design file and
+  its comment sidecar.
+- Project deletion journals capture project, owned files, comment sidecars, and
+  registry subscriptions. Hard-exit seams before and after subscription writes
+  prove restart rollback and idempotent retry.
+- The transaction coordinator remains held through the project lock and project
+  mutation, so interrupted recovery cannot overwrite a newly committed project.
+- Cold same-instance operations replace an externally queued startup-recovery
+  promise with a preflight-only recovery promise and cache it for nested prepare
+  calls. Active imports do not wait on their own queued recovery work.
+- Cold library updates acquire the transaction coordinator before the target
+  lock, preserving one cross-process lock order.
+- Archive, project, external-migration, library, and comment case-folded IDs use
+  canonical reservation and explicit idempotency keys. Response-loss retry and
+  crash recovery do not duplicate or partially replace product state.
+
+## Failure Learning
+
+Each missed boundary became a focused RED before repair. The durable failure
+catalog is:
+
+1. authorization could change between HTTP/MCP checks and a sidecar read/write;
+2. stale or remotely deleted thread/reply drafts could be discarded;
+3. process clocks, case-folded paths, and mixed-visibility feeds could corrupt or
+   expose comment state;
+4. archive, project, external-import, and library transactions could roll back
+   concurrent writes or lose response-retry identity;
+5. cold project mutations skipped generic recovery, library updates inverted
+   coordinator/target lock order, and project deletion retained comment secrets;
+6. releasing the transaction coordinator before the project lock handoff let an
+   interrupted journal overwrite a newly committed project mutation;
+7. the first handoff repair exposed a same-instance cold startup-promise cycle,
+   while direct nested recovery made an active import wait on itself; the final
+   boundary uses a cached preflight-only promise;
+8. comment polling could replace explicit mutation feedback before users saw it;
+9. component-variant writes could report an older save, and one global revision
+   let unrelated instance, definition, and area writes suppress each other;
+10. stale background success, transient refresh failure, and direct foreground
+    errors shared one status epoch and could lose drafts or feedback;
+11. a preserve-status poll could prevent an initial comment summary from being
+    applied;
+12. old-file completion could leak threads into a new file or clear its draft;
+13. an older foreground list could overwrite a newer poll or event-stream list;
+14. partial component success followed by a newer failure could leave stale Dev
+    export output;
+15. delayed same-file comment/reply completion could erase newer drafts, while an
+    older failed operation could replace newer success feedback;
+16. a stale initial refresh failure could overwrite a newer successful poll
+    summary;
+17. an unrelated newer read mutation could suppress delayed successful create or
+    edit reconciliation;
+18. a pending preserve-status poll could leave an older initial or successful
+    mutation refresh error permanently visible;
+19. an older inline-edit success could close newer text in the same editor or a
+    different thread editor; and
+20. the first regression assumed exactly two initial GETs. StrictMode and access
+    scope initialization produced two or three, creating a retry-only CI pass;
+    the final test separates the initial request burst from the two-second poll.
+
+No memory note was added: these were product concurrency and test-ordering gaps,
+not a reusable agent-process or missed visual-state rule. The repository failure
+loop, focused E2E coverage, headed browser proof, and PR evidence were updated.
+
+## Verification Evidence
+
+### Storage And Recovery Runs
+
+| Run | Evidence |
+| --- | --- |
+| `31297080928` | RED: seven intended storage failures; 552 server tests still passed. |
+| `31298182373` | First storage GREEN: 560 server and 234 Playwright cases. |
+| `31300137844` / `31300566459` | Project recovery handoff RED at 1/560, then GREEN at 561 server tests. |
+| `31301395913` / `31302169627` | Cold recovery promise-cycle RED at 1/561, then implementation GREEN at 562 server tests; the latter still exposed four browser flakes. |
+
+### Browser Ordering Runs
+
+| Run | Evidence |
+| --- | --- |
+| `31303085592` / `31304047169` | Separate comment-feedback and variant-status RED runs against 233 existing Playwright cases. |
+| `31304676569` | Clean 234/234 baseline after both first repairs; server remained 562. |
+| `31306074381` / `31306743012` | Three cross-scope RED cases, followed by a 236-case repair head with one existing mention failure. |
+| `31307888313` / `31308574488` | Four final feedback-ordering RED cases, then 240/240 GREEN. |
+| `31309924313` / `31310653490` | Three cross-file feedback RED cases, then 243/243 GREEN. |
+| `31311649156` / `31312393347` | Three same-scope intent RED cases, then 246/246 GREEN. |
+| `31313294712` | Three reconciliation RED cases; 245 passed and one unrelated case recovered on retry. |
+| `31314680948` | Intermediate repair run cancelled when the next RED was pushed. |
+| `31315334688` | Two stale inline-editor RED cases; 249 existing cases passed. |
+| `31316640082` | Consolidated RED: exactly four intended failures and 249 passed. |
+| `31317448727` | Implementation GREEN but not accepted as final: 252 passed and the initial-refresh regression was flaky on retry. |
+| `31318544219` | Final code/test GREEN at `a3551a84b7e2d61bda88eb3713ccea68a61f8005`: 253/253 Playwright with no retry or flaky case. |
+
+Final Full Verification also passed 283 web, 562 server, 18 renderer, 39
+collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
+evidence includes 30/30 comment product flows, 21/21 mixed ordering repetitions,
+10/10 repetitions of the stabilized initial-refresh case, headed 7/7 for the
+latest interaction set, and headed 1/1 for the stabilized case. Web typecheck,
+283/283 unit tests, and the production build passed; the build retains only the
+existing chunk-size warning.
+
+Independent exact-head review found no P0-P2 issues. It confirmed the earlier
+cross-file state leak, delayed editor closure, and sticky mutation-refresh error
+were resolved, then separately reviewed the final test-only delta.
+
+## Deliberate Divergence And Remaining Gaps
+
+Layo deliberately keeps comments in team-owned local sidecars and binds them to
+stable design nodes. It does not require a maintainer-operated central comment
+database.
+
+The next comment maturity gaps are:
+
+- a first-class canvas comment tool with arbitrary coordinate placement instead
+  of selected-node-only creation;
+- user-level hide/show comment preference and full dashboard-level navigation;
+- full CRDT-backed live comment editing rather than durable sidecar events;
+- hosted durable pub/sub and external notification channels beyond a shared
+  filesystem event log; and
+- branch, review, and merge workflows that connect comment resolution to a
+  formal design review lifecycle.
+
+Deployment remains a separate, deliberately non-gating concern for this
+local-first product slice.

@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-07-14
+Last checked: 2026-08-09
 
 ## Product Target
 
@@ -36,6 +36,47 @@ Use these sources before changing Layo's team-product roadmap:
 
 Refresh this document when those sources materially change or when a Layo
 implementation slice reveals a new gap.
+
+## Current Comment Management Evidence
+
+PR #319 adapts the current Penpot comment workflow at `develop` commit
+`b5bec4f983b5540a3ed7969121badf08a14f384e`. Stable thread/reply ownership,
+optimistic edit/delete versions, viewer feedback participation, trusted team
+actors, content-free deletion tombstones, terminal SSE reauthorization, and
+review-first MCP mutations now share one storage contract. Browser conflict
+recovery retains user drafts across stale edits and remotely deleted threads or
+replies. Late completions cannot erase newer drafts, close a newer inline
+editor, leak old-file threads into a new file, or leave a recovered refresh error
+permanently visible.
+
+The reliability loop extends beyond UI state. Canonical comment paths serialize
+across processes; locked reads and writes recheck the exact project sharing
+boundary; mixed-project feeds authorize before limiting; deleting a document's
+last project reference transactionally removes canonical and legacy comment
+sidecars; and shared document references retain their comments. Generic storage
+journals recover before cold project metadata mutations. The coordinator stays
+held through the project lock and mutation, and a cached preflight-only recovery
+promise prevents same-instance cold operations from waiting on their own queued
+startup recovery. Cold library updates acquire the coordinator before target
+locks. Project-delete hard-exit seams prove rollback and retry around
+subscription writes.
+
+Consolidated browser RED Full Verification `31316640082` failed exactly four
+intended ordering cases with 249 passing. Implementation run `31317448727`
+passed but retained one retry-only flaky case, so it was not accepted as final.
+Code/test head `a3551a84b7e2d61bda88eb3713ccea68a61f8005`
+passed Full Verification `31318544219`: 283 web, 562 server, 18 renderer, 39
+collaboration, seven relay, 117 Rust, and 253/253 Playwright cases with no retry.
+Independent exact-head review found no P0-P2 issue. Local proof includes 30/30
+comment product flows, 21/21 mixed ordering repetitions, 10/10 stabilized
+initial-refresh repetitions, headed 7/7 for the latest interaction set, and
+headed 1/1 for the stabilized case.
+
+This is evidence toward gates 2, 8, 9, and 10, not closure of the whole maturity
+benchmark. Arbitrary canvas-coordinate comments, hide/show preference, full
+CRDT comment editing, hosted durable pub/sub, external notifications, and formal
+branch/review/merge remain open. See
+`docs/product/penpot-comment-management-delta.md`.
 
 ## Current Token Administration Evidence
 
