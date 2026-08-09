@@ -7828,6 +7828,10 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await page.getByTestId(`comment-owner-assign-${created.threadId}`).click();
   await expect(page.getByTestId("comment-status")).toContainText("코멘트 소유자 지정됨");
   await expect(page.getByRole("button", { name: "소유권 없는 기존 코멘트 수정" })).toHaveCount(1);
+  await page.getByRole("button", { name: "소유권 없는 기존 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("소유권 복구 후 수정한 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 수정됨");
 
   const legacyReply = replied.replies[0];
   const replyOwnerSelect = page.getByTestId(`comment-owner-select-${legacyReply.replyId}`);
@@ -7857,8 +7861,17 @@ test("team owners explicitly assign legacy thread and reply owners before editin
   await page.getByTestId(`comment-owner-assign-${legacyReply.replyId}`).click();
   await expect(page.getByTestId("comment-status")).toContainText("답글 소유자 지정됨");
   await expect(page.getByRole("button", { name: "소유권 없는 기존 답글 수정" })).toHaveCount(1);
+  await page.getByRole("button", { name: "소유권 없는 기존 답글 수정" }).click();
+  await page.getByTestId("comment-reply-edit-body").fill("소유권 복구 후 수정한 답글");
+  await page.getByRole("button", { name: "답글 저장" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("답글 수정됨");
   await openFilePanel(page);
-  await expect(page.getByTestId("comment-activity-feed")).toContainText("소유자 지정");
+  const activityFeed = page.getByTestId("comment-activity-feed");
+  await expect(activityFeed).toContainText("소유자 지정");
+  await expect(activityFeed).toContainText(
+    "팀 소유자에게 코멘트 소유자가 지정되었습니다"
+  );
+  await expect(activityFeed).toContainText("팀 소유자에게 답글 소유자가 지정되었습니다");
 
   await importTeamManifest({ ...teamManifest, currentUserId: "team-editor" });
   await openFilePanel(page);

@@ -5461,7 +5461,9 @@ export class FileStorage {
         ),
         activity: prependCommentActivity(
           store.activity.map((event) =>
-            event.threadId === threadId && !event.replyId
+            event.threadId === threadId &&
+            !event.replyId &&
+            isCommentContentActivity(event)
               ? { ...event, body, mentions, mentionTargets }
               : event
           ),
@@ -5703,7 +5705,7 @@ export class FileStorage {
         ),
         activity: prependCommentActivity(
           store.activity.map((event) =>
-            event.replyId === replyId
+            event.replyId === replyId && isCommentContentActivity(event)
               ? { ...event, body, mentions, mentionTargets }
               : event
           ),
@@ -7477,6 +7479,15 @@ function prependCommentActivity(
     event,
     ...current
   ].slice(0, COMMENT_ACTIVITY_RETENTION_LIMIT);
+}
+
+function isCommentContentActivity(event: StoredCommentActivityEvent): boolean {
+  return (
+    event.type === "created" ||
+    event.type === "replied" ||
+    event.type === "resolved" ||
+    event.type === "edited"
+  );
 }
 
 function appendCommentLiveEvent(

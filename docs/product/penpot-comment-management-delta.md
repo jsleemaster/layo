@@ -60,6 +60,8 @@ safety), and 10 (failure loop). It does not close the whole maturity benchmark.
   the record; `undefined` identifies a modern record that is not a migration
   target. Thread assignment preserves every existing `readBy` receipt and adds
   the new owner without duplication, preventing false unread notifications.
+  Later thread/reply edits refresh only prior content-snapshot activity bodies;
+  ownership-assignment and deletion audit messages remain immutable.
   The browser hides dead edit/delete controls before assignment and reveals
   them only for the assigned actor afterward.
 
@@ -193,14 +195,22 @@ catalog is:
     the entire `readBy` list while reply assignment already preserved it. This
     made prior readers falsely unread after migration. Thread assignment now
     appends the owner through the same unique-reader contract, with focused
-    storage and browser notification regressions.
+    storage and browser notification regressions; and
+29. the following exact-head review found that later edits rewrote every
+    activity event for the same thread/reply, including `ownership_assigned`.
+    The activity feed therefore mislabeled edited content as the original
+    ownership audit. Content refresh now uses an explicit activity-type
+    allowlist, while storage and browser regressions preserve thread and reply
+    assignment messages after both items are edited.
 
 No personal memory note was added: the new misses are captured as product and
 repository-process regressions in focused E2E, this durable delta, the review
 timing rule, and the PR body. Headed pre/post screenshots verified that owner
 selectors, status labels, and edit/delete controls remain visible without overlap.
 The final receipt-focused headed pass also showed the unread badge disappear
-before assignment and stay absent after the owner changed to `민지`.
+before assignment and stay absent after the owner changed to `민지`. The final
+audit-focused headed pass showed edited bodies under `수정` while the separate
+`소유자 지정` rows retained the exact team-owner and `민지` assignment messages.
 
 ## Verification Evidence
 
@@ -239,7 +249,8 @@ before assignment and stay absent after the owner changed to `민지`.
 | `31324584270` | Implementation GREEN at `2c2954e9f9252d3bb968df50875b529af0daaf83`: 284 web, 566 server, 18 renderer, 39 collaboration, seven relay, 117 Rust, and 254/254 Playwright; backup, restore, and retention drills also passed. |
 | `31328690712` | Superseded head `06fce31df5d3af751b4a2016f7cf367625a2b4b3` passed Full Verification and all three drills, but exact-head review correctly rejected it for the resaved synthetic-owner and reconnect-selection gaps. |
 | `31331290743` | Superseded head `7eccbaae9362a035dcc51848c0901bce35d9c765` passed Full Verification and all three drills; independent review was clean, but configured exact-head review correctly found lost read receipts during thread assignment. |
-| Local latest | 521 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, and read-receipt preservation. Private claim, team reconnect, and the final receipt flow each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
+| `31333603394` | Superseded head `83e6c3a0fcf49dbd8d921cb39d34b21e0133fb48` passed Full Verification and all three drills, but independent exact-head review reproduced ownership audit messages being overwritten by later edits. |
+| Local latest | 521 server tests passed with 47 skipped, and 284/284 web tests passed. Focused storage/MCP/browser regressions cover raw and resaved legacy IDs, all four rejected MCP commits, reply reassignment, modern reply blocking, reconnect selection, editor control absence, read-receipt preservation, and immutable ownership-audit messages after edits. Private claim, team reconnect, receipt preservation, and audit preservation each passed headed 1/1 with visual inspection; workspace typecheck, production build, maturity 7/7, design rules, and full Playwright 255/255 passed without retry. |
 
 Final documentation-head Full Verification also passed 283 web, 562 server, 18 renderer, 39
 collaboration, seven TypeScript relay, and 117 Rust tests. Local Playwright CLI
@@ -267,8 +278,11 @@ reserialized `v1` provenance P1 and reconnect selector P2; sidecar `v2`,
 conservative `v1` recovery, and current-owner selector defaults close both
 locally. Configured review then found the thread read-receipt P2; matching
 storage/browser RED now passes after preserving existing readers. The final
-local server, web, typecheck, build, maturity, design, full E2E, and headed
-receipt checks are green. Another exact-head re-review, final CI, configured
+independent review then found ownership audit messages overwritten by later
+edits even though `83e6c3a` CI was green. An activity-type allowlist plus exact
+storage/browser RED and headed activity-feed proof now preserves those audits.
+The final local server, web, typecheck, build, maturity, design, full E2E, and
+headed checks are green. Another exact-head re-review, final CI, configured
 review, merge, PR #319 thread resolution, and closeout remain.
 
 ## Merge And Cleanup Evidence

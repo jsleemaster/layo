@@ -94,8 +94,13 @@ receipt-focused flow each passed headed 1/1 with visual inspection. Full
 Verification `31331290743` and independent review were
 green, but configured review then found that thread assignment discarded prior
 read receipts and created false unread notifications. Storage and browser RED
-now preserve all readers while adding the new owner. Final-head re-review, CI,
-configured review, merge, PR #319 thread resolution, and cleanup remain. Local PR #319
+now preserve all readers while adding the new owner. Superseded head `83e6c3a`
+then passed Full Verification `31333603394` and all three drills, but independent
+exact-head review found later edits overwrote ownership-assignment audit bodies.
+An explicit content-activity allowlist now preserves thread/reply assignment
+messages; focused storage/browser RED and headed activity-feed proof are green.
+Final-head re-review, CI, configured review, merge, PR #319 thread resolution,
+and cleanup remain. Local PR #319
 proof otherwise includes 30/30 comment product flows, 21/21 mixed ordering
 repetitions, 10/10 stabilized initial-refresh repetitions, headed 7/7 for the
 latest interaction set, and headed 1/1 for the stabilized case.

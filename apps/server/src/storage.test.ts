@@ -3380,11 +3380,21 @@ describe("FileStorage", () => {
 
     await expect(reloaded.listCommentActivity()).resolves.toMatchObject({
       events: expect.arrayContaining([
-        expect.objectContaining({ type: "ownership_assigned", threadId: created.threadId }),
         expect.objectContaining({
           type: "ownership_assigned",
           threadId: created.threadId,
-          replyId: replied.replies[0].replyId
+          body: "잘못 지정된 사용자에게 코멘트 소유자가 지정되었습니다"
+        }),
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          body: "민지에게 코멘트 소유자가 지정되었습니다"
+        }),
+        expect.objectContaining({
+          type: "ownership_assigned",
+          threadId: created.threadId,
+          replyId: replied.replies[0].replyId,
+          body: "준호에게 답글 소유자가 지정되었습니다"
         })
       ])
     });

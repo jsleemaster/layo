@@ -178,6 +178,14 @@ React, Vitest, Playwright CLI.
   storage and browser RED both now pass after preserving existing receipts and
   adding the new owner uniquely. A final headed 1/1 pass visibly removed the
   unread badge before assignment and kept it absent after assigning `민지`.
+- Superseded head `83e6c3a0fcf49dbd8d921cb39d34b21e0133fb48`
+  passed Full Verification `31333603394` and all three drills, but independent
+  exact-head review found that later thread/reply edits rewrote matching
+  `ownership_assigned` activity bodies. Focused storage and browser RED showed
+  the audit messages replaced by edited content. An explicit content-activity
+  allowlist now keeps ownership/deletion messages immutable; focused GREEN and
+  headed 1/1 activity-feed inspection preserve both thread and reply assignment
+  messages after edits.
 - The first local full browser run also exposed a transient boolean-path polling
   reader that dereferenced a non-success response. Returning an empty poll
   sample made the exact case pass 10/10 and the complete 255/255 run.
