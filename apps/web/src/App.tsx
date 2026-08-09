@@ -10047,6 +10047,10 @@ export function App() {
   const commentThreadAppliedRefreshRevisionRef = useRef(0);
   const commentThreadAppliedThreadsRef = useRef<CommentThread[]>([]);
   const commentThreadBackgroundStatusRevisionRef = useRef(0);
+  const commentThreadAppliedBackgroundStatusRef = useRef<{
+    refreshRevision: number;
+    statusRevision: number;
+  } | null>(null);
   const commentThreadStatusRevisionRef = useRef(0);
   const commentAuthorizationEndedRef = useRef(false);
   const libraryRegistryEventSequenceRef = useRef(0);
@@ -10478,7 +10482,23 @@ export function App() {
         const summaryThreads = commentThreadAppliedRefreshRevisionRef.current > refreshRevision
           ? commentThreadAppliedThreadsRef.current
           : threads;
+        commentThreadAppliedBackgroundStatusRef.current = {
+          refreshRevision,
+          statusRevision
+        };
         setCommentStatus(commentThreadSummaryStatus(summaryThreads));
+      } else if (options.preserveStatus && isCurrentRefresh) {
+        const appliedBackgroundStatus = commentThreadAppliedBackgroundStatusRef.current;
+        if (
+          appliedBackgroundStatus?.statusRevision === statusRevision
+          && appliedBackgroundStatus.refreshRevision < refreshRevision
+        ) {
+          commentThreadAppliedBackgroundStatusRef.current = {
+            refreshRevision,
+            statusRevision
+          };
+          setCommentStatus(commentThreadSummaryStatus(threads));
+        }
       }
     } catch (error) {
       if (
@@ -10499,6 +10519,10 @@ export function App() {
           commentThreadStatusRevisionRef.current === statusRevision
           && commentThreadBackgroundStatusRevisionRef.current === backgroundStatusRevision
         ) {
+          commentThreadAppliedBackgroundStatusRef.current = {
+            refreshRevision,
+            statusRevision
+          };
           setCommentStatus(
             newerThreadsApplied
               ? commentThreadSummaryStatus(commentThreadAppliedThreadsRef.current)
@@ -10507,6 +10531,20 @@ export function App() {
         }
       }
     }
+  };
+
+  const refreshCommentThreadsAfterMutation = (
+    fileId: string,
+    accessGeneration: number,
+    mutationRevision: number,
+    status: string
+  ) => {
+    const ownsStatus = isCurrentCommentMutation(fileId, accessGeneration, mutationRevision);
+    return refreshCommentThreads(
+      fileId,
+      ownsStatus ? status : undefined,
+      { preserveStatus: !ownsStatus }
+    );
   };
 
   useEffect(() => {
@@ -17078,14 +17116,19 @@ export function App() {
         authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       }, fetch, activeLibraryRegistryCredentials ?? undefined);
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return;
       }
       if (commentBodyRevisionRef.current === draftRevision) {
         updateCommentBodyDraft("");
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 추가됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 추가됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
@@ -17120,14 +17163,19 @@ export function App() {
         authorName: commentAuthorName,
         mentionTargets: resolveCommentMentionTargets(body, activeProjectTeamContext ?? undefined)
       }, fetch, activeLibraryRegistryCredentials ?? undefined);
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return;
       }
       if ((commentReplyBodyRevisionRef.current.get(threadId) ?? 0) === draftRevision) {
         updateCommentReplyBodyDraft(threadId, "");
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "답글 추가됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "답글 추가됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
@@ -17147,18 +17195,22 @@ export function App() {
     mutationRevision: number,
     fallback: string
   ): Promise<"stale" | "failed"> => {
-    if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+    if (!isCurrentCommentScope(fileId, accessGeneration)) {
       return "failed";
     }
     if (error instanceof DocumentRequestError && error.status === 409) {
-      await refreshCommentThreads(
+      await refreshCommentThreadsAfterMutation(
         fileId,
+        accessGeneration,
+        mutationRevision,
         "다른 사용자가 먼저 수정했습니다. 최신 코멘트를 불러왔습니다"
       );
-      return "stale";
+      return isCurrentCommentScope(fileId, accessGeneration) ? "stale" : "failed";
     }
-    const message = error instanceof Error ? error.message : fallback;
-    setCommentForegroundStatus(message);
+    if (isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      const message = error instanceof Error ? error.message : fallback;
+      setCommentForegroundStatus(message);
+    }
     return "failed";
   };
 
@@ -17192,15 +17244,20 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return "failed";
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 수정됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 수정됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return "applied";
+      return isCurrentCommentScope(fileId, accessGeneration) ? "applied" : "failed";
     } catch (error) {
       return handleCommentMutationError(
         error,
@@ -17231,15 +17288,20 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return false;
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 삭제됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 삭제됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return true;
+      return isCurrentCommentScope(fileId, accessGeneration);
     } catch (error) {
       await handleCommentMutationError(
         error,
@@ -17284,15 +17346,20 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return "failed";
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "답글 수정됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "답글 수정됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return "applied";
+      return isCurrentCommentScope(fileId, accessGeneration) ? "applied" : "failed";
     } catch (error) {
       return handleCommentMutationError(
         error,
@@ -17325,15 +17392,20 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return false;
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "답글 삭제됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "답글 삭제됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
-      return true;
+      return isCurrentCommentScope(fileId, accessGeneration);
     } catch (error) {
       await handleCommentMutationError(
         error,
@@ -17362,11 +17434,16 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return;
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 해결됨"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 해결됨"
+        ),
         refreshCommentNotifications(),
         refreshCommentActivity()
       ]);
@@ -17396,11 +17473,16 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return;
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 읽음"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 읽음"
+        ),
         refreshCommentNotifications()
       ]);
     } catch (error) {
@@ -17428,14 +17510,21 @@ export function App() {
         fetch,
         activeLibraryRegistryCredentials ?? undefined
       );
-      if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+      if (!isCurrentCommentScope(fileId, accessGeneration)) {
         return;
       }
       await Promise.all([
-        refreshCommentThreads(fileId, "코멘트 읽음"),
+        refreshCommentThreadsAfterMutation(
+          fileId,
+          accessGeneration,
+          mutationRevision,
+          "코멘트 읽음"
+        ),
         refreshCommentNotifications()
       ]);
-      setProjectStatus("현재 파일 코멘트 읽음");
+      if (isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
+        setProjectStatus("현재 파일 코멘트 읽음");
+      }
     } catch (error) {
       if (!isCurrentCommentMutation(fileId, accessGeneration, mutationRevision)) {
         return;

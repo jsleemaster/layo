@@ -7022,12 +7022,12 @@ test("pending successful comment poll clears an older initial refresh error", as
   try {
     await expect.poll(() => heldInitialResponses).toBe(2);
     await expect.poll(() => pollingResponseReady, { timeout: 6_000 }).toBe(true);
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
     for (const releaseResponse of initialResponseReleases) {
       releaseResponse();
     }
     await expect.poll(() => failedInitialResponses).toBe(2);
-    await openFilePanel(page);
-    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
     await expect(page.getByTestId("comment-status")).toContainText(
       "forced older initial refresh failure"
     );
