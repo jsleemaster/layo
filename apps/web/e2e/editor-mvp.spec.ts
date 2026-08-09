@@ -6961,6 +6961,93 @@ test("failed initial comment refresh yields to a newer successful poll", async (
   }
 });
 
+test("pending successful comment poll clears an older initial refresh error", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const created = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "대기 중인 최신 poll 코멘트", authorName: "디자인 팀" }
+  });
+  expect(created.ok()).toBeTruthy();
+
+  const initialResponseReleases: Array<() => void> = [];
+  let heldInitialResponses = 0;
+  let failedInitialResponses = 0;
+  let pollingResponseReady = false;
+  let pollingResponseFulfilled = false;
+  let releasePollingResponse = () => {};
+  const pollingResponseRelease = new Promise<void>((resolve) => {
+    releasePollingResponse = resolve;
+  });
+  let releaseLaterResponses = () => {};
+  const laterResponsesRelease = new Promise<void>((resolve) => {
+    releaseLaterResponses = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      if (heldInitialResponses < 2) {
+        heldInitialResponses += 1;
+        let releaseResponse = () => {};
+        const responseRelease = new Promise<void>((resolve) => {
+          releaseResponse = resolve;
+        });
+        initialResponseReleases.push(releaseResponse);
+        await responseRelease;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "forced older initial refresh failure" })
+        });
+        failedInitialResponses += 1;
+        return;
+      }
+      if (!pollingResponseReady) {
+        pollingResponseReady = true;
+        const response = await route.fetch();
+        await pollingResponseRelease;
+        await route.fulfill({ response });
+        pollingResponseFulfilled = true;
+        return;
+      }
+      await laterResponsesRelease;
+      await route.abort();
+    }
+  );
+
+  await page.reload();
+  try {
+    await expect.poll(() => heldInitialResponses).toBe(2);
+    await expect.poll(() => pollingResponseReady, { timeout: 6_000 }).toBe(true);
+    for (const releaseResponse of initialResponseReleases) {
+      releaseResponse();
+    }
+    await expect.poll(() => failedInitialResponses).toBe(2);
+    await openFilePanel(page);
+    await page.getByTestId("layer-panel").getByRole("button", { name: "헤드라인" }).click();
+    await expect(page.getByTestId("comment-status")).toContainText(
+      "forced older initial refresh failure"
+    );
+
+    releasePollingResponse();
+    await expect.poll(() => pollingResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("대기 중인 최신 poll 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("1개 읽지 않은 코멘트");
+    await expect(page.getByTestId("comment-status")).not.toContainText(
+      "forced older initial refresh failure"
+    );
+  } finally {
+    for (const releaseResponse of initialResponseReleases) {
+      releaseResponse();
+    }
+    releasePollingResponse();
+    releaseLaterResponses();
+  }
+});
+
 test("old-file comment completion cannot replace a new-file draft or thread list", async ({ page }) => {
   await openEmptyEditor(page);
   const firstProjectId = await createNamedProject(page, "코멘트 전환 A");
@@ -7112,6 +7199,133 @@ test("delayed comment and reply completion preserve newer unsent drafts", async 
     await expect(replyDraft).toHaveValue("아직 제출하지 않은 답글 B");
   } finally {
     releaseReplyResponse();
+  }
+});
+
+test("newer read mutation does not suppress delayed comment draft reconciliation", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  const unread = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "별도 읽음 처리 대상", authorName: "외부 검수자" }
+  });
+  expect(unread.ok()).toBeTruthy();
+
+  let commentRequestReserved = false;
+  let commentResponseReady = false;
+  let commentResponseFulfilled = false;
+  let releaseCommentResponse = () => {};
+  const commentResponseRelease = new Promise<void>((resolve) => {
+    releaseCommentResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments`,
+    async (route) => {
+      if (
+        route.request().method() !== "POST"
+        || commentRequestReserved
+        || route.request().postDataJSON()?.body !== "지연 성공 코멘트"
+      ) {
+        await route.continue();
+        return;
+      }
+      commentRequestReserved = true;
+      const response = await route.fetch();
+      commentResponseReady = true;
+      await commentResponseRelease;
+      await route.fulfill({ response });
+      commentResponseFulfilled = true;
+    }
+  );
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("별도 읽음 처리 대상");
+  await page.getByTestId("comment-body").fill("지연 성공 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect.poll(() => commentResponseReady).toBe(true);
+
+  const unreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "별도 읽음 처리 대상" });
+  await unreadRow.getByRole("button", { name: "읽음 처리", exact: true }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  try {
+    releaseCommentResponse();
+    await expect.poll(() => commentResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-list")).toContainText("지연 성공 코멘트");
+    await expect(page.getByTestId("comment-body")).toHaveValue("");
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  } finally {
+    releaseCommentResponse();
+  }
+});
+
+test("newer read mutation does not suppress delayed comment edit reconciliation", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("comment-body").fill("지연 수정 전 코멘트");
+  await page.getByRole("button", { name: "코멘트 추가" }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 추가됨");
+  const threadsResponse = await page.request.get(
+    `http://127.0.0.1:4317/files/${documentId}/comments?includeResolved=true`
+  );
+  const editedThread = (await threadsResponse.json()).threads.find(
+    (thread: { body: string }) => thread.body === "지연 수정 전 코멘트"
+  ) as { threadId: string } | undefined;
+  expect(editedThread?.threadId).toBeTruthy();
+
+  const unread = await page.request.post(`http://127.0.0.1:4317/files/${documentId}/comments`, {
+    data: { nodeId: "text-1", body: "수정 중 읽음 처리 대상", authorName: "외부 검수자" }
+  });
+  expect(unread.ok()).toBeTruthy();
+
+  let editRequestReserved = false;
+  let editResponseReady = false;
+  let editResponseFulfilled = false;
+  let releaseEditResponse = () => {};
+  const editResponseRelease = new Promise<void>((resolve) => {
+    releaseEditResponse = resolve;
+  });
+  await page.route(
+    (url) => url.pathname === `/files/${documentId}/comments/${editedThread!.threadId}`,
+    async (route) => {
+      if (route.request().method() !== "PATCH" || editRequestReserved) {
+        await route.continue();
+        return;
+      }
+      editRequestReserved = true;
+      const response = await route.fetch();
+      editResponseReady = true;
+      await editResponseRelease;
+      await route.fulfill({ response });
+      editResponseFulfilled = true;
+    }
+  );
+
+  await page.reload();
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await expect(page.getByTestId("comment-list")).toContainText("수정 중 읽음 처리 대상");
+  await page.getByRole("button", { name: "지연 수정 전 코멘트 수정" }).click();
+  await page.getByTestId("comment-thread-edit-body").fill("지연 수정 완료 코멘트");
+  await page.getByRole("button", { name: "코멘트 저장" }).click();
+  await expect.poll(() => editResponseReady).toBe(true);
+
+  const unreadRow = page
+    .getByTestId("comment-list")
+    .locator("li.comment-row")
+    .filter({ hasText: "수정 중 읽음 처리 대상" });
+  await unreadRow.getByRole("button", { name: "읽음 처리", exact: true }).click();
+  await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  try {
+    releaseEditResponse();
+    await expect.poll(() => editResponseFulfilled).toBe(true);
+    await expect(page.getByTestId("comment-thread-edit-body")).toHaveCount(0);
+    await expect(page.getByTestId("comment-list")).toContainText("지연 수정 완료 코멘트");
+    await expect(page.getByTestId("comment-status")).toContainText("코멘트 읽음");
+  } finally {
+    releaseEditResponse();
   }
 });
 
