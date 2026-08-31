@@ -56,10 +56,11 @@ image insertions and replacements now enter Yjs Undo/Redo history and persist
 both directions. Final review also
 scoped remote cursor, selection, and editing presence to the active page,
 reconciled incoming delete/move presence, kept saved-version preview overlays
-silent, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
+silent, preserved the live active page and selection across older-version
+preview fallbacks, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
 passed workspace typecheck, the full root test gate, the production web build,
 the focused no-retry Playwright cases, the complete collaboration Playwright
-suite 9/9 without retry, and a
+suite 9/9 without retry, the combined image/preview matrix 9/9 without retry, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.

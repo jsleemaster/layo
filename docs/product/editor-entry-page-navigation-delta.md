@@ -208,6 +208,24 @@ The final no-retry collaboration suite passed 9/9. Its Restore case now waits
 for the visible Restore completion status before reopening Layers, preventing
 late reconciliation from racing the post-Restore Inspector assertion.
 
+A later exact-head review found that the displayed preview fallback still wrote
+into the live `activePageId`. Live and preview page state are now separate: an
+older Page-1-only snapshot may display its own fallback while the live Page 2,
+selection, and page-scoped presence stay intact. Normal exit, Escape, refresh,
+preview deletion, and failed preview discard only preview state; Restore may
+reconcile the live page only when the restored document actually removes it.
+Focused browser coverage proves local Page 2 selection and remote presence both
+return after a Page-1-only preview, while applying that version as a real
+Restore legitimately removes Page 2, selects Page 1, and clears the deleted
+selection. Multi-page navigation inside the inert saved-version preview remains
+a separate maturity gap.
+
+The final combined image/preview browser matrix passes 9/9 without retry, and
+the complete collaboration suite passes 9/9. The latter now intercepts only
+base-aware snapshot PUTs in its reverse-order test and polls the persisted Redo
+result before opening a fresh client, avoiding bootstrap-write and queue-timing
+false failures.
+
 The focused command is:
 
 ```bash

@@ -87,6 +87,8 @@ New code is limited to:
   the active page while treating legacy page-less presence as first-page only.
 - Reconcile incoming document selection changes immediately, and keep live
   collaboration overlays hidden throughout saved-version preview.
+- Keep preview page fallback state separate from the live active page so every
+  non-Restore preview exit preserves the live page and selection.
 - Restrict pointer hit testing, measurement, marquee selection, Select All, and
   Select Same Kind to the active page.
 - Route keyboard/context paste and drag-snap targets through the active page;

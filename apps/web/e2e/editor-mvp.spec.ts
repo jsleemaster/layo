@@ -6103,6 +6103,96 @@ test("a rejected stale project document request cannot replace the active status
   await expect(page.getByTestId("project-status")).toContainText("실패 지연 B 불러옴");
 });
 
+test("page-only version previews restore the live active page and selection", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const savedVersionResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/versions`,
+    { data: { message: "페이지 1 기준" } }
+  );
+  expect(savedVersionResponse.ok()).toBeTruthy();
+
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({
+    id: "page-live-2",
+    name: "라이브 페이지 2",
+    children: [
+      {
+        id: "frame-live-2",
+        kind: "frame",
+        name: "라이브 프레임",
+        children: [
+          {
+            id: "text-live-2",
+            kind: "text",
+            name: "라이브 헤드라인",
+            children: [],
+            transform: { x: 32, y: 40, rotation: 0 },
+            size: { width: 260, height: 48 },
+            style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+            content: {
+              type: "text",
+              value: "라이브 페이지 선택",
+              font_size: 28,
+              font_family: "Inter"
+            }
+          }
+        ],
+        transform: { x: 620, y: 160, rotation: 0 },
+        size: { width: 420, height: 280 },
+        style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+        content: { type: "empty" }
+      }
+    ]
+  });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await page.getByRole("button", { name: "라이브 페이지 2", exact: true }).click();
+  await page.getByRole("button", { name: "라이브 프레임", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("라이브 페이지 2");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await openFilePanel(page);
+  await expect(page.getByTestId("file-version-list")).toContainText("페이지 1 기준");
+  await page.getByRole("button", { name: "페이지 1 기준 미리보기" }).click();
+
+  await expect(page.getByTestId("file-version-preview-banner")).toContainText("페이지 1 기준");
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "라이브 페이지 2", exact: true })).toHaveCount(0);
+
+  await page
+    .getByTestId("file-version-preview-banner")
+    .getByRole("button", { name: "미리보기 종료" })
+    .click();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("라이브 페이지 2");
+  await expect(page.getByRole("button", { name: "라이브 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "페이지 1 기준 미리보기" }).click();
+  await page
+    .getByTestId("file-version-preview-banner")
+    .getByRole("button", { name: "이 버전 복원" })
+    .click();
+  await expect(page.getByTestId("file-version-status")).toContainText("페이지 1 기준 복원됨");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "라이브 페이지 2", exact: true })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+});
+
 test("file version history previews the saved canvas in read-only mode", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 

@@ -1426,6 +1426,7 @@ interface FileVersionPreviewState {
   version: FileVersionSummary;
   document: RendererDocument;
   summary: FileVersionChangeSummary;
+  activePageId: string | null;
 }
 
 interface FileArchiveReviewState {
@@ -11441,26 +11442,31 @@ export function App() {
 
   const isFileVersionPreviewing = fileVersionPreview !== null;
   const displayedDocument = fileVersionPreview?.document ?? editor?.document ?? null;
-  const pageIdSignature = displayedDocument?.pages.map((page) => page.id).join("\u0000") ?? "";
+  const livePageIdSignature = editor?.document.pages.map((page) => page.id).join("\u0000") ?? "";
   useEffect(() => {
     setActivePageId((current) => {
-      const pages = displayedDocument?.pages ?? [];
+      const pages = editor?.document.pages ?? [];
       if (current && pages.some((page) => page.id === current)) {
         return current;
       }
       return pages[0]?.id ?? null;
     });
-  }, [displayedDocument?.id, pageIdSignature]);
+  }, [editor?.document.id, livePageIdSignature]);
 
   const nodes = useMemo(
     () => (displayedDocument ? flattenRendererNodes(displayedDocument) : []),
     [displayedDocument]
   );
-  const activePage =
-    displayedDocument?.pages.find((page) => page.id === activePageId) ??
-    displayedDocument?.pages[0] ??
+  const liveActivePage =
+    editor?.document.pages.find((page) => page.id === activePageId) ??
+    editor?.document.pages[0] ??
     null;
-  activePageIdRef.current = activePage?.id ?? null;
+  const activePage = fileVersionPreview
+    ? fileVersionPreview.document.pages.find((page) => page.id === fileVersionPreview.activePageId) ??
+      fileVersionPreview.document.pages[0] ??
+      null
+    : liveActivePage;
+  activePageIdRef.current = liveActivePage?.id ?? null;
   const activePageDocument = useMemo(
     () =>
       displayedDocument && activePage
@@ -12104,7 +12110,7 @@ export function App() {
   };
 
   useEffect(() => {
-    const nextPageId = activePage?.id ?? null;
+    const nextPageId = liveActivePage?.id ?? null;
     let current = editorRef.current;
     if (!isFileVersionPreviewing && current?.selection.nodeId) {
       const pageSelection = getPageScopedSelection(
@@ -12143,7 +12149,7 @@ export function App() {
     publishedCursorRef.current = null;
     setPresenceClock(Date.now());
     publishPresenceSnapshot(activeSession);
-  }, [activePage?.id, collabSession, isFileVersionPreviewing]);
+  }, [collabSession, isFileVersionPreviewing, liveActivePage?.id]);
 
   const enqueueDocumentPersistence = <T,>(fileId: string, operation: () => Promise<T>) =>
     documentPersistenceQueueRef.current.enqueue(fileId, operation);
@@ -16980,7 +16986,14 @@ export function App() {
   };
 
   const switchActivePage = (pageId: string) => {
-    if (!displayedDocument?.pages.some((page) => page.id === pageId) || pageId === activePage?.id) {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
+    const liveDocument = editorRef.current?.document;
+    if (
+      !liveDocument?.pages.some((page) => page.id === pageId) ||
+      pageId === liveActivePage?.id
+    ) {
       return;
     }
     cancelActiveCanvasInteractions();
@@ -17030,7 +17043,17 @@ export function App() {
         return;
       }
       fileVersionPreviewPendingRequestRef.current = null;
-      setFileVersionPreview({ version, document: snapshot.document, summary });
+      const livePageId = activePageIdRef.current;
+      const previewPageId =
+        snapshot.document.pages.find((page) => page.id === livePageId)?.id ??
+        snapshot.document.pages[0]?.id ??
+        null;
+      setFileVersionPreview({
+        version,
+        document: snapshot.document,
+        summary,
+        activePageId: previewPageId
+      });
       setFileVersionStatus(`${version.message} 미리보기`);
     } catch (error) {
       if (requestId !== fileVersionPreviewRequestRef.current) {

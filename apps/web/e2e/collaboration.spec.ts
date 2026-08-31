@@ -289,6 +289,11 @@ test("remote cursors and selections stay on their collaborator's active page", a
 
   try {
     const documentId = await createProjectFromEmptyState(pageA);
+    const versionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "협업 presence 기준" } }
+    );
+    expect(versionResponse.ok()).toBeTruthy();
     const documentResponse = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
     expect(documentResponse.ok()).toBeTruthy();
     const payload = await documentResponse.json();
@@ -329,11 +334,6 @@ test("remote cursors and selections stay on their collaborator's active page", a
       data: { document }
     });
     expect(replaceResponse.ok()).toBeTruthy();
-    const versionResponse = await pageA.request.post(
-      `http://127.0.0.1:4317/files/${documentId}/versions`,
-      { data: { message: "협업 presence 기준" } }
-    );
-    expect(versionResponse.ok()).toBeTruthy();
 
     await pageA.reload();
     await pageB.goto("http://127.0.0.1:5173/");
@@ -431,6 +431,12 @@ test("remote cursors and selections stay on their collaborator's active page", a
       .getByTestId("file-version-preview-banner")
       .getByRole("button", { name: "미리보기 종료" })
       .click();
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+    await expect(pageA.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(pageA.getByTestId("inspector-x")).toHaveValue("144");
     await expect(pageB.getByTestId("remote-selection")).toHaveAttribute(
       "data-selected-node-id",
       "frame-2",
@@ -530,11 +536,15 @@ test("general collaborative snapshot persistence converges a newer room edit aft
         await route.fallback();
         return;
       }
-      held = true;
       const payload = route.request().postDataJSON() as {
-        baseDocument: Parameters<typeof frameX>[0];
-        document: Parameters<typeof frameX>[0];
+        baseDocument?: Parameters<typeof frameX>[0];
+        document?: Parameters<typeof frameX>[0];
       };
+      if (!payload.baseDocument || !payload.document) {
+        await route.fallback();
+        return;
+      }
+      held = true;
       let release = () => {};
       const releaseGate = new Promise<void>((resolve) => {
         release = resolve;
@@ -659,22 +669,27 @@ test("general collaborative snapshot persistence converges a newer room edit aft
     await firstPage.keyboard.press("Control+Shift+z");
     await expect(firstPage.getByTestId("inspector-x")).toHaveValue("303");
     await expect(secondPage.getByTestId("inspector-x")).toHaveValue("303", { timeout: 8000 });
-    const persistedAfterRedo = await firstPage.request.get(
-      `http://127.0.0.1:4317/files/${documentId}`
-    );
-    const persistedDocument = (await persistedAfterRedo.json()).file as {
-      pages: Array<{ children: Array<{
-        id: string;
-        transform: { x: number };
-        children: Array<{ id: string; content: { type: string; value?: string } }>;
-      }> }>;
-    };
-    const persistedFrame = persistedDocument.pages[0]?.children.find((node) => node.id === "frame-1");
-    expect(persistedFrame?.transform.x).toBe(303);
-    expect(persistedFrame?.children.find((node) => node.id === "text-1")?.content).toMatchObject({
-      type: "text",
-      value: serverText
-    });
+    await expect
+      .poll(async () => {
+        const response = await firstPage.request.get(
+          `http://127.0.0.1:4317/files/${documentId}`
+        );
+        const persistedDocument = (await response.json()).file as {
+          pages: Array<{ children: Array<{
+            id: string;
+            transform: { x: number };
+            children: Array<{ id: string; content: { type: string; value?: string } }>;
+          }> }>;
+        };
+        const persistedFrame = persistedDocument.pages[0]?.children.find(
+          (node) => node.id === "frame-1"
+        );
+        return {
+          x: persistedFrame?.transform.x,
+          text: persistedFrame?.children.find((node) => node.id === "text-1")?.content.value
+        };
+      })
+      .toEqual({ x: 303, text: serverText });
 
     await freshPage.goto("http://127.0.0.1:5173/");
     await openLayersPanel(freshPage);

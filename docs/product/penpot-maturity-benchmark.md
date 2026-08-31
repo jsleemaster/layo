@@ -59,7 +59,9 @@ Exact-head review later found and drove focused repairs for cross-page paste and
 hidden-page snap guides, including real snap-delta application. Follow-up review
 also closed copy-time parent-origin drift and delayed image-upload page races.
 The final review added explicit page identity to presence, first-page-only
-legacy compatibility, and a self-contained relay-backed two-browser regression.
+legacy compatibility, a self-contained relay-backed two-browser regression,
+and preview-local page fallback so older saved versions cannot replace the live
+active page or clear its selection.
 
 This advances editor completeness and direct task entry, but it is not page
 management maturity. Page create/rename/delete/reorder and corresponding
