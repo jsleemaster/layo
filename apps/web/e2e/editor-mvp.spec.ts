@@ -139,6 +139,7 @@ test("switches existing document pages without mixing hidden-page layers", async
 
   await page.getByRole("button", { name: "헤드라인", exact: true }).click();
   await expect(page.getByText("헤드라인").first()).toBeVisible();
+  await page.keyboard.press("Control+C");
   await page.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
   await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
   await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveCount(0);
@@ -146,6 +147,19 @@ test("switches existing document pages without mixing hidden-page layers", async
   await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
   await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(1_000);
   await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBe(0);
+
+  const frameBeforeDrag = await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 });
+  await page.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("120");
+  await page.mouse.move(frameBeforeDrag.left + 300, frameBeforeDrag.top + 200);
+  await page.mouse.down();
+  await page.mouse.move(frameBeforeDrag.left + 305, frameBeforeDrag.top + 200);
+  await expect(page.getByTestId("snap-guide-vertical")).toHaveCount(0);
+  await page.mouse.up();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("125");
+
+  await page.keyboard.press("Control+V");
+  await expect(page.getByRole("button", { name: "헤드라인 복사본", exact: true })).toBeVisible();
 
   const stageBox = await page.getByTestId("stage-frame").boundingBox();
   if (!stageBox) {
@@ -157,6 +171,17 @@ test("switches existing document pages without mixing hidden-page layers", async
     "aria-pressed",
     "true"
   );
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "붙여넣기",
+    exact: true
+  }).click();
+  await expect(page.getByRole("button", { name: "헤드라인 복사본 2", exact: true })).toBeVisible();
+
+  await page.mouse.click(stageBox.x + 560, stageBox.y + 500, { button: "right" });
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "여기에 붙여넣기"
+  }).click();
+  await expect(page.getByRole("button", { name: "헤드라인 복사본 3", exact: true })).toBeVisible();
   await page.mouse.click(stageBox.x + 24, stageBox.y + 24);
 
   await page.keyboard.press("Control+A");
@@ -173,7 +198,39 @@ test("switches existing document pages without mixing hidden-page layers", async
   await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toBeVisible();
   await page.getByRole("button", { name: "페이지 1", exact: true }).click();
   await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "헤드라인 복사본", exact: true })).toHaveCount(0);
   await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(1_000);
+  await expect
+    .poll(async () => {
+      const persistedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(persistedResponse.ok()).toBeTruthy();
+      const persistedDocument = (await persistedResponse.json()).file;
+      return {
+        pageOneFrameChildren: persistedDocument.pages[0].children[0].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageTwoRootChildren: persistedDocument.pages[1].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageTwoFrameChildren: persistedDocument.pages[1].children[0].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageTwoPasteAtPosition: persistedDocument.pages[1].children.find(
+          (node: { id: string }) => node.id === "text-1-copy-3"
+        )?.transform
+      };
+    })
+    .toEqual({
+      pageOneFrameChildren: ["text-1"],
+      pageTwoRootChildren: expect.arrayContaining([
+        "frame-2",
+        "text-1-copy-1",
+        "text-1-copy-2",
+        "text-1-copy-3"
+      ]),
+      pageTwoFrameChildren: ["text-2"],
+      pageTwoPasteAtPosition: expect.objectContaining({ x: 560, y: 500 })
+    });
 });
 
 test("editor chrome uses the generated Layo brand logo assets", async ({ page }) => {
@@ -9698,6 +9755,10 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
   await page.getByTestId("inspector-y").fill("130");
   await expect(page.getByTestId("inspector-x")).toHaveValue("480");
 
+  await headlineLayer.click();
+  await page.getByTestId("inspector-fill").fill("#a855f7");
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#a855f7");
+
   await rectangleLayer.click();
   await page.keyboard.down("Shift");
   await headlineLayer.click();
@@ -9712,10 +9773,17 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
     throw new Error("stage canvas was not visible");
   }
 
+  const rectangleBeforeDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  const headlineBeforeDrag = await findCanvasColorBounds(page, { r: 168, g: 85, b: 247 });
+
   await page.mouse.move(stageBox.x + 220, stageBox.y + 180);
   await page.mouse.down();
   await page.mouse.move(stageBox.x + 285, stageBox.y + 180);
   await expect(page.getByTestId("snap-guide-vertical")).toBeVisible();
+  const rectangleDuringDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  const headlineDuringDrag = await findCanvasColorBounds(page, { r: 168, g: 85, b: 247 });
+  expect(rectangleDuringDrag.left - rectangleBeforeDrag.left).toBeCloseTo(68, 0);
+  expect(headlineDuringDrag.left - headlineBeforeDrag.left).toBeCloseTo(68, 0);
   await page.mouse.up();
 
   await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
@@ -9723,9 +9791,9 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
   await page.keyboard.press("Escape");
   await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
   await rectangleLayer.click();
-  await expect(page.getByTestId("inspector-x")).toHaveValue("245");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("248");
   await headlineLayer.click();
-  await expect(page.getByTestId("inspector-x")).toHaveValue("97");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("100");
 });
 
 test("multi-selection drag preview preserves sub-pixel movement while zoomed", async ({ page }) => {

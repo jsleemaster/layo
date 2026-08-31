@@ -139,6 +139,7 @@ Initial MVP targets desktop-first editor use.
 - `?` opens and closes Help when focus is not inside a text-entry control.
 - Global canvas shortcuts must not intercept native activation or navigation while an interactive control has focus. Text-entry controls keep every editing key; layer rows may continue to forward selection shortcuts such as Arrow, Delete, and command-modified actions after selection.
 - Multi-page documents expose their existing pages in the Layers surface. One active page owns the visible layer list, canvas paint, comment overlays, Inspector page context, and page-level developer export review.
+- Clipboard paste targets and drag-snap candidates must also belong to the active page. A nested copy moved across pages preserves its document-space position while reparenting to the active page root.
 - Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
 - Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
 

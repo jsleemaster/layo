@@ -41,9 +41,11 @@ Penpot's explicit project entry, workspace shortcut Help, and visible page
 navigation to Layo's local-first editor shell. The shipped contract replaces
 dead first-run affordances, preserves native controls without breaking layer
 selection shortcuts, and makes the active page own canvas paint, Layers,
-comments, Inspector/Dev context, pointer hit testing, measurement, marquee, and
-bulk selection. Local proof passed workspace typecheck, the full root test
-gate, the production web build, five focused no-retry Playwright cases, and a
+comments, Inspector/Dev context, pointer hit testing, measurement, marquee,
+bulk selection, clipboard paste ownership, and drag-snap targets. Exact-head
+review also repaired cross-page paste coordinates, hidden-page snap guides, and
+cosmetic-only snap deltas. Local proof passed workspace typecheck, the full root test
+gate, the production web build, six focused no-retry Playwright cases, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.

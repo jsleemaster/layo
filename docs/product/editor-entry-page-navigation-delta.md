@@ -56,6 +56,12 @@ or document model.
 - Pointer hit testing, measurement targets, marquee selection, Select All, and
   Select Same Kind are also constrained to the active page, so overlapping
   coordinates cannot select or mutate a hidden page.
+- Keyboard/context paste resolves its parent inside the active page. A nested
+  copy crossing pages reanchors from its source-parent coordinates to the
+  active page root, while same-page nested paste retains the original parent.
+- Drag snapping receives the active-page projection only, and the editor now
+  applies the calculated snap delta rather than displaying cosmetic guides
+  while committing the raw pointer delta.
 - New rectangles, text, images, and component instances target the active page
   while all-document node counts and component relationships remain intact.
 - Active-page switching does not mutate the document and falls back to the
@@ -110,6 +116,17 @@ validity window. The final local gate passed workspace typecheck, root
 `pnpm test` (including 522 passed/47 skipped server tests and 285 web tests),
 Rust workspace tests, design rules, the Penpot maturity check, and the production
 web build. The build retains the existing large-chunk warning.
+
+The exact-head Codex review on `bd24847` then found two additional active-page
+leaks: cross-page paste retained the hidden source parent, and drag snapping
+collected hidden-page targets. The repair added cross-page parent/coordinate
+coverage, active-only snap-guide browser proof, and corrected actual snap delta
+application. Focused editor-state tests now pass 117/117 and the two affected
+Playwright cases pass 2/2 without retry. A fresh exact-head remote review is
+required before merge.
+
+The final combined editor/keyboard Playwright selection passes 6/6 without
+retry, including both active-page repairs and the existing snap interaction.
 
 The focused command is:
 

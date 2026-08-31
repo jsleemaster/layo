@@ -49,11 +49,13 @@ action, renders built-in kit examples as honest static previews, adds a Korean
 Help rail surface with `?`, preserves text entry and native control activation
 while retaining layer-selection shortcuts, and exposes existing document pages
 as session-level active page choices. Layers, canvas paint, pointer hit testing,
-marquee/bulk selection, comment overlays, Inspector page context, and page-level
-Dev export review now follow that active page while page changes clear stale
-selection. The focused isolated Playwright run passed 3/3 without retry and
+marquee/bulk selection, clipboard paste ownership, drag-snap candidates,
+comment overlays, Inspector page context, and page-level Dev export review now
+follow that active page while page changes clear stale selection. The focused isolated Playwright run passed 3/3 without retry and
 repeated the same cases 15/15 without retry once Cargo binding generation and
 browser E2E were serialized; expanded editor/keyboard coverage then passed 5/5.
+Exact-head review later found and drove focused repairs for cross-page paste and
+hidden-page snap guides, including real snap-delta application.
 
 This advances editor completeness and direct task entry, but it is not page
 management maturity. Page create/rename/delete/reorder and corresponding

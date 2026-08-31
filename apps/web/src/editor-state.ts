@@ -1704,35 +1704,58 @@ export function setSelectedNodeStyle(state: EditorState, style: EditorNodeStyle)
 
 export function pasteCopiedNode(
   state: EditorState,
-  clipboard: EditorNodeClipboard | null
+  clipboard: EditorNodeClipboard | null,
+  targetPageId?: string
 ): EditorState {
   if (!clipboard) {
     return state;
   }
 
   const { copiedNode, copyIndex } = createClipboardNodeCopy(state.document, clipboard);
+  const parentId = resolveClipboardParentId(
+    state.document,
+    clipboard.parentId,
+    targetPageId
+  );
+  if (!parentId) {
+    return state;
+  }
+
+  const sourceParentAbsolute = getParentAbsolutePosition(state.document, clipboard.parentId);
+  const targetParentAbsolute = getParentAbsolutePosition(state.document, parentId);
   copiedNode.transform = {
     ...copiedNode.transform,
-    x: copiedNode.transform.x + PASTE_OFFSET * copyIndex,
-    y: copiedNode.transform.y + PASTE_OFFSET * copyIndex
+    x:
+      copiedNode.transform.x +
+      sourceParentAbsolute.x -
+      targetParentAbsolute.x +
+      PASTE_OFFSET * copyIndex,
+    y:
+      copiedNode.transform.y +
+      sourceParentAbsolute.y -
+      targetParentAbsolute.y +
+      PASTE_OFFSET * copyIndex
   };
 
-  return insertCopiedNode(state, clipboard, copiedNode);
+  return insertCopiedNode(state, parentId, copiedNode);
 }
 
 export function pasteCopiedNodeAt(
   state: EditorState,
   clipboard: EditorNodeClipboard | null,
-  point: { x: number; y: number } | null
+  point: { x: number; y: number } | null,
+  targetPageId?: string
 ): EditorState {
   if (!clipboard || !point) {
     return state;
   }
 
   const { copiedNode } = createClipboardNodeCopy(state.document, clipboard);
-  const parentId = findParentChildren(state.document, clipboard.parentId)
-    ? clipboard.parentId
-    : state.document.pages[0]?.id;
+  const parentId = resolveClipboardParentId(
+    state.document,
+    clipboard.parentId,
+    targetPageId
+  );
   if (!parentId) {
     return state;
   }
@@ -6362,21 +6385,39 @@ function createClipboardNodeCopy(
 
 function insertCopiedNode(
   state: EditorState,
-  clipboard: EditorNodeClipboard,
+  parentId: string,
   copiedNode: RendererNode
 ): EditorState {
-  const parentId = findParentChildren(state.document, clipboard.parentId)
-    ? clipboard.parentId
-    : state.document.pages[0]?.id;
-  if (!parentId) {
-    return state;
-  }
-
   return executeEditorCommand(state, {
     type: "create_node",
     parentId,
     node: copiedNode
   });
+}
+
+function resolveClipboardParentId(
+  document: RendererDocument,
+  clipboardParentId: string,
+  targetPageId?: string
+): string | null {
+  if (!targetPageId) {
+    return findParentChildren(document, clipboardParentId)
+      ? clipboardParentId
+      : document.pages[0]?.id ?? null;
+  }
+
+  const targetPage = document.pages.find((page) => page.id === targetPageId);
+  if (!targetPage) {
+    return null;
+  }
+  if (clipboardParentId === targetPage.id) {
+    return targetPage.id;
+  }
+
+  const parentBelongsToTargetPage = targetPage.children.some(
+    (node) => findInNode(node, clipboardParentId) !== null
+  );
+  return parentBelongsToTargetPage ? clipboardParentId : targetPage.id;
 }
 
 function getParentAbsolutePosition(

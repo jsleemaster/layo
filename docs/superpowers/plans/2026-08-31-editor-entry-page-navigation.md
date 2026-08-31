@@ -84,6 +84,9 @@ New code is limited to:
 - Restrict visible Layers, canvas paint, comments, and Dev page exports to the active page.
 - Restrict pointer hit testing, measurement, marquee selection, Select All, and
   Select Same Kind to the active page.
+- Route keyboard/context paste and drag-snap targets through the active page;
+  preserve document-space position when a nested copy crosses page roots.
+- Apply the resolved snap delta whenever a guide is active.
 - Keep all-document node counts for generated ids and component relationships.
 
 ### 5. Verify and document
@@ -100,7 +103,7 @@ New code is limited to:
 - Help works by click and `?` and does not interfere with focused inputs/controls.
 - Button Space activation works without canvas pan interception.
 - Switching to Page B hides Page A layers, paints distinct Page B pixels,
-  clears stale selection, scopes hit/bulk-selection paths, and updates Inspector
-  page context.
+  clears stale selection, scopes hit/bulk-selection/paste/snap paths, and updates
+  Inspector page context.
 - No Figma implementation or Figma board work is included.
 - Focused Playwright CLI passes without retry and browser console errors are zero.

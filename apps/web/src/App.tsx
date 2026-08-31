@@ -12534,7 +12534,12 @@ export function App() {
 
   const pasteContextSelectionAtMenuPoint = () => {
     runContextMenuStateAction((state) =>
-      pasteCopiedNodeAt(state, objectClipboardRef.current, objectContextMenu?.documentPoint ?? null)
+      pasteCopiedNodeAt(
+        state,
+        objectClipboardRef.current,
+        objectContextMenu?.documentPoint ?? null,
+        activePage?.id
+      )
     );
   };
 
@@ -13292,7 +13297,9 @@ export function App() {
       }
       if (isCommand && event.key.toLowerCase() === "v" && objectClipboardRef.current) {
         event.preventDefault();
-        updateEditorFromInteraction((state) => pasteCopiedNode(state, objectClipboardRef.current));
+        updateEditorFromInteraction((state) =>
+          pasteCopiedNode(state, objectClipboardRef.current, activePage?.id)
+        );
         return;
       }
       if (isCommand && event.key.toLowerCase() === "r") {
@@ -14703,7 +14710,7 @@ export function App() {
     const rawDelta = pointerDelta;
     activeDrag.hasMoved = true;
     const snapped = calculateSnapForMovingBounds(
-      editor.document,
+      activePageDocument ?? editor.document,
       activeDrag.selectedNodeIds,
       activeDrag.selectionBounds,
       rawDelta
@@ -14714,17 +14721,18 @@ export function App() {
       return { delta: rawDelta, guides: snapped.guides, nativePosition: true };
     }
 
+    const resolvedDelta = snapped.delta;
     event.target.position({
-      x: activeDrag.startPosition.x + rawDelta.x,
-      y: activeDrag.startPosition.y + rawDelta.y
+      x: activeDrag.startPosition.x + resolvedDelta.x,
+      y: activeDrag.startPosition.y + resolvedDelta.y
     });
     setDragPreview({
       primaryNodeId: activeDrag.nodeId,
       nodeIds: activeDrag.selectedNodeIds,
-      delta: rawDelta
+      delta: resolvedDelta
     });
     setSnapGuides(snapped.guides);
-    return { delta: rawDelta, guides: snapped.guides };
+    return { delta: resolvedDelta, guides: snapped.guides };
   };
 
   const finishNodeDrag = (nodeId: string, event: KonvaEventObject<DragEvent>) => {
@@ -21437,7 +21445,11 @@ export function App() {
               label="붙여넣기"
               shortcut="⌘V"
               disabled={!objectClipboardRef.current}
-              onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
+              onClick={() =>
+                runContextMenuStateAction((state) =>
+                  pasteCopiedNode(state, objectClipboardRef.current, activePage?.id)
+                )
+              }
             />
             <ContextMenuItem
               label="여기에 붙여넣기"
