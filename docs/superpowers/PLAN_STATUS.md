@@ -51,8 +51,13 @@ image-upload races, including committed-write reconciliation that preserves a
 newer active-page selection, mid-flight locks, queued replacement order, and
 distinct concurrent image IDs. Immediate prior-asset deletion stays deferred
 until history-aware GC can preserve Undo, and discarded confirmed deltas do not
-add phantom history or orphan their newly uploaded assets. Local proof passed workspace typecheck, the full root test
-gate, the production web build, six focused no-retry Playwright cases, and a
+add phantom history or orphan their newly uploaded assets. Final review also
+scoped remote cursor, selection, and editing presence to the active page,
+reconciled incoming delete/move presence, kept saved-version preview overlays
+silent, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
+passed workspace typecheck, the full root test gate, the production web build,
+the focused no-retry Playwright cases, the complete collaboration Playwright
+suite 9/9 without retry, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.

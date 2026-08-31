@@ -35,6 +35,15 @@ test("e2e script starts required local services before Playwright", async () => 
 
   assert.equal(typeof e2eScript, "string");
   assert.match(e2eScript, /^node scripts\/run-e2e\.mjs -- /);
+  assert.match(
+    runner,
+    /name: "collaboration relay"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/collab-relay", "start"\]/
+  );
+  assert.match(runner, /const requestedPlaywrightArgs = normalizeArgs/);
+  assert.match(runner, /withCiRetries\(requestedPlaywrightArgs\)/);
+  assert.match(runner, /isCollaborationSpecRequested\(requestedPlaywrightArgs\)/);
+  assert.match(runner, /reuseExisting: true/);
+  assert.match(runner, /reusing \$\{service\.name\}/);
   assert.match(runner, /name: "server"[\s\S]*command: "pnpm"[\s\S]*args: \["--filter", "@layo\/server", "dev"\]/);
   assert.match(
     runner,
@@ -42,6 +51,7 @@ test("e2e script starts required local services before Playwright", async () => 
   );
   assert.match(runner, /http:\/\/127\.0\.0\.1:4317\/health/);
   assert.match(runner, /http:\/\/127\.0\.0\.1:5173\//);
+  assert.match(runner, /http:\/\/127\.0\.0\.1:4327\/health/);
   assert.match(runner, /"pnpm",\s*\["exec",\s*"playwright",\s*"test"/);
   assert.match(runner, /mkdtemp/);
   assert.match(runner, /LAYO_E2E_STORAGE_DIR/);

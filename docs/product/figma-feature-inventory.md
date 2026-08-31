@@ -43,7 +43,9 @@ surface, a Korean Help/shortcut panel that preserves native controls without
 breaking layer-selection shortcuts, and session-level switching among pages
 already stored in the document. The active page owns Layers, canvas paint,
 pointer/marquee/bulk selection, clipboard paste ownership, drag-snap targets,
-comments, Inspector page context, and page-level Dev export review. Page creation, rename, delete, reorder, and persistence
+comments, remote collaboration overlays, Inspector page context, and page-level
+Dev export review. Legacy page-less presence remains first-page-only for rolling
+upgrade compatibility. Page creation, rename, delete, reorder, and persistence
 commands remain open, as do File-panel density, 1024px viewport comfort, and
 broader focus/status feedback. See
 `docs/product/editor-entry-page-navigation-delta.md`. Focused isolated

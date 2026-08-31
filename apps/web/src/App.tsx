@@ -250,6 +250,7 @@ import {
 } from "./path-editor";
 import {
   documentPointToViewport,
+  getPageScopedSelection,
   getRemotePresence,
   getSelectedNodeBounds,
   REMOTE_PRESENCE_STALE_MS,
@@ -1840,6 +1841,7 @@ const IMPORTED_IMAGE_MAX_DIMENSION = 480;
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
+    activePageId: member.activePageId,
     selectedNodeId: member.selectedNodeId,
     selectedNodeBounds: member.selectedNodeBounds,
     cursor: member.cursor,
@@ -5030,11 +5032,15 @@ function renderNode({
 }
 
 function RemotePresenceOverlay({
+  activePageId,
+  legacyPageId,
   localSessionId,
   presence,
   nowMs,
   viewport
 }: {
+  activePageId: string | null;
+  legacyPageId: string | null;
   localSessionId: string | null;
   presence: CollaborationPresence[];
   nowMs: number;
@@ -5042,7 +5048,9 @@ function RemotePresenceOverlay({
 }) {
   const remotePresence = getRemotePresence(presence, localSessionId, {
     nowMs,
-    staleAfterMs: REMOTE_PRESENCE_STALE_MS
+    staleAfterMs: REMOTE_PRESENCE_STALE_MS,
+    activePageId,
+    legacyPageId
   });
 
   return (
@@ -12077,9 +12085,16 @@ export function App() {
       return;
     }
 
+    const activePageId = activePageIdRef.current;
+    const pageSelection = getPageScopedSelection(
+      state.document,
+      state.selection.nodeId,
+      activePageId
+    );
     activeSession.updatePresence({
-      selectedNodeId: state.selection.nodeId,
-      selectedNodeBounds: getSelectedNodeBounds(state.document, state.selection.nodeId),
+      activePageId,
+      selectedNodeId: pageSelection.nodeId,
+      selectedNodeBounds: pageSelection.bounds,
       viewport: state.viewport,
       updatedAtMs: Date.now(),
       ...patch
@@ -12087,6 +12102,48 @@ export function App() {
     setPresenceClock(Date.now());
     publishPresenceSnapshot(activeSession);
   };
+
+  useEffect(() => {
+    const nextPageId = activePage?.id ?? null;
+    let current = editorRef.current;
+    if (!isFileVersionPreviewing && current?.selection.nodeId) {
+      const pageSelection = getPageScopedSelection(
+        current.document,
+        current.selection.nodeId,
+        nextPageId
+      );
+      if (!pageSelection.nodeId) {
+        const nextState = setSelection(current, null);
+        editorRef.current = nextState;
+        setEditor(nextState);
+        current = nextState;
+      }
+    }
+
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      return;
+    }
+
+    const pageSelection =
+      !isFileVersionPreviewing && current
+        ? getPageScopedSelection(current.document, current.selection.nodeId, nextPageId)
+        : { nodeId: null, bounds: null };
+    activeSession.updatePresence({
+      activePageId: nextPageId,
+      selectedNodeId: pageSelection.nodeId,
+      selectedNodeBounds: pageSelection.bounds,
+      cursor: null,
+      editingNodeId: null,
+      editingMode: null,
+      activeTool: "select",
+      ...(current ? { viewport: current.viewport } : {}),
+      updatedAtMs: Date.now()
+    });
+    publishedCursorRef.current = null;
+    setPresenceClock(Date.now());
+    publishPresenceSnapshot(activeSession);
+  }, [activePage?.id, collabSession, isFileVersionPreviewing]);
 
   const enqueueDocumentPersistence = <T,>(fileId: string, operation: () => Promise<T>) =>
     documentPersistenceQueueRef.current.enqueue(fileId, operation);
@@ -16929,8 +16986,21 @@ export function App() {
     cancelActiveCanvasInteractions();
     setMeasurementTargetNodeId(null);
     activePageIdRef.current = pageId;
+    publishedCursorRef.current = null;
+    const current = editorRef.current;
+    if (current) {
+      const nextState = setSelection(current, null);
+      editorRef.current = nextState;
+      setEditor(nextState);
+      publishEditorPresence(nextState, {
+        activePageId: pageId,
+        cursor: null,
+        editingNodeId: null,
+        editingMode: null,
+        activeTool: "select"
+      });
+    }
     setActivePageId(pageId);
-    clearSelectionFromInteraction();
   };
 
   const previewCurrentFileVersion = async (version: FileVersionSummary) => {
@@ -18537,16 +18607,52 @@ export function App() {
         }
       }
       const current = editorRef.current;
+      const nextPageId = activePageIdRef.current;
+      const isPreviewing = fileVersionPreviewActiveRef.current;
+      const activeSelectionNodeIds = current
+        ? isPreviewing
+          ? current.selection.nodeIds
+          : current.selection.nodeIds.filter(
+              (nodeId) => getPageScopedSelection(document, nodeId, nextPageId).nodeId
+            )
+        : [];
+      const activePrimaryNodeId =
+        current?.selection.nodeId && activeSelectionNodeIds.includes(current.selection.nodeId)
+          ? current.selection.nodeId
+          : activeSelectionNodeIds.at(-1) ?? null;
       const nextState = current
         ? setMultiSelection(
             { ...current, document, history: { past: [], future: [] } },
-            current.selection.nodeIds,
-            current.selection.nodeId
+            activeSelectionNodeIds,
+            activePrimaryNodeId
           )
         : createEditorState(document);
       editorRef.current = nextState;
       setEditor(nextState);
-      setPresence(session.getPresence());
+      const pageSelection = isPreviewing
+        ? { nodeId: null, bounds: null }
+        : getPageScopedSelection(document, nextState.selection.nodeId, nextPageId);
+      const localPresence = session.getLocalPresence();
+      const editingNodeId =
+        !isPreviewing &&
+        localPresence.editingNodeId &&
+        getPageScopedSelection(document, localPresence.editingNodeId, nextPageId).nodeId
+          ? localPresence.editingNodeId
+          : null;
+      session.updatePresence({
+        activePageId: nextPageId,
+        selectedNodeId: pageSelection.nodeId,
+        selectedNodeBounds: pageSelection.bounds,
+        editingNodeId,
+        editingMode: editingNodeId ? localPresence.editingMode : null,
+        cursor: isPreviewing ? null : localPresence.cursor,
+        viewport: nextState.viewport,
+        updatedAtMs: Date.now()
+      });
+      setPresenceClock(Date.now());
+      setPresence(
+        normalizePresenceForOverlay(session.getPresence(), session.getLocalPresence().sessionId)
+      );
     });
     session.subscribePresence((nextPresence) => {
       setPresence(normalizePresenceForOverlay(nextPresence, session.getLocalPresence().sessionId));
@@ -18555,9 +18661,15 @@ export function App() {
       setCollabStatus(nextStatus);
     });
     collabSessionRef.current = session;
+    const initialPageSelection = getPageScopedSelection(
+      initialDocument,
+      editor?.selection.nodeId ?? null,
+      activePageIdRef.current
+    );
     session.updatePresence({
-      selectedNodeId: editor?.selection.nodeId ?? null,
-      selectedNodeBounds: getSelectedNodeBounds(initialDocument, editor.selection.nodeId),
+      activePageId: activePageIdRef.current,
+      selectedNodeId: initialPageSelection.nodeId,
+      selectedNodeBounds: initialPageSelection.bounds,
       viewport: editor.viewport,
       updatedAtMs: Date.now()
     });
@@ -21068,6 +21180,8 @@ export function App() {
             ) : null}
             {editor && !isFileVersionPreviewing ? (
               <RemotePresenceOverlay
+                activePageId={activePage?.id ?? null}
+                legacyPageId={displayedDocument?.pages[0]?.id ?? null}
                 localSessionId={localSessionId}
                 nowMs={presenceClock}
                 presence={presence}

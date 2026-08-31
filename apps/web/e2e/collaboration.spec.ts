@@ -281,6 +281,167 @@ test("relay team syncs document edits between two browser contexts", async ({ br
   }
 });
 
+test("remote cursors and selections stay on their collaborator's active page", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const documentResponse = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    expect(documentResponse.ok()).toBeTruthy();
+    const payload = await documentResponse.json();
+    const document = payload.file;
+    document.pages.push({
+      id: "page-2",
+      name: "두 번째 페이지",
+      children: [
+        {
+          id: "frame-2",
+          kind: "frame",
+          name: "두 번째 프레임",
+          children: [
+            {
+              id: "text-2",
+              kind: "text",
+              name: "두 번째 헤드라인",
+              children: [],
+              transform: { x: 32, y: 40, rotation: 0 },
+              size: { width: 260, height: 48 },
+              style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+              content: {
+                type: "text",
+                value: "두 번째 페이지",
+                font_size: 28,
+                font_family: "Inter"
+              }
+            }
+          ],
+          transform: { x: 120, y: 80, rotation: 0 },
+          size: { width: 420, height: 280 },
+          style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" }
+        }
+      ]
+    });
+    const replaceResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document }
+    });
+    expect(replaceResponse.ok()).toBeTruthy();
+    const versionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "협업 presence 기준" } }
+    );
+    expect(versionResponse.ok()).toBeTruthy();
+
+    await pageA.reload();
+    await pageB.goto("http://127.0.0.1:5173/");
+
+    await openTeamPanel(pageA);
+    await pageA.getByRole("tab", { name: "실시간 협업" }).click();
+    await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+    await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
+    await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await pageA.getByRole("tab", { name: "팀 설정" }).click();
+    await pageA.getByRole("button", { name: "설정 내보내기" }).click();
+    const manifest = await pageA.getByTestId("team-manifest").inputValue();
+
+    await openTeamPanel(pageB);
+    await pageB.getByRole("tab", { name: "팀 설정" }).click();
+    await pageB.getByTestId("team-manifest").fill(manifest);
+    await pageB.getByRole("button", { name: "설정 가져오기" }).click();
+    await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await openLayersPanel(pageA);
+    await openLayersPanel(pageB);
+    await pageB.getByRole("button", { name: "헤드라인", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-1",
+      { timeout: 8000 }
+    );
+
+    const firstPageStage = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(firstPageStage).not.toBeNull();
+    await pageB.mouse.move(firstPageStage!.x + 360, firstPageStage!.y + 260);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageB.mouse.move(firstPageStage!.x + 372, firstPageStage!.y + 264);
+    await pageA.getByRole("button", { name: "페이지 1", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-1"
+    );
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible();
+
+    await pageB.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageA.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await pageB.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-2",
+      { timeout: 8000 }
+    );
+
+    const secondPageStage = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(secondPageStage).not.toBeNull();
+    await pageB.mouse.move(secondPageStage!.x + 340, secondPageStage!.y + 220);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+    await pageA.keyboard.press("Delete");
+    await expect(pageB.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toHaveCount(0, {
+      timeout: 8000
+    });
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0, { timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+    const previewSourceStage = await pageA.getByTestId("stage-frame").boundingBox();
+    expect(previewSourceStage).not.toBeNull();
+    await pageA.mouse.move(previewSourceStage!.x + 360, previewSourceStage!.y + 240);
+    await expect(pageB.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "frame-2",
+      { timeout: 8000 }
+    );
+    await expect(pageB.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await openFilePanel(pageA);
+    await pageA.getByRole("button", { name: "협업 presence 기준 미리보기" }).click();
+    await expect(pageA.getByTestId("file-version-preview-banner")).toBeVisible();
+    await expect(pageB.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageB.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageB.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+    await pageB.getByTestId("inspector-x").fill("144");
+    await expect(pageB.getByTestId("inspector-x")).toHaveValue("144");
+    await expect(pageB.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageB.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageA
+      .getByTestId("file-version-preview-banner")
+      .getByRole("button", { name: "미리보기 종료" })
+      .click();
+    await expect(pageB.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "frame-2",
+      { timeout: 8000 }
+    );
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
 test("two editors keep independent node move and text edits", async ({ browser }) => {
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
@@ -739,6 +900,12 @@ test("collaborative restore persists independent remote edits and aborts conflic
         ]
       }
     });
+    await openFilePanel(firstPage);
+    await expect(firstPage.getByTestId("file-version-status")).toContainText(
+      "협업 복원 기준 복원됨",
+      { timeout: 8000 }
+    );
+    await openLayersPanel(firstPage);
     await firstPage.getByRole("button", { name: "랜딩 프레임" }).click();
     await expect(firstPage.getByTestId("inspector-x")).toHaveValue("144");
     await secondPage.getByRole("button", { name: "랜딩 프레임" }).click();

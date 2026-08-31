@@ -53,6 +53,18 @@ or document model.
 - Switching pages clears stale selection and scopes the visible layer list,
   canvas paint, comment overlays, Inspector page identity, and page-level Dev
   export review to the active page.
+- Remote collaboration cursors, selection bounds, and editing claims are also
+  scoped to the active page. Legacy presence without a page id is treated as
+  first-page presence so rolling upgrades preserve the old single-page
+  behavior without leaking overlays onto later pages.
+- Older receivers cannot interpret the new opaque page id; collaborators must
+  refresh to the upgraded client before cross-version overlay isolation is
+  guaranteed.
+- Incoming collaborative node moves, deletes, and bounds changes reconcile the
+  local page-scoped selection and republish presence in the same subscription
+  callback. Saved-version preview preserves the live selection internally but
+  keeps its selection, cursor, and editing presence hidden through incoming
+  live document updates, then republishes on preview exit.
 - Pointer hit testing, measurement targets, marquee selection, Select All, and
   Select Same Kind are also constrained to the active page, so overlapping
   coordinates cannot select or mutate a hidden page.
@@ -172,6 +184,21 @@ overlapping drops. Fully discarded confirmed deltas keep the current history, so
 the first Undo restores a concurrently deleted parent instead of consuming a
 phantom image command. Replacement Undo keeps every referenced asset readable.
 The six focused image cases pass 6/6 without retry.
+
+The final exact-head review then found that collaboration overlays still used
+document-space coordinates without carrying page identity. Presence now
+publishes `activePageId`, clears cursor and editing claims on page changes, and
+filters only the overlay layer while leaving the Team member list intact. For
+collaboration specs, the repository E2E wrapper now starts the TypeScript relay
+it previously omitted, or reuses a healthy externally started Rust relay. Full
+Verification runs the focused two-browser active-page regression explicitly.
+That browser case also proves remote deletion removes a selection ghost and an
+incoming live edit cannot revive selection or cursor overlays during a saved
+version preview.
+
+The final no-retry collaboration suite passed 9/9. Its Restore case now waits
+for the visible Restore completion status before reopening Layers, preventing
+late reconciliation from racing the post-Restore Inspector assertion.
 
 The focused command is:
 

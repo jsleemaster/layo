@@ -15,6 +15,8 @@ export interface PublishedCursor {
 export interface RemotePresenceFilterOptions {
   nowMs: number;
   staleAfterMs: number;
+  activePageId?: string | null;
+  legacyPageId?: string | null;
 }
 
 export const REMOTE_PRESENCE_STALE_MS = 4_000;
@@ -29,6 +31,13 @@ export function getRemotePresence(
   return presence.filter((member) => {
     if (localSessionId && member.sessionId === localSessionId) {
       return false;
+    }
+
+    if (options?.activePageId !== undefined) {
+      const remotePageId = member.activePageId ?? options.legacyPageId ?? null;
+      if (remotePageId !== options.activePageId) {
+        return false;
+      }
     }
 
     if (!options || member.updatedAtMs === null) {
@@ -70,6 +79,31 @@ export function getSelectedNodeBounds(
     height: node.size.height,
     rotation: node.transform.rotation,
     space: "document"
+  };
+}
+
+export function getPageScopedSelection(
+  document: RendererDocument,
+  nodeId: string | null,
+  pageId: string | null
+): { nodeId: string | null; bounds: CollaborationSelectionBounds | null } {
+  if (!nodeId || !pageId) {
+    return { nodeId: null, bounds: null };
+  }
+
+  const page = document.pages.find((candidate) => candidate.id === pageId);
+  if (!page) {
+    return { nodeId: null, bounds: null };
+  }
+
+  const pageDocument = { ...document, pages: [page] };
+  if (!findNodeById(pageDocument, nodeId)) {
+    return { nodeId: null, bounds: null };
+  }
+
+  return {
+    nodeId,
+    bounds: getSelectedNodeBounds(pageDocument, nodeId)
   };
 }
 

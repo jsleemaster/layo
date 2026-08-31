@@ -83,6 +83,10 @@ New code is limited to:
 - Show page buttons in Layers when the document has pages.
 - Clear selection on page switch.
 - Restrict visible Layers, canvas paint, comments, and Dev page exports to the active page.
+- Scope remote collaboration cursors, selection bounds, and editing claims to
+  the active page while treating legacy page-less presence as first-page only.
+- Reconcile incoming document selection changes immediately, and keep live
+  collaboration overlays hidden throughout saved-version preview.
 - Restrict pointer hit testing, measurement, marquee selection, Select All, and
   Select Same Kind to the active page.
 - Route keyboard/context paste and drag-snap targets through the active page;
@@ -119,5 +123,7 @@ New code is limited to:
 - Switching to Page B hides Page A layers, paints distinct Page B pixels,
   clears stale selection, scopes hit/bulk-selection/paste/snap paths, and updates
   Inspector page context.
+- Collaborators on different pages do not see each other's cursor or selection;
+  the overlays return when both collaborators join the same page.
 - No Figma implementation or Figma board work is included.
 - Focused Playwright CLI passes without retry and browser console errors are zero.
