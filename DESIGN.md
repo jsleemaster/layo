@@ -131,6 +131,28 @@ Initial MVP targets desktop-first editor use.
 - Canvas area scrolls rather than collapsing core editor chrome.
 - Touch targets should be at least `32px` in compact tool areas.
 
+## 8.1 Editor Entry, Help, And Page Context
+
+- The default Assets surface may remain the first view, but an empty local store must expose one working primary action that creates a project and opens an editable layer context.
+- Visible catalog or template examples must not use button semantics until they perform an actual product action. Preview-only items use static row/card semantics and say that they are examples.
+- Every rail action must open a visible surface. Help opens a Korean quick-start and only lists shortcuts the editor currently implements.
+- `?` opens and closes Help when focus is not inside a text-entry control.
+- Global canvas shortcuts must not intercept native activation or navigation while an interactive control has focus. Text-entry controls keep every editing key; layer rows behave as the editor selection surface and continue to forward Space pan, Enter edit, Arrow, Delete, and command-modified actions after selection.
+- Multi-page documents expose their existing pages in the Layers surface. One active page owns the visible layer list, canvas paint, comment overlays, Inspector page context, and page-level developer export review.
+- Collaboration cursors, selection bounds, and editing claims are scoped to that same active page. Incoming document changes immediately reconcile stale selection presence, and saved-version preview keeps live-editor overlays hidden until preview exit. Legacy presence without a page id is visible only on the first page, matching the pre-navigation client behavior.
+- Saved-version preview owns a separate preview page id. Falling back to a page that exists only in an older snapshot must never replace the live active page or clear the live selection; every non-Restore exit returns to that live page and selection.
+- Clipboard paste targets and drag-snap candidates must also belong to the active page. A nested copy snapshots its parent origin at copy time, then preserves that document-space position while reparenting to the active page root.
+- Page-scoped image insert and replacement work revalidates the active page plus the captured parent/node's ownership on that page after every pre-commit async boundary and at queue entry. If the page or ownership changed before persistence starts, the upload is cancelled and its unreferenced asset is removed.
+- Once an image document write starts, server and local reconciliation complete in the same per-file queue step. A later page switch preserves the newer active-page selection while the committed source-page document change is retained.
+- If a committed image result is superseded by newer collaboration state, the persisted server document converges to that live state before the result is reported discarded or asset cleanup starts. This server-only convergence is non-undoable and preserves the winning edit's Undo/Redo history.
+- Confirmed image reconciliation uses the document visible at queue start as its merge base, so mid-flight locks and later queued replacements converge without rejecting the server commit or letting an older result win.
+- In a collaboration session, an applied confirmed image insertion or replacement is a user-authored UndoManager transaction. Server-only convergence remains non-undoable; successful image edits must support Undo/Redo and persist both directions.
+- Concurrent image drops reserve distinct node IDs before their first async boundary. Previous replacement assets are not deleted immediately because editor undo history may still reference them; cleanup requires a separate history-aware GC policy.
+- If a confirmed image delta is completely superseded by a newer local delete, cleanup of that newly uploaded asset is queued after pending file writes; the server reference check remains authoritative.
+- Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
+- Local and collaborative Undo/Redo may mutate hidden pages, but their resulting selection is always filtered back to the live active page before Inspector, presence, or keyboard shortcuts can consume it.
+- Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
+
 ## 9. Agent Prompt Guide
 
 When modifying UI:

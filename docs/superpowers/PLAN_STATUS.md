@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-08-10
+Last audited: 2026-08-31
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,15 +29,48 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No active plan. The PR #319 comment-management slice and its exact post-merge
-legacy-ownership repair completed through PR #320. Start the next Penpot gap
-from the [product maturity benchmark](../product/penpot-maturity-benchmark.md)
-with a new plan instead of reopening this historical plan without a new failed
-case.
+No active plan. The editor-entry and active-page navigation slice is completed
+by PR #322's merge gate. Start the next Penpot gap from the product maturity
+benchmark instead of extending that bounded navigation slice without a new
+failed case.
 
 ## Recently Completed Plan
 
-`2026-07-23-penpot-comment-management.md` completed across PR #319 and the
+`2026-08-31-editor-entry-page-navigation.md` is completed by PR #322. It adapts
+Penpot's explicit project entry, workspace shortcut Help, and visible page
+navigation to Layo's local-first editor shell. The shipped contract replaces
+dead first-run affordances, preserves native controls without breaking layer
+selection shortcuts, and makes the active page own canvas paint, Layers,
+comments, Inspector/Dev context, pointer hit testing, measurement, marquee,
+bulk selection, clipboard paste ownership, and drag-snap targets. Exact-head
+review also repaired cross-page paste coordinates, hidden-page snap guides, and
+cosmetic-only snap deltas. Superseded-head CI then repaired layer-focused Space
+pan and Enter path editing without weakening ordinary control activation.
+Follow-up review fixed copy-time parent-origin drift and delayed page-scoped
+image-upload races, including committed-write reconciliation that preserves a
+newer active-page selection, mid-flight locks, queued replacement order, and
+distinct concurrent image IDs. Captured image parents and replacement targets
+are revalidated against the active page through queue entry so remote moves
+cannot write to a hidden page. Already-committed stale inserts and replacements
+converge the filesystem document back to the winning Yjs state before cleanup,
+without adding phantom Undo history. Immediate prior-asset deletion stays deferred
+until history-aware GC can preserve Undo, and discarded confirmed deltas do not
+add phantom history or orphan their newly uploaded assets. Applied collaborative
+image insertions and replacements now enter Yjs Undo/Redo history and persist
+both directions. Final review also
+scoped remote cursor, selection, and editing presence to the active page,
+reconciled incoming delete/move presence, kept saved-version preview overlays
+silent, preserved the live active page and selection across older-version
+preview fallbacks, scopes local and collaborative Undo/Redo selection back to
+the active page, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
+passed workspace typecheck, the full root test gate, the production web build,
+the focused no-retry Playwright cases, the complete collaboration Playwright
+suite 11/11 without retry, the combined image/preview matrix 9/9 without retry, and a
+direct live browser pass with zero console errors or warnings. Page CRUD,
+File-panel density, 1024px comfort, focus return, and persistent status feedback
+remain separate gaps.
+
+2026-07-23-penpot-comment-management.md completed across PR #319 and the
 failure-learning repair PR #320. PR #319 shipped the main comment workflow as
 `e87fe7e0e980ba7375a734ac08767b6af2a51e14`; its late configured review exposed
 the legacy ownership P1. PR #320 final head

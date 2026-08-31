@@ -85,6 +85,7 @@ export interface EditorState {
 export interface EditorNodeClipboard {
   sourceNodeId: string;
   parentId: string;
+  sourceParentOrigin: { x: number; y: number };
   node: RendererNode;
 }
 
@@ -1084,9 +1085,13 @@ export function isNodeVisible(node: RendererNode | null | undefined): boolean {
 export function getTopmostNodeIdAtPoint(
   document: RendererDocument,
   point: { x: number; y: number },
-  excludedNodeIds = new Set<string>()
+  excludedNodeIds = new Set<string>(),
+  pageId?: string
 ): string | null {
-  for (const page of document.pages) {
+  const pages = pageId
+    ? document.pages.filter((page) => page.id === pageId)
+    : document.pages;
+  for (const page of pages) {
     const pageChildren = nodesInPaintOrder(page.children);
     for (let index = pageChildren.length - 1; index >= 0; index -= 1) {
       const found = topmostNodeIdAtPointInTree(pageChildren[index], point, { x: 0, y: 0 }, excludedNodeIds);
@@ -1190,6 +1195,26 @@ export function setMultiSelection(
     ...state,
     selection: normalizeSelection(state.document, nodeIds, primaryNodeId)
   };
+}
+
+export function scopeSelectionToPage(
+  state: EditorState,
+  pageId: string | null
+): EditorState {
+  const page = pageId ? state.document.pages.find((candidate) => candidate.id === pageId) : null;
+  if (!page) {
+    return setSelection(state, null);
+  }
+
+  const pageDocument = { ...state.document, pages: [page] };
+  const nodeIds = selectionNodeIds(state.selection).filter((nodeId) =>
+    Boolean(findNodeById(pageDocument, nodeId))
+  );
+  const primaryNodeId =
+    state.selection.nodeId && nodeIds.includes(state.selection.nodeId)
+      ? state.selection.nodeId
+      : nodeIds.at(-1) ?? null;
+  return setMultiSelection(state, nodeIds, primaryNodeId);
 }
 
 export function toggleSelection(state: EditorState, nodeId: string): EditorState {
@@ -1314,12 +1339,16 @@ export function ungroupSelectedNode(state: EditorState): EditorState {
 export function selectNodesInBounds(
   state: EditorState,
   bounds: SelectionBounds,
-  mode: "replace" | "add" = "replace"
+  mode: "replace" | "add" = "replace",
+  pageId?: string
 ): EditorState {
   const normalizedBounds = normalizeBounds(bounds);
   const selectedNodeIds: string[] = [];
 
-  for (const page of state.document.pages) {
+  const pages = pageId
+    ? state.document.pages.filter((page) => page.id === pageId)
+    : state.document.pages;
+  for (const page of pages) {
     for (const node of page.children) {
       selectedNodeIds.push(...collectNodeIdsInBounds(node, normalizedBounds, { x: 0, y: 0 }));
     }
@@ -1333,20 +1362,22 @@ export function selectNodesInBounds(
   return setMultiSelection(state, selectedNodeIds, selectedNodeIds.at(-1) ?? null);
 }
 
-export function selectAllPageNodes(state: EditorState): EditorState {
-  const firstPage = state.document.pages[0];
-  if (!firstPage) {
+export function selectAllPageNodes(state: EditorState, pageId?: string): EditorState {
+  const page = pageId
+    ? state.document.pages.find((candidate) => candidate.id === pageId)
+    : state.document.pages[0];
+  if (!page) {
     return state;
   }
 
-  const nodeIds = firstPage.children
+  const nodeIds = page.children
     .filter((node) => !isNodeLocked(node) && isNodeVisible(node))
     .map((node) => node.id);
 
   return setMultiSelection(state, nodeIds, nodeIds.at(-1) ?? null);
 }
 
-export function selectNodesWithSameKind(state: EditorState): EditorState {
+export function selectNodesWithSameKind(state: EditorState, pageId?: string): EditorState {
   const selectedNodeId = state.selection.nodeId;
   const selectedNode = selectedNodeId ? findNodeById(state.document, selectedNodeId) : null;
   if (!selectedNode) {
@@ -1354,7 +1385,10 @@ export function selectNodesWithSameKind(state: EditorState): EditorState {
   }
 
   const nodeIds: string[] = [];
-  for (const page of state.document.pages) {
+  const pages = pageId
+    ? state.document.pages.filter((page) => page.id === pageId)
+    : state.document.pages;
+  for (const page of pages) {
     for (const node of page.children) {
       collectNodeIdsByKind(node, selectedNode.kind, nodeIds);
     }
@@ -1672,6 +1706,7 @@ export function copySelectedNode(state: EditorState): EditorNodeClipboard | null
   return {
     sourceNodeId: selected.node.id,
     parentId: selected.parentId,
+    sourceParentOrigin: getParentAbsolutePosition(state.document, selected.parentId),
     node: structuredClone(selected.node)
   };
 }
@@ -1691,35 +1726,56 @@ export function setSelectedNodeStyle(state: EditorState, style: EditorNodeStyle)
 
 export function pasteCopiedNode(
   state: EditorState,
-  clipboard: EditorNodeClipboard | null
+  clipboard: EditorNodeClipboard | null,
+  targetPageId?: string
 ): EditorState {
   if (!clipboard) {
     return state;
   }
 
   const { copiedNode, copyIndex } = createClipboardNodeCopy(state.document, clipboard);
+  const parentId = resolveClipboardParentId(
+    state.document,
+    clipboard.parentId,
+    targetPageId
+  );
+  if (!parentId) {
+    return state;
+  }
+
+  const targetParentAbsolute = getParentAbsolutePosition(state.document, parentId);
+  const parentOffset =
+    parentId === clipboard.parentId
+      ? { x: 0, y: 0 }
+      : {
+          x: clipboard.sourceParentOrigin.x - targetParentAbsolute.x,
+          y: clipboard.sourceParentOrigin.y - targetParentAbsolute.y
+        };
   copiedNode.transform = {
     ...copiedNode.transform,
-    x: copiedNode.transform.x + PASTE_OFFSET * copyIndex,
-    y: copiedNode.transform.y + PASTE_OFFSET * copyIndex
+    x: copiedNode.transform.x + parentOffset.x + PASTE_OFFSET * copyIndex,
+    y: copiedNode.transform.y + parentOffset.y + PASTE_OFFSET * copyIndex
   };
 
-  return insertCopiedNode(state, clipboard, copiedNode);
+  return insertCopiedNode(state, parentId, copiedNode);
 }
 
 export function pasteCopiedNodeAt(
   state: EditorState,
   clipboard: EditorNodeClipboard | null,
-  point: { x: number; y: number } | null
+  point: { x: number; y: number } | null,
+  targetPageId?: string
 ): EditorState {
   if (!clipboard || !point) {
     return state;
   }
 
   const { copiedNode } = createClipboardNodeCopy(state.document, clipboard);
-  const parentId = findParentChildren(state.document, clipboard.parentId)
-    ? clipboard.parentId
-    : state.document.pages[0]?.id;
+  const parentId = resolveClipboardParentId(
+    state.document,
+    clipboard.parentId,
+    targetPageId
+  );
   if (!parentId) {
     return state;
   }
@@ -6349,21 +6405,39 @@ function createClipboardNodeCopy(
 
 function insertCopiedNode(
   state: EditorState,
-  clipboard: EditorNodeClipboard,
+  parentId: string,
   copiedNode: RendererNode
 ): EditorState {
-  const parentId = findParentChildren(state.document, clipboard.parentId)
-    ? clipboard.parentId
-    : state.document.pages[0]?.id;
-  if (!parentId) {
-    return state;
-  }
-
   return executeEditorCommand(state, {
     type: "create_node",
     parentId,
     node: copiedNode
   });
+}
+
+function resolveClipboardParentId(
+  document: RendererDocument,
+  clipboardParentId: string,
+  targetPageId?: string
+): string | null {
+  if (!targetPageId) {
+    return findParentChildren(document, clipboardParentId)
+      ? clipboardParentId
+      : document.pages[0]?.id ?? null;
+  }
+
+  const targetPage = document.pages.find((page) => page.id === targetPageId);
+  if (!targetPage) {
+    return null;
+  }
+  if (clipboardParentId === targetPage.id) {
+    return targetPage.id;
+  }
+
+  const parentBelongsToTargetPage = targetPage.children.some(
+    (node) => findInNode(node, clipboardParentId) !== null
+  );
+  return parentBelongsToTargetPage ? clipboardParentId : targetPage.id;
 }
 
 function getParentAbsolutePosition(

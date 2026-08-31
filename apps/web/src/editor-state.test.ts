@@ -35,6 +35,7 @@ import {
   selectAllPageNodes,
   selectNodesInBounds,
   selectNodesWithSameKind,
+  scopeSelectionToPage,
   setSelectedImageFitMode,
   setSelectedNodeLocked,
   setSelectedNodeStyle,
@@ -3183,6 +3184,81 @@ describe("editor state commands", () => {
     expect(sameKind.selection.nodeId).toBe("rectangle-2");
   });
 
+  test("scopes hit testing and bulk selection to an explicit active page", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: [
+        {
+          id: "page-2-rectangle",
+          kind: "rectangle",
+          name: "페이지 2 사각형",
+          transform: { x: 180, y: 140, rotation: 0 },
+          size: { width: 160, height: 96 },
+          style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" },
+          children: []
+        }
+      ]
+    });
+
+    expect(getTopmostNodeIdAtPoint(document, { x: 190, y: 150 }, new Set(), "page-1")).toBe(
+      "rectangle-1"
+    );
+    expect(getTopmostNodeIdAtPoint(document, { x: 190, y: 150 }, new Set(), "page-2")).toBe(
+      "page-2-rectangle"
+    );
+
+    const activePageState = createEditorState(document);
+    const selectedInBounds = selectNodesInBounds(
+      activePageState,
+      { x: 170, y: 130, width: 180, height: 120 },
+      "replace",
+      "page-2"
+    );
+    expect(selectedInBounds.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const selectedAll = selectAllPageNodes(activePageState, "page-2");
+    expect(selectedAll.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const selectedSameKind = selectNodesWithSameKind(
+      setSelection(activePageState, "page-2-rectangle"),
+      "page-2"
+    );
+    expect(selectedSameKind.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const mixedSelection = setMultiSelection(
+      activePageState,
+      ["rectangle-1", "page-2-rectangle"],
+      "rectangle-1"
+    );
+    expect(scopeSelectionToPage(mixedSelection, "page-2").selection).toEqual({
+      nodeId: "page-2-rectangle",
+      nodeIds: ["page-2-rectangle"]
+    });
+  });
+
+  test("keeps redo-created nodes from selecting a hidden page", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: []
+    });
+    const created = executeEditorCommand(createEditorState(document), {
+      type: "create_node",
+      parentId: "page-1",
+      node: createRectangleNode(3)
+    });
+    const pageTwoState = setSelection(created, null);
+    const undone = scopeSelectionToPage(undo(pageTwoState), "page-2");
+    const redone = scopeSelectionToPage(redo(undone), "page-2");
+
+    expect(findNodeById(redone.document, "rectangle-3")).not.toBeNull();
+    expect(redone.selection).toEqual({ nodeId: null, nodeIds: [] });
+  });
+
   test("flips selected sibling nodes around the selection bounds with undo support", () => {
     const document = sampleDocumentWithTopLevelRectangle();
     document.pages[0]?.children.push({
@@ -3343,6 +3419,50 @@ describe("editor state commands", () => {
     );
   });
 
+  test("ignores snap targets outside the active page", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: [
+        {
+          id: "hidden-snap-target",
+          kind: "rectangle",
+          name: "숨은 스냅 기준",
+          transform: { x: 400, y: 600, rotation: 0 },
+          size: { width: 160, height: 96 },
+          style: { fill: "#f8fafc", stroke: "#64748b", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" },
+          children: []
+        }
+      ]
+    });
+    const movingBounds = getSelectionBoundsForNodeIds(document, ["rectangle-1"]);
+    expect(movingBounds).not.toBeNull();
+
+    const documentWide = calculateSnapForMovingBounds(
+      document,
+      ["rectangle-1"],
+      movingBounds!,
+      { x: 55, y: 0 },
+      6
+    );
+    expect(documentWide.delta.x).toBe(60);
+    expect(documentWide.guides).toContainEqual(
+      expect.objectContaining({ orientation: "vertical", x: 400 })
+    );
+
+    const activePageDocument = { ...document, pages: [document.pages[0]!] };
+    const activePageOnly = calculateSnapForMovingBounds(
+      activePageDocument,
+      ["rectangle-1"],
+      movingBounds!,
+      { x: 55, y: 0 },
+      6
+    );
+    expect(activePageOnly).toEqual({ delta: { x: 55, y: 0 }, guides: [] });
+  });
+
   test("creates predictable default rectangle and text nodes for toolbar actions", () => {
     const rectangle = createRectangleNode(3);
     const text = createTextNode(4);
@@ -3459,6 +3579,134 @@ describe("editor state commands", () => {
     expect(pastedNode?.transform).toMatchObject({ x: 100, y: 160 });
     expect(pasted.selection.nodeId).toBe("text-1-copy-1");
     expect(findNodeById(undo(pasted).document, "text-1-copy-1")).toBeNull();
+  });
+
+  test("routes cross-page pastes to the active page while retaining same-page nested parents", () => {
+    const document = sampleDocument();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: [
+        {
+          id: "frame-2",
+          kind: "frame",
+          name: "두 번째 프레임",
+          transform: { x: 600, y: 80, rotation: 0 },
+          size: { width: 420, height: 280 },
+          style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" },
+          children: [
+            {
+              id: "text-2",
+              kind: "text",
+              name: "두 번째 헤드라인",
+              transform: { x: 32, y: 40, rotation: 0 },
+              size: { width: 260, height: 48 },
+              style: { fill: "#052e16", stroke: null, stroke_width: 0, opacity: 1 },
+              content: {
+                type: "text",
+                value: "페이지 2",
+                font_size: 28,
+                font_family: "Inter"
+              },
+              children: []
+            }
+          ]
+        }
+      ]
+    });
+
+    const pageOneState = setSelection(createEditorState(document), "text-1");
+    const pageOneClipboard = copySelectedNode(pageOneState);
+    const crossPagePaste = pasteCopiedNode(pageOneState, pageOneClipboard, "page-2");
+    expect(crossPagePaste.document.pages[0]?.children[0]?.children).toHaveLength(1);
+    expect(crossPagePaste.document.pages[1]?.children.map((node) => node.id)).toContain(
+      "text-1-copy-1"
+    );
+    expect(findNodeById(crossPagePaste.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 176,
+      y: 144
+    });
+
+    const movedSourceParent = executeEditorCommand(pageOneState, {
+      type: "update_node_geometry",
+      nodeId: "frame-1",
+      patch: { x: 300, y: 240 }
+    });
+    const pasteAfterSourceMove = pasteCopiedNode(
+      movedSourceParent,
+      pageOneClipboard,
+      "page-2"
+    );
+    expect(findNodeById(pasteAfterSourceMove.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 176,
+      y: 144
+    });
+
+    const sameParentAfterMove = pasteCopiedNode(
+      movedSourceParent,
+      pageOneClipboard,
+      "page-1"
+    );
+    expect(findNodeById(sameParentAfterMove.document, "frame-1")?.children.map((node) => node.id)).toContain(
+      "text-1-copy-1"
+    );
+    expect(findNodeById(sameParentAfterMove.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 56,
+      y: 64
+    });
+
+    const deletedSourceParent = deleteSelectedNode(
+      setSelection(createEditorState(document), "frame-1")
+    );
+    const pasteAfterSourceDelete = pasteCopiedNode(
+      deletedSourceParent,
+      pageOneClipboard,
+      "page-2"
+    );
+    expect(findNodeById(pasteAfterSourceDelete.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 176,
+      y: 144
+    });
+
+    const crossPagePointPaste = pasteCopiedNodeAt(
+      pageOneState,
+      pageOneClipboard,
+      { x: 220, y: 240 },
+      "page-2"
+    );
+    const pointPaste = crossPagePointPaste.document.pages[1]?.children.find(
+      (node) => node.id === "text-1-copy-1"
+    );
+    expect(pointPaste?.transform).toMatchObject({ x: 220, y: 240 });
+
+    const pageTwoState = setSelection(createEditorState(document), "text-2");
+    const pageTwoClipboard = copySelectedNode(pageTwoState);
+    const nestedPaste = pasteCopiedNode(pageTwoState, pageTwoClipboard, "page-2");
+    expect(findNodeById(nestedPaste.document, "frame-2")?.children.map((node) => node.id)).toContain(
+      "text-2-copy-1"
+    );
+    expect(findNodeById(nestedPaste.document, "text-2-copy-1")?.transform).toMatchObject({
+      x: 56,
+      y: 64
+    });
+
+    const nestedPointPaste = pasteCopiedNodeAt(
+      pageTwoState,
+      pageTwoClipboard,
+      { x: 700, y: 200 },
+      "page-2"
+    );
+    expect(findNodeById(nestedPointPaste.document, "frame-2")?.children.map((node) => node.id)).toContain(
+      "text-2-copy-1"
+    );
+    expect(findNodeById(nestedPointPaste.document, "text-2-copy-1")?.transform).toMatchObject({
+      x: 100,
+      y: 120
+    });
+
+    const invalidTarget = pasteCopiedNode(pageOneState, pageOneClipboard, "missing-page");
+    expect(invalidTarget).toBe(pageOneState);
   });
 
   test("resizes selected images back to their original uploaded dimensions", () => {

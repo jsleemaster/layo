@@ -56,7 +56,8 @@ describe("team access token administration", () => {
         authenticateTeamMember(
           source.config,
           "owner-user",
-          "layo_pat_one_time_secret"
+          "layo_pat_one_time_secret",
+          new Date("2026-07-15T09:30:00.000Z")
         )
       ).toMatchObject({
         userId: "owner-user",

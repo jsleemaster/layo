@@ -23,6 +23,7 @@ export interface CollaborationPresence {
   userId: string;
   displayName: string;
   color: string;
+  activePageId: string | null;
   selectedNodeId: string | null;
   editingNodeId: string | null;
   editingMode: "drag" | "resize" | "text" | "agent" | null;
@@ -69,6 +70,7 @@ const presenceSchema = z
     userId: z.string().trim().min(1),
     displayName: z.string().trim().min(1),
     color: z.string().trim().min(1),
+    activePageId: z.string().trim().min(1).nullable().default(null),
     selectedNodeId: z.string().nullable().default(null),
     editingNodeId: z.string().nullable().default(null),
     editingMode: z.enum(["drag", "resize", "text", "agent"]).nullable().default(null),
@@ -85,6 +87,7 @@ const presenceSchema = z
 
 export function createPresenceState(input: CollaborationPresenceInput): CollaborationPresence {
   return presenceSchema.parse({
+    activePageId: null,
     selectedNodeId: null,
     editingNodeId: null,
     editingMode: null,

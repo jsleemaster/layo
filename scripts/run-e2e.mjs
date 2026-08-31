@@ -7,7 +7,20 @@ import path from "node:path";
 
 const readinessTimeoutMs = 45_000;
 const readinessPollMs = 250;
+const requestedPlaywrightArgs = normalizeArgs(process.argv.slice(2));
+const playwrightArgs = withCiRetries(requestedPlaywrightArgs);
 const services = [
+  ...(isCollaborationSpecRequested(requestedPlaywrightArgs)
+    ? [
+        {
+          name: "collaboration relay",
+          command: "pnpm",
+          args: ["--filter", "@layo/collab-relay", "start"],
+          url: "http://127.0.0.1:4327/health",
+          reuseExisting: true
+        }
+      ]
+    : []),
   {
     name: "server",
     command: "pnpm",
@@ -22,7 +35,6 @@ const services = [
   }
 ];
 
-const playwrightArgs = withCiRetries(normalizeArgs(process.argv.slice(2)));
 const started = [];
 const e2eStorageRoot = await mkdtemp(path.join(tmpdir(), "layo-e2e-"));
 const e2eStorageToken = randomUUID();
@@ -41,6 +53,10 @@ const e2eEnvironment = {
 try {
   for (const service of services) {
     if (await isReady(service.url)) {
+      if (service.reuseExisting) {
+        console.log(`[e2e] reusing ${service.name} at ${service.url}`);
+        continue;
+      }
       throw new Error(
         `[e2e] ${service.name} is already running at ${service.url}; stop it before starting isolated E2E`
       );
@@ -70,6 +86,10 @@ try {
 
 function normalizeArgs(args) {
   return args[0] === "--" ? args.slice(1) : args;
+}
+
+function isCollaborationSpecRequested(args) {
+  return args.length === 0 || args.some((arg) => arg.includes("collaboration.spec.ts"));
 }
 
 function withCiRetries(args) {

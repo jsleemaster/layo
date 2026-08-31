@@ -4,7 +4,8 @@ import {
   createDocumentRoomId,
   createPresenceState,
   createSharedKeyEncryptionConfig,
-  createTeamManifest
+  createTeamManifest,
+  type CollaborationPresence
 } from "@layo/collaboration";
 import {
   createCollabDocumentSession,
@@ -298,6 +299,7 @@ describe("web collaboration session", () => {
         userId: "user-1",
         displayName: "Lee",
         color: "#2563eb",
+        activePageId: null,
         selectedNodeId: "text-1",
         editingNodeId: null,
         editingMode: null,
@@ -308,6 +310,61 @@ describe("web collaboration session", () => {
         activeTool: "select"
       }
     ]);
+
+    session.destroy();
+  });
+
+  test("publishes active-page presence while preserving the remaining local state", () => {
+    const providerUpdates: CollaborationPresence[] = [];
+    const providerFactory: CollaborationProviderFactory = () => ({
+      onStatus(listener) {
+        listener("synced");
+      },
+      onPresence() {
+        return () => {};
+      },
+      updatePresence(presence) {
+        providerUpdates.push(presence);
+      },
+      getPresence() {
+        return [];
+      },
+      destroy() {}
+    });
+    const team = createTeamManifest({
+      name: "Page Presence Team",
+      currentUser: {
+        userId: "user-1",
+        displayName: "Lee",
+        color: "#2563eb"
+      },
+      sync: {
+        mode: "websocket",
+        roomPrefix: "layo",
+        relayUrl: "ws://127.0.0.1:4327"
+      }
+    });
+    const session = createCollabDocumentSession({
+      team,
+      documentId: "sample-file",
+      initialDocument: sampleDocument(),
+      enablePersistence: false,
+      providerFactory
+    });
+
+    session.updatePresence({ selectedNodeId: "text-1", activeTool: "select" });
+    session.updatePresence({ activePageId: "page-2" });
+
+    expect(session.getLocalPresence()).toMatchObject({
+      activePageId: "page-2",
+      selectedNodeId: "text-1",
+      activeTool: "select"
+    });
+    expect(providerUpdates.at(-1)).toMatchObject({
+      activePageId: "page-2",
+      selectedNodeId: "text-1",
+      activeTool: "select"
+    });
 
     session.destroy();
   });

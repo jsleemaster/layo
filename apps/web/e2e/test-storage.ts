@@ -22,17 +22,20 @@ export async function resetE2eStorage() {
   }
   const canonicalRoot = await assertOwnedE2eStorageRoot(storageRoot, storageToken);
   let lastError: unknown;
+  let lastEntries: string[] = [];
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     try {
       await removeStorageEntries(canonicalRoot);
       await delay(75);
-      if ((await storageEntries(canonicalRoot)).length > 0) {
+      lastEntries = await storageEntries(canonicalRoot);
+      if (lastEntries.length > 0) {
         continue;
       }
 
       await delay(75);
-      if ((await storageEntries(canonicalRoot)).length === 0) {
+      lastEntries = await storageEntries(canonicalRoot);
+      if (lastEntries.length === 0) {
         return;
       }
     } catch (error) {
@@ -40,7 +43,8 @@ export async function resetE2eStorage() {
     }
   }
 
-  throw new Error("E2E storage did not stabilize after repeated cleanup", { cause: lastError });
+  const suffix = lastEntries.length > 0 ? `: ${lastEntries.join(", ")}` : "";
+  throw new Error(`E2E storage did not stabilize after repeated cleanup${suffix}`, { cause: lastError });
 }
 
 async function assertOwnedE2eStorageRoot(storageRoot: string, storageToken: string) {

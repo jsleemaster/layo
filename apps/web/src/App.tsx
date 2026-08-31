@@ -210,6 +210,7 @@ import {
   selectAllPageNodes,
   selectNodesInBounds,
   selectNodesWithSameKind,
+  scopeSelectionToPage,
   setSelection,
   setMultiSelection,
   setSelectedNodeLocked,
@@ -250,6 +251,7 @@ import {
 } from "./path-editor";
 import {
   documentPointToViewport,
+  getPageScopedSelection,
   getRemotePresence,
   getSelectedNodeBounds,
   REMOTE_PRESENCE_STALE_MS,
@@ -1419,12 +1421,13 @@ const FRAME_PRESET_CATEGORIES = [
   { name: "아카이브", size: "이전 규격" }
 ];
 type TeamPanelMode = "local" | "relay" | "manifest";
-type LeftPanelMode = "files" | "assets" | "layers" | "team";
+type LeftPanelMode = "files" | "assets" | "layers" | "team" | "help";
 
 interface FileVersionPreviewState {
   version: FileVersionSummary;
   document: RendererDocument;
   summary: FileVersionChangeSummary;
+  activePageId: string | null;
 }
 
 interface FileArchiveReviewState {
@@ -1840,6 +1843,7 @@ const IMPORTED_IMAGE_MAX_DIMENSION = 480;
 
 function remotePresenceSignature(member: CollaborationPresence) {
   return JSON.stringify({
+    activePageId: member.activePageId,
     selectedNodeId: member.selectedNodeId,
     selectedNodeBounds: member.selectedNodeBounds,
     cursor: member.cursor,
@@ -2682,16 +2686,56 @@ function collaborationStatusLabel(status: string): string {
   }
 }
 
-function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+function isTextEntryKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
 
-  return (
+  return Boolean(
     target.isContentEditable ||
     target.tagName === "INPUT" ||
     target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT"
+    target.tagName === "SELECT" ||
+    target.closest('input, textarea, select, [contenteditable="true"]')
+  );
+}
+
+function shouldPreserveInteractiveKeyboardEvent(event: KeyboardEvent): boolean {
+  if (isTextEntryKeyboardTarget(event.target)) {
+    return true;
+  }
+
+  if (!(event.target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const interactiveTarget = event.target.closest<HTMLElement>(
+    'button, summary, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="switch"]'
+  );
+  if (!interactiveTarget) {
+    return false;
+  }
+
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return false;
+  }
+
+  const isLayerSelectionControl = Boolean(interactiveTarget.closest(".layer-list"));
+  if (isLayerSelectionControl) {
+    return false;
+  }
+
+  if (event.key === " " || event.code === "Space" || event.key === "Enter") {
+    return true;
+  }
+
+  return (
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight" ||
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "Backspace" ||
+    event.key === "Delete"
   );
 }
 
@@ -4990,11 +5034,15 @@ function renderNode({
 }
 
 function RemotePresenceOverlay({
+  activePageId,
+  legacyPageId,
   localSessionId,
   presence,
   nowMs,
   viewport
 }: {
+  activePageId: string | null;
+  legacyPageId: string | null;
   localSessionId: string | null;
   presence: CollaborationPresence[];
   nowMs: number;
@@ -5002,7 +5050,9 @@ function RemotePresenceOverlay({
 }) {
   const remotePresence = getRemotePresence(presence, localSessionId, {
     nowMs,
-    staleAfterMs: REMOTE_PRESENCE_STALE_MS
+    staleAfterMs: REMOTE_PRESENCE_STALE_MS,
+    activePageId,
+    legacyPageId
   });
 
   return (
@@ -6276,6 +6326,25 @@ function findNodeParentId(document: RendererDocument, nodeId: string): string | 
   }
 
   return null;
+}
+
+function isNodeOnDocumentPage(
+  document: RendererDocument,
+  nodeId: string,
+  pageId: string | null
+): boolean {
+  const page = pageId ? document.pages.find((candidate) => candidate.id === pageId) : null;
+  return Boolean(page && findNodeById({ ...document, pages: [page] }, nodeId));
+}
+
+function isParentOnDocumentPage(
+  document: RendererDocument,
+  parentId: string,
+  pageId: string
+): boolean {
+  return parentId === pageId
+    ? document.pages.some((page) => page.id === pageId)
+    : isNodeOnDocumentPage(document, parentId, pageId);
 }
 
 function findNodeParentIdInTree(parent: RendererNode, nodeId: string): string | null {
@@ -10111,6 +10180,7 @@ export function App() {
   const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("assets");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [activeTeamContext, setActiveTeamContext] = useState<TeamManifest | null>(null);
   const activeProjectTeamContext =
@@ -10190,6 +10260,7 @@ export function App() {
   accountTokenIdentityRef.current = accountTokenIdentityKey;
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
+  const activePageIdRef = useRef<string | null>(activePageId);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
   const componentVariantPersistenceRevisionRef = useRef(0);
   const documentSnapshotRevisionRef = useRef(0);
@@ -10305,6 +10376,7 @@ export function App() {
   const projectArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementNodeIdRef = useRef<string | null>(null);
+  const imageNodeIdReservationsRef = useRef(new Set<string>());
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
   const konvaStageRef = useRef<KonvaStage | null>(null);
   const inlineTextEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -11390,11 +11462,42 @@ export function App() {
 
   const isFileVersionPreviewing = fileVersionPreview !== null;
   const displayedDocument = fileVersionPreview?.document ?? editor?.document ?? null;
+  const livePageIdSignature = editor?.document.pages.map((page) => page.id).join("\u0000") ?? "";
+  useEffect(() => {
+    setActivePageId((current) => {
+      const pages = editor?.document.pages ?? [];
+      if (current && pages.some((page) => page.id === current)) {
+        return current;
+      }
+      return pages[0]?.id ?? null;
+    });
+  }, [editor?.document.id, livePageIdSignature]);
+
   const nodes = useMemo(
     () => (displayedDocument ? flattenRendererNodes(displayedDocument) : []),
     [displayedDocument]
   );
-  const activePage = displayedDocument?.pages[0] ?? null;
+  const liveActivePage =
+    editor?.document.pages.find((page) => page.id === activePageId) ??
+    editor?.document.pages[0] ??
+    null;
+  const activePage = fileVersionPreview
+    ? fileVersionPreview.document.pages.find((page) => page.id === fileVersionPreview.activePageId) ??
+      fileVersionPreview.document.pages[0] ??
+      null
+    : liveActivePage;
+  activePageIdRef.current = liveActivePage?.id ?? null;
+  const activePageDocument = useMemo(
+    () =>
+      displayedDocument && activePage
+        ? { ...displayedDocument, pages: [activePage] }
+        : null,
+    [activePage, displayedDocument]
+  );
+  const activePageNodes = useMemo(
+    () => (activePageDocument ? flattenRendererNodes(activePageDocument) : []),
+    [activePageDocument]
+  );
   const pageExportReviewItems = useMemo(
     () => (displayedDocument ? buildPageExportPresetReviewItems(displayedDocument, activePage?.id) : []),
     [activePage?.id, displayedDocument]
@@ -11412,10 +11515,10 @@ export function App() {
   );
   const commentBubbleOverlays = useMemo(
     () =>
-      editor && !isFileVersionPreviewing
-        ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport)
+      editor && activePageDocument && !isFileVersionPreviewing
+        ? createCommentBubbleOverlays(activePageDocument, commentThreads, editor.viewport)
         : [],
-    [commentThreads, editor, isFileVersionPreviewing]
+    [activePageDocument, commentThreads, editor, isFileVersionPreviewing]
   );
   const currentProjectCommentNotification = useMemo(
     () =>
@@ -11840,6 +11943,7 @@ export function App() {
   const showAssetPanel = leftPanelMode === "assets";
   const showLayerPanel = leftPanelMode === "files" || leftPanelMode === "layers";
   const showTeamPanel = leftPanelMode === "files" || leftPanelMode === "team";
+  const showHelpPanel = leftPanelMode === "help";
   const leftPanelTitle =
     leftPanelMode === "files"
       ? "파일"
@@ -11847,7 +11951,9 @@ export function App() {
         ? "에셋"
         : leftPanelMode === "layers"
           ? "레이어"
-          : "팀";
+          : leftPanelMode === "team"
+            ? "팀"
+            : "도움말";
 
   useEffect(() => {
     if (!inlineTextEditingNodeId) {
@@ -12005,9 +12111,16 @@ export function App() {
       return;
     }
 
+    const activePageId = activePageIdRef.current;
+    const pageSelection = getPageScopedSelection(
+      state.document,
+      state.selection.nodeId,
+      activePageId
+    );
     activeSession.updatePresence({
-      selectedNodeId: state.selection.nodeId,
-      selectedNodeBounds: getSelectedNodeBounds(state.document, state.selection.nodeId),
+      activePageId,
+      selectedNodeId: pageSelection.nodeId,
+      selectedNodeBounds: pageSelection.bounds,
       viewport: state.viewport,
       updatedAtMs: Date.now(),
       ...patch
@@ -12015,6 +12128,48 @@ export function App() {
     setPresenceClock(Date.now());
     publishPresenceSnapshot(activeSession);
   };
+
+  useEffect(() => {
+    const nextPageId = liveActivePage?.id ?? null;
+    let current = editorRef.current;
+    if (!isFileVersionPreviewing && current?.selection.nodeId) {
+      const pageSelection = getPageScopedSelection(
+        current.document,
+        current.selection.nodeId,
+        nextPageId
+      );
+      if (!pageSelection.nodeId) {
+        const nextState = setSelection(current, null);
+        editorRef.current = nextState;
+        setEditor(nextState);
+        current = nextState;
+      }
+    }
+
+    const activeSession = collabSessionRef.current;
+    if (!activeSession) {
+      return;
+    }
+
+    const pageSelection =
+      !isFileVersionPreviewing && current
+        ? getPageScopedSelection(current.document, current.selection.nodeId, nextPageId)
+        : { nodeId: null, bounds: null };
+    activeSession.updatePresence({
+      activePageId: nextPageId,
+      selectedNodeId: pageSelection.nodeId,
+      selectedNodeBounds: pageSelection.bounds,
+      cursor: null,
+      editingNodeId: null,
+      editingMode: null,
+      activeTool: "select",
+      ...(current ? { viewport: current.viewport } : {}),
+      updatedAtMs: Date.now()
+    });
+    publishedCursorRef.current = null;
+    setPresenceClock(Date.now());
+    publishPresenceSnapshot(activeSession);
+  }, [collabSession, isFileVersionPreviewing, liveActivePage?.id]);
 
   const enqueueDocumentPersistence = <T,>(fileId: string, operation: () => Promise<T>) =>
     documentPersistenceQueueRef.current.enqueue(fileId, operation);
@@ -12329,10 +12484,13 @@ export function App() {
       return false;
     }
 
-    const nextState = setMultiSelection(
-      { ...current, document, history: { past: [], future: [] } },
-      current.selection.nodeIds,
-      current.selection.nodeId
+    const nextState = scopeSelectionToPage(
+      setMultiSelection(
+        { ...current, document, history: { past: [], future: [] } },
+        current.selection.nodeIds,
+        current.selection.nodeId
+      ),
+      activePageIdRef.current
     );
     editorRef.current = nextState;
     setEditor(nextState);
@@ -12465,16 +12623,21 @@ export function App() {
 
   const pasteContextSelectionAtMenuPoint = () => {
     runContextMenuStateAction((state) =>
-      pasteCopiedNodeAt(state, objectClipboardRef.current, objectContextMenu?.documentPoint ?? null)
+      pasteCopiedNodeAt(
+        state,
+        objectClipboardRef.current,
+        objectContextMenu?.documentPoint ?? null,
+        activePage?.id
+      )
     );
   };
 
   const selectAllContextNodes = () => {
-    runContextMenuStateAction(selectAllPageNodes);
+    runContextMenuStateAction((state) => selectAllPageNodes(state, activePage?.id));
   };
 
   const selectSameKindContextNodes = () => {
-    runContextMenuStateAction(selectNodesWithSameKind);
+    runContextMenuStateAction((state) => selectNodesWithSameKind(state, activePage?.id));
   };
 
   const flipContextSelection = (axis: FlipAxis) => {
@@ -12732,14 +12895,15 @@ export function App() {
       const definition = node
         ? (state.document.components ?? []).find((component) => component.source_node.id === node.id)
         : null;
-      const firstPage = state.document.pages[0];
-      if (!node || !definition || !firstPage) {
+      const targetPage =
+        state.document.pages.find((page) => page.id === activePageId) ?? state.document.pages[0];
+      if (!node || !definition || !targetPage) {
         return state;
       }
 
       return executeEditorCommand(state, {
         type: "create_component_instance",
-        parentId: firstPage.id,
+        parentId: targetPage.id,
         definitionId: definition.id,
         instanceId: `instance-${flattenRendererNodes(state.document).length + 1}`,
         x: node.transform.x + 440,
@@ -12895,30 +13059,42 @@ export function App() {
     }
 
     const currentEditor = editorRef.current;
-    const node = currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
-    if (!node || node.kind !== "image" || isNodeLocked(node)) {
+    if (!currentEditor) {
+      return;
+    }
+    const node = findNodeById(currentEditor.document, nodeId);
+    if (
+      !node ||
+      node.kind !== "image" ||
+      node.content.type !== "image" ||
+      isNodeLocked(node)
+    ) {
       return;
     }
 
     const fileId = currentProject.currentDocumentId;
     const mutationGeneration = editorMutationGenerationRef.current;
+    const targetPageId = activePageIdRef.current;
+    const currentReplacementDocument = () =>
+      collabSessionRef.current?.documentId === fileId
+        ? collabSessionRef.current.getDocument()
+        : editorRef.current?.document ?? null;
+    const isCurrentPageReplacement = (document = currentReplacementDocument()) =>
+      !isEditorDocumentMutationBlocked() &&
+      mutationGeneration === editorMutationGenerationRef.current &&
+      currentProjectRef.current?.currentDocumentId === fileId &&
+      activePageIdRef.current === targetPageId &&
+      document?.id === fileId &&
+      isNodeOnDocumentPage(document, nodeId, targetPageId);
     let pendingAsset: UploadedAsset | null = null;
     try {
       const naturalSize = await readImageFileSize(file);
-      if (
-        isEditorDocumentMutationBlocked() ||
-        mutationGeneration !== editorMutationGenerationRef.current ||
-        currentProjectRef.current?.currentDocumentId !== fileId
-      ) {
+      if (!isCurrentPageReplacement()) {
         return;
       }
       const asset = await uploadImageAsset(file);
       pendingAsset = asset;
-      if (
-        isEditorDocumentMutationBlocked() ||
-        mutationGeneration !== editorMutationGenerationRef.current ||
-        currentProjectRef.current?.currentDocumentId !== fileId
-      ) {
+      if (!isCurrentPageReplacement()) {
         await deleteImageAssetIfUnreferenced(asset.assetId);
         pendingAsset = null;
         return;
@@ -12928,18 +13104,66 @@ export function App() {
         naturalWidth: naturalSize.width,
         naturalHeight: naturalSize.height
       };
-      await enqueueDocumentPersistence(fileId, () =>
-        persistImageAssetReplacement(fileId, nodeId, replacement)
-      );
-      pendingAsset = null;
-      applyPersistedEditorCommand(fileId, {
-        type: "replace_image_asset",
+      const confirmedCommand = {
+        type: "replace_image_asset" as const,
         nodeId,
         assetId: replacement.assetId,
         naturalWidth: replacement.naturalWidth,
         naturalHeight: replacement.naturalHeight
+      };
+      let persistenceStarted = false;
+      const reconciliationResult = await enqueueDocumentPersistence(fileId, () => {
+        if (!isCurrentPageReplacement()) {
+          return Promise.resolve("unavailable" as const);
+        }
+        const queuedEditor = editorRef.current;
+        if (!queuedEditor || queuedEditor.document.id !== fileId) {
+          return Promise.resolve("unavailable" as const);
+        }
+        const operationBaseDocument = structuredClone(
+          collabSessionRef.current?.documentId === fileId
+            ? collabSessionRef.current.getDocument()
+            : queuedEditor.document
+        );
+        if (!isCurrentPageReplacement(operationBaseDocument)) {
+          return Promise.resolve("unavailable" as const);
+        }
+        const queuedNode = findNodeById(operationBaseDocument, nodeId);
+        if (!queuedNode || queuedNode.content.type !== "image") {
+          return Promise.resolve("unavailable" as const);
+        }
+        const candidateState = executeEditorCommand(
+          { ...queuedEditor, document: operationBaseDocument },
+          confirmedCommand
+        );
+        if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
+          return Promise.resolve("unavailable" as const);
+        }
+        persistenceStarted = true;
+        return persistImageAssetReplacement(fileId, nodeId, replacement).then(() => {
+          const pageStillActive = isCurrentPageReplacement();
+          return reconcileConfirmedEditorCommand(
+            fileId,
+            operationBaseDocument,
+            confirmedCommand,
+            { preserveSelection: !pageStillActive }
+          );
+        });
       });
-      setProjectStatus(`${node.name} 이미지 바뀜`);
+      if (!persistenceStarted) {
+        await deleteImageAssetIfUnreferenced(asset.assetId);
+        pendingAsset = null;
+        return;
+      }
+      pendingAsset = null;
+      if (reconciliationResult === "discarded") {
+        await enqueueDocumentPersistence(fileId, () =>
+          deleteImageAssetIfUnreferenced(replacement.assetId)
+        );
+        setProjectStatus(`${node.name} 이미지 교체 취소됨`);
+      } else if (reconciliationResult === "applied") {
+        setProjectStatus(`${node.name} 이미지 바뀜`);
+      }
     } catch (error) {
       let cleanupError: unknown;
       if (pendingAsset) {
@@ -12993,6 +13217,18 @@ export function App() {
     });
   };
 
+  const openLeftPanel = (mode: LeftPanelMode) => {
+    setLeftPanelMode(mode);
+    setIsSidebarCollapsed(false);
+  };
+
+  const toggleHelpPanel = () => {
+    setLeftPanelMode((current) =>
+      current === "help" ? (editorRef.current ? "layers" : "assets") : "help"
+    );
+    setIsSidebarCollapsed(false);
+  };
+
   const openObjectContextMenuFromPointer = (event: KonvaEventObject<MouseEvent>) => {
     event.evt.preventDefault();
     event.cancelBubble = true;
@@ -13010,7 +13246,7 @@ export function App() {
 
     const documentPoint = documentPointFromKonvaEvent(event, editor.viewport, stageFrameRef.current);
     const targetNodeId = documentPoint
-      ? getTopmostNodeIdAtPoint(editor.document, documentPoint)
+      ? getTopmostNodeIdAtPoint(editor.document, documentPoint, new Set(), activePage?.id)
       : null;
 
     if (targetNodeId) {
@@ -13063,7 +13299,17 @@ export function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableKeyboardTarget(event.target)) {
+      const target = event.target;
+      const isTextEntryTarget =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+      if ((event.key === "?" || (event.code === "Slash" && event.shiftKey)) && !isTextEntryTarget) {
+        event.preventDefault();
+        toggleHelpPanel();
+        return;
+      }
+
+      if (shouldPreserveInteractiveKeyboardEvent(event)) {
         return;
       }
 
@@ -13111,7 +13357,12 @@ export function App() {
         if (collabSessionRef.current) {
           applyCollaborativeHistory(event.shiftKey ? "redo" : "undo");
         } else {
-          updateEditorFromInteraction(event.shiftKey ? redo : undo);
+          updateEditorFromInteraction((state) =>
+            scopeSelectionToPage(
+              event.shiftKey ? redo(state) : undo(state),
+              activePageIdRef.current
+            )
+          );
         }
         return;
       }
@@ -13127,7 +13378,11 @@ export function App() {
       }
       if (isCommand && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        updateEditorFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
+        updateEditorFromInteraction((state) =>
+          event.shiftKey
+            ? selectNodesWithSameKind(state, activePage?.id)
+            : selectAllPageNodes(state, activePage?.id)
+        );
         return;
       }
       if (isCommand && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "e") {
@@ -13196,7 +13451,9 @@ export function App() {
       }
       if (isCommand && event.key.toLowerCase() === "v" && objectClipboardRef.current) {
         event.preventDefault();
-        updateEditorFromInteraction((state) => pasteCopiedNode(state, objectClipboardRef.current));
+        updateEditorFromInteraction((state) =>
+          pasteCopiedNode(state, objectClipboardRef.current, activePage?.id)
+        );
         return;
       }
       if (isCommand && event.key.toLowerCase() === "r") {
@@ -13374,7 +13631,7 @@ export function App() {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [stageSize.height, stageSize.width]);
+  }, [activePage?.id, stageSize.height, stageSize.width]);
 
   const applyEditorCommand = (command: Parameters<typeof executeEditorCommand>[1]) => {
     const currentEditor = editorRef.current;
@@ -13445,6 +13702,78 @@ export function App() {
       return false;
     }
     return applyEditorCommand(command);
+  };
+
+  const reconcileConfirmedEditorCommand = async (
+    fileId: string,
+    baseDocument: RendererDocument,
+    command: Parameters<typeof executeEditorCommand>[1],
+    options: { preserveSelection: boolean }
+  ) => {
+    const currentEditor = editorRef.current;
+    if (
+      !currentEditor ||
+      currentProjectRef.current?.currentDocumentId !== fileId ||
+      currentEditor.document.id !== fileId
+    ) {
+      return "unavailable" as const;
+    }
+
+    const activeSession =
+      collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+    const currentDocument = activeSession?.getDocument() ?? currentEditor.document;
+    const confirmedState = executeEditorCommand(
+      { ...currentEditor, document: structuredClone(baseDocument) },
+      command
+    );
+    if (rendererDocumentsEqual(confirmedState.document, baseDocument)) {
+      return "unavailable" as const;
+    }
+
+    const reconciledDocument = mergeConcurrentDocumentSnapshots(
+      baseDocument,
+      confirmedState.document,
+      currentDocument,
+      { conflictPreference: "current" }
+    );
+    if (rendererDocumentsEqual(reconciledDocument, currentDocument)) {
+      const persistedDocument = await stabilizeDocumentSnapshotPersistence(
+        fileId,
+        confirmedState.document,
+        reconciledDocument,
+        getDocumentSnapshotEpoch(fileId)
+      );
+      updateCollaborationSnapshotBaseline(activeSession, persistedDocument);
+      return "discarded" as const;
+    }
+    let nextState: EditorState = {
+      ...confirmedState,
+      document: reconciledDocument
+    };
+    if (options.preserveSelection) {
+      nextState = setMultiSelection(
+        nextState,
+        currentEditor.selection.nodeIds,
+        currentEditor.selection.nodeId
+      );
+    }
+
+    if (activeSession) {
+      activeSession.transact(
+        "confirmed-image-reconciliation",
+        () => reconciledDocument,
+        { undoable: true }
+      );
+      nextState = {
+        ...nextState,
+        document: activeSession.getDocument(),
+        history: { past: [], future: [] }
+      };
+      publishEditorPresence(nextState);
+    }
+    editorRef.current = nextState;
+    setEditor(nextState);
+    return "applied" as const;
   };
 
   gridTrackDispatchRef.current = dispatch;
@@ -14607,7 +14936,7 @@ export function App() {
     const rawDelta = pointerDelta;
     activeDrag.hasMoved = true;
     const snapped = calculateSnapForMovingBounds(
-      editor.document,
+      activePageDocument ?? editor.document,
       activeDrag.selectedNodeIds,
       activeDrag.selectionBounds,
       rawDelta
@@ -14618,17 +14947,18 @@ export function App() {
       return { delta: rawDelta, guides: snapped.guides, nativePosition: true };
     }
 
+    const resolvedDelta = snapped.delta;
     event.target.position({
-      x: activeDrag.startPosition.x + rawDelta.x,
-      y: activeDrag.startPosition.y + rawDelta.y
+      x: activeDrag.startPosition.x + resolvedDelta.x,
+      y: activeDrag.startPosition.y + resolvedDelta.y
     });
     setDragPreview({
       primaryNodeId: activeDrag.nodeId,
       nodeIds: activeDrag.selectedNodeIds,
-      delta: rawDelta
+      delta: resolvedDelta
     });
     setSnapGuides(snapped.guides);
-    return { delta: rawDelta, guides: snapped.guides };
+    return { delta: resolvedDelta, guides: snapped.guides };
   };
 
   const finishNodeDrag = (nodeId: string, event: KonvaEventObject<DragEvent>) => {
@@ -15806,9 +16136,17 @@ export function App() {
         await requireProjectDocumentLoad(project, nextProjects, transitionToken);
       });
       setProjectStatus("새 프로젝트 저장됨");
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "새 프로젝트를 만들지 못했습니다";
       setProjectStatus(message);
+      return false;
+    }
+  };
+
+  const createProjectFromAssetStart = async () => {
+    if (await createNewProject()) {
+      openLeftPanel("layers");
     }
   };
 
@@ -16691,6 +17029,37 @@ export function App() {
     document.body.style.cursor = "";
   };
 
+  const switchActivePage = (pageId: string) => {
+    if (fileVersionPreviewActiveRef.current) {
+      return;
+    }
+    const liveDocument = editorRef.current?.document;
+    if (
+      !liveDocument?.pages.some((page) => page.id === pageId) ||
+      pageId === liveActivePage?.id
+    ) {
+      return;
+    }
+    cancelActiveCanvasInteractions();
+    setMeasurementTargetNodeId(null);
+    activePageIdRef.current = pageId;
+    publishedCursorRef.current = null;
+    const current = editorRef.current;
+    if (current) {
+      const nextState = setSelection(current, null);
+      editorRef.current = nextState;
+      setEditor(nextState);
+      publishEditorPresence(nextState, {
+        activePageId: pageId,
+        cursor: null,
+        editingNodeId: null,
+        editingMode: null,
+        activeTool: "select"
+      });
+    }
+    setActivePageId(pageId);
+  };
+
   const previewCurrentFileVersion = async (version: FileVersionSummary) => {
     if (!currentProject || !editorRef.current) {
       setFileVersionStatus("프로젝트 없음");
@@ -16718,7 +17087,17 @@ export function App() {
         return;
       }
       fileVersionPreviewPendingRequestRef.current = null;
-      setFileVersionPreview({ version, document: snapshot.document, summary });
+      const livePageId = activePageIdRef.current;
+      const previewPageId =
+        snapshot.document.pages.find((page) => page.id === livePageId)?.id ??
+        snapshot.document.pages[0]?.id ??
+        null;
+      setFileVersionPreview({
+        version,
+        document: snapshot.document,
+        summary,
+        activePageId: previewPageId
+      });
       setFileVersionStatus(`${version.message} 미리보기`);
     } catch (error) {
       if (requestId !== fileVersionPreviewRequestRef.current) {
@@ -18001,8 +18380,9 @@ export function App() {
       return;
     }
 
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
     const selectedContainer =
@@ -18012,7 +18392,7 @@ export function App() {
 
     dispatch({
       type: "create_node",
-      parentId: selectedContainer?.id ?? firstPage.id,
+      parentId: selectedContainer?.id ?? targetPage.id,
       node:
         kind === "rectangle"
           ? createRectangleNode(nodes.length + 1)
@@ -18030,20 +18410,46 @@ export function App() {
 
     const fileId = currentProject.currentDocumentId;
     const mutationGeneration = editorMutationGenerationRef.current;
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
-
+    const targetPageId = targetPage.id;
     const selectedContainer =
       selectedNode && (selectedNode.kind === "frame" || selectedNode.kind === "component")
         ? selectedNode
         : null;
-    const parentId = selectedContainer?.id ?? firstPage.id;
+    const parentId = selectedContainer?.id ?? targetPage.id;
+    const currentInsertDocument = () =>
+      collabSessionRef.current?.documentId === fileId
+        ? collabSessionRef.current.getDocument()
+        : editorRef.current?.document ?? null;
+    const isCurrentPageInsert = (document = currentInsertDocument()) => {
+      return (
+        !isEditorDocumentMutationBlocked() &&
+        mutationGeneration === editorMutationGenerationRef.current &&
+        currentProjectRef.current?.currentDocumentId === fileId &&
+        activePageIdRef.current === targetPageId &&
+        document?.id === fileId &&
+        isParentOnDocumentPage(document, parentId, targetPageId)
+      );
+    };
     const parentOrigin = selectedContainer
       ? (getNodeAbsolutePosition(editor.document, selectedContainer.id) ?? { x: 0, y: 0 })
       : { x: 0, y: 0 };
-    const baseSequence = nodes.length;
+    const usedNodeIds = new Set(flattenRendererNodes(editor.document).map((node) => node.id));
+    const reservedImageSequences = files.map(() => {
+      let sequence = usedNodeIds.size + imageNodeIdReservationsRef.current.size + 1;
+      let nodeId = `image-${sequence}`;
+      while (usedNodeIds.has(nodeId) || imageNodeIdReservationsRef.current.has(nodeId)) {
+        sequence += 1;
+        nodeId = `image-${sequence}`;
+      }
+      imageNodeIdReservationsRef.current.add(nodeId);
+      return sequence;
+    });
+    const reservedImageIds = reservedImageSequences.map((sequence) => `image-${sequence}`);
     const point = insertionPoint ?? {
       x: (stageSize.width / 2 - editor.viewport.x) / editor.viewport.scale,
       y: (stageSize.height / 2 - editor.viewport.y) / editor.viewport.scale
@@ -18052,34 +18458,22 @@ export function App() {
     let pendingAsset: UploadedAsset | null = null;
     try {
       for (const [index, file] of files.entries()) {
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           return;
         }
         const naturalSize = await readImageFileSize(file);
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           return;
         }
         const asset = await uploadImageAsset(file);
         pendingAsset = asset;
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           await deleteImageAssetIfUnreferenced(asset.assetId);
           pendingAsset = null;
           return;
         }
         const imageSize = fitImportedImageSize(naturalSize);
-        const node = createImageNode(baseSequence + index + 1, {
+        const node = createImageNode(reservedImageSequences[index]!, {
           assetId: asset.assetId,
           naturalWidth: naturalSize.width,
           naturalHeight: naturalSize.height,
@@ -18088,11 +18482,57 @@ export function App() {
           width: imageSize.width,
           height: imageSize.height
         });
+        const confirmedCommand = { type: "create_node" as const, parentId, node };
 
-        await enqueueDocumentPersistence(fileId, () => persistCreatedNode(fileId, parentId, node));
+        let persistenceStarted = false;
+        const reconciliationResult = await enqueueDocumentPersistence(fileId, () => {
+          if (!isCurrentPageInsert()) {
+            return Promise.resolve("unavailable" as const);
+          }
+          const queuedEditor = editorRef.current;
+          if (!queuedEditor || queuedEditor.document.id !== fileId) {
+            return Promise.resolve("unavailable" as const);
+          }
+          const operationBaseDocument = structuredClone(
+            collabSessionRef.current?.documentId === fileId
+              ? collabSessionRef.current.getDocument()
+              : queuedEditor.document
+          );
+          if (!isCurrentPageInsert(operationBaseDocument)) {
+            return Promise.resolve("unavailable" as const);
+          }
+          const candidateState = executeEditorCommand(
+            { ...queuedEditor, document: operationBaseDocument },
+            confirmedCommand
+          );
+          if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
+            return Promise.resolve("unavailable" as const);
+          }
+          persistenceStarted = true;
+          return persistCreatedNode(fileId, parentId, node).then(() => {
+            const pageStillActive = isCurrentPageInsert();
+            return reconcileConfirmedEditorCommand(
+              fileId,
+              operationBaseDocument,
+              confirmedCommand,
+              { preserveSelection: !pageStillActive }
+            );
+          });
+        });
+        if (!persistenceStarted) {
+          await deleteImageAssetIfUnreferenced(asset.assetId);
+          pendingAsset = null;
+          return;
+        }
         pendingAsset = null;
-        applyPersistedEditorCommand(fileId, { type: "create_node", parentId, node });
-        setProjectStatus(`${node.name} 추가됨`);
+        if (reconciliationResult === "discarded") {
+          await enqueueDocumentPersistence(fileId, () =>
+            deleteImageAssetIfUnreferenced(asset.assetId)
+          );
+          setProjectStatus(`${node.name} 추가 취소됨`);
+        } else if (reconciliationResult === "applied") {
+          setProjectStatus(`${node.name} 추가됨`);
+        }
       }
     } catch (error) {
       let cleanupError: unknown;
@@ -18108,6 +18548,10 @@ export function App() {
         ? `${primaryMessage} · ${cleanupError.message}`
         : primaryMessage;
       setProjectStatus(message);
+    } finally {
+      for (const nodeId of reservedImageIds) {
+        imageNodeIdReservationsRef.current.delete(nodeId);
+      }
     }
   };
 
@@ -18162,14 +18606,15 @@ export function App() {
       return;
     }
 
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
 
     dispatch({
       type: "create_component_instance",
-      parentId: firstPage.id,
+      parentId: targetPage.id,
       definitionId: selectedComponent.id,
       instanceId: `instance-${nodes.length + 1}`,
       x: selectedNode ? selectedNode.transform.x + 440 : 520,
@@ -18237,16 +18682,52 @@ export function App() {
         }
       }
       const current = editorRef.current;
+      const nextPageId = activePageIdRef.current;
+      const isPreviewing = fileVersionPreviewActiveRef.current;
+      const activeSelectionNodeIds = current
+        ? isPreviewing
+          ? current.selection.nodeIds
+          : current.selection.nodeIds.filter(
+              (nodeId) => getPageScopedSelection(document, nodeId, nextPageId).nodeId
+            )
+        : [];
+      const activePrimaryNodeId =
+        current?.selection.nodeId && activeSelectionNodeIds.includes(current.selection.nodeId)
+          ? current.selection.nodeId
+          : activeSelectionNodeIds.at(-1) ?? null;
       const nextState = current
         ? setMultiSelection(
             { ...current, document, history: { past: [], future: [] } },
-            current.selection.nodeIds,
-            current.selection.nodeId
+            activeSelectionNodeIds,
+            activePrimaryNodeId
           )
         : createEditorState(document);
       editorRef.current = nextState;
       setEditor(nextState);
-      setPresence(session.getPresence());
+      const pageSelection = isPreviewing
+        ? { nodeId: null, bounds: null }
+        : getPageScopedSelection(document, nextState.selection.nodeId, nextPageId);
+      const localPresence = session.getLocalPresence();
+      const editingNodeId =
+        !isPreviewing &&
+        localPresence.editingNodeId &&
+        getPageScopedSelection(document, localPresence.editingNodeId, nextPageId).nodeId
+          ? localPresence.editingNodeId
+          : null;
+      session.updatePresence({
+        activePageId: nextPageId,
+        selectedNodeId: pageSelection.nodeId,
+        selectedNodeBounds: pageSelection.bounds,
+        editingNodeId,
+        editingMode: editingNodeId ? localPresence.editingMode : null,
+        cursor: isPreviewing ? null : localPresence.cursor,
+        viewport: nextState.viewport,
+        updatedAtMs: Date.now()
+      });
+      setPresenceClock(Date.now());
+      setPresence(
+        normalizePresenceForOverlay(session.getPresence(), session.getLocalPresence().sessionId)
+      );
     });
     session.subscribePresence((nextPresence) => {
       setPresence(normalizePresenceForOverlay(nextPresence, session.getLocalPresence().sessionId));
@@ -18255,9 +18736,15 @@ export function App() {
       setCollabStatus(nextStatus);
     });
     collabSessionRef.current = session;
+    const initialPageSelection = getPageScopedSelection(
+      initialDocument,
+      editor?.selection.nodeId ?? null,
+      activePageIdRef.current
+    );
     session.updatePresence({
-      selectedNodeId: editor?.selection.nodeId ?? null,
-      selectedNodeBounds: getSelectedNodeBounds(initialDocument, editor.selection.nodeId),
+      activePageId: activePageIdRef.current,
+      selectedNodeId: initialPageSelection.nodeId,
+      selectedNodeBounds: initialPageSelection.bounds,
       viewport: editor.viewport,
       updatedAtMs: Date.now()
     });
@@ -18734,7 +19221,8 @@ export function App() {
     const targetNodeId = getTopmostNodeIdAtPoint(
       editor.document,
       documentPoint,
-      new Set(editor.selection.nodeIds)
+      new Set(editor.selection.nodeIds),
+      activePage?.id
     );
     setMeasurementTargetNodeId((current) => (current === targetNodeId ? current : targetNodeId));
   };
@@ -18903,7 +19391,12 @@ export function App() {
           return current;
         }
 
-        const nextState = selectNodesInBounds(current, bounds, activeAreaSelection.mode);
+        const nextState = selectNodesInBounds(
+          current,
+          bounds,
+          activeAreaSelection.mode,
+          activePage?.id
+        );
         publishEditorPresence(nextState, { activeTool: "select" });
         return nextState;
       });
@@ -18972,7 +19465,7 @@ export function App() {
         event.preventDefault();
         return;
       }
-      if (isEditableKeyboardTarget(event.target) || isEditableKeyboardTarget(document.activeElement)) {
+      if (isTextEntryKeyboardTarget(event.target) || isTextEntryKeyboardTarget(document.activeElement)) {
         return;
       }
 
@@ -19011,7 +19504,7 @@ export function App() {
             aria-label="파일"
             aria-pressed={leftPanelMode === "files"}
             title="파일"
-            onClick={() => setLeftPanelMode("files")}
+            onClick={() => openLeftPanel("files")}
           >
             ▦
           </button>
@@ -19020,7 +19513,7 @@ export function App() {
             aria-label="에셋"
             aria-pressed={leftPanelMode === "assets"}
             title="에셋"
-            onClick={() => setLeftPanelMode("assets")}
+            onClick={() => openLeftPanel("assets")}
           >
             ◇
           </button>
@@ -19029,7 +19522,7 @@ export function App() {
             aria-label="레이어"
             aria-pressed={leftPanelMode === "layers"}
             title="레이어"
-            onClick={() => setLeftPanelMode("layers")}
+            onClick={() => openLeftPanel("layers")}
           >
             ☰
           </button>
@@ -19038,13 +19531,19 @@ export function App() {
             aria-label="팀"
             aria-pressed={leftPanelMode === "team"}
             title="팀"
-            onClick={() => setLeftPanelMode("team")}
+            onClick={() => openLeftPanel("team")}
           >
             ◎
           </button>
         </div>
         <div className="editor-rail-group">
-          <button type="button" aria-label="도움말" aria-pressed="false" title="도움말">
+          <button
+            type="button"
+            aria-label="도움말"
+            aria-pressed={leftPanelMode === "help"}
+            title="도움말"
+            onClick={toggleHelpPanel}
+          >
             ?
           </button>
         </div>
@@ -19099,7 +19598,7 @@ export function App() {
                   />
                 </label>
                 <div className="project-actions">
-                  <button type="button" onClick={createNewProject}>
+                  <button type="button" className="project-primary-action" onClick={createNewProject}>
                     새 프로젝트 만들기
                   </button>
                   <button type="button" onClick={saveProjectName} disabled={!currentProject}>
@@ -19834,23 +20333,37 @@ export function App() {
                   <span className="visually-hidden">라이브러리 검색</span>
                   <input data-testid="asset-search" placeholder="모든 라이브러리 검색" />
                 </label>
-                <div className="asset-empty-card">
-                  <span className="asset-empty-icon" aria-hidden="true">
-                    ◧
-                  </span>
-                  <strong>아직 라이브러리가 없습니다.</strong>
-                  <span>팀에서 생성한 에셋을 찾아 이 파일에 추가해 사용할 수 있습니다.</span>
-                  <button type="button">팀 라이브러리 탐색하기</button>
-                </div>
-                <p className="asset-kit-intro">또는 사전 제작된 UI 키트로 시작하세요</p>
+                {currentProject ? (
+                  <div className="asset-empty-card">
+                    <span className="asset-empty-icon" aria-hidden="true">
+                      ◧
+                    </span>
+                    <strong>아직 라이브러리가 없습니다.</strong>
+                    <span>팀에서 생성한 에셋을 찾아 이 파일에 추가해 사용할 수 있습니다.</span>
+                    <button type="button" onClick={() => openLeftPanel("team")}>팀 라이브러리 탐색하기</button>
+                  </div>
+                ) : (
+                  <div className="asset-empty-card asset-project-start" role="status">
+                    <span className="asset-empty-icon" aria-hidden="true">
+                      ◧
+                    </span>
+                    <strong>프로젝트부터 시작하세요.</strong>
+                    <span>로컬 프로젝트를 만들면 캔버스, 레이어, Inspector와 에셋을 바로 사용할 수 있습니다.</span>
+                    <button type="button" onClick={() => void createProjectFromAssetStart()}>
+                      프로젝트 만들고 시작
+                    </button>
+                  </div>
+                )}
+                <p className="asset-kit-intro">
+                  {currentProject ? "사전 제작된 UI 키트 카탈로그" : "프로젝트를 만든 뒤 참고할 UI 키트 예시입니다."}
+                </p>
                 <div className="asset-library-list">
                   {ASSET_LIBRARY_KITS.map((kit) => (
-                    <button
-                      type="button"
-                      className="asset-library-card"
+                    <article
+                      className="asset-library-card asset-library-card-static"
                       data-testid="asset-library-card"
                       key={kit.name}
-                      aria-label={`${kit.name} 라이브러리`}
+                      aria-label={`${kit.name} 라이브러리 카탈로그 예시`}
                     >
                       <span
                         className={`asset-library-thumbnail asset-library-thumbnail-${kit.preview}`}
@@ -19876,25 +20389,90 @@ export function App() {
                         <span className="asset-library-meta">
                           <span>{kit.count}</span>
                           <span>{kit.templateCount}</span>
+                          <span className="asset-library-availability">카탈로그 예시</span>
                         </span>
                       </span>
-                    </button>
+                    </article>
                   ))}
                 </div>
               </section>
             ) : null}
+            {showHelpPanel ? (
+              <section className="help-panel" data-testid="help-panel" aria-label="도움말">
+                <div className="panel-header">
+                  <span className="panel-eyebrow">빠른 시작</span>
+                  <h2>빠른 시작</h2>
+                  <p>{currentProject ? "현재 파일에서 자주 쓰는 편집 흐름입니다." : "첫 프로젝트를 만들고 편집을 시작하세요."}</p>
+                </div>
+                <ol className="help-step-list">
+                  {currentProject ? (
+                    <>
+                      <li><strong>레이어 선택</strong><span>레이어 패널이나 캔버스에서 편집할 대상을 선택합니다.</span></li>
+                      <li><strong>속성 편집</strong><span>오른쪽 디자인 Inspector에서 위치, 크기, 스타일과 레이아웃을 조정합니다.</span></li>
+                      <li><strong>개발 인계</strong><span>개발 탭에서 CSS, HTML, 구조와 에셋을 검토합니다.</span></li>
+                    </>
+                  ) : (
+                    <>
+                      <li><strong>프로젝트 만들기</strong><span>로컬 저장소에 새 프로젝트와 첫 문서를 만듭니다.</span></li>
+                      <li><strong>레이어 선택</strong><span>샘플 프레임과 텍스트를 선택해 편집을 시작합니다.</span></li>
+                      <li><strong>저장과 검토</strong><span>변경은 로컬 파일에 저장되고 버전 기록에서 검토할 수 있습니다.</span></li>
+                    </>
+                  )}
+                </ol>
+                <section className="help-shortcuts" aria-labelledby="help-shortcuts-title">
+                  <h3 id="help-shortcuts-title">단축키</h3>
+                  <dl>
+                    <div><dt><kbd>Space</kbd> + 드래그</dt><dd>캔버스 이동</dd></div>
+                    <div><dt><kbd>⌘/Ctrl</kbd> + <kbd>0</kbd></dt><dd>화면 초기화</dd></div>
+                    <div><dt><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></dt><dd>실행 취소</dd></div>
+                    <div><dt><kbd>Shift</kbd> + <kbd>1</kbd></dt><dd>선택 영역 맞춤</dd></div>
+                    <div><dt><kbd>Esc</kbd></dt><dd>선택 해제</dd></div>
+                    <div><dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd></div>
+                  </dl>
+                </section>
+                <button
+                  type="button"
+                  className="help-primary-action"
+                  onClick={() => openLeftPanel(currentProject ? "layers" : "files")}
+                >
+                  {currentProject ? "레이어로 돌아가기" : "파일에서 프로젝트 만들기"}
+                </button>
+              </section>
+            ) : null}
             {showLayerPanel ? (
               <section data-testid="layer-panel" aria-label="레이어">
+                {displayedDocument?.pages.length ? (
+                  <div className="page-switcher" data-testid="page-switcher" role="group" aria-label="페이지 전환">
+                    <div className="page-switcher-heading">
+                      <span>페이지</span>
+                      <strong data-testid="active-page-name">{activePage?.name ?? "페이지 없음"}</strong>
+                    </div>
+                    <div className="page-switcher-list">
+                      {displayedDocument.pages.map((page) => (
+                        <button
+                          key={page.id}
+                          type="button"
+                          className={page.id === activePage?.id ? "is-selected" : undefined}
+                          aria-pressed={page.id === activePage?.id}
+                          onClick={() => switchActivePage(page.id)}
+                        >
+                          {page.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="panel-header">
                   <span className="panel-eyebrow">레이어</span>
                   <p>{editor ? editor.document.name : "로컬 서버를 시작하면 프로젝트를 불러옵니다."}</p>
                 </div>
                 <div className="layer-list">
-                  {nodes.map((node) => (
+                  {activePageNodes.map((node) => (
                     <button
                       key={node.id}
                       type="button"
                       className={editor?.selection.nodeIds.includes(node.id) ? "is-selected" : undefined}
+                      aria-pressed={editor?.selection.nodeIds.includes(node.id)}
                       onClick={(event) => selectNode(node.id, event.shiftKey)}
                     >
                       {nodeLayerLabel(node)}
@@ -20583,7 +21161,7 @@ export function App() {
               }}
             >
               <Layer>
-                {orderedAppChildrenForPaint(displayedDocument?.pages[0]?.children ?? []).map((node) =>
+                {orderedAppChildrenForPaint(activePage?.children ?? []).map((node) =>
                   renderNode({
                     node,
                     selectedNodeId: isFileVersionPreviewing ? null : editor?.selection.nodeId ?? null,
@@ -20677,6 +21255,8 @@ export function App() {
             ) : null}
             {editor && !isFileVersionPreviewing ? (
               <RemotePresenceOverlay
+                activePageId={activePage?.id ?? null}
+                legacyPageId={displayedDocument?.pages[0]?.id ?? null}
                 localSessionId={localSessionId}
                 nowMs={presenceClock}
                 presence={presence}
@@ -21100,7 +21680,7 @@ export function App() {
         componentDefinition={selectedComponentInstanceDefinition}
         selectedComponentDefinition={selectedComponent ?? null}
         pageName={activePage?.name ?? currentDocumentName}
-        pageExportNodes={nodes}
+        pageExportNodes={activePageNodes}
         pageExportReviewItems={pageExportReviewItems}
         selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}
@@ -21229,7 +21809,11 @@ export function App() {
               label="붙여넣기"
               shortcut="⌘V"
               disabled={!objectClipboardRef.current}
-              onClick={() => runContextMenuStateAction((state) => pasteCopiedNode(state, objectClipboardRef.current))}
+              onClick={() =>
+                runContextMenuStateAction((state) =>
+                  pasteCopiedNode(state, objectClipboardRef.current, activePage?.id)
+                )
+              }
             />
             <ContextMenuItem
               label="여기에 붙여넣기"

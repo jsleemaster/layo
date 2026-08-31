@@ -2,6 +2,8 @@
 
 Last checked: 2026-06-27
 
+Layo implementation delta: 2026-08-31
+
 This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Layo. It now sits under the broader Penpot-comparable team-product maturity target in `docs/product/penpot-maturity-benchmark.md`: Layo should mature into a professional team design platform while preserving local-first storage and deterministic MCP/HTTP control.
 
 ## Migration Rules
@@ -14,6 +16,32 @@ This roadmap translates `docs/product/figma-feature-inventory.md` into implement
 - Browser verification must use Playwright CLI.
 - For basic canvas behavior, use `docs/product/figma-core-interaction-rules.md` as the current rule matrix before creating a new implementation slice.
 - For team-product scope, compare the slice against `docs/product/penpot-maturity-benchmark.md` and feed failed comparisons into `docs/process/penpot-maturity-loop.md`.
+- Treat Figma navigation as an adapt benchmark only. Editor-entry and page-navigation work does not require a Figma board, Figma file, or migration artifact.
+
+## 2026-08-31 Editor Navigation Delta
+
+The current worktree reuses Layo's editor shell rather than adding a separate
+Figma-style dashboard. The default Assets entry now exposes one real project
+start action and labels built-in kits as static catalog examples. Help is a real
+rail destination opened by click or `?`; global canvas shortcuts preserve text
+entry and native control activation while layer rows retain intentional editor
+selection shortcuts.
+
+Existing document pages now have session-level active-page switching. The
+active page scopes Layers, canvas rendering, pointer hit testing,
+marquee/bulk selection, clipboard paste ownership, drag-snap targets, comments,
+Inspector identity, and page-level Dev export review, while page switches clear
+stale selection and do not mutate the document. Snap guides now apply their
+calculated delta instead of remaining visual-only.
+
+This is navigation, not page CRUD. Page create/rename/delete/reorder with
+undo/redo and deterministic HTTP/MCP commands remains open. File-panel density,
+the 1024px fixed-shell constraint, focus return, and durable server/save/status
+feedback remain separate editor-product gaps. See
+`docs/product/editor-entry-page-navigation-delta.md`. Focused isolated
+Playwright passed 3/3 and then 15/15 repeated cases without retry after Cargo
+binding generation and browser E2E were serialized; expanded editor/keyboard
+coverage passed 5/5 without retry.
 
 ## Current Baseline
 
@@ -28,6 +56,7 @@ The current main branch already has:
 - HTTP and MCP agent control for inspect, find, command application, validation, change summaries, components, and code export.
 - Structured code export with implementation specs and token candidates.
 - Team manifests, relay collaboration, remote presence/selection, role-based relay auth, E2EE snapshots, complete top-level document-field Yjs mapping, local-transaction Undo/Redo that preserves later remote edits, and experimental Rust relay support.
+- An empty-store project entry, honest static asset-catalog previews, Korean shortcut Help, native-control-safe global shortcuts, and active-page Layers/canvas/selection/paste/snap/Inspector/Dev context are implemented as an editor-shell adaptation. Page CRUD and reorder are not part of this slice.
 
 ## Lane 1: Layout Foundation
 

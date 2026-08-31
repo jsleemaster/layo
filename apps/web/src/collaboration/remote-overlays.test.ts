@@ -3,6 +3,7 @@ import type { CollaborationPresence } from "@layo/collaboration";
 import type { RendererDocument } from "@layo/renderer";
 import {
   documentPointToViewport,
+  getPageScopedSelection,
   getRemotePresence,
   getSelectedNodeBounds,
   shouldPublishCursor
@@ -14,6 +15,7 @@ function presence(input: Partial<CollaborationPresence>): CollaborationPresence 
     userId: input.userId ?? "user-1",
     displayName: input.displayName ?? "User",
     color: input.color ?? "#2563eb",
+    activePageId: input.activePageId ?? null,
     selectedNodeId: input.selectedNodeId ?? null,
     editingNodeId: input.editingNodeId ?? null,
     editingMode: input.editingMode ?? null,
@@ -56,6 +58,11 @@ function sampleDocument(): RendererDocument {
             ]
           }
         ]
+      },
+      {
+        id: "page-2",
+        name: "Page 2",
+        children: []
       }
     ]
   };
@@ -100,6 +107,36 @@ describe("remote collaboration overlays", () => {
     ).toEqual([fresh]);
   });
 
+  test("keeps overlays on the active page and treats legacy presence as first-page presence", () => {
+    const firstPage = presence({
+      sessionId: "first-page-session",
+      activePageId: "page-1"
+    });
+    const secondPage = presence({
+      sessionId: "second-page-session",
+      activePageId: "page-2"
+    });
+    const legacy = presence({ sessionId: "legacy-session" });
+
+    expect(
+      getRemotePresence([firstPage, secondPage, legacy], "local-session", {
+        nowMs: 1_200,
+        staleAfterMs: 500,
+        activePageId: "page-1",
+        legacyPageId: "page-1"
+      })
+    ).toEqual([firstPage, legacy]);
+
+    expect(
+      getRemotePresence([firstPage, secondPage, legacy], "local-session", {
+        nowMs: 1_200,
+        staleAfterMs: 500,
+        activePageId: "page-2",
+        legacyPageId: "page-1"
+      })
+    ).toEqual([secondPage]);
+  });
+
   test("projects document coordinates through current viewport pan and zoom", () => {
     expect(
       documentPointToViewport(
@@ -119,6 +156,24 @@ describe("remote collaboration overlays", () => {
       space: "document"
     });
     expect(getSelectedNodeBounds(sampleDocument(), "missing")).toBeNull();
+  });
+
+  test("drops a hidden-page selection before publishing presence", () => {
+    expect(getPageScopedSelection(sampleDocument(), "text-1", "page-1")).toEqual({
+      nodeId: "text-1",
+      bounds: {
+        x: 152,
+        y: 120,
+        width: 260,
+        height: 48,
+        rotation: 3,
+        space: "document"
+      }
+    });
+    expect(getPageScopedSelection(sampleDocument(), "text-1", "page-2")).toEqual({
+      nodeId: null,
+      bounds: null
+    });
   });
 
   test("throttles cursor publishing while still allowing meaningful movement", () => {

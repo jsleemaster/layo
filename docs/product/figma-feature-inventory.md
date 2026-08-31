@@ -2,6 +2,8 @@
 
 Last checked: 2026-06-27
 
+Layo implementation delta: 2026-08-31
+
 This inventory is based on current Figma Learn and Figma developer documentation. It is intentionally broader than the current Layo MVP so we can decide which Figma behaviors to adopt, adapt, defer, or exclude with a stable record.
 
 ## Source Set
@@ -30,6 +32,27 @@ This inventory is based on current Figma Learn and Figma developer documentation
 - Comments: https://help.figma.com/hc/en-us/articles/360039825314-Guide-to-comments-in-Figma
 - Core interaction rule matrix: `docs/product/figma-core-interaction-rules.md`
 
+## 2026-08-31 Layo Editor Delta
+
+Figma remains an **adapt** benchmark for familiar editor behavior, not an
+artifact or migration deliverable for this slice. No Figma board, Figma file,
+or migration output is included.
+
+Layo now provides a working empty-store project entry from the default Assets
+surface, a Korean Help/shortcut panel that preserves native controls without
+breaking layer-selection shortcuts, and session-level switching among pages
+already stored in the document. The active page owns Layers, canvas paint,
+pointer/marquee/bulk selection, clipboard paste ownership, drag-snap targets,
+comments, remote collaboration overlays, Inspector page context, and page-level
+Dev export review. Legacy page-less presence remains first-page-only for rolling
+upgrade compatibility. Page creation, rename, delete, reorder, and persistence
+commands remain open, as do File-panel density, 1024px viewport comfort, and
+broader focus/status feedback. See
+`docs/product/editor-entry-page-navigation-delta.md`. Focused isolated
+Playwright passed 3/3 and then 15/15 repeated cases without retry after Cargo
+binding generation and browser E2E were serialized; expanded editor/keyboard
+coverage passed 5/5 without retry.
+
 ## Product Surface Map
 
 Figma currently spans these product surfaces:
@@ -51,10 +74,10 @@ Figma currently spans these product surfaces:
 
 | Feature Group | Figma Capability | Current Canvas State | Migration Decision |
 | --- | --- | --- | --- |
-| Files and projects | Teams, projects, files, pages, drafts, project permissions, file sharing. | Single sample file, local file storage, team manifests for collaboration. | Adapt. Keep local-first files, then add multi-file browser and project metadata without central SaaS dependency. |
+| Files and projects | Teams, projects, files, pages, drafts, project permissions, file sharing. | Local-first project manifests, file storage, project create/search/rename/duplicate/delete/share, team manifests, and session-level active-page switching exist. Page create/rename/delete/reorder mutations are not implemented. | Adapt. Keep local-first ownership and extend the existing page/document primitives instead of adding a centralized SaaS dashboard. |
 | Version history | File-level version history, named versions, restore points. | Manual and automatic saved file versions exist with HTTP/MCP/UI list/save/read/restore, current-file diff preview, pinned checkpoint controls, manual delete, and explicit retention cleanup that keeps pinned checkpoints while pruning old unpinned versions. Full visual preview and branchable review are not implemented. | Extend. Add full visual preview and branch/merge review on top of the landed history foundation. |
 | Branching and merging | Create branches, review branch changes, merge back, keep branch checkpoints. | Not implemented. | Defer until version history and change summaries become diff-capable. |
-| Canvas navigation | Zoom, pan, stage, page canvas, nudge values, view options. | Basic zoom, fixed stage, browser editor shell. | Adopt. Add panning, fit selection, better keyboard navigation, and nudge settings. |
+| Canvas navigation | Zoom, pan, stage, page canvas, nudge values, view options. | Zoom, pan, rulers, fixed stage, nudge/selection shortcuts, shortcut Help, and active-page-only canvas/layer context exist. The fixed shell is still cramped at the documented 1024px minimum. | Adapt. Preserve direct canvas behavior and close responsive/collapse, focus-return, and page-management gaps through existing editor primitives. |
 | Layer model | Pages, frames, shapes, text, images, groups, sections, parent/child hierarchy, selection. | Pages, frames, transparent groups, rectangles, text, images in type model, nested children, image insertion by paste/drop, layer ordering, node lock/visibility state, context-menu group/ungroup, context-menu frame selection for sibling layers, context-menu select all/same kind, context-menu flip/fit selection/export actions, and image natural-size metadata. No sections UI. | Adopt. Add richer layer nesting controls, section-like organization, and more object context-menu groups. |
 | Geometry | Move, resize, rotate, flip, x/y/w/h fields, bounding boxes. | Move, four corner resize handles only, selection size badge, x/y/w/h fields, rotation in model only. | Adapt. Keep corner-only resize handles unless edge resize is explicitly reintroduced; add rotation, flip, proportional scale, and keyboard nudging. |
 | Precision editing | Alignment, distribute, tidy, rulers, guides, layout guides. | Inspector alignment/distribution controls, hover measurement overlay, selected-frame padding and child-spacing guides. | Adopt after layout foundation. Add rulers, manual guides, snap settings, and tidy up later. |

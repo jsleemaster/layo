@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-08-10
+Last checked: 2026-08-31 (editor entry and page-navigation delta; reference set unchanged)
 
 ## Product Target
 
@@ -36,6 +36,45 @@ Use these sources before changing Layo's team-product roadmap:
 
 Refresh this document when those sources materially change or when a Layo
 implementation slice reveals a new gap.
+
+## Current Editor Entry And Page Navigation Delta
+
+The 2026-08-31 worktree **adapts** Penpot's explicit project entry, workspace
+shortcut help, and visible page navigation to Layo's existing local-first editor
+shell. It does not copy Penpot's hosted dashboard and does not produce a Figma
+board, Figma file, or migration artifact.
+
+The implemented slice gives an empty Assets entry one working project-start
+action, renders built-in kit examples as honest static previews, adds a Korean
+Help rail surface with `?`, preserves text entry and native control activation
+while retaining layer-selection shortcuts, and exposes existing document pages
+as session-level active page choices. Layers, canvas paint, pointer hit testing,
+marquee/bulk selection, clipboard paste ownership, drag-snap candidates,
+comment overlays, remote cursors/selections/editing claims, Inspector page
+context, and page-level Dev export review now follow that active page while page
+changes clear stale selection. The focused isolated Playwright run passed 3/3 without retry and
+repeated the same cases 15/15 without retry once Cargo binding generation and
+browser E2E were serialized; expanded editor/keyboard coverage then passed 5/5.
+Exact-head review later found and drove focused repairs for cross-page paste and
+hidden-page snap guides, including real snap-delta application. Follow-up review
+also closed copy-time parent-origin drift and delayed image-upload page races.
+Captured image parent and replacement-node ownership is now revalidated against
+the active page through queue entry, including remote frame moves during upload.
+If an HTTP image mutation already committed, stale insert/replacement results
+use bounded base-aware server/Yjs compensation before asset cleanup.
+The final review added explicit page identity to presence, first-page-only
+legacy compatibility, a self-contained relay-backed two-browser regression,
+and preview-local page fallback so older saved versions cannot replace the live
+active page or clear its selection.
+Undo/Redo result selection is also re-scoped to the active page after hidden-page
+history mutations, preventing Inspector and shortcut leakage.
+
+This advances editor completeness and direct task entry, but it is not page
+management maturity. Page create/rename/delete/reorder and corresponding
+undo/redo plus HTTP/MCP commands remain open. File-panel density, the declared
+1024px comfortable viewport, focus return, and persistent server/save/status
+feedback also remain separate gaps. Wider merge gates remain pending; see
+`docs/product/editor-entry-page-navigation-delta.md`.
 
 ## Current Comment Management Evidence
 

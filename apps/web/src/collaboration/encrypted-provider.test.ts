@@ -328,6 +328,7 @@ function createTestProvider(input: {
       userId: "user-1",
       displayName: "Lee",
       color: "#2563eb",
+      activePageId: null,
       selectedNodeId: null,
       editingNodeId: null,
       editingMode: null,

@@ -24,13 +24,13 @@ function floatingToolbarZoom(page: Page, label: string) {
   return page.getByTestId("floating-toolbar").getByText(label);
 }
 
-test("opens with a Figma-like assets panel and keeps project controls behind the file rail", async ({ page }) => {
+test("opens with an assets catalog and keeps project controls behind the file rail", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
 
   await expect(page.getByTestId("asset-panel")).toBeVisible();
   await expect(page.getByRole("heading", { name: "에셋" })).toBeVisible();
   await expect(page.getByTestId("asset-search")).toHaveAttribute("placeholder", "모든 라이브러리 검색");
-  await expect(page.getByText("아직 라이브러리가 없습니다.")).toBeVisible();
+  await expect(page.getByText("프로젝트부터 시작하세요.")).toBeVisible();
   await expect(page.getByText("iOS 18 and iPadOS 18")).toBeVisible();
   await expect(page.getByText("visionOS 26")).toBeVisible();
   await expect(page.getByTestId("asset-library-card")).toHaveCount(6);
@@ -53,6 +53,216 @@ test("opens with a Figma-like assets panel and keeps project controls behind the
   await page.getByRole("button", { name: "에셋" }).click();
   await expect(page.getByTestId("asset-panel")).toBeVisible();
   await expect(page.getByTestId("project-panel")).toBeHidden();
+});
+
+test("empty editor exposes a real project start action and honest asset previews", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByText("프로젝트부터 시작하세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "프로젝트 만들고 시작" })).toBeVisible();
+  const catalogCards = page.getByTestId("asset-library-card");
+  await expect(catalogCards).toHaveCount(6);
+  await expect(catalogCards.first()).not.toHaveJSProperty("tagName", "BUTTON");
+
+  await page.getByRole("button", { name: "프로젝트 만들고 시작" }).click();
+  await expect(page.getByTestId("layer-panel")).toBeVisible();
+  await expect(page.getByTestId("top-file-project")).toContainText("새 프로젝트 1");
+  await expect(page.getByTestId("stage-frame")).toBeVisible();
+});
+
+test("help works by click and question-mark shortcut while focused controls keep native Space behavior", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  const helpButton = page.getByTestId("editor-rail").getByRole("button", { name: "도움말" });
+  await helpButton.click();
+  await expect(page.getByTestId("help-panel")).toBeVisible();
+  await expect(helpButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "빠른 시작" })).toBeVisible();
+  await expect(page.getByText("Space + 드래그")).toBeVisible();
+
+  await page.keyboard.press("Shift+/");
+  await expect(page.getByTestId("help-panel")).toHaveCount(0);
+  await page.keyboard.press("Shift+/");
+  await expect(page.getByTestId("help-panel")).toBeVisible();
+
+  const fileButton = page.getByTestId("editor-rail").getByRole("button", { name: "파일" });
+  await fileButton.focus();
+  await expect(fileButton).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("project-panel")).toBeVisible();
+  await expect(fileButton).toHaveAttribute("aria-pressed", "true");
+});
+
+test("switches existing document pages without mixing hidden-page layers", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(documentResponse.ok()).toBeTruthy();
+  const payload = await documentResponse.json();
+  const document = payload.file;
+  document.pages[0].children[0].style.fill = "#dc2626";
+  document.pages.push({
+    id: "page-2",
+    name: "두 번째 페이지",
+    children: [{
+      id: "frame-2",
+      kind: "frame",
+      name: "두 번째 프레임",
+      children: [{
+        id: "text-2",
+        kind: "text",
+        name: "두 번째 헤드라인",
+        children: [],
+        transform: { x: 32, y: 40, rotation: 0 },
+        size: { width: 260, height: 48 },
+        style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "text", value: "두 번째 페이지", font_size: 28, font_family: "Inter" }
+      }],
+      transform: { x: 120, y: 80, rotation: 0 },
+      size: { width: 420, height: 280 },
+      style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" }
+    }]
+  });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("page-switcher")).toBeVisible();
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toHaveCount(0);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(1_000);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBe(0);
+
+  await page.getByRole("button", { name: "헤드라인", exact: true }).click();
+  await expect(page.getByText("헤드라인").first()).toBeVisible();
+  await page.keyboard.press("Control+C");
+  await page.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+  await page.getByTestId("inspector-x").fill("300");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("300");
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toBeVisible();
+  await page.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toBeVisible();
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await page.keyboard.press("Control+Z");
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "rectangle").length;
+    })
+    .toBe(1);
+  await page.keyboard.press("Control+D");
+  await page.keyboard.press("Control+Z");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "rectangle").length;
+    })
+    .toBe(0);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(1_000);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBe(0);
+
+  const frameBeforeDrag = await findCanvasColorBounds(page, { r: 22, g: 163, b: 74 });
+  await page.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("120");
+  await page.mouse.move(frameBeforeDrag.left + 300, frameBeforeDrag.top + 200);
+  await page.mouse.down();
+  await page.mouse.move(frameBeforeDrag.left + 305, frameBeforeDrag.top + 200);
+  await expect(page.getByTestId("snap-guide-vertical")).toHaveCount(0);
+  await page.mouse.up();
+  await expect(page.getByTestId("inspector-x")).toHaveValue("125");
+
+  await page.keyboard.press("Control+V");
+  await expect(page.getByRole("button", { name: "헤드라인 복사본", exact: true })).toBeVisible();
+
+  const stageBox = await page.getByTestId("stage-frame").boundingBox();
+  if (!stageBox) {
+    throw new Error("active page stage was not visible");
+  }
+  await page.mouse.click(stageBox.x + 500, stageBox.y + 300, { button: "right" });
+  await expect(page.getByTestId("object-context-menu")).toBeVisible();
+  await expect(page.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "붙여넣기",
+    exact: true
+  }).click();
+  await expect(page.getByRole("button", { name: "헤드라인 복사본 2", exact: true })).toBeVisible();
+
+  await page.mouse.click(stageBox.x + 560, stageBox.y + 500, { button: "right" });
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "여기에 붙여넣기"
+  }).click();
+  await expect(page.getByRole("button", { name: "헤드라인 복사본 3", exact: true })).toBeVisible();
+  await page.mouse.click(stageBox.x + 24, stageBox.y + 24);
+
+  await page.keyboard.press("Control+A");
+  await expect(page.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+
+  await page.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+  await expect(page.getByText("두 번째 헤드라인").first()).toBeVisible();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("두 번째 페이지");
+
+  await page.getByRole("button", { name: "사각형 만들기", exact: true }).click();
+  await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toBeVisible();
+  await page.getByRole("button", { name: "페이지 1", exact: true }).click();
+  await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "헤드라인 복사본", exact: true })).toHaveCount(0);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(1_000);
+  await expect
+    .poll(async () => {
+      const persistedResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(persistedResponse.ok()).toBeTruthy();
+      const persistedDocument = (await persistedResponse.json()).file;
+      return {
+        pageOneFrameChildren: persistedDocument.pages[0].children[0].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageOneFrameX: persistedDocument.pages[0].children[0].transform.x,
+        pageTwoRootChildren: persistedDocument.pages[1].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageTwoFrameChildren: persistedDocument.pages[1].children[0].children.map(
+          (node: { id: string }) => node.id
+        ),
+        pageTwoPasteAtPosition: persistedDocument.pages[1].children.find(
+          (node: { id: string }) => node.id === "text-1-copy-3"
+        )?.transform,
+        pageTwoKeyboardPastePosition: persistedDocument.pages[1].children.find(
+          (node: { id: string }) => node.id === "text-1-copy-1"
+        )?.transform
+      };
+    })
+    .toEqual({
+      pageOneFrameChildren: ["text-1"],
+      pageOneFrameX: 300,
+      pageTwoRootChildren: expect.arrayContaining([
+        "frame-2",
+        "text-1-copy-1",
+        "text-1-copy-2",
+        "text-1-copy-3"
+      ]),
+      pageTwoFrameChildren: ["text-2"],
+      pageTwoPasteAtPosition: expect.objectContaining({ x: 560, y: 500 }),
+      pageTwoKeyboardPastePosition: expect.objectContaining({ x: 176, y: 144 })
+    });
 });
 
 test("editor chrome uses the generated Layo brand logo assets", async ({ page }) => {
@@ -199,6 +409,22 @@ function flattenNodeKinds(nodes: Array<{ kind: string; children: unknown[] }>): 
   ]);
 }
 
+function findFirstNodeByKind<T extends { kind: string; children: T[] }>(
+  nodes: T[],
+  kind: string
+): T | undefined {
+  for (const node of nodes) {
+    if (node.kind === kind) {
+      return node;
+    }
+    const nested = findFirstNodeByKind(node.children, kind);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
+}
+
 async function findCanvasColorBounds(page: Page, color: { r: number; g: number; b: number }) {
   return page.evaluate((targetColor) => {
     const colorDistance = (red: number, green: number, blue: number) =>
@@ -261,6 +487,30 @@ async function findCanvasColorBounds(page: Page, color: { r: number; g: number; 
     }
 
     return bestBounds;
+  }, color);
+}
+
+async function canvasColorPixelCount(page: Page, color: { r: number; g: number; b: number }) {
+  return page.evaluate((targetColor) => {
+    const colorDistance = (red: number, green: number, blue: number) =>
+      Math.abs(red - targetColor.r) + Math.abs(green - targetColor.g) + Math.abs(blue - targetColor.b);
+    let count = 0;
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        continue;
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (
+          pixels[index + 3] >= 200 &&
+          colorDistance(pixels[index], pixels[index + 1], pixels[index + 2]) <= 8
+        ) {
+          count += 1;
+        }
+      }
+    }
+    return count;
   }, color);
 }
 
@@ -5876,6 +6126,96 @@ test("a rejected stale project document request cannot replace the active status
   await expect(page.getByTestId("project-status")).toContainText("실패 지연 B 불러옴");
 });
 
+test("page-only version previews restore the live active page and selection", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const savedVersionResponse = await page.request.post(
+    `http://127.0.0.1:4317/files/${documentId}/versions`,
+    { data: { message: "페이지 1 기준" } }
+  );
+  expect(savedVersionResponse.ok()).toBeTruthy();
+
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({
+    id: "page-live-2",
+    name: "라이브 페이지 2",
+    children: [
+      {
+        id: "frame-live-2",
+        kind: "frame",
+        name: "라이브 프레임",
+        children: [
+          {
+            id: "text-live-2",
+            kind: "text",
+            name: "라이브 헤드라인",
+            children: [],
+            transform: { x: 32, y: 40, rotation: 0 },
+            size: { width: 260, height: 48 },
+            style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+            content: {
+              type: "text",
+              value: "라이브 페이지 선택",
+              font_size: 28,
+              font_family: "Inter"
+            }
+          }
+        ],
+        transform: { x: 620, y: 160, rotation: 0 },
+        size: { width: 420, height: 280 },
+        style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+        content: { type: "empty" }
+      }
+    ]
+  });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await page.getByRole("button", { name: "라이브 페이지 2", exact: true }).click();
+  await page.getByRole("button", { name: "라이브 프레임", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("라이브 페이지 2");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await openFilePanel(page);
+  await expect(page.getByTestId("file-version-list")).toContainText("페이지 1 기준");
+  await page.getByRole("button", { name: "페이지 1 기준 미리보기" }).click();
+
+  await expect(page.getByTestId("file-version-preview-banner")).toContainText("페이지 1 기준");
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "라이브 페이지 2", exact: true })).toHaveCount(0);
+
+  await page
+    .getByTestId("file-version-preview-banner")
+    .getByRole("button", { name: "미리보기 종료" })
+    .click();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("라이브 페이지 2");
+  await expect(page.getByRole("button", { name: "라이브 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(page.getByTestId("inspector-x")).toHaveValue("620");
+
+  await openFilePanel(page);
+  await page.getByRole("button", { name: "페이지 1 기준 미리보기" }).click();
+  await page
+    .getByTestId("file-version-preview-banner")
+    .getByRole("button", { name: "이 버전 복원" })
+    .click();
+  await expect(page.getByTestId("file-version-status")).toContainText("페이지 1 기준 복원됨");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "라이브 페이지 2", exact: true })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+});
+
 test("file version history previews the saved canvas in read-only mode", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
 
@@ -6154,6 +6494,745 @@ test("file version preview cancels an image upload before it mutates the documen
       (await page.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
     )
     .toBe(404);
+
+});
+
+test("page switching cancels an image upload before it can write the hidden source page", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(documentResponse.ok()).toBeTruthy();
+  const document = (await documentResponse.json()).file;
+  document.pages.push({ id: "page-upload-2", name: "업로드 대상 전환", children: [] });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByRole("button", { name: "업로드 대상 전환" })).toBeVisible();
+
+  let releaseUpload!: () => void;
+  const uploadRelease = new Promise<void>((resolve) => {
+    releaseUpload = resolve;
+  });
+  let markUploadStarted!: () => void;
+  const uploadStarted = new Promise<void>((resolve) => {
+    markUploadStarted = resolve;
+  });
+  await page.route("**/assets", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markUploadStarted();
+    await uploadRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("page-switch upload test could not find the stage");
+  }
+  const dropTransfer = await createImageDataTransfer(page, "delayed-page-switch-image.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: dropTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await uploadStarted;
+
+  await page.getByRole("button", { name: "업로드 대상 전환" }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("업로드 대상 전환");
+  const uploadResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  releaseUpload();
+  const uploadedAsset = (await (await uploadResponsePromise).json()).asset as { assetId: string };
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persistedDocument = (await response.json()).file;
+      return persistedDocument.pages.map((candidate: { children: Array<{ kind: string; children: unknown[] }> }) =>
+        flattenNodeKinds(candidate.children).filter((kind) => kind === "image").length
+      );
+    })
+    .toEqual([0, 0]);
+  await expect
+    .poll(async () =>
+      (await page.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
+    )
+    .toBe(404);
+});
+
+test("page switching cancels an image replacement before it mutates the hidden source page", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({ id: "page-replacement-2", name: "교체 대상 전환", children: [] });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("page-switch replacement test could not find the stage");
+  }
+  const originalTransfer = await createImageDataTransfer(page, "replacement-source.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: originalTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  const originalFileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const originalImage = (await originalFileResponse.json()).file.pages[0].children.find(
+    (node: { kind: string }) => node.kind === "image"
+  ) as { content: { asset_id: string } };
+
+  let releaseReplacement!: () => void;
+  const replacementRelease = new Promise<void>((resolve) => {
+    releaseReplacement = resolve;
+  });
+  let markReplacementStarted!: () => void;
+  const replacementStarted = new Promise<void>((resolve) => {
+    markReplacementStarted = resolve;
+  });
+  await page.route("**/assets", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markReplacementStarted();
+    await replacementRelease;
+    await route.continue();
+  });
+
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(
+    await createImageUploadFile(page, "replacement-cancelled.png", { width: 300, height: 900 })
+  );
+  await replacementStarted;
+
+  await page.getByRole("button", { name: "교체 대상 전환" }).click();
+  const replacementResponsePromise = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  releaseReplacement();
+  const replacementAsset = (await (await replacementResponsePromise).json()).asset as {
+    assetId: string;
+  };
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persistedImage = (await response.json()).file.pages[0].children.find(
+        (node: { kind: string }) => node.kind === "image"
+      );
+      return persistedImage?.content.asset_id;
+    })
+    .toBe(originalImage.content.asset_id);
+  await expect
+    .poll(async () =>
+      (await page.request.get(`http://127.0.0.1:4317/assets/${replacementAsset.assetId}`)).status()
+    )
+    .toBe(404);
+  expect(
+    (await page.request.get(`http://127.0.0.1:4317/assets/${originalImage.content.asset_id}`)).status()
+  ).toBe(200);
+});
+
+test("committed image writes reconcile without stealing the active-page selection", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({
+    id: "page-commit-2",
+    name: "커밋 중 전환",
+    children: [{
+      id: "frame-commit-2",
+      kind: "frame",
+      name: "커밋 페이지 프레임",
+      children: [{
+        id: "text-commit-2",
+        kind: "text",
+        name: "커밋 페이지 선택",
+        children: [],
+        transform: { x: 32, y: 40, rotation: 0 },
+        size: { width: 260, height: 48 },
+        style: { fill: "#052e16", stroke: null, stroke_width: 0, opacity: 1 },
+        content: {
+          type: "text",
+          value: "Page B selection",
+          font_size: 28,
+          font_family: "Inter"
+        }
+      }],
+      transform: { x: 120, y: 80, rotation: 0 },
+      size: { width: 420, height: 280 },
+      style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" }
+    }]
+  });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  let releaseNodeCreate!: () => void;
+  const nodeCreateRelease = new Promise<void>((resolve) => {
+    releaseNodeCreate = resolve;
+  });
+  let markNodeCreateStarted!: () => void;
+  const nodeCreateStarted = new Promise<void>((resolve) => {
+    markNodeCreateStarted = resolve;
+  });
+  await page.route(`**/files/${documentId}/nodes`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markNodeCreateStarted();
+    await nodeCreateRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("committed image write test could not find the stage");
+  }
+  const imageTransfer = await createImageDataTransfer(page, "commit-source.png");
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await nodeCreateStarted;
+
+  await page.mouse.click(stageBox.x + 500, stageBox.y + 300, { button: "right" });
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "잠그기"
+  }).click();
+
+  await page.getByRole("button", { name: "커밋 중 전환" }).click();
+  const pageTwoText = page.getByRole("button", { name: "커밋 페이지 선택" });
+  await pageTwoText.click();
+  const nodeCreateResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/files/${documentId}/nodes`) &&
+      response.request().method() === "POST"
+  );
+  releaseNodeCreate();
+  await nodeCreateResponse;
+  await expect(pageTwoText).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Page B selection");
+  await page.unroute(`**/files/${documentId}/nodes`);
+
+  await page.getByRole("button", { name: "페이지 1" }).click();
+  await expect(page.getByRole("button", { name: /^이미지 \d+$/ })).toBeVisible();
+  const insertedFileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const insertedImage = findFirstNodeByKind(
+    (await insertedFileResponse.json()).file.pages[0].children,
+    "image"
+  ) as { kind: string; children: []; content: { asset_id: string } };
+
+  let releaseReplacementCommit!: () => void;
+  const replacementCommitRelease = new Promise<void>((resolve) => {
+    releaseReplacementCommit = resolve;
+  });
+  let markReplacementCommitStarted!: () => void;
+  const replacementCommitStarted = new Promise<void>((resolve) => {
+    markReplacementCommitStarted = resolve;
+  });
+  await page.route(`**/files/${documentId}/nodes/*/image`, async (route) => {
+    if (route.request().method() !== "PATCH") {
+      await route.continue();
+      return;
+    }
+    markReplacementCommitStarted();
+    await replacementCommitRelease;
+    await route.continue();
+  });
+
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles(
+    await createImageUploadFile(page, "commit-replacement.png", { width: 300, height: 900 })
+  );
+  await replacementCommitStarted;
+
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "잠그기"
+  }).click();
+
+  await page.getByRole("button", { name: "커밋 중 전환" }).click();
+  await pageTwoText.click();
+  const replacementCommitResponse = page.waitForResponse(
+    (response) =>
+      /\/files\/[^/]+\/nodes\/[^/]+\/image$/.test(new URL(response.url()).pathname) &&
+      response.request().method() === "PATCH"
+  );
+  releaseReplacementCommit();
+  await replacementCommitResponse;
+  await expect(pageTwoText).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("inspector-text")).toHaveValue("Page B selection");
+
+  await page.getByTestId("inspector-text").fill("Page B survives image commit");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      const persistedImage = findFirstNodeByKind(
+        persisted.pages[0].children,
+        "image"
+      );
+      return {
+        assetChanged: persistedImage?.content.asset_id !== insertedImage.content.asset_id,
+        imageLocked: persistedImage?.locked === true,
+        parentLocked: persisted.pages[0].children[0].locked === true,
+        pageTwoText: persisted.pages[1].children[0].children[0].content.value
+      };
+    })
+    .toEqual({
+      assetChanged: true,
+      imageLocked: true,
+      parentLocked: true,
+      pageTwoText: "Page B survives image commit"
+    });
+  const finalFileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const finalImage = findFirstNodeByKind(
+    (await finalFileResponse.json()).file.pages[0].children,
+    "image"
+  ) as { kind: string; children: []; content: { asset_id: string } };
+  expect(
+    (await page.request.get(`http://127.0.0.1:4317/assets/${finalImage.content.asset_id}`)).status()
+  ).toBe(200);
+});
+
+test("queued image replacements keep the latest server and editor asset", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("queued replacement test could not find the stage");
+  }
+  const originalTransfer = await createImageDataTransfer(
+    page,
+    "queued-original.png",
+    { width: 320, height: 240 },
+    "#2563eb"
+  );
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: originalTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  const originalFileResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const originalImage = findFirstNodeByKind(
+    (await originalFileResponse.json()).file.pages[0].children,
+    "image"
+  ) as { kind: string; children: []; content: { asset_id: string } };
+
+  let releaseFirstPatch!: () => void;
+  const firstPatchRelease = new Promise<void>((resolve) => {
+    releaseFirstPatch = resolve;
+  });
+  let markFirstPatchStarted!: () => void;
+  const firstPatchStarted = new Promise<void>((resolve) => {
+    markFirstPatchStarted = resolve;
+  });
+  let patchCount = 0;
+  await page.route(`**/files/${documentId}/nodes/*/image`, async (route) => {
+    if (route.request().method() !== "PATCH") {
+      await route.continue();
+      return;
+    }
+    patchCount += 1;
+    if (patchCount === 1) {
+      markFirstPatchStarted();
+      await firstPatchRelease;
+    }
+    await route.continue();
+  });
+
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const firstChooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const firstUploadResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  const firstChooser = await firstChooserPromise;
+  await firstChooser.setFiles(
+    await createImageUploadFile(
+      page,
+      "queued-first.png",
+      { width: 320, height: 240 },
+      "#dc2626"
+    )
+  );
+  const firstAsset = (await (await firstUploadResponse).json()).asset as { assetId: string };
+  await firstPatchStarted;
+
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const secondChooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const secondUploadResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  const secondChooser = await secondChooserPromise;
+  await secondChooser.setFiles(
+    await createImageUploadFile(
+      page,
+      "queued-second.png",
+      { width: 320, height: 240 },
+      "#16a34a"
+    )
+  );
+  const secondAsset = (await (await secondUploadResponse).json()).asset as { assetId: string };
+  const secondPatchResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      response.request().postData()?.includes(secondAsset.assetId) === true
+  );
+
+  releaseFirstPatch();
+  await secondPatchResponse;
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBe(0);
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const image = findFirstNodeByKind((await response.json()).file.pages[0].children, "image");
+      return image?.content.asset_id;
+    })
+    .toBe(secondAsset.assetId);
+
+  await page.keyboard.press("Control+Z");
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(100);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const image = findFirstNodeByKind((await response.json()).file.pages[0].children, "image");
+      return image?.content.asset_id;
+    })
+    .toBe(firstAsset.assetId);
+
+  await page.keyboard.press("Control+Z");
+  await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const image = findFirstNodeByKind((await response.json()).file.pages[0].children, "image");
+      return image?.content.asset_id;
+    })
+    .toBe(originalImage.content.asset_id);
+  for (const assetId of [originalImage.content.asset_id, firstAsset.assetId, secondAsset.assetId]) {
+    expect((await page.request.get(`http://127.0.0.1:4317/assets/${assetId}`)).status()).toBe(200);
+  }
+});
+
+test("confirmed collaborative image insertions and replacements remain undoable", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({ id: "page-history-2", name: "히스토리 페이지 2", children: [] });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  const readPersistedImageAssetId = async () => {
+    const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    const image = findFirstNodeByKind((await response.json()).file.pages[0].children, "image");
+    return image?.content.asset_id ?? null;
+  };
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("collaborative image undo test could not find the stage");
+  }
+
+  const originalTransfer = await createImageDataTransfer(
+    page,
+    "collaborative-undo-original.png",
+    { width: 320, height: 240 },
+    "#2563eb"
+  );
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: originalTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await openFilePanel(page);
+  await expect(page.getByTestId("project-status")).toContainText("이미지 3 추가됨");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect.poll(readPersistedImageAssetId).not.toBeNull();
+  const originalAssetId = await readPersistedImageAssetId();
+  if (!originalAssetId) {
+    throw new Error("collaborative image undo test did not persist the original asset");
+  }
+  await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
+
+  await page.getByRole("button", { name: "히스토리 페이지 2", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("히스토리 페이지 2");
+  await expect(page.getByRole("button", { name: "이미지 3" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await page.keyboard.press("Control+Z");
+  await expect.poll(readPersistedImageAssetId).toBeNull();
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect(page.getByTestId("active-page-name")).toHaveText("히스토리 페이지 2");
+  await expect(page.getByRole("button", { name: "이미지 3" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+
+  await page.keyboard.press("Control+D");
+  await page.keyboard.press("Control+Z");
+  await expect.poll(readPersistedImageAssetId).toBeNull();
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "image").length;
+    })
+    .toBe(1);
+
+  await page.getByRole("button", { name: "페이지 1", exact: true }).click();
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await page.getByRole("button", { name: "이미지 3" }).click();
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const replacementResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  const chooser = await chooserPromise;
+  await chooser.setFiles(
+    await createImageUploadFile(
+      page,
+      "collaborative-undo-replacement.png",
+      { width: 320, height: 240 },
+      "#16a34a"
+    )
+  );
+  const replacementAsset = (await (await replacementResponse).json()).asset as { assetId: string };
+  await openFilePanel(page);
+  await expect(page.getByTestId("project-status")).toContainText("이미지 3 이미지 바뀜");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+
+  await page.keyboard.press("Control+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBe(0);
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+  for (const assetId of [originalAssetId, replacementAsset.assetId]) {
+    expect((await page.request.get(`http://127.0.0.1:4317/assets/${assetId}`)).status()).toBe(200);
+  }
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+});
+
+test("overlapping image drops reserve distinct node ids", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  let releaseUploads!: () => void;
+  const uploadsRelease = new Promise<void>((resolve) => {
+    releaseUploads = resolve;
+  });
+  let markBothUploadsStarted!: () => void;
+  const bothUploadsStarted = new Promise<void>((resolve) => {
+    markBothUploadsStarted = resolve;
+  });
+  let uploadCount = 0;
+  await page.route("**/assets", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    uploadCount += 1;
+    if (uploadCount === 2) {
+      markBothUploadsStarted();
+    }
+    await uploadsRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("overlapping image drop test could not find the stage");
+  }
+  const firstTransfer = await createImageDataTransfer(page, "overlap-first.png");
+  const secondTransfer = await createImageDataTransfer(page, "overlap-second.png");
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: firstTransfer,
+    clientX: stageBox.x + 240,
+    clientY: stageBox.y + 200
+  });
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: secondTransfer,
+    clientX: stageBox.x + 360,
+    clientY: stageBox.y + 280
+  });
+  await bothUploadsStarted;
+  releaseUploads();
+
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "이미지 4" })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      const imageIds: string[] = [];
+      const collectImageIds = (nodes: Array<{ id: string; kind: string; children: unknown[] }>) => {
+        for (const node of nodes) {
+          if (node.kind === "image") {
+            imageIds.push(node.id);
+          }
+          collectImageIds(node.children as Array<{ id: string; kind: string; children: unknown[] }>);
+        }
+      };
+      collectImageIds(persisted.pages[0].children);
+      return imageIds.sort();
+    })
+    .toEqual(["image-3", "image-4"]);
+});
+
+test("discarded committed image inserts do not leave phantom undo history", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  let releaseNodeCreate!: () => void;
+  const nodeCreateRelease = new Promise<void>((resolve) => {
+    releaseNodeCreate = resolve;
+  });
+  let markNodeCreateStarted!: () => void;
+  const nodeCreateStarted = new Promise<void>((resolve) => {
+    markNodeCreateStarted = resolve;
+  });
+  await page.route(`**/files/${documentId}/nodes`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    markNodeCreateStarted();
+    await nodeCreateRelease;
+    await route.continue();
+  });
+
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("discarded image insert test could not find the stage");
+  }
+  await page.getByRole("button", { name: "랜딩 프레임" }).click();
+  const imageTransfer = await createImageDataTransfer(page, "discarded-insert.png");
+  const assetUploadResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: imageTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  const discardedAsset = (await (await assetUploadResponse).json()).asset as { assetId: string };
+  await nodeCreateStarted;
+
+  await page.mouse.click(stageBox.x + 500, stageBox.y + 300, { button: "right" });
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "삭제"
+  }).click();
+  await expect(page.getByRole("button", { name: "랜딩 프레임" })).toHaveCount(0);
+
+  const nodeCreateResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/files/${documentId}/nodes`) &&
+      response.request().method() === "POST"
+  );
+  const deleteSnapshotResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/files/${documentId}`) &&
+      response.request().method() === "PUT"
+  );
+  const discardedAssetCleanupRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "DELETE" &&
+      request.url().endsWith(`/assets/${discardedAsset.assetId}`)
+  );
+  releaseNodeCreate();
+  await nodeCreateResponse;
+  await deleteSnapshotResponse;
+  await discardedAssetCleanupRequest;
+  await expect
+    .poll(async () =>
+      (await page.request.get(`http://127.0.0.1:4317/assets/${discardedAsset.assetId}`)).status()
+    )
+    .toBe(404);
+  await expect(page.getByTestId("project-status")).toContainText("추가 취소됨");
+
+  const undoSnapshotResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/files/${documentId}`) &&
+      response.request().method() === "PUT"
+  );
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByRole("button", { name: "랜딩 프레임" })).toBeVisible();
+  await undoSnapshotResponse;
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return {
+        framePresent: persisted.pages[0].children.some(
+          (node: { id: string }) => node.id === "frame-1"
+        ),
+        imageCount: flattenNodeKinds(persisted.pages[0].children).filter(
+          (kind) => kind === "image"
+        ).length
+      };
+    })
+    .toEqual({ framePresent: true, imageCount: 0 });
 });
 
 test("file version restore cancels an image upload that started before the restore barrier", async ({ page }) => {
@@ -9311,6 +10390,11 @@ test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ 
   await createProjectFromEmptyState(page);
 
   await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).focus();
+  await page.keyboard.press("Delete");
+  await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
   await page.keyboard.press("Control+D");
   await expect(page.getByRole("button", { name: "헤드라인 복사본" })).toBeVisible();
   await expect(page.getByTestId("inspector-text")).toHaveValue("Layo");
@@ -9548,6 +10632,10 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
   await page.getByTestId("inspector-y").fill("130");
   await expect(page.getByTestId("inspector-x")).toHaveValue("480");
 
+  await headlineLayer.click();
+  await page.getByTestId("inspector-fill").fill("#a855f7");
+  await expect(page.getByTestId("inspector-fill")).toHaveValue("#a855f7");
+
   await rectangleLayer.click();
   await page.keyboard.down("Shift");
   await headlineLayer.click();
@@ -9562,10 +10650,17 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
     throw new Error("stage canvas was not visible");
   }
 
+  const rectangleBeforeDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  const headlineBeforeDrag = await findCanvasColorBounds(page, { r: 168, g: 85, b: 247 });
+
   await page.mouse.move(stageBox.x + 220, stageBox.y + 180);
   await page.mouse.down();
   await page.mouse.move(stageBox.x + 285, stageBox.y + 180);
   await expect(page.getByTestId("snap-guide-vertical")).toBeVisible();
+  const rectangleDuringDrag = await findCanvasColorBounds(page, { r: 224, g: 242, b: 254 });
+  const headlineDuringDrag = await findCanvasColorBounds(page, { r: 168, g: 85, b: 247 });
+  expect(rectangleDuringDrag.left - rectangleBeforeDrag.left).toBeCloseTo(68, 0);
+  expect(headlineDuringDrag.left - headlineBeforeDrag.left).toBeCloseTo(68, 0);
   await page.mouse.up();
 
   await expect(page.getByText("2개 레이어 선택됨")).toBeVisible();
@@ -9573,9 +10668,9 @@ test("Figma-like multi-selection drags together and shows snap guides", async ({
   await page.keyboard.press("Escape");
   await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
   await rectangleLayer.click();
-  await expect(page.getByTestId("inspector-x")).toHaveValue("245");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("248");
   await headlineLayer.click();
-  await expect(page.getByTestId("inspector-x")).toHaveValue("97");
+  await expect(page.getByTestId("inspector-x")).toHaveValue("100");
 });
 
 test("multi-selection drag preview preserves sub-pixel movement while zoomed", async ({ page }) => {

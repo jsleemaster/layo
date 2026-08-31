@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { Buffer } from "node:buffer";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,118 @@ async function createProjectFromEmptyState(page: Page) {
   expect(projectResponse.ok()).toBeTruthy();
   const projectPayload = await projectResponse.json();
   return projectPayload.project.currentDocumentId as string;
+}
+
+async function createImageDataTransfer(page: Page, name: string) {
+  return page.evaluateHandle(async (fileName) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 12;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas context missing");
+    }
+    context.fillStyle = "#2563eb";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("png blob missing"));
+        }
+      }, "image/png");
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], fileName, { type: "image/png" }));
+    return transfer;
+  }, name);
+}
+
+async function createImageUploadFile(page: Page, name: string, fillColor: string) {
+  const payload = await page.evaluate(async ({ fileName, color }) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 12;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas context missing");
+    }
+    context.fillStyle = color;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("png blob missing"));
+        }
+      }, "image/png");
+    });
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  }, { fileName: name, color: fillColor });
+  return { name, mimeType: "image/png", buffer: Buffer.from(payload) };
+}
+
+async function canvasColorPixelCount(page: Page, color: { r: number; g: number; b: number }) {
+  return page.evaluate((target) => {
+    let count = 0;
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        continue;
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const distance =
+          Math.abs(pixels[index] - target.r) +
+          Math.abs(pixels[index + 1] - target.g) +
+          Math.abs(pixels[index + 2] - target.b);
+        if (pixels[index + 3] >= 200 && distance <= 8) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }, color);
+}
+
+async function advanceToAutomaticVersionBoundary(page: Page, documentId: string) {
+  const automaticVersionCount = async () => {
+    const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}/versions`);
+    const versions = (await response.json()).versions as Array<{ source: string }>;
+    return versions.filter((version) => version.source === "auto").length;
+  };
+  const beforeCount = await automaticVersionCount();
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document }
+    });
+    expect(response.ok()).toBeTruthy();
+    if (await automaticVersionCount() > beforeCount) {
+      return;
+    }
+  }
+  throw new Error("automatic version boundary did not advance");
+}
+
+async function connectRelayEditors(pageA: Page, pageB: Page) {
+  await openTeamPanel(pageA);
+  await pageA.getByRole("tab", { name: "실시간 협업" }).click();
+  await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+  await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
+  await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+  await pageA.getByRole("tab", { name: "팀 설정" }).click();
+  await pageA.getByRole("button", { name: "설정 내보내기" }).click();
+  const manifest = await pageA.getByTestId("team-manifest").inputValue();
+
+  await openTeamPanel(pageB);
+  await pageB.getByRole("tab", { name: "팀 설정" }).click();
+  await pageB.getByTestId("team-manifest").fill(manifest);
+  await pageB.getByRole("button", { name: "설정 가져오기" }).click();
+  await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 }
 
 test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
@@ -281,6 +394,665 @@ test("relay team syncs document edits between two browser contexts", async ({ br
   }
 });
 
+test("remote cursors and selections stay on their collaborator's active page", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const versionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "협업 presence 기준" } }
+    );
+    expect(versionResponse.ok()).toBeTruthy();
+    const documentResponse = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    expect(documentResponse.ok()).toBeTruthy();
+    const payload = await documentResponse.json();
+    const document = payload.file;
+    document.pages.push({
+      id: "page-2",
+      name: "두 번째 페이지",
+      children: [
+        {
+          id: "frame-2",
+          kind: "frame",
+          name: "두 번째 프레임",
+          children: [
+            {
+              id: "text-2",
+              kind: "text",
+              name: "두 번째 헤드라인",
+              children: [],
+              transform: { x: 32, y: 40, rotation: 0 },
+              size: { width: 260, height: 48 },
+              style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+              content: {
+                type: "text",
+                value: "두 번째 페이지",
+                font_size: 28,
+                font_family: "Inter"
+              }
+            }
+          ],
+          transform: { x: 120, y: 80, rotation: 0 },
+          size: { width: 420, height: 280 },
+          style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" }
+        }
+      ]
+    });
+    const replaceResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document }
+    });
+    expect(replaceResponse.ok()).toBeTruthy();
+
+    await pageA.reload();
+    await pageB.goto("http://127.0.0.1:5173/");
+
+    await openTeamPanel(pageA);
+    await pageA.getByRole("tab", { name: "실시간 협업" }).click();
+    await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+    await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
+    await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await pageA.getByRole("tab", { name: "팀 설정" }).click();
+    await pageA.getByRole("button", { name: "설정 내보내기" }).click();
+    const manifest = await pageA.getByTestId("team-manifest").inputValue();
+
+    await openTeamPanel(pageB);
+    await pageB.getByRole("tab", { name: "팀 설정" }).click();
+    await pageB.getByTestId("team-manifest").fill(manifest);
+    await pageB.getByRole("button", { name: "설정 가져오기" }).click();
+    await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    await openLayersPanel(pageA);
+    await openLayersPanel(pageB);
+    await pageB.getByRole("button", { name: "헤드라인", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-1",
+      { timeout: 8000 }
+    );
+
+    const firstPageStage = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(firstPageStage).not.toBeNull();
+    await pageB.mouse.move(firstPageStage!.x + 360, firstPageStage!.y + 260);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageB.mouse.move(firstPageStage!.x + 372, firstPageStage!.y + 264);
+    await pageA.getByRole("button", { name: "페이지 1", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-1"
+    );
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible();
+
+    await pageB.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageA.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+    await pageB.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+    await expect(pageA.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "text-2",
+      { timeout: 8000 }
+    );
+
+    const secondPageStage = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(secondPageStage).not.toBeNull();
+    await pageB.mouse.move(secondPageStage!.x + 340, secondPageStage!.y + 220);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+    await pageA.keyboard.press("Delete");
+    await expect(pageB.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toHaveCount(0, {
+      timeout: 8000
+    });
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0, { timeout: 8000 });
+
+    await pageA.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+    const previewSourceStage = await pageA.getByTestId("stage-frame").boundingBox();
+    expect(previewSourceStage).not.toBeNull();
+    await pageA.mouse.move(previewSourceStage!.x + 360, previewSourceStage!.y + 240);
+    await expect(pageB.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "frame-2",
+      { timeout: 8000 }
+    );
+    await expect(pageB.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+
+    await openFilePanel(pageA);
+    await pageA.getByRole("button", { name: "협업 presence 기준 미리보기" }).click();
+    await expect(pageA.getByTestId("file-version-preview-banner")).toBeVisible();
+    await expect(pageB.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageB.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageB.getByRole("button", { name: "두 번째 프레임", exact: true }).click();
+    await pageB.getByTestId("inspector-x").fill("144");
+    await expect(pageB.getByTestId("inspector-x")).toHaveValue("144");
+    await expect(pageB.getByTestId("remote-selection")).toHaveCount(0);
+    await expect(pageB.getByTestId("remote-cursor")).toHaveCount(0);
+
+    await pageA
+      .getByTestId("file-version-preview-banner")
+      .getByRole("button", { name: "미리보기 종료" })
+      .click();
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+    await expect(pageA.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(pageA.getByTestId("inspector-x")).toHaveValue("144");
+    await expect(pageB.getByTestId("remote-selection")).toHaveAttribute(
+      "data-selected-node-id",
+      "frame-2",
+      { timeout: 8000 }
+    );
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test("collaborative image uploads converge when parents move before or disappear after persistence starts", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  let releaseQueueBlocker = () => {};
+  let releaseCommittedNode = () => {};
+  let releaseDeletionPersistence = () => {};
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const documentResponse = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    const currentDocument = structuredClone((await documentResponse.json()).file);
+    currentDocument.pages.push({
+      id: "page-parent-move-2",
+      name: "프레임 이동 페이지",
+      children: []
+    });
+    const movedDocument = structuredClone(currentDocument);
+    const movedFrame = movedDocument.pages[0].children.shift();
+    if (!movedFrame) {
+      throw new Error("parent-move fixture could not find frame-1");
+    }
+    movedDocument.pages[1].children.push(movedFrame);
+    const movedResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document: movedDocument }
+    });
+    expect(movedResponse.ok()).toBeTruthy();
+    const versionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "프레임 이동 기준" } }
+    );
+    expect(versionResponse.ok()).toBeTruthy();
+    const currentResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document: currentDocument }
+    });
+    expect(currentResponse.ok()).toBeTruthy();
+    await advanceToAutomaticVersionBoundary(pageA, documentId);
+    const currentVersionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "프레임 원위치 기준" } }
+    );
+    expect(currentVersionResponse.ok()).toBeTruthy();
+
+    await pageA.reload();
+    await pageB.goto("http://127.0.0.1:5173/");
+    await connectRelayEditors(pageA, pageB);
+
+    let markQueueBlockerStarted = () => {};
+    const queueBlockerStarted = new Promise<void>((resolve) => {
+      markQueueBlockerStarted = resolve;
+    });
+    const queueBlockerRelease = new Promise<void>((resolve) => {
+      releaseQueueBlocker = resolve;
+    });
+    await pageA.route(`**/files/${documentId}/versions`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postDataJSON() as { message?: string } | null;
+      if (body?.message !== "큐 선행 저장") {
+        await route.continue();
+        return;
+      }
+      markQueueBlockerStarted();
+      await queueBlockerRelease;
+      await route.continue();
+    });
+    await openFilePanel(pageA);
+    await pageA.getByTestId("file-version-message").fill("큐 선행 저장");
+    await pageA.getByRole("button", { name: "현재 버전 저장" }).click();
+    await queueBlockerStarted;
+
+    await pageA.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+    await pageA.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+    const stageBox = await pageA.getByTestId("stage-frame").boundingBox();
+    expect(stageBox).not.toBeNull();
+    let createNodeRequests = 0;
+    await pageA.route(`**/files/${documentId}/nodes`, async (route) => {
+      if (route.request().method() === "POST") {
+        createNodeRequests += 1;
+      }
+      await route.continue();
+    });
+    const imageTransfer = await createImageDataTransfer(pageA, "parent-moved.png");
+    const uploadResponse = pageA.waitForResponse(
+      (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+    );
+    await pageA.getByTestId("stage-frame").dispatchEvent("drop", {
+      dataTransfer: imageTransfer,
+      clientX: stageBox!.x + 260,
+      clientY: stageBox!.y + 220
+    });
+    const uploadedAsset = (await (await uploadResponse).json()).asset as { assetId: string };
+    await pageA.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        })
+    );
+
+    await openFilePanel(pageB);
+    await expect(pageB.getByTestId("file-version-list")).toContainText("프레임 이동 기준");
+    await pageB.getByRole("button", { name: "프레임 이동 기준 복원" }).click();
+    await expect(pageB.getByTestId("file-version-status")).toContainText("프레임 이동 기준 복원됨", {
+      timeout: 8000
+    });
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("페이지 1");
+    await expect(pageA.getByRole("button", { name: "랜딩 프레임", exact: true })).toHaveCount(0);
+
+    releaseQueueBlocker();
+    await expect
+      .poll(async () =>
+        (await pageA.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
+      )
+      .toBe(404);
+    expect(createNodeRequests).toBe(0);
+    await expect
+      .poll(async () => {
+        const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+        const persisted = (await response.json()).file;
+        return {
+          pageOneFrame: persisted.pages[0].children.some((node: { id: string }) => node.id === "frame-1"),
+          pageTwoFrame: persisted.pages[1].children.some((node: { id: string }) => node.id === "frame-1"),
+          imageCounts: persisted.pages.map((page: { children: Array<{ kind: string; children: unknown[] }> }) => {
+            const countImages = (nodes: Array<{ kind: string; children: unknown[] }>): number =>
+              nodes.reduce(
+                (count, node) =>
+                  count +
+                  (node.kind === "image" ? 1 : 0) +
+                  countImages(node.children as Array<{ kind: string; children: unknown[] }>),
+                0
+              );
+            return countImages(page.children);
+          })
+        };
+      })
+      .toEqual({ pageOneFrame: false, pageTwoFrame: true, imageCounts: [0, 0] });
+
+    await pageB.getByRole("button", { name: "프레임 원위치 기준 복원" }).click();
+    await expect(pageB.getByTestId("file-version-status")).toContainText("프레임 원위치 기준 복원됨", {
+      timeout: 8000
+    });
+    await expect(pageA.getByRole("button", { name: "랜딩 프레임", exact: true })).toBeVisible({
+      timeout: 8000
+    });
+    await pageA.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+    await pageA.unroute(`**/files/${documentId}/nodes`);
+    let markCommittedNodeStarted = () => {};
+    const committedNodeStarted = new Promise<void>((resolve) => {
+      markCommittedNodeStarted = resolve;
+    });
+    const committedNodeRelease = new Promise<void>((resolve) => {
+      releaseCommittedNode = resolve;
+    });
+    let committedNodeRequests = 0;
+    await pageA.route(`**/files/${documentId}/nodes`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      committedNodeRequests += 1;
+      const response = await route.fetch();
+      markCommittedNodeStarted();
+      await committedNodeRelease;
+      await route.fulfill({ response });
+    });
+    const committedTransfer = await createImageDataTransfer(pageA, "parent-moved-after-start.png");
+    const committedAssetResponse = pageA.waitForResponse(
+      (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+    );
+    await pageA.getByTestId("stage-frame").dispatchEvent("drop", {
+      dataTransfer: committedTransfer,
+      clientX: stageBox!.x + 280,
+      clientY: stageBox!.y + 240
+    });
+    const committedAsset = (await (await committedAssetResponse).json()).asset as { assetId: string };
+    await committedNodeStarted;
+
+    let markDeletionPersistenceStarted = () => {};
+    const deletionPersistenceStarted = new Promise<void>((resolve) => {
+      markDeletionPersistenceStarted = resolve;
+    });
+    const deletionPersistenceRelease = new Promise<void>((resolve) => {
+      releaseDeletionPersistence = resolve;
+    });
+    await pageB.route(`**/files/${documentId}`, async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      markDeletionPersistenceStarted();
+      await deletionPersistenceRelease;
+      await route.continue();
+    });
+    await pageB.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+    await pageB.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+    await pageB.keyboard.press("Delete");
+    await deletionPersistenceStarted;
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("페이지 1");
+    await expect(pageA.getByRole("button", { name: "랜딩 프레임", exact: true })).toHaveCount(0);
+    await expect
+      .poll(async () => {
+        const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+        const persisted = (await response.json()).file;
+        const countImages = (nodes: Array<{ kind: string; children: unknown[] }>): number =>
+          nodes.reduce(
+            (count, node) =>
+              count +
+              (node.kind === "image" ? 1 : 0) +
+              countImages(node.children as Array<{ kind: string; children: unknown[] }>),
+            0
+          );
+        return {
+          pageOneFrame: persisted.pages[0].children.some((node: { id: string }) => node.id === "frame-1"),
+          pageTwoFrame: persisted.pages[1].children.some((node: { id: string }) => node.id === "frame-1"),
+          imageCounts: persisted.pages.map((page: { children: Array<{ kind: string; children: unknown[] }> }) =>
+            countImages(page.children)
+          )
+        };
+      })
+      .toEqual({ pageOneFrame: true, pageTwoFrame: false, imageCounts: [1, 0] });
+    expect(
+      (await pageA.request.get(`http://127.0.0.1:4317/assets/${committedAsset.assetId}`)).status()
+    ).toBe(200);
+
+    const committedNodeResponse = pageA.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/files/${documentId}/nodes`) &&
+        response.request().method() === "POST"
+    );
+    releaseCommittedNode();
+    await committedNodeResponse;
+    await expect
+      .poll(async () =>
+        (await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`)).json()
+      )
+      .toMatchObject({
+        file: {
+          pages: [
+            { children: [] },
+            { children: [] }
+          ]
+        }
+      });
+    const committedAssetDisposition = async () => {
+      const assetStatus = (
+        await pageA.request.get(`http://127.0.0.1:4317/assets/${committedAsset.assetId}`)
+      ).status();
+      if (assetStatus === 404) {
+        return "deleted";
+      }
+      if (assetStatus !== 200) {
+        return `unexpected-${assetStatus}`;
+      }
+      const versionsResponse = await pageA.request.get(
+        `http://127.0.0.1:4317/files/${documentId}/versions`
+      );
+      const versions = (await versionsResponse.json()).versions as Array<{ versionId: string }>;
+      const referencesAsset = (nodes: Array<{
+        content?: { asset_id?: string };
+        children: unknown[];
+      }>): boolean =>
+        nodes.some(
+          (node) =>
+            node.content?.asset_id === committedAsset.assetId ||
+            referencesAsset(node.children as Array<{ content?: { asset_id?: string }; children: unknown[] }>)
+        );
+      for (const version of versions) {
+        const versionResponse = await pageA.request.get(
+          `http://127.0.0.1:4317/files/${documentId}/versions/${version.versionId}`
+        );
+        const versionDocument = (await versionResponse.json()).version.document;
+        if (versionDocument.pages.some((page: { children: unknown[] }) =>
+          referencesAsset(page.children as Array<{ content?: { asset_id?: string }; children: unknown[] }>)
+        )) {
+          return "version-retained";
+        }
+      }
+      return "unreferenced";
+    };
+    await expect.poll(committedAssetDisposition).toMatch(/^(deleted|version-retained)$/);
+    expect(committedNodeRequests).toBe(1);
+    const deletionPersistenceResponse = pageB.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/files/${documentId}`) &&
+        response.request().method() === "PUT"
+    );
+    releaseDeletionPersistence();
+    await deletionPersistenceResponse;
+    await expect
+      .poll(async () => {
+        const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+        const persisted = (await response.json()).file;
+        const countImages = (nodes: Array<{ kind: string; children: unknown[] }>): number =>
+          nodes.reduce(
+            (count, node) =>
+              count +
+              (node.kind === "image" ? 1 : 0) +
+              countImages(node.children as Array<{ kind: string; children: unknown[] }>),
+            0
+          );
+        return {
+          pageOneFrame: persisted.pages[0].children.some((node: { id: string }) => node.id === "frame-1"),
+          pageTwoFrame: persisted.pages[1].children.some((node: { id: string }) => node.id === "frame-1"),
+          imageCounts: persisted.pages.map((page: { children: Array<{ kind: string; children: unknown[] }> }) =>
+            countImages(page.children)
+          )
+        };
+      })
+      .toEqual({ pageOneFrame: false, pageTwoFrame: false, imageCounts: [0, 0] });
+    await pageA.reload();
+    await pageA.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+    await expect(pageA.getByRole("button", { name: "랜딩 프레임", exact: true })).toHaveCount(0);
+    await pageA.getByRole("button", { name: "프레임 이동 페이지", exact: true }).click();
+    await expect(pageA.getByRole("button", { name: /^이미지 \d+$/ })).toHaveCount(0);
+  } finally {
+    releaseQueueBlocker();
+    releaseCommittedNode();
+    releaseDeletionPersistence();
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test("collaborative stale image replacements converge to the newer edit", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const freshContext = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  const freshPage = await freshContext.newPage();
+  let allowStaleCommit = () => {};
+  let releaseStaleResponse = () => {};
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const stageBoxA = await pageA.getByTestId("stage-frame").boundingBox();
+    expect(stageBoxA).not.toBeNull();
+    const originalTransfer = await createImageDataTransfer(pageA, "replacement-original.png");
+    await pageA.getByTestId("stage-frame").dispatchEvent("drop", {
+      dataTransfer: originalTransfer,
+      clientX: stageBoxA!.x + 260,
+      clientY: stageBoxA!.y + 220
+    });
+    await expect(pageA.getByRole("button", { name: "이미지 3" })).toBeVisible();
+    const readPersistedAssetId = async () => {
+      const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const file = (await response.json()).file;
+      const findImageAsset = (nodes: Array<{
+        kind: string;
+        content?: { asset_id?: string };
+        children: unknown[];
+      }>): string | null => {
+        for (const node of nodes) {
+          if (node.kind === "image" && node.content?.asset_id) {
+            return node.content.asset_id;
+          }
+          const nested = findImageAsset(
+            node.children as Array<{ kind: string; content?: { asset_id?: string }; children: unknown[] }>
+          );
+          if (nested) {
+            return nested;
+          }
+        }
+        return null;
+      };
+      return findImageAsset(file.pages[0].children);
+    };
+    await expect.poll(readPersistedAssetId).not.toBeNull();
+    const originalAssetId = await readPersistedAssetId();
+    if (!originalAssetId) {
+      throw new Error("replacement convergence fixture did not persist the original asset");
+    }
+
+    await pageB.goto("http://127.0.0.1:5173/");
+    await connectRelayEditors(pageA, pageB);
+    await openLayersPanel(pageA);
+    await openLayersPanel(pageB);
+    await expect(pageB.getByRole("button", { name: "이미지 3" })).toBeVisible({ timeout: 8000 });
+    const stageBoxB = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(stageBoxB).not.toBeNull();
+
+    let markStalePatchReady = () => {};
+    const stalePatchReady = new Promise<void>((resolve) => {
+      markStalePatchReady = resolve;
+    });
+    const staleCommitGate = new Promise<void>((resolve) => {
+      allowStaleCommit = resolve;
+    });
+    let markStaleServerCommitted = (_status: number) => {};
+    const staleServerCommitted = new Promise<number>((resolve) => {
+      markStaleServerCommitted = resolve;
+    });
+    const staleResponseGate = new Promise<void>((resolve) => {
+      releaseStaleResponse = resolve;
+    });
+    await pageA.route(`**/files/${documentId}/nodes/*/image`, async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      markStalePatchReady();
+      await staleCommitGate;
+      const response = await route.fetch();
+      markStaleServerCommitted(response.status());
+      await staleResponseGate;
+      await route.fulfill({ response });
+    });
+
+    await pageA.getByRole("button", { name: "이미지 3" }).click();
+    await pageA.mouse.click(stageBoxA!.x + 260, stageBoxA!.y + 220, { button: "right" });
+    const staleChooserPromise = pageA.waitForEvent("filechooser");
+    await pageA.getByTestId("object-context-menu").getByRole("menuitem", {
+      name: "이미지 바꾸기"
+    }).click();
+    const staleAssetResponse = pageA.waitForResponse(
+      (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+    );
+    const staleChooser = await staleChooserPromise;
+    await staleChooser.setFiles(
+      await createImageUploadFile(pageA, "replacement-stale.png", "#dc2626")
+    );
+    const staleAsset = (await (await staleAssetResponse).json()).asset as { assetId: string };
+    await stalePatchReady;
+
+    await pageB.getByRole("button", { name: "이미지 3" }).click();
+    await pageB.mouse.click(stageBoxB!.x + 260, stageBoxB!.y + 220, { button: "right" });
+    const winningChooserPromise = pageB.waitForEvent("filechooser");
+    await pageB.getByTestId("object-context-menu").getByRole("menuitem", {
+      name: "이미지 바꾸기"
+    }).click();
+    const winningAssetResponse = pageB.waitForResponse(
+      (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+    );
+    const winningChooser = await winningChooserPromise;
+    await winningChooser.setFiles(
+      await createImageUploadFile(pageB, "replacement-winning.png", "#16a34a")
+    );
+    const winningAsset = (await (await winningAssetResponse).json()).asset as { assetId: string };
+    await expect.poll(readPersistedAssetId).toBe(winningAsset.assetId);
+    await expect.poll(() => canvasColorPixelCount(pageA, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await expect.poll(() => canvasColorPixelCount(pageB, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await advanceToAutomaticVersionBoundary(pageA, documentId);
+
+    allowStaleCommit();
+    expect(await staleServerCommitted).toBe(200);
+    await expect.poll(readPersistedAssetId).toBe(staleAsset.assetId);
+    await expect.poll(() => canvasColorPixelCount(pageA, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await expect.poll(() => canvasColorPixelCount(pageA, { r: 220, g: 38, b: 38 })).toBe(0);
+    expect((await pageA.request.get(`http://127.0.0.1:4317/assets/${staleAsset.assetId}`)).status()).toBe(200);
+
+    const stalePatchResponse = pageA.waitForResponse(
+      (response) =>
+        /\/files\/[^/]+\/nodes\/[^/]+\/image$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "PATCH"
+    );
+    releaseStaleResponse();
+    await stalePatchResponse;
+    await expect.poll(readPersistedAssetId).toBe(winningAsset.assetId);
+    await expect.poll(() => canvasColorPixelCount(pageA, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await expect.poll(() => canvasColorPixelCount(pageB, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await expect
+      .poll(async () =>
+        (await pageA.request.get(`http://127.0.0.1:4317/assets/${staleAsset.assetId}`)).status()
+      )
+      .toBe(404);
+    for (const assetId of [originalAssetId, winningAsset.assetId]) {
+      expect((await pageA.request.get(`http://127.0.0.1:4317/assets/${assetId}`)).status()).toBe(200);
+    }
+
+    await pageB.getByRole("button", { name: "이미지 3" }).click();
+    await pageB.keyboard.press("Control+Z");
+    await expect.poll(readPersistedAssetId).toBe(originalAssetId);
+    await pageB.keyboard.press("Control+Shift+Z");
+    await expect.poll(readPersistedAssetId).toBe(winningAsset.assetId);
+
+    await freshPage.goto("http://127.0.0.1:5173/");
+    await openLayersPanel(freshPage);
+    await expect(freshPage.getByRole("button", { name: "이미지 3" })).toBeVisible();
+    await expect.poll(() => canvasColorPixelCount(freshPage, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+    await expect.poll(() => canvasColorPixelCount(freshPage, { r: 220, g: 38, b: 38 })).toBe(0);
+  } finally {
+    allowStaleCommit();
+    releaseStaleResponse();
+    await contextA.close();
+    await contextB.close();
+    await freshContext.close();
+  }
+});
+
 test("two editors keep independent node move and text edits", async ({ browser }) => {
   const downloadDir = await mkdtemp(join(tmpdir(), "canvas-manifest-"));
 
@@ -369,11 +1141,15 @@ test("general collaborative snapshot persistence converges a newer room edit aft
         await route.fallback();
         return;
       }
-      held = true;
       const payload = route.request().postDataJSON() as {
-        baseDocument: Parameters<typeof frameX>[0];
-        document: Parameters<typeof frameX>[0];
+        baseDocument?: Parameters<typeof frameX>[0];
+        document?: Parameters<typeof frameX>[0];
       };
+      if (!payload.baseDocument || !payload.document) {
+        await route.fallback();
+        return;
+      }
+      held = true;
       let release = () => {};
       const releaseGate = new Promise<void>((resolve) => {
         release = resolve;
@@ -498,22 +1274,27 @@ test("general collaborative snapshot persistence converges a newer room edit aft
     await firstPage.keyboard.press("Control+Shift+z");
     await expect(firstPage.getByTestId("inspector-x")).toHaveValue("303");
     await expect(secondPage.getByTestId("inspector-x")).toHaveValue("303", { timeout: 8000 });
-    const persistedAfterRedo = await firstPage.request.get(
-      `http://127.0.0.1:4317/files/${documentId}`
-    );
-    const persistedDocument = (await persistedAfterRedo.json()).file as {
-      pages: Array<{ children: Array<{
-        id: string;
-        transform: { x: number };
-        children: Array<{ id: string; content: { type: string; value?: string } }>;
-      }> }>;
-    };
-    const persistedFrame = persistedDocument.pages[0]?.children.find((node) => node.id === "frame-1");
-    expect(persistedFrame?.transform.x).toBe(303);
-    expect(persistedFrame?.children.find((node) => node.id === "text-1")?.content).toMatchObject({
-      type: "text",
-      value: serverText
-    });
+    await expect
+      .poll(async () => {
+        const response = await firstPage.request.get(
+          `http://127.0.0.1:4317/files/${documentId}`
+        );
+        const persistedDocument = (await response.json()).file as {
+          pages: Array<{ children: Array<{
+            id: string;
+            transform: { x: number };
+            children: Array<{ id: string; content: { type: string; value?: string } }>;
+          }> }>;
+        };
+        const persistedFrame = persistedDocument.pages[0]?.children.find(
+          (node) => node.id === "frame-1"
+        );
+        return {
+          x: persistedFrame?.transform.x,
+          text: persistedFrame?.children.find((node) => node.id === "text-1")?.content.value
+        };
+      })
+      .toEqual({ x: 303, text: serverText });
 
     await freshPage.goto("http://127.0.0.1:5173/");
     await openLayersPanel(freshPage);
@@ -739,6 +1520,12 @@ test("collaborative restore persists independent remote edits and aborts conflic
         ]
       }
     });
+    await openFilePanel(firstPage);
+    await expect(firstPage.getByTestId("file-version-status")).toContainText(
+      "협업 복원 기준 복원됨",
+      { timeout: 8000 }
+    );
+    await openLayersPanel(firstPage);
     await firstPage.getByRole("button", { name: "랜딩 프레임" }).click();
     await expect(firstPage.getByTestId("inspector-x")).toHaveValue("144");
     await secondPage.getByRole("button", { name: "랜딩 프레임" }).click();
