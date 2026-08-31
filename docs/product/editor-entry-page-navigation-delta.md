@@ -193,6 +193,17 @@ server-only convergence remain outside user history. The focused browser proof
 covers insert Undo/Redo, replacement Undo/Redo, REST persistence in both
 directions, retained source/replacement assets, and reload fidelity.
 
+Another exact-head review found a narrower ownership race: a collaborator could
+move the selected parent frame to another page while an asset upload waited,
+without changing the uploader's active page or local mutation generation. Image
+insertion now revalidates that the captured page root or nested parent still
+belongs to the target page at every async boundary and queue entry; replacement
+does the same for its target image node. A relay-backed regression holds an
+earlier file-version save in A's per-file queue, completes the asset upload, then
+uses B's Restore to move the live frame off Page 1 before releasing the queue.
+It proves node POST count 0, page image counts `[0, 0]`, retained frame ownership
+on Page 2, and uploaded asset cleanup to 404.
+
 The final exact-head review then found that collaboration overlays still used
 document-space coordinates without carrying page identity. Presence now
 publishes `activePageId`, clears cursor and editing claims on page changes, and
@@ -204,7 +215,7 @@ That browser case also proves remote deletion removes a selection ghost and an
 incoming live edit cannot revive selection or cursor overlays during a saved
 version preview.
 
-The final no-retry collaboration suite passed 9/9. Its Restore case now waits
+The final no-retry collaboration suite passed 10/10. Its Restore case now waits
 for the visible Restore completion status before reopening Layers, preventing
 late reconciliation from racing the post-Restore Inspector assertion.
 
@@ -221,7 +232,7 @@ selection. Multi-page navigation inside the inert saved-version preview remains
 a separate maturity gap.
 
 The final combined image/preview browser matrix passes 9/9 without retry, and
-the complete collaboration suite passes 9/9. The latter now intercepts only
+the complete collaboration suite passes 10/10. The latter now intercepts only
 base-aware snapshot PUTs in its reverse-order test and polls the persisted Redo
 result before opening a fresh client, avoiding bootstrap-write and queue-timing
 false failures.

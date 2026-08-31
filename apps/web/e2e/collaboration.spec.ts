@@ -36,6 +36,32 @@ async function createProjectFromEmptyState(page: Page) {
   return projectPayload.project.currentDocumentId as string;
 }
 
+async function createImageDataTransfer(page: Page, name: string) {
+  return page.evaluateHandle(async (fileName) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 12;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("canvas context missing");
+    }
+    context.fillStyle = "#2563eb";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((nextBlob) => {
+        if (nextBlob) {
+          resolve(nextBlob);
+        } else {
+          reject(new Error("png blob missing"));
+        }
+      }, "image/png");
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([blob], fileName, { type: "image/png" }));
+    return transfer;
+  }, name);
+}
+
 test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
   await openTeamPanel(page);
@@ -443,6 +469,157 @@ test("remote cursors and selections stay on their collaborator's active page", a
       { timeout: 8000 }
     );
   } finally {
+    await contextA.close();
+    await contextB.close();
+  }
+});
+
+test("delayed collaborative image uploads reject parents moved off the active page", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+  let releaseQueueBlocker = () => {};
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const documentResponse = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    const currentDocument = structuredClone((await documentResponse.json()).file);
+    currentDocument.pages.push({
+      id: "page-parent-move-2",
+      name: "프레임 이동 페이지",
+      children: []
+    });
+    const movedDocument = structuredClone(currentDocument);
+    const movedFrame = movedDocument.pages[0].children.shift();
+    if (!movedFrame) {
+      throw new Error("parent-move fixture could not find frame-1");
+    }
+    movedDocument.pages[1].children.push(movedFrame);
+    const movedResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document: movedDocument }
+    });
+    expect(movedResponse.ok()).toBeTruthy();
+    const versionResponse = await pageA.request.post(
+      `http://127.0.0.1:4317/files/${documentId}/versions`,
+      { data: { message: "프레임 이동 기준" } }
+    );
+    expect(versionResponse.ok()).toBeTruthy();
+    const currentResponse = await pageA.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+      data: { document: currentDocument }
+    });
+    expect(currentResponse.ok()).toBeTruthy();
+
+    await pageA.reload();
+    await pageB.goto("http://127.0.0.1:5173/");
+    await openTeamPanel(pageA);
+    await pageA.getByRole("tab", { name: "실시간 협업" }).click();
+    await pageA.getByTestId("relay-url").fill("ws://127.0.0.1:4327");
+    await pageA.getByRole("button", { name: "협업 팀 만들기" }).click();
+    await expect(pageA.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+    await pageA.getByRole("tab", { name: "팀 설정" }).click();
+    await pageA.getByRole("button", { name: "설정 내보내기" }).click();
+    const manifest = await pageA.getByTestId("team-manifest").inputValue();
+
+    await openTeamPanel(pageB);
+    await pageB.getByRole("tab", { name: "팀 설정" }).click();
+    await pageB.getByTestId("team-manifest").fill(manifest);
+    await pageB.getByRole("button", { name: "설정 가져오기" }).click();
+    await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
+
+    let markQueueBlockerStarted = () => {};
+    const queueBlockerStarted = new Promise<void>((resolve) => {
+      markQueueBlockerStarted = resolve;
+    });
+    const queueBlockerRelease = new Promise<void>((resolve) => {
+      releaseQueueBlocker = resolve;
+    });
+    await pageA.route(`**/files/${documentId}/versions`, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const body = route.request().postDataJSON() as { message?: string } | null;
+      if (body?.message !== "큐 선행 저장") {
+        await route.continue();
+        return;
+      }
+      markQueueBlockerStarted();
+      await queueBlockerRelease;
+      await route.continue();
+    });
+    await openFilePanel(pageA);
+    await pageA.getByTestId("file-version-message").fill("큐 선행 저장");
+    await pageA.getByRole("button", { name: "현재 버전 저장" }).click();
+    await queueBlockerStarted;
+
+    await pageA.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+    await pageA.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+    const stageBox = await pageA.getByTestId("stage-frame").boundingBox();
+    expect(stageBox).not.toBeNull();
+    let createNodeRequests = 0;
+    await pageA.route(`**/files/${documentId}/nodes`, async (route) => {
+      if (route.request().method() === "POST") {
+        createNodeRequests += 1;
+      }
+      await route.continue();
+    });
+    const imageTransfer = await createImageDataTransfer(pageA, "parent-moved.png");
+    const uploadResponse = pageA.waitForResponse(
+      (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+    );
+    await pageA.getByTestId("stage-frame").dispatchEvent("drop", {
+      dataTransfer: imageTransfer,
+      clientX: stageBox!.x + 260,
+      clientY: stageBox!.y + 220
+    });
+    const uploadedAsset = (await (await uploadResponse).json()).asset as { assetId: string };
+    await pageA.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        })
+    );
+
+    await openFilePanel(pageB);
+    await expect(pageB.getByTestId("file-version-list")).toContainText("프레임 이동 기준");
+    await pageB.getByRole("button", { name: "프레임 이동 기준 복원" }).click();
+    await expect(pageB.getByTestId("file-version-status")).toContainText("프레임 이동 기준 복원됨", {
+      timeout: 8000
+    });
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("페이지 1");
+    await expect(pageA.getByRole("button", { name: "랜딩 프레임", exact: true })).toHaveCount(0);
+
+    releaseQueueBlocker();
+    await expect
+      .poll(async () =>
+        (await pageA.request.get(`http://127.0.0.1:4317/assets/${uploadedAsset.assetId}`)).status()
+      )
+      .toBe(404);
+    expect(createNodeRequests).toBe(0);
+    await expect
+      .poll(async () => {
+        const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+        const persisted = (await response.json()).file;
+        return {
+          pageOneFrame: persisted.pages[0].children.some((node: { id: string }) => node.id === "frame-1"),
+          pageTwoFrame: persisted.pages[1].children.some((node: { id: string }) => node.id === "frame-1"),
+          imageCounts: persisted.pages.map((page: { children: Array<{ kind: string; children: unknown[] }> }) => {
+            const countImages = (nodes: Array<{ kind: string; children: unknown[] }>): number =>
+              nodes.reduce(
+                (count, node) =>
+                  count +
+                  (node.kind === "image" ? 1 : 0) +
+                  countImages(node.children as Array<{ kind: string; children: unknown[] }>),
+                0
+              );
+            return countImages(page.children);
+          })
+        };
+      })
+      .toEqual({ pageOneFrame: false, pageTwoFrame: true, imageCounts: [0, 0] });
+  } finally {
+    releaseQueueBlocker();
     await contextA.close();
     await contextB.close();
   }

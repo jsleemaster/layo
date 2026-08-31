@@ -58,6 +58,8 @@ browser E2E were serialized; expanded editor/keyboard coverage then passed 5/5.
 Exact-head review later found and drove focused repairs for cross-page paste and
 hidden-page snap guides, including real snap-delta application. Follow-up review
 also closed copy-time parent-origin drift and delayed image-upload page races.
+Captured image parent and replacement-node ownership is now revalidated against
+the active page through queue entry, including remote frame moves during upload.
 The final review added explicit page identity to presence, first-page-only
 legacy compatibility, a self-contained relay-backed two-browser regression,
 and preview-local page fallback so older saved versions cannot replace the live

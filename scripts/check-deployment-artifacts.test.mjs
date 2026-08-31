@@ -121,6 +121,7 @@ test("full verification workflow runs PR-head gates without Vercel deployment se
   assert.match(workflow, /pnpm test/);
   assert.match(workflow, /pnpm test:e2e/);
   assert.match(workflow, /remote cursors and selections stay on their collaborator's active page/);
+  assert.match(workflow, /delayed collaborative image uploads reject parents moved off the active page/);
   assert.doesNotMatch(
     workflow,
     /VERCEL_TOKEN|VERCEL_ORG_ID|VERCEL_PROJECT_ID|LAYO_REPOSITORY_ADMIN_TOKEN|vercel build|vercel deploy/

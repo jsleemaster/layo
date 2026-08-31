@@ -95,7 +95,8 @@ New code is limited to:
   snapshot copy-time parent origin and preserve document-space position when a
   nested copy crosses page roots.
 - Revalidate page-scoped image insert/replacement work after async preparation,
-  upload, and at the persistence queue boundary; clean cancelled assets.
+  upload, and at the persistence queue boundary, including captured parent/node
+  ownership on the target page; clean cancelled assets.
 - Reconcile a document write that already started inside the same per-file queue
   step and preserve any newer active-page selection.
 - Use queue-start merge bases for confirmed writes, preserving mid-flight locks

@@ -49,7 +49,9 @@ pan and Enter path editing without weakening ordinary control activation.
 Follow-up review fixed copy-time parent-origin drift and delayed page-scoped
 image-upload races, including committed-write reconciliation that preserves a
 newer active-page selection, mid-flight locks, queued replacement order, and
-distinct concurrent image IDs. Immediate prior-asset deletion stays deferred
+distinct concurrent image IDs. Captured image parents and replacement targets
+are revalidated against the active page through queue entry so remote moves
+cannot write to a hidden page. Immediate prior-asset deletion stays deferred
 until history-aware GC can preserve Undo, and discarded confirmed deltas do not
 add phantom history or orphan their newly uploaded assets. Applied collaborative
 image insertions and replacements now enter Yjs Undo/Redo history and persist
@@ -60,7 +62,7 @@ silent, preserved the live active page and selection across older-version
 preview fallbacks, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
 passed workspace typecheck, the full root test gate, the production web build,
 the focused no-retry Playwright cases, the complete collaboration Playwright
-suite 9/9 without retry, the combined image/preview matrix 9/9 without retry, and a
+suite 10/10 without retry, the combined image/preview matrix 9/9 without retry, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.

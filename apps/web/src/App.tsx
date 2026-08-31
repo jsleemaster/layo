@@ -6327,6 +6327,25 @@ function findNodeParentId(document: RendererDocument, nodeId: string): string | 
   return null;
 }
 
+function isNodeOnDocumentPage(
+  document: RendererDocument,
+  nodeId: string,
+  pageId: string | null
+): boolean {
+  const page = pageId ? document.pages.find((candidate) => candidate.id === pageId) : null;
+  return Boolean(page && findNodeById({ ...document, pages: [page] }, nodeId));
+}
+
+function isParentOnDocumentPage(
+  document: RendererDocument,
+  parentId: string,
+  pageId: string
+): boolean {
+  return parentId === pageId
+    ? document.pages.some((page) => page.id === pageId)
+    : isNodeOnDocumentPage(document, parentId, pageId);
+}
+
 function findNodeParentIdInTree(parent: RendererNode, nodeId: string): string | null {
   if (parent.children.some((node) => node.id === nodeId)) {
     return parent.id;
@@ -13052,11 +13071,17 @@ export function App() {
     const fileId = currentProject.currentDocumentId;
     const mutationGeneration = editorMutationGenerationRef.current;
     const targetPageId = activePageIdRef.current;
-    const isCurrentPageReplacement = () =>
+    const currentReplacementDocument = () =>
+      collabSessionRef.current?.documentId === fileId
+        ? collabSessionRef.current.getDocument()
+        : editorRef.current?.document ?? null;
+    const isCurrentPageReplacement = (document = currentReplacementDocument()) =>
       !isEditorDocumentMutationBlocked() &&
       mutationGeneration === editorMutationGenerationRef.current &&
       currentProjectRef.current?.currentDocumentId === fileId &&
-      activePageIdRef.current === targetPageId;
+      activePageIdRef.current === targetPageId &&
+      document?.id === fileId &&
+      isNodeOnDocumentPage(document, nodeId, targetPageId);
     let pendingAsset: UploadedAsset | null = null;
     try {
       const naturalSize = await readImageFileSize(file);
@@ -13096,6 +13121,9 @@ export function App() {
             ? collabSessionRef.current.getDocument()
             : queuedEditor.document
         );
+        if (!isCurrentPageReplacement(operationBaseDocument)) {
+          return Promise.resolve("unavailable" as const);
+        }
         const queuedNode = findNodeById(operationBaseDocument, nodeId);
         if (!queuedNode || queuedNode.content.type !== "image") {
           return Promise.resolve("unavailable" as const);
@@ -18372,20 +18400,25 @@ export function App() {
       return;
     }
     const targetPageId = targetPage.id;
-    const isCurrentPageInsert = () => {
-      return (
-        !isEditorDocumentMutationBlocked() &&
-        mutationGeneration === editorMutationGenerationRef.current &&
-        currentProjectRef.current?.currentDocumentId === fileId &&
-        activePageIdRef.current === targetPageId
-      );
-    };
-
     const selectedContainer =
       selectedNode && (selectedNode.kind === "frame" || selectedNode.kind === "component")
         ? selectedNode
         : null;
     const parentId = selectedContainer?.id ?? targetPage.id;
+    const currentInsertDocument = () =>
+      collabSessionRef.current?.documentId === fileId
+        ? collabSessionRef.current.getDocument()
+        : editorRef.current?.document ?? null;
+    const isCurrentPageInsert = (document = currentInsertDocument()) => {
+      return (
+        !isEditorDocumentMutationBlocked() &&
+        mutationGeneration === editorMutationGenerationRef.current &&
+        currentProjectRef.current?.currentDocumentId === fileId &&
+        activePageIdRef.current === targetPageId &&
+        document?.id === fileId &&
+        isParentOnDocumentPage(document, parentId, targetPageId)
+      );
+    };
     const parentOrigin = selectedContainer
       ? (getNodeAbsolutePosition(editor.document, selectedContainer.id) ?? { x: 0, y: 0 })
       : { x: 0, y: 0 };
@@ -18449,6 +18482,9 @@ export function App() {
               ? collabSessionRef.current.getDocument()
               : queuedEditor.document
           );
+          if (!isCurrentPageInsert(operationBaseDocument)) {
+            return Promise.resolve("unavailable" as const);
+          }
           const candidateState = executeEditorCommand(
             { ...queuedEditor, document: operationBaseDocument },
             confirmedCommand
