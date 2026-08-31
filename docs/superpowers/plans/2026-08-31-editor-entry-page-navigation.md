@@ -98,6 +98,8 @@ New code is limited to:
   step and preserve any newer active-page selection.
 - Use queue-start merge bases for confirmed writes, preserving mid-flight locks
   and later-replacement order; reserve concurrent image IDs before awaiting.
+- Record applied confirmed image insertion/replacement deltas as undoable
+  collaboration transactions and persist both Undo and Redo.
 - Keep replacement source assets available to Undo until a history-aware GC
   policy can remove them safely.
 - If a confirmed delta is fully discarded by a newer current-document change,

@@ -51,7 +51,9 @@ image-upload races, including committed-write reconciliation that preserves a
 newer active-page selection, mid-flight locks, queued replacement order, and
 distinct concurrent image IDs. Immediate prior-asset deletion stays deferred
 until history-aware GC can preserve Undo, and discarded confirmed deltas do not
-add phantom history or orphan their newly uploaded assets. Final review also
+add phantom history or orphan their newly uploaded assets. Applied collaborative
+image insertions and replacements now enter Yjs Undo/Redo history and persist
+both directions. Final review also
 scoped remote cursor, selection, and editing presence to the active page,
 reconciled incoming delete/move presence, kept saved-version preview overlays
 silent, and made the isolated E2E runner start or reuse a collaboration relay. Local proof

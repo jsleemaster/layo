@@ -144,6 +144,7 @@ Initial MVP targets desktop-first editor use.
 - Page-scoped image insert and replacement work revalidates the active page after every pre-commit async boundary. If the page changed before persistence starts, the upload is cancelled and its unreferenced asset is removed.
 - Once an image document write starts, server and local reconciliation complete in the same per-file queue step. A later page switch preserves the newer active-page selection while the committed source-page document change is retained.
 - Confirmed image reconciliation uses the document visible at queue start as its merge base, so mid-flight locks and later queued replacements converge without rejecting the server commit or letting an older result win.
+- In a collaboration session, an applied confirmed image insertion or replacement is a user-authored UndoManager transaction. Server-only convergence remains non-undoable; successful image edits must support Undo/Redo and persist both directions.
 - Concurrent image drops reserve distinct node IDs before their first async boundary. Previous replacement assets are not deleted immediately because editor undo history may still reference them; cleanup requires a separate history-aware GC policy.
 - If a confirmed image delta is completely superseded by a newer local delete, cleanup of that newly uploaded asset is queued after pending file writes; the server reference check remains authoritative.
 - Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.

@@ -185,6 +185,14 @@ the first Undo restores a concurrently deleted parent instead of consuming a
 phantom image command. Replacement Undo keeps every referenced asset readable.
 The six focused image cases pass 6/6 without retry.
 
+The next exact-head review found that applied confirmed image reconciliation was
+marked as a system-only Yjs transaction, leaving collaboration UndoManager
+history empty after the local history reset. Applied insertions and replacements
+now use one undoable collaboration transaction, while discarded deltas and
+server-only convergence remain outside user history. The focused browser proof
+covers insert Undo/Redo, replacement Undo/Redo, REST persistence in both
+directions, retained source/replacement assets, and reload fidelity.
+
 The final exact-head review then found that collaboration overlays still used
 document-space coordinates without carrying page identity. Presence now
 publishes `activePageId`, clears cursor and editing claims on page changes, and

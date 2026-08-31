@@ -13712,7 +13712,7 @@ export function App() {
       activeSession.transact(
         "confirmed-image-reconciliation",
         () => reconciledDocument,
-        { undoable: false }
+        { undoable: true }
       );
       nextState = {
         ...nextState,

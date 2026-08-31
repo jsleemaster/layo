@@ -6843,6 +6843,98 @@ test("queued image replacements keep the latest server and editor asset", async 
   }
 });
 
+test("confirmed collaborative image insertions and replacements remain undoable", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
+  await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
+  await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  const readPersistedImageAssetId = async () => {
+    const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    const image = findFirstNodeByKind((await response.json()).file.pages[0].children, "image");
+    return image?.content.asset_id ?? null;
+  };
+  const stageFrame = page.getByTestId("stage-frame");
+  const stageBox = await stageFrame.boundingBox();
+  if (!stageBox) {
+    throw new Error("collaborative image undo test could not find the stage");
+  }
+
+  const originalTransfer = await createImageDataTransfer(
+    page,
+    "collaborative-undo-original.png",
+    { width: 320, height: 240 },
+    "#2563eb"
+  );
+  await stageFrame.dispatchEvent("drop", {
+    dataTransfer: originalTransfer,
+    clientX: stageBox.x + 260,
+    clientY: stageBox.y + 220
+  });
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await openFilePanel(page);
+  await expect(page.getByTestId("project-status")).toContainText("이미지 3 추가됨");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect.poll(readPersistedImageAssetId).not.toBeNull();
+  const originalAssetId = await readPersistedImageAssetId();
+  if (!originalAssetId) {
+    throw new Error("collaborative image undo test did not persist the original asset");
+  }
+  await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
+
+  await page.keyboard.press("Control+Z");
+  await expect(page.getByRole("button", { name: "이미지 3" })).toHaveCount(0);
+  await expect.poll(readPersistedImageAssetId).toBeNull();
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+
+  await page.getByRole("button", { name: "이미지 3" }).click();
+  await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
+  const chooserPromise = page.waitForEvent("filechooser");
+  await page.getByTestId("object-context-menu").getByRole("menuitem", {
+    name: "이미지 바꾸기"
+  }).click();
+  const replacementResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/assets") && response.request().method() === "POST"
+  );
+  const chooser = await chooserPromise;
+  await chooser.setFiles(
+    await createImageUploadFile(
+      page,
+      "collaborative-undo-replacement.png",
+      { width: 320, height: 240 },
+      "#16a34a"
+    )
+  );
+  const replacementAsset = (await (await replacementResponse).json()).asset as { assetId: string };
+  await openFilePanel(page);
+  await expect(page.getByTestId("project-status")).toContainText("이미지 3 이미지 바뀜");
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+
+  await page.keyboard.press("Control+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBe(0);
+
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+  for (const assetId of [originalAssetId, replacementAsset.assetId]) {
+    expect((await page.request.get(`http://127.0.0.1:4317/assets/${assetId}`)).status()).toBe(200);
+  }
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
+  await expect.poll(readPersistedImageAssetId).toBe(replacementAsset.assetId);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(100);
+});
+
 test("overlapping image drops reserve distinct node ids", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
   let releaseUploads!: () => void;
