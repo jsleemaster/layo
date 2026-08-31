@@ -13695,7 +13695,7 @@ export function App() {
     return applyEditorCommand(command);
   };
 
-  const reconcileConfirmedEditorCommand = (
+  const reconcileConfirmedEditorCommand = async (
     fileId: string,
     baseDocument: RendererDocument,
     command: Parameters<typeof executeEditorCommand>[1],
@@ -13728,6 +13728,13 @@ export function App() {
       { conflictPreference: "current" }
     );
     if (rendererDocumentsEqual(reconciledDocument, currentDocument)) {
+      const persistedDocument = await stabilizeDocumentSnapshotPersistence(
+        fileId,
+        confirmedState.document,
+        reconciledDocument,
+        getDocumentSnapshotEpoch(fileId)
+      );
+      updateCollaborationSnapshotBaseline(activeSession, persistedDocument);
       return "discarded" as const;
     }
     let nextState: EditorState = {

@@ -60,6 +60,8 @@ hidden-page snap guides, including real snap-delta application. Follow-up review
 also closed copy-time parent-origin drift and delayed image-upload page races.
 Captured image parent and replacement-node ownership is now revalidated against
 the active page through queue entry, including remote frame moves during upload.
+If an HTTP image mutation already committed, stale insert/replacement results
+use bounded base-aware server/Yjs compensation before asset cleanup.
 The final review added explicit page identity to presence, first-page-only
 legacy compatibility, a self-contained relay-backed two-browser regression,
 and preview-local page fallback so older saved versions cannot replace the live

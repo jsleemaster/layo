@@ -204,6 +204,26 @@ uses B's Restore to move the live frame off Page 1 before releasing the queue.
 It proves node POST count 0, page image counts `[0, 0]`, retained frame ownership
 on Page 2, and uploaded asset cleanup to 404.
 
+The next exact-head review found the post-start half of that race. A node POST
+or image PATCH can already mutate the filesystem document before a newer
+collaboration delete or replacement wins in Yjs. Returning `discarded` without
+compensation left the server and live state divergent. Discarded confirmed
+commands now run the existing bounded base-aware snapshot stabilizer inside the
+same file queue before cleanup. Relay tests hold the HTTP response after the
+server commit to prove the temporary divergence, then verify convergence:
+
+- committed insertion: server `[1,0]` while live Yjs has deleted the parent,
+  followed by server/Yjs `[0,0]` and no phantom Undo command;
+- stale replacement: the server is temporarily red while both clients remain
+  on the newer green replacement, then server, Undo/Redo, and cold reload all
+  converge to green.
+
+Attempted assets are deleted when unreferenced or retained only when an existing
+saved version legitimately references them. The expanded collaboration suite
+passes 11/11 without retry. Its marker-owned raw-storage reset now allows a
+nine-second quieting window and reports remaining entry names, covering late
+async writes from the longer relay suite without masking persistent contamination.
+
 The final exact-head review then found that collaboration overlays still used
 document-space coordinates without carrying page identity. Presence now
 publishes `activePageId`, clears cursor and editing claims on page changes, and
@@ -215,7 +235,7 @@ That browser case also proves remote deletion removes a selection ghost and an
 incoming live edit cannot revive selection or cursor overlays during a saved
 version preview.
 
-The final no-retry collaboration suite passed 10/10. Its Restore case now waits
+The final no-retry collaboration suite passed 11/11. Its Restore case now waits
 for the visible Restore completion status before reopening Layers, preventing
 late reconciliation from racing the post-Restore Inspector assertion.
 
@@ -232,7 +252,7 @@ selection. Multi-page navigation inside the inert saved-version preview remains
 a separate maturity gap.
 
 The final combined image/preview browser matrix passes 9/9 without retry, and
-the complete collaboration suite passes 10/10. The latter now intercepts only
+the complete collaboration suite passes 11/11. The latter now intercepts only
 base-aware snapshot PUTs in its reverse-order test and polls the persisted Redo
 result before opening a fresh client, avoiding bootstrap-write and queue-timing
 false failures.

@@ -51,7 +51,9 @@ image-upload races, including committed-write reconciliation that preserves a
 newer active-page selection, mid-flight locks, queued replacement order, and
 distinct concurrent image IDs. Captured image parents and replacement targets
 are revalidated against the active page through queue entry so remote moves
-cannot write to a hidden page. Immediate prior-asset deletion stays deferred
+cannot write to a hidden page. Already-committed stale inserts and replacements
+converge the filesystem document back to the winning Yjs state before cleanup,
+without adding phantom Undo history. Immediate prior-asset deletion stays deferred
 until history-aware GC can preserve Undo, and discarded confirmed deltas do not
 add phantom history or orphan their newly uploaded assets. Applied collaborative
 image insertions and replacements now enter Yjs Undo/Redo history and persist
@@ -62,7 +64,7 @@ silent, preserved the live active page and selection across older-version
 preview fallbacks, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
 passed workspace typecheck, the full root test gate, the production web build,
 the focused no-retry Playwright cases, the complete collaboration Playwright
-suite 10/10 without retry, the combined image/preview matrix 9/9 without retry, and a
+suite 11/11 without retry, the combined image/preview matrix 9/9 without retry, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.

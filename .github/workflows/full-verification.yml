@@ -96,5 +96,5 @@ jobs:
           NODE_OPTIONS: --conditions=development
         run: >-
           node scripts/run-e2e.mjs -- apps/web/e2e/collaboration.spec.ts
-          --grep "remote cursors and selections stay on their collaborator's active page|delayed collaborative image uploads reject parents moved off the active page"
+          --grep "remote cursors and selections stay on their collaborator's active page|collaborative image uploads converge when parents move before or disappear after persistence starts|collaborative stale image replacements converge to the newer edit"
           --workers=1 --retries=0 --reporter=line

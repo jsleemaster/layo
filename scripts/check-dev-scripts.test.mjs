@@ -68,6 +68,8 @@ test("e2e script starts required local services before Playwright", async () => 
   assert.match(storageHelper, /process\.env\.LAYO_E2E_STORAGE_TOKEN/);
   assert.match(storageHelper, /realpath/);
   assert.match(storageHelper, /tmpdir/);
+  assert.match(storageHelper, /attempt < 60/);
+  assert.match(storageHelper, /lastEntries/);
   assert.doesNotMatch(storageHelper, /apps\/server\/\.layo/);
 
   for (const specPath of [

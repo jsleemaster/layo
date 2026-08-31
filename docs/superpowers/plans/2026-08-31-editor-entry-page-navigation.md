@@ -99,6 +99,9 @@ New code is limited to:
   ownership on the target page; clean cancelled assets.
 - Reconcile a document write that already started inside the same per-file queue
   step and preserve any newer active-page selection.
+- Before treating a committed image delta as discarded, converge the persisted
+  server document to the winning live collaboration state and only then clean
+  an unreferenced asset; keep this convergence outside user Undo history.
 - Use queue-start merge bases for confirmed writes, preserving mid-flight locks
   and later-replacement order; reserve concurrent image IDs before awaiting.
 - Record applied confirmed image insertion/replacement deltas as undoable
