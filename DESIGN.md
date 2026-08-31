@@ -131,6 +131,17 @@ Initial MVP targets desktop-first editor use.
 - Canvas area scrolls rather than collapsing core editor chrome.
 - Touch targets should be at least `32px` in compact tool areas.
 
+## 8.1 Editor Entry, Help, And Page Context
+
+- The default Assets surface may remain the first view, but an empty local store must expose one working primary action that creates a project and opens an editable layer context.
+- Visible catalog or template examples must not use button semantics until they perform an actual product action. Preview-only items use static row/card semantics and say that they are examples.
+- Every rail action must open a visible surface. Help opens a Korean quick-start and only lists shortcuts the editor currently implements.
+- `?` opens and closes Help when focus is not inside a text-entry control.
+- Global canvas shortcuts must not intercept native activation or navigation while an interactive control has focus. Text-entry controls keep every editing key; layer rows may continue to forward selection shortcuts such as Arrow, Delete, and command-modified actions after selection.
+- Multi-page documents expose their existing pages in the Layers surface. One active page owns the visible layer list, canvas paint, comment overlays, Inspector page context, and page-level developer export review.
+- Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
+- Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
+
 ## 9. Agent Prompt Guide
 
 When modifying UI:

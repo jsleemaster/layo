@@ -1419,7 +1419,7 @@ const FRAME_PRESET_CATEGORIES = [
   { name: "아카이브", size: "이전 규격" }
 ];
 type TeamPanelMode = "local" | "relay" | "manifest";
-type LeftPanelMode = "files" | "assets" | "layers" | "team";
+type LeftPanelMode = "files" | "assets" | "layers" | "team" | "help";
 
 interface FileVersionPreviewState {
   version: FileVersionSummary;
@@ -2682,16 +2682,56 @@ function collaborationStatusLabel(status: string): string {
   }
 }
 
-function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+function isTextEntryKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
 
-  return (
+  return Boolean(
     target.isContentEditable ||
     target.tagName === "INPUT" ||
     target.tagName === "TEXTAREA" ||
-    target.tagName === "SELECT"
+    target.tagName === "SELECT" ||
+    target.closest('input, textarea, select, [contenteditable="true"]')
+  );
+}
+
+function shouldPreserveInteractiveKeyboardEvent(event: KeyboardEvent): boolean {
+  if (isTextEntryKeyboardTarget(event.target)) {
+    return true;
+  }
+
+  if (!(event.target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const interactiveTarget = event.target.closest<HTMLElement>(
+    'button, summary, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="checkbox"], [role="switch"]'
+  );
+  if (!interactiveTarget) {
+    return false;
+  }
+
+  if (event.metaKey || event.ctrlKey || event.altKey) {
+    return false;
+  }
+
+  if (event.key === " " || event.code === "Space" || event.key === "Enter") {
+    return true;
+  }
+
+  const isLayerSelectionControl = Boolean(interactiveTarget.closest(".layer-list"));
+  if (isLayerSelectionControl) {
+    return false;
+  }
+
+  return (
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight" ||
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown" ||
+    event.key === "Backspace" ||
+    event.key === "Delete"
   );
 }
 
@@ -10111,6 +10151,7 @@ export function App() {
   const [teamPanelMode, setTeamPanelMode] = useState<TeamPanelMode>("local");
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("assets");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [activeTeamContext, setActiveTeamContext] = useState<TeamManifest | null>(null);
   const activeProjectTeamContext =
@@ -11390,11 +11431,36 @@ export function App() {
 
   const isFileVersionPreviewing = fileVersionPreview !== null;
   const displayedDocument = fileVersionPreview?.document ?? editor?.document ?? null;
+  const pageIdSignature = displayedDocument?.pages.map((page) => page.id).join("\u0000") ?? "";
+  useEffect(() => {
+    setActivePageId((current) => {
+      const pages = displayedDocument?.pages ?? [];
+      if (current && pages.some((page) => page.id === current)) {
+        return current;
+      }
+      return pages[0]?.id ?? null;
+    });
+  }, [displayedDocument?.id, pageIdSignature]);
+
   const nodes = useMemo(
     () => (displayedDocument ? flattenRendererNodes(displayedDocument) : []),
     [displayedDocument]
   );
-  const activePage = displayedDocument?.pages[0] ?? null;
+  const activePage =
+    displayedDocument?.pages.find((page) => page.id === activePageId) ??
+    displayedDocument?.pages[0] ??
+    null;
+  const activePageDocument = useMemo(
+    () =>
+      displayedDocument && activePage
+        ? { ...displayedDocument, pages: [activePage] }
+        : null,
+    [activePage, displayedDocument]
+  );
+  const activePageNodes = useMemo(
+    () => (activePageDocument ? flattenRendererNodes(activePageDocument) : []),
+    [activePageDocument]
+  );
   const pageExportReviewItems = useMemo(
     () => (displayedDocument ? buildPageExportPresetReviewItems(displayedDocument, activePage?.id) : []),
     [activePage?.id, displayedDocument]
@@ -11412,10 +11478,10 @@ export function App() {
   );
   const commentBubbleOverlays = useMemo(
     () =>
-      editor && !isFileVersionPreviewing
-        ? createCommentBubbleOverlays(editor.document, commentThreads, editor.viewport)
+      editor && activePageDocument && !isFileVersionPreviewing
+        ? createCommentBubbleOverlays(activePageDocument, commentThreads, editor.viewport)
         : [],
-    [commentThreads, editor, isFileVersionPreviewing]
+    [activePageDocument, commentThreads, editor, isFileVersionPreviewing]
   );
   const currentProjectCommentNotification = useMemo(
     () =>
@@ -11840,6 +11906,7 @@ export function App() {
   const showAssetPanel = leftPanelMode === "assets";
   const showLayerPanel = leftPanelMode === "files" || leftPanelMode === "layers";
   const showTeamPanel = leftPanelMode === "files" || leftPanelMode === "team";
+  const showHelpPanel = leftPanelMode === "help";
   const leftPanelTitle =
     leftPanelMode === "files"
       ? "파일"
@@ -11847,7 +11914,9 @@ export function App() {
         ? "에셋"
         : leftPanelMode === "layers"
           ? "레이어"
-          : "팀";
+          : leftPanelMode === "team"
+            ? "팀"
+            : "도움말";
 
   useEffect(() => {
     if (!inlineTextEditingNodeId) {
@@ -12470,11 +12539,11 @@ export function App() {
   };
 
   const selectAllContextNodes = () => {
-    runContextMenuStateAction(selectAllPageNodes);
+    runContextMenuStateAction((state) => selectAllPageNodes(state, activePage?.id));
   };
 
   const selectSameKindContextNodes = () => {
-    runContextMenuStateAction(selectNodesWithSameKind);
+    runContextMenuStateAction((state) => selectNodesWithSameKind(state, activePage?.id));
   };
 
   const flipContextSelection = (axis: FlipAxis) => {
@@ -12732,14 +12801,15 @@ export function App() {
       const definition = node
         ? (state.document.components ?? []).find((component) => component.source_node.id === node.id)
         : null;
-      const firstPage = state.document.pages[0];
-      if (!node || !definition || !firstPage) {
+      const targetPage =
+        state.document.pages.find((page) => page.id === activePageId) ?? state.document.pages[0];
+      if (!node || !definition || !targetPage) {
         return state;
       }
 
       return executeEditorCommand(state, {
         type: "create_component_instance",
-        parentId: firstPage.id,
+        parentId: targetPage.id,
         definitionId: definition.id,
         instanceId: `instance-${flattenRendererNodes(state.document).length + 1}`,
         x: node.transform.x + 440,
@@ -12993,6 +13063,18 @@ export function App() {
     });
   };
 
+  const openLeftPanel = (mode: LeftPanelMode) => {
+    setLeftPanelMode(mode);
+    setIsSidebarCollapsed(false);
+  };
+
+  const toggleHelpPanel = () => {
+    setLeftPanelMode((current) =>
+      current === "help" ? (editorRef.current ? "layers" : "assets") : "help"
+    );
+    setIsSidebarCollapsed(false);
+  };
+
   const openObjectContextMenuFromPointer = (event: KonvaEventObject<MouseEvent>) => {
     event.evt.preventDefault();
     event.cancelBubble = true;
@@ -13010,7 +13092,7 @@ export function App() {
 
     const documentPoint = documentPointFromKonvaEvent(event, editor.viewport, stageFrameRef.current);
     const targetNodeId = documentPoint
-      ? getTopmostNodeIdAtPoint(editor.document, documentPoint)
+      ? getTopmostNodeIdAtPoint(editor.document, documentPoint, new Set(), activePage?.id)
       : null;
 
     if (targetNodeId) {
@@ -13063,7 +13145,17 @@ export function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableKeyboardTarget(event.target)) {
+      const target = event.target;
+      const isTextEntryTarget =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+      if ((event.key === "?" || (event.code === "Slash" && event.shiftKey)) && !isTextEntryTarget) {
+        event.preventDefault();
+        toggleHelpPanel();
+        return;
+      }
+
+      if (shouldPreserveInteractiveKeyboardEvent(event)) {
         return;
       }
 
@@ -13127,7 +13219,11 @@ export function App() {
       }
       if (isCommand && event.key.toLowerCase() === "a") {
         event.preventDefault();
-        updateEditorFromInteraction(event.shiftKey ? selectNodesWithSameKind : selectAllPageNodes);
+        updateEditorFromInteraction((state) =>
+          event.shiftKey
+            ? selectNodesWithSameKind(state, activePage?.id)
+            : selectAllPageNodes(state, activePage?.id)
+        );
         return;
       }
       if (isCommand && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "e") {
@@ -13374,7 +13470,7 @@ export function App() {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [stageSize.height, stageSize.width]);
+  }, [activePage?.id, stageSize.height, stageSize.width]);
 
   const applyEditorCommand = (command: Parameters<typeof executeEditorCommand>[1]) => {
     const currentEditor = editorRef.current;
@@ -15806,9 +15902,17 @@ export function App() {
         await requireProjectDocumentLoad(project, nextProjects, transitionToken);
       });
       setProjectStatus("새 프로젝트 저장됨");
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "새 프로젝트를 만들지 못했습니다";
       setProjectStatus(message);
+      return false;
+    }
+  };
+
+  const createProjectFromAssetStart = async () => {
+    if (await createNewProject()) {
+      openLeftPanel("layers");
     }
   };
 
@@ -16689,6 +16793,16 @@ export function App() {
     setGridCellContextMenu(null);
     setGridCellSelection(null);
     document.body.style.cursor = "";
+  };
+
+  const switchActivePage = (pageId: string) => {
+    if (!displayedDocument?.pages.some((page) => page.id === pageId) || pageId === activePage?.id) {
+      return;
+    }
+    cancelActiveCanvasInteractions();
+    setMeasurementTargetNodeId(null);
+    setActivePageId(pageId);
+    clearSelectionFromInteraction();
   };
 
   const previewCurrentFileVersion = async (version: FileVersionSummary) => {
@@ -18001,8 +18115,9 @@ export function App() {
       return;
     }
 
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
     const selectedContainer =
@@ -18012,7 +18127,7 @@ export function App() {
 
     dispatch({
       type: "create_node",
-      parentId: selectedContainer?.id ?? firstPage.id,
+      parentId: selectedContainer?.id ?? targetPage.id,
       node:
         kind === "rectangle"
           ? createRectangleNode(nodes.length + 1)
@@ -18030,8 +18145,9 @@ export function App() {
 
     const fileId = currentProject.currentDocumentId;
     const mutationGeneration = editorMutationGenerationRef.current;
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
 
@@ -18039,7 +18155,7 @@ export function App() {
       selectedNode && (selectedNode.kind === "frame" || selectedNode.kind === "component")
         ? selectedNode
         : null;
-    const parentId = selectedContainer?.id ?? firstPage.id;
+    const parentId = selectedContainer?.id ?? targetPage.id;
     const parentOrigin = selectedContainer
       ? (getNodeAbsolutePosition(editor.document, selectedContainer.id) ?? { x: 0, y: 0 })
       : { x: 0, y: 0 };
@@ -18162,14 +18278,15 @@ export function App() {
       return;
     }
 
-    const firstPage = editor.document.pages[0];
-    if (!firstPage) {
+    const targetPage =
+      editor.document.pages.find((page) => page.id === activePageId) ?? editor.document.pages[0];
+    if (!targetPage) {
       return;
     }
 
     dispatch({
       type: "create_component_instance",
-      parentId: firstPage.id,
+      parentId: targetPage.id,
       definitionId: selectedComponent.id,
       instanceId: `instance-${nodes.length + 1}`,
       x: selectedNode ? selectedNode.transform.x + 440 : 520,
@@ -18734,7 +18851,8 @@ export function App() {
     const targetNodeId = getTopmostNodeIdAtPoint(
       editor.document,
       documentPoint,
-      new Set(editor.selection.nodeIds)
+      new Set(editor.selection.nodeIds),
+      activePage?.id
     );
     setMeasurementTargetNodeId((current) => (current === targetNodeId ? current : targetNodeId));
   };
@@ -18903,7 +19021,12 @@ export function App() {
           return current;
         }
 
-        const nextState = selectNodesInBounds(current, bounds, activeAreaSelection.mode);
+        const nextState = selectNodesInBounds(
+          current,
+          bounds,
+          activeAreaSelection.mode,
+          activePage?.id
+        );
         publishEditorPresence(nextState, { activeTool: "select" });
         return nextState;
       });
@@ -18972,7 +19095,7 @@ export function App() {
         event.preventDefault();
         return;
       }
-      if (isEditableKeyboardTarget(event.target) || isEditableKeyboardTarget(document.activeElement)) {
+      if (isTextEntryKeyboardTarget(event.target) || isTextEntryKeyboardTarget(document.activeElement)) {
         return;
       }
 
@@ -19011,7 +19134,7 @@ export function App() {
             aria-label="파일"
             aria-pressed={leftPanelMode === "files"}
             title="파일"
-            onClick={() => setLeftPanelMode("files")}
+            onClick={() => openLeftPanel("files")}
           >
             ▦
           </button>
@@ -19020,7 +19143,7 @@ export function App() {
             aria-label="에셋"
             aria-pressed={leftPanelMode === "assets"}
             title="에셋"
-            onClick={() => setLeftPanelMode("assets")}
+            onClick={() => openLeftPanel("assets")}
           >
             ◇
           </button>
@@ -19029,7 +19152,7 @@ export function App() {
             aria-label="레이어"
             aria-pressed={leftPanelMode === "layers"}
             title="레이어"
-            onClick={() => setLeftPanelMode("layers")}
+            onClick={() => openLeftPanel("layers")}
           >
             ☰
           </button>
@@ -19038,13 +19161,19 @@ export function App() {
             aria-label="팀"
             aria-pressed={leftPanelMode === "team"}
             title="팀"
-            onClick={() => setLeftPanelMode("team")}
+            onClick={() => openLeftPanel("team")}
           >
             ◎
           </button>
         </div>
         <div className="editor-rail-group">
-          <button type="button" aria-label="도움말" aria-pressed="false" title="도움말">
+          <button
+            type="button"
+            aria-label="도움말"
+            aria-pressed={leftPanelMode === "help"}
+            title="도움말"
+            onClick={toggleHelpPanel}
+          >
             ?
           </button>
         </div>
@@ -19099,7 +19228,7 @@ export function App() {
                   />
                 </label>
                 <div className="project-actions">
-                  <button type="button" onClick={createNewProject}>
+                  <button type="button" className="project-primary-action" onClick={createNewProject}>
                     새 프로젝트 만들기
                   </button>
                   <button type="button" onClick={saveProjectName} disabled={!currentProject}>
@@ -19834,23 +19963,37 @@ export function App() {
                   <span className="visually-hidden">라이브러리 검색</span>
                   <input data-testid="asset-search" placeholder="모든 라이브러리 검색" />
                 </label>
-                <div className="asset-empty-card">
-                  <span className="asset-empty-icon" aria-hidden="true">
-                    ◧
-                  </span>
-                  <strong>아직 라이브러리가 없습니다.</strong>
-                  <span>팀에서 생성한 에셋을 찾아 이 파일에 추가해 사용할 수 있습니다.</span>
-                  <button type="button">팀 라이브러리 탐색하기</button>
-                </div>
-                <p className="asset-kit-intro">또는 사전 제작된 UI 키트로 시작하세요</p>
+                {currentProject ? (
+                  <div className="asset-empty-card">
+                    <span className="asset-empty-icon" aria-hidden="true">
+                      ◧
+                    </span>
+                    <strong>아직 라이브러리가 없습니다.</strong>
+                    <span>팀에서 생성한 에셋을 찾아 이 파일에 추가해 사용할 수 있습니다.</span>
+                    <button type="button" onClick={() => openLeftPanel("team")}>팀 라이브러리 탐색하기</button>
+                  </div>
+                ) : (
+                  <div className="asset-empty-card asset-project-start" role="status">
+                    <span className="asset-empty-icon" aria-hidden="true">
+                      ◧
+                    </span>
+                    <strong>프로젝트부터 시작하세요.</strong>
+                    <span>로컬 프로젝트를 만들면 캔버스, 레이어, Inspector와 에셋을 바로 사용할 수 있습니다.</span>
+                    <button type="button" onClick={() => void createProjectFromAssetStart()}>
+                      프로젝트 만들고 시작
+                    </button>
+                  </div>
+                )}
+                <p className="asset-kit-intro">
+                  {currentProject ? "사전 제작된 UI 키트 카탈로그" : "프로젝트를 만든 뒤 참고할 UI 키트 예시입니다."}
+                </p>
                 <div className="asset-library-list">
                   {ASSET_LIBRARY_KITS.map((kit) => (
-                    <button
-                      type="button"
-                      className="asset-library-card"
+                    <article
+                      className="asset-library-card asset-library-card-static"
                       data-testid="asset-library-card"
                       key={kit.name}
-                      aria-label={`${kit.name} 라이브러리`}
+                      aria-label={`${kit.name} 라이브러리 카탈로그 예시`}
                     >
                       <span
                         className={`asset-library-thumbnail asset-library-thumbnail-${kit.preview}`}
@@ -19876,25 +20019,90 @@ export function App() {
                         <span className="asset-library-meta">
                           <span>{kit.count}</span>
                           <span>{kit.templateCount}</span>
+                          <span className="asset-library-availability">카탈로그 예시</span>
                         </span>
                       </span>
-                    </button>
+                    </article>
                   ))}
                 </div>
               </section>
             ) : null}
+            {showHelpPanel ? (
+              <section className="help-panel" data-testid="help-panel" aria-label="도움말">
+                <div className="panel-header">
+                  <span className="panel-eyebrow">빠른 시작</span>
+                  <h2>빠른 시작</h2>
+                  <p>{currentProject ? "현재 파일에서 자주 쓰는 편집 흐름입니다." : "첫 프로젝트를 만들고 편집을 시작하세요."}</p>
+                </div>
+                <ol className="help-step-list">
+                  {currentProject ? (
+                    <>
+                      <li><strong>레이어 선택</strong><span>레이어 패널이나 캔버스에서 편집할 대상을 선택합니다.</span></li>
+                      <li><strong>속성 편집</strong><span>오른쪽 디자인 Inspector에서 위치, 크기, 스타일과 레이아웃을 조정합니다.</span></li>
+                      <li><strong>개발 인계</strong><span>개발 탭에서 CSS, HTML, 구조와 에셋을 검토합니다.</span></li>
+                    </>
+                  ) : (
+                    <>
+                      <li><strong>프로젝트 만들기</strong><span>로컬 저장소에 새 프로젝트와 첫 문서를 만듭니다.</span></li>
+                      <li><strong>레이어 선택</strong><span>샘플 프레임과 텍스트를 선택해 편집을 시작합니다.</span></li>
+                      <li><strong>저장과 검토</strong><span>변경은 로컬 파일에 저장되고 버전 기록에서 검토할 수 있습니다.</span></li>
+                    </>
+                  )}
+                </ol>
+                <section className="help-shortcuts" aria-labelledby="help-shortcuts-title">
+                  <h3 id="help-shortcuts-title">단축키</h3>
+                  <dl>
+                    <div><dt><kbd>Space</kbd> + 드래그</dt><dd>캔버스 이동</dd></div>
+                    <div><dt><kbd>⌘/Ctrl</kbd> + <kbd>0</kbd></dt><dd>화면 초기화</dd></div>
+                    <div><dt><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></dt><dd>실행 취소</dd></div>
+                    <div><dt><kbd>Shift</kbd> + <kbd>1</kbd></dt><dd>선택 영역 맞춤</dd></div>
+                    <div><dt><kbd>Esc</kbd></dt><dd>선택 해제</dd></div>
+                    <div><dt><kbd>?</kbd></dt><dd>도움말 열기·닫기</dd></div>
+                  </dl>
+                </section>
+                <button
+                  type="button"
+                  className="help-primary-action"
+                  onClick={() => openLeftPanel(currentProject ? "layers" : "files")}
+                >
+                  {currentProject ? "레이어로 돌아가기" : "파일에서 프로젝트 만들기"}
+                </button>
+              </section>
+            ) : null}
             {showLayerPanel ? (
               <section data-testid="layer-panel" aria-label="레이어">
+                {displayedDocument?.pages.length ? (
+                  <div className="page-switcher" data-testid="page-switcher" role="group" aria-label="페이지 전환">
+                    <div className="page-switcher-heading">
+                      <span>페이지</span>
+                      <strong data-testid="active-page-name">{activePage?.name ?? "페이지 없음"}</strong>
+                    </div>
+                    <div className="page-switcher-list">
+                      {displayedDocument.pages.map((page) => (
+                        <button
+                          key={page.id}
+                          type="button"
+                          className={page.id === activePage?.id ? "is-selected" : undefined}
+                          aria-pressed={page.id === activePage?.id}
+                          onClick={() => switchActivePage(page.id)}
+                        >
+                          {page.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="panel-header">
                   <span className="panel-eyebrow">레이어</span>
                   <p>{editor ? editor.document.name : "로컬 서버를 시작하면 프로젝트를 불러옵니다."}</p>
                 </div>
                 <div className="layer-list">
-                  {nodes.map((node) => (
+                  {activePageNodes.map((node) => (
                     <button
                       key={node.id}
                       type="button"
                       className={editor?.selection.nodeIds.includes(node.id) ? "is-selected" : undefined}
+                      aria-pressed={editor?.selection.nodeIds.includes(node.id)}
                       onClick={(event) => selectNode(node.id, event.shiftKey)}
                     >
                       {nodeLayerLabel(node)}
@@ -20583,7 +20791,7 @@ export function App() {
               }}
             >
               <Layer>
-                {orderedAppChildrenForPaint(displayedDocument?.pages[0]?.children ?? []).map((node) =>
+                {orderedAppChildrenForPaint(activePage?.children ?? []).map((node) =>
                   renderNode({
                     node,
                     selectedNodeId: isFileVersionPreviewing ? null : editor?.selection.nodeId ?? null,
@@ -21100,7 +21308,7 @@ export function App() {
         componentDefinition={selectedComponentInstanceDefinition}
         selectedComponentDefinition={selectedComponent ?? null}
         pageName={activePage?.name ?? currentDocumentName}
-        pageExportNodes={nodes}
+        pageExportNodes={activePageNodes}
         pageExportReviewItems={pageExportReviewItems}
         selectedParentNode={selectedParentNode}
         selectedNodeCount={selectedNodeIds.length}

@@ -24,13 +24,13 @@ function floatingToolbarZoom(page: Page, label: string) {
   return page.getByTestId("floating-toolbar").getByText(label);
 }
 
-test("opens with a Figma-like assets panel and keeps project controls behind the file rail", async ({ page }) => {
+test("opens with an assets catalog and keeps project controls behind the file rail", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
 
   await expect(page.getByTestId("asset-panel")).toBeVisible();
   await expect(page.getByRole("heading", { name: "에셋" })).toBeVisible();
   await expect(page.getByTestId("asset-search")).toHaveAttribute("placeholder", "모든 라이브러리 검색");
-  await expect(page.getByText("아직 라이브러리가 없습니다.")).toBeVisible();
+  await expect(page.getByText("프로젝트부터 시작하세요.")).toBeVisible();
   await expect(page.getByText("iOS 18 and iPadOS 18")).toBeVisible();
   await expect(page.getByText("visionOS 26")).toBeVisible();
   await expect(page.getByTestId("asset-library-card")).toHaveCount(6);
@@ -53,6 +53,127 @@ test("opens with a Figma-like assets panel and keeps project controls behind the
   await page.getByRole("button", { name: "에셋" }).click();
   await expect(page.getByTestId("asset-panel")).toBeVisible();
   await expect(page.getByTestId("project-panel")).toBeHidden();
+});
+
+test("empty editor exposes a real project start action and honest asset previews", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  await expect(page.getByText("프로젝트부터 시작하세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "프로젝트 만들고 시작" })).toBeVisible();
+  const catalogCards = page.getByTestId("asset-library-card");
+  await expect(catalogCards).toHaveCount(6);
+  await expect(catalogCards.first()).not.toHaveJSProperty("tagName", "BUTTON");
+
+  await page.getByRole("button", { name: "프로젝트 만들고 시작" }).click();
+  await expect(page.getByTestId("layer-panel")).toBeVisible();
+  await expect(page.getByTestId("top-file-project")).toContainText("새 프로젝트 1");
+  await expect(page.getByTestId("stage-frame")).toBeVisible();
+});
+
+test("help works by click and question-mark shortcut while focused controls keep native Space behavior", async ({ page }) => {
+  await page.goto("http://127.0.0.1:5173/");
+
+  const helpButton = page.getByTestId("editor-rail").getByRole("button", { name: "도움말" });
+  await helpButton.click();
+  await expect(page.getByTestId("help-panel")).toBeVisible();
+  await expect(helpButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "빠른 시작" })).toBeVisible();
+  await expect(page.getByText("Space + 드래그")).toBeVisible();
+
+  await page.keyboard.press("Shift+/");
+  await expect(page.getByTestId("help-panel")).toHaveCount(0);
+  await page.keyboard.press("Shift+/");
+  await expect(page.getByTestId("help-panel")).toBeVisible();
+
+  const fileButton = page.getByTestId("editor-rail").getByRole("button", { name: "파일" });
+  await fileButton.focus();
+  await expect(fileButton).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("project-panel")).toBeVisible();
+  await expect(fileButton).toHaveAttribute("aria-pressed", "true");
+});
+
+test("switches existing document pages without mixing hidden-page layers", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(documentResponse.ok()).toBeTruthy();
+  const payload = await documentResponse.json();
+  const document = payload.file;
+  document.pages[0].children[0].style.fill = "#dc2626";
+  document.pages.push({
+    id: "page-2",
+    name: "두 번째 페이지",
+    children: [{
+      id: "frame-2",
+      kind: "frame",
+      name: "두 번째 프레임",
+      children: [{
+        id: "text-2",
+        kind: "text",
+        name: "두 번째 헤드라인",
+        children: [],
+        transform: { x: 32, y: 40, rotation: 0 },
+        size: { width: 260, height: 48 },
+        style: { fill: "#065f46", stroke: null, stroke_width: 0, opacity: 1 },
+        content: { type: "text", value: "두 번째 페이지", font_size: 28, font_family: "Inter" }
+      }],
+      transform: { x: 120, y: 80, rotation: 0 },
+      size: { width: 420, height: 280 },
+      style: { fill: "#16a34a", stroke: "#86efac", stroke_width: 1, opacity: 1 },
+      content: { type: "empty" }
+    }]
+  });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(page.getByTestId("page-switcher")).toBeVisible();
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toHaveCount(0);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(1_000);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBe(0);
+
+  await page.getByRole("button", { name: "헤드라인", exact: true }).click();
+  await expect(page.getByText("헤드라인").first()).toBeVisible();
+  await page.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toBeVisible();
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(1_000);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBe(0);
+
+  const stageBox = await page.getByTestId("stage-frame").boundingBox();
+  if (!stageBox) {
+    throw new Error("active page stage was not visible");
+  }
+  await page.mouse.click(stageBox.x + 500, stageBox.y + 300, { button: "right" });
+  await expect(page.getByTestId("object-context-menu")).toBeVisible();
+  await expect(page.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.mouse.click(stageBox.x + 24, stageBox.y + 24);
+
+  await page.keyboard.press("Control+A");
+  await expect(page.getByRole("button", { name: "두 번째 프레임", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+
+  await page.getByRole("button", { name: "두 번째 헤드라인", exact: true }).click();
+  await expect(page.getByText("두 번째 헤드라인").first()).toBeVisible();
+  await expect(page.getByTestId("inspector-text")).toHaveValue("두 번째 페이지");
+
+  await page.getByRole("button", { name: "사각형 만들기", exact: true }).click();
+  await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toBeVisible();
+  await page.getByRole("button", { name: "페이지 1", exact: true }).click();
+  await expect(page.getByTestId("layer-panel").getByRole("button", { name: /^사각형/ })).toHaveCount(0);
+  await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBeGreaterThan(1_000);
 });
 
 test("editor chrome uses the generated Layo brand logo assets", async ({ page }) => {
@@ -261,6 +382,30 @@ async function findCanvasColorBounds(page: Page, color: { r: number; g: number; 
     }
 
     return bestBounds;
+  }, color);
+}
+
+async function canvasColorPixelCount(page: Page, color: { r: number; g: number; b: number }) {
+  return page.evaluate((targetColor) => {
+    const colorDistance = (red: number, green: number, blue: number) =>
+      Math.abs(red - targetColor.r) + Math.abs(green - targetColor.g) + Math.abs(blue - targetColor.b);
+    let count = 0;
+    for (const canvas of Array.from(document.querySelectorAll("canvas"))) {
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        continue;
+      }
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (
+          pixels[index + 3] >= 200 &&
+          colorDistance(pixels[index], pixels[index + 1], pixels[index + 2]) <= 8
+        ) {
+          count += 1;
+        }
+      }
+    }
+    return count;
   }, color);
 }
 
@@ -9309,6 +9454,11 @@ test("right inspector binds imported typography tokens to text layers", async ({
 
 test("Figma-like edit shortcuts duplicate and delete selected layers", async ({ page }) => {
   await createProjectFromEmptyState(page);
+
+  await page.getByRole("button", { name: "헤드라인" }).click();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "파일" }).focus();
+  await page.keyboard.press("Delete");
+  await expect(page.getByRole("button", { name: "헤드라인" })).toBeVisible();
 
   await page.getByRole("button", { name: "헤드라인" }).click();
   await page.keyboard.press("Control+D");

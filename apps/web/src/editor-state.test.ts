@@ -3183,6 +3183,51 @@ describe("editor state commands", () => {
     expect(sameKind.selection.nodeId).toBe("rectangle-2");
   });
 
+  test("scopes hit testing and bulk selection to an explicit active page", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: [
+        {
+          id: "page-2-rectangle",
+          kind: "rectangle",
+          name: "페이지 2 사각형",
+          transform: { x: 180, y: 140, rotation: 0 },
+          size: { width: 160, height: 96 },
+          style: { fill: "#dcfce7", stroke: "#16a34a", stroke_width: 1, opacity: 1 },
+          content: { type: "empty" },
+          children: []
+        }
+      ]
+    });
+
+    expect(getTopmostNodeIdAtPoint(document, { x: 190, y: 150 }, new Set(), "page-1")).toBe(
+      "rectangle-1"
+    );
+    expect(getTopmostNodeIdAtPoint(document, { x: 190, y: 150 }, new Set(), "page-2")).toBe(
+      "page-2-rectangle"
+    );
+
+    const activePageState = createEditorState(document);
+    const selectedInBounds = selectNodesInBounds(
+      activePageState,
+      { x: 170, y: 130, width: 180, height: 120 },
+      "replace",
+      "page-2"
+    );
+    expect(selectedInBounds.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const selectedAll = selectAllPageNodes(activePageState, "page-2");
+    expect(selectedAll.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const selectedSameKind = selectNodesWithSameKind(
+      setSelection(activePageState, "page-2-rectangle"),
+      "page-2"
+    );
+    expect(selectedSameKind.selection.nodeIds).toEqual(["page-2-rectangle"]);
+  });
+
   test("flips selected sibling nodes around the selection bounds with undo support", () => {
     const document = sampleDocumentWithTopLevelRectangle();
     document.pages[0]?.children.push({

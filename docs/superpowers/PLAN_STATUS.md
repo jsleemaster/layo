@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-08-10
+Last audited: 2026-08-31
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,15 +29,17 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No active plan. The PR #319 comment-management slice and its exact post-merge
-legacy-ownership repair completed through PR #320. Start the next Penpot gap
-from the [product maturity benchmark](../product/penpot-maturity-benchmark.md)
-with a new plan instead of reopening this historical plan without a new failed
-case.
+`2026-08-31-editor-entry-page-navigation.md` - adapting Penpot's explicit
+project entry, workspace shortcuts panel, and page navigation to Layo's
+local-first editor shell. Implementation and local full verification are green;
+remote PR review and merge gates remain. The captured RED cases were dead
+first-run affordances, native-control shortcut interception, and multi-page
+documents whose hidden-page layers and hit/selection paths could diverge from
+the painted page.
 
 ## Recently Completed Plan
 
-`2026-07-23-penpot-comment-management.md` completed across PR #319 and the
+2026-07-23-penpot-comment-management.md completed across PR #319 and the
 failure-learning repair PR #320. PR #319 shipped the main comment workflow as
 `e87fe7e0e980ba7375a734ac08767b6af2a51e14`; its late configured review exposed
 the legacy ownership P1. PR #320 final head
