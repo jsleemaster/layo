@@ -267,11 +267,27 @@ base-aware snapshot PUTs in its reverse-order test and polls the persisted Redo
 result before opening a fresh client, avoiding bootstrap-write and queue-timing
 false failures.
 
+Post-merge use on a multi-page Resume Admin audit board exposed a separate
+navigation defect: `Shift+1` claimed to fit a selected board but reused the 25%
+manual zoom floor, cropping oversized frames. Selection fit now owns a 1% floor,
+while direct/manual `setViewport` still clamps to 25%. Panning preserves a
+below-floor fitted scale, and subsequent zoom input remains bounded. Unit and
+browser regressions require a 5000x4000 frame to render all four resize handles
+inside the stage at a zoom below 25%.
+
 The focused command is:
 
 ```bash
 node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts \
   --grep "empty editor exposes|help works|switches existing document pages" \
+  --workers=1 --retries=0 --reporter=line
+```
+
+The oversized selection-fit regression is:
+
+```bash
+node scripts/run-e2e.mjs -- apps/web/e2e/editor-mvp.spec.ts \
+  --grep "fit selection zooms below 25 percent for oversized frames" \
   --workers=1 --retries=0 --reporter=line
 ```
 

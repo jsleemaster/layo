@@ -3296,6 +3296,53 @@ describe("editor state commands", () => {
     expect((bounds.y + bounds.height / 2) * fitted.viewport.scale + fitted.viewport.y).toBeCloseTo(300, 1);
   });
 
+  test("fits oversized selections below the manual zoom floor and preserves that scale while panning", () => {
+    const document = sampleDocument();
+    const frame = findNodeById(document, "frame-1");
+    if (!frame) {
+      throw new Error("frame missing");
+    }
+    frame.size = { width: 5_000, height: 4_000 };
+    const selected = setSelection(createEditorState(document), "frame-1");
+
+    const fitted = fitViewportToSelection(selected, { width: 1_000, height: 600 }, 40);
+    const bounds = getSelectionBoundsForNodeIds(fitted.document, fitted.selection.nodeIds);
+    expect(bounds).not.toBeNull();
+    if (!bounds) {
+      return;
+    }
+
+    expect(fitted.viewport.scale).toBeCloseTo(0.13, 5);
+    const projected = {
+      left: bounds.x * fitted.viewport.scale + fitted.viewport.x,
+      top: bounds.y * fitted.viewport.scale + fitted.viewport.y,
+      right: (bounds.x + bounds.width) * fitted.viewport.scale + fitted.viewport.x,
+      bottom: (bounds.y + bounds.height) * fitted.viewport.scale + fitted.viewport.y
+    };
+    expect(projected.left).toBeGreaterThanOrEqual(40 - 1e-9);
+    expect(projected.top).toBeCloseTo(40, 8);
+    expect(projected.right).toBeLessThanOrEqual(960 + 1e-9);
+    expect(projected.bottom).toBeCloseTo(560, 8);
+
+    const panned = panViewport(fitted, { x: 24, y: -16 });
+    expect(panned.viewport.scale).toBe(fitted.viewport.scale);
+    expect(zoomViewport(fitted, -0.25).viewport.scale).toBe(0.01);
+
+    const pointer = { x: 440, y: 260 };
+    const documentPointBefore = {
+      x: (pointer.x - fitted.viewport.x) / fitted.viewport.scale,
+      y: (pointer.y - fitted.viewport.y) / fitted.viewport.scale
+    };
+    const zoomedAtPointer = zoomViewportAtPoint(fitted, -0.25, pointer);
+    const documentPointAfter = {
+      x: (pointer.x - zoomedAtPointer.viewport.x) / zoomedAtPointer.viewport.scale,
+      y: (pointer.y - zoomedAtPointer.viewport.y) / zoomedAtPointer.viewport.scale
+    };
+    expect(zoomedAtPointer.viewport.scale).toBe(0.01);
+    expect(documentPointAfter.x).toBeCloseTo(documentPointBefore.x, 8);
+    expect(documentPointAfter.y).toBeCloseTo(documentPointBefore.y, 8);
+  });
+
   test("aligns selected nodes by document-space left edge across parents", () => {
     const initial = setMultiSelection(
       createEditorState(sampleDocumentWithTopLevelRectangle()),

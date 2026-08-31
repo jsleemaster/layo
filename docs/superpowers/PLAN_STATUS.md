@@ -70,6 +70,10 @@ direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback
 remain separate gaps.
 
+A post-merge real-board follow-up also repairs `Shift+1` for oversized audit
+frames: semantic fit may drop below the 25% manual floor to keep the complete
+selection inside the viewport, with focused unit and browser coverage.
+
 2026-07-23-penpot-comment-management.md completed across PR #319 and the
 failure-learning repair PR #320. PR #319 shipped the main comment workflow as
 `e87fe7e0e980ba7375a734ac08767b6af2a51e14`; its late configured review exposed
