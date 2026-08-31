@@ -44,7 +44,8 @@ selection shortcuts, and makes the active page own canvas paint, Layers,
 comments, Inspector/Dev context, pointer hit testing, measurement, marquee,
 bulk selection, clipboard paste ownership, and drag-snap targets. Exact-head
 review also repaired cross-page paste coordinates, hidden-page snap guides, and
-cosmetic-only snap deltas. Local proof passed workspace typecheck, the full root test
+cosmetic-only snap deltas. Superseded-head CI then repaired layer-focused Space
+pan and Enter path editing without weakening ordinary control activation. Local proof passed workspace typecheck, the full root test
 gate, the production web build, six focused no-retry Playwright cases, and a
 direct live browser pass with zero console errors or warnings. Page CRUD,
 File-panel density, 1024px comfort, focus return, and persistent status feedback

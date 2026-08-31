@@ -128,6 +128,13 @@ required before merge.
 The final combined editor/keyboard Playwright selection passes 6/6 without
 retry, including both active-page repairs and the existing snap interaction.
 
+The superseded `bd24847` Full Verification also exposed that the first
+interactive-focus repair still treated layer rows like ordinary buttons: Space
+drag moved the selected layer instead of panning, and Enter could not open path
+editing. Layer rows now explicitly remain in the editor shortcut surface while
+rail and other controls keep native activation. Both exact failed CI cases pass
+2/2 locally without retry on the repaired code.
+
 The focused command is:
 
 ```bash

@@ -73,7 +73,8 @@ New code is limited to:
 - Show a Korean quick-start and only verified keyboard shortcuts.
 - Expand the sidebar when a rail destination is selected.
 - Preserve text entry and native control activation/navigation while keeping
-  intentional layer-selection shortcuts available after layer focus.
+  intentional layer-selection shortcuts, including Space pan and Enter edit,
+  available after layer focus.
 
 ### 4. Implement active-page switching
 

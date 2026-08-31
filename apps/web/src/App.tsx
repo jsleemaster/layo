@@ -2716,13 +2716,13 @@ function shouldPreserveInteractiveKeyboardEvent(event: KeyboardEvent): boolean {
     return false;
   }
 
-  if (event.key === " " || event.code === "Space" || event.key === "Enter") {
-    return true;
-  }
-
   const isLayerSelectionControl = Boolean(interactiveTarget.closest(".layer-list"));
   if (isLayerSelectionControl) {
     return false;
+  }
+
+  if (event.key === " " || event.code === "Space" || event.key === "Enter") {
+    return true;
   }
 
   return (
