@@ -57,8 +57,26 @@ or document model.
   Select Same Kind are also constrained to the active page, so overlapping
   coordinates cannot select or mutate a hidden page.
 - Keyboard/context paste resolves its parent inside the active page. A nested
-  copy crossing pages reanchors from its source-parent coordinates to the
-  active page root, while same-page nested paste retains the original parent.
+  copy snapshots its source-parent origin at copy time, then reanchors to the
+  active page root even if that source parent later moves or is deleted;
+  same-page nested paste retains the original parent.
+- Async image insert and replacement revalidate their captured page after image
+  decoding, upload, and again at the persistence queue boundary. A pre-commit
+  page switch cancels the operation and removes the unreferenced uploaded asset.
+- Once the document write starts, confirmed insert/replacement reconciliation
+  completes inside the same per-file queue operation. A later page switch keeps
+  the current page selection while the source-page commit remains in both the
+  server and local document, preventing a stale snapshot from reverting it.
+- Queue-start snapshots are the merge base for confirmed writes. This preserves
+  mid-flight lock changes, makes the last queued replacement win in both server
+  and editor state, and avoids lock-policy rejection during reconciliation.
+- Concurrent image drops reserve distinct IDs before their first async boundary.
+  Previous replacement assets remain available to Undo; cleanup is deliberately
+  deferred to a separate history-aware GC policy rather than deleting them
+  immediately and restoring a broken asset reference.
+- A newly uploaded asset whose confirmed delta is fully discarded by a newer
+  delete is different: its reference-safe cleanup is queued after pending file
+  writes, once the server can authoritatively determine that it is orphaned.
 - Drag snapping receives the active-page projection only, and the editor now
   applies the calculated snap delta rather than displaying cosmetic guides
   while committing the raw pointer delta.
@@ -113,7 +131,7 @@ The first root test run also exposed a wall-clock-dependent authorization test:
 its fixture token had expired relative to the current date because authentication
 used the real clock. The regression now injects a fixed time inside the token's
 validity window. The final local gate passed workspace typecheck, root
-`pnpm test` (including 522 passed/47 skipped server tests and 285 web tests),
+`pnpm test` (including 522 passed/47 skipped server tests and 287 web tests),
 Rust workspace tests, design rules, the Penpot maturity check, and the production
 web build. The build retains the existing large-chunk warning.
 
@@ -134,6 +152,26 @@ drag moved the selected layer instead of panning, and Enter could not open path
 editing. Layer rows now explicitly remain in the editor shortcut surface while
 rail and other controls keep native activation. Both exact failed CI cases pass
 2/2 locally without retry on the repaired code.
+
+The next exact-head review on `0e3daee` found the remaining async and snapshot
+boundaries: delayed image insertion could finish on the hidden source page, and
+cross-page paste read the source parent origin at paste time. The repair adds a
+synchronous active-page ref with queue-boundary revalidation and a copy-time
+clipboard origin snapshot. The two focused browser regressions pass 2/2 and the
+editor-state suite remains 117/117.
+
+Independent re-review then extended the race proof through the document-write
+commit boundary. Delayed node create and image replacement responses now
+reconcile before the persistence queue advances and preserve a Page B selection;
+a subsequent Page B edit proves the hidden Page A image commit survives later
+snapshot persistence. The three focused image race cases pass 3/3 without retry.
+
+Final local race coverage also holds parent/image locks across committed writes,
+proves queued replacement A/B order converges on B, and reserves unique IDs for
+overlapping drops. Fully discarded confirmed deltas keep the current history, so
+the first Undo restores a concurrently deleted parent instead of consuming a
+phantom image command. Replacement Undo keeps every referenced asset readable.
+The six focused image cases pass 6/6 without retry.
 
 The focused command is:
 

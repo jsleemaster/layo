@@ -85,6 +85,7 @@ export interface EditorState {
 export interface EditorNodeClipboard {
   sourceNodeId: string;
   parentId: string;
+  sourceParentOrigin: { x: number; y: number };
   node: RendererNode;
 }
 
@@ -1685,6 +1686,7 @@ export function copySelectedNode(state: EditorState): EditorNodeClipboard | null
   return {
     sourceNodeId: selected.node.id,
     parentId: selected.parentId,
+    sourceParentOrigin: getParentAbsolutePosition(state.document, selected.parentId),
     node: structuredClone(selected.node)
   };
 }
@@ -1721,20 +1723,18 @@ export function pasteCopiedNode(
     return state;
   }
 
-  const sourceParentAbsolute = getParentAbsolutePosition(state.document, clipboard.parentId);
   const targetParentAbsolute = getParentAbsolutePosition(state.document, parentId);
+  const parentOffset =
+    parentId === clipboard.parentId
+      ? { x: 0, y: 0 }
+      : {
+          x: clipboard.sourceParentOrigin.x - targetParentAbsolute.x,
+          y: clipboard.sourceParentOrigin.y - targetParentAbsolute.y
+        };
   copiedNode.transform = {
     ...copiedNode.transform,
-    x:
-      copiedNode.transform.x +
-      sourceParentAbsolute.x -
-      targetParentAbsolute.x +
-      PASTE_OFFSET * copyIndex,
-    y:
-      copiedNode.transform.y +
-      sourceParentAbsolute.y -
-      targetParentAbsolute.y +
-      PASTE_OFFSET * copyIndex
+    x: copiedNode.transform.x + parentOffset.x + PASTE_OFFSET * copyIndex,
+    y: copiedNode.transform.y + parentOffset.y + PASTE_OFFSET * copyIndex
   };
 
   return insertCopiedNode(state, parentId, copiedNode);

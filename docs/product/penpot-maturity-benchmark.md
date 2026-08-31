@@ -55,7 +55,8 @@ follow that active page while page changes clear stale selection. The focused is
 repeated the same cases 15/15 without retry once Cargo binding generation and
 browser E2E were serialized; expanded editor/keyboard coverage then passed 5/5.
 Exact-head review later found and drove focused repairs for cross-page paste and
-hidden-page snap guides, including real snap-delta application.
+hidden-page snap guides, including real snap-delta application. Follow-up review
+also closed copy-time parent-origin drift and delayed image-upload page races.
 
 This advances editor completeness and direct task entry, but it is not page
 management maturity. Page create/rename/delete/reorder and corresponding

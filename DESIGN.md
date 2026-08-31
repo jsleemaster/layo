@@ -139,7 +139,12 @@ Initial MVP targets desktop-first editor use.
 - `?` opens and closes Help when focus is not inside a text-entry control.
 - Global canvas shortcuts must not intercept native activation or navigation while an interactive control has focus. Text-entry controls keep every editing key; layer rows behave as the editor selection surface and continue to forward Space pan, Enter edit, Arrow, Delete, and command-modified actions after selection.
 - Multi-page documents expose their existing pages in the Layers surface. One active page owns the visible layer list, canvas paint, comment overlays, Inspector page context, and page-level developer export review.
-- Clipboard paste targets and drag-snap candidates must also belong to the active page. A nested copy moved across pages preserves its document-space position while reparenting to the active page root.
+- Clipboard paste targets and drag-snap candidates must also belong to the active page. A nested copy snapshots its parent origin at copy time, then preserves that document-space position while reparenting to the active page root.
+- Page-scoped image insert and replacement work revalidates the active page after every pre-commit async boundary. If the page changed before persistence starts, the upload is cancelled and its unreferenced asset is removed.
+- Once an image document write starts, server and local reconciliation complete in the same per-file queue step. A later page switch preserves the newer active-page selection while the committed source-page document change is retained.
+- Confirmed image reconciliation uses the document visible at queue start as its merge base, so mid-flight locks and later queued replacements converge without rejecting the server commit or letting an older result win.
+- Concurrent image drops reserve distinct node IDs before their first async boundary. Previous replacement assets are not deleted immediately because editor undo history may still reference them; cleanup requires a separate history-aware GC policy.
+- If a confirmed image delta is completely superseded by a newer local delete, cleanup of that newly uploaded asset is queued after pending file writes; the server reference check remains authoritative.
 - Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
 - Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
 

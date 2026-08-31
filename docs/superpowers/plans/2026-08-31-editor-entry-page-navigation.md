@@ -86,7 +86,20 @@ New code is limited to:
 - Restrict pointer hit testing, measurement, marquee selection, Select All, and
   Select Same Kind to the active page.
 - Route keyboard/context paste and drag-snap targets through the active page;
-  preserve document-space position when a nested copy crosses page roots.
+  snapshot copy-time parent origin and preserve document-space position when a
+  nested copy crosses page roots.
+- Revalidate page-scoped image insert/replacement work after async preparation,
+  upload, and at the persistence queue boundary; clean cancelled assets.
+- Reconcile a document write that already started inside the same per-file queue
+  step and preserve any newer active-page selection.
+- Use queue-start merge bases for confirmed writes, preserving mid-flight locks
+  and later-replacement order; reserve concurrent image IDs before awaiting.
+- Keep replacement source assets available to Undo until a history-aware GC
+  policy can remove them safely.
+- If a confirmed delta is fully discarded by a newer current-document change,
+  keep the current selection and history instead of adding a phantom Undo step.
+- Queue cleanup of the discarded delta's newly uploaded asset after pending
+  file writes; do not confuse it with an old replacement asset needed by Undo.
 - Apply the resolved snap delta whenever a guide is active.
 - Keep all-document node counts for generated ids and component relationships.
 

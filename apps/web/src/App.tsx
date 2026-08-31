@@ -10231,6 +10231,7 @@ export function App() {
   accountTokenIdentityRef.current = accountTokenIdentityKey;
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
+  const activePageIdRef = useRef<string | null>(activePageId);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
   const componentVariantPersistenceRevisionRef = useRef(0);
   const documentSnapshotRevisionRef = useRef(0);
@@ -10346,6 +10347,7 @@ export function App() {
   const projectArchiveInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementFileInputRef = useRef<HTMLInputElement | null>(null);
   const imageReplacementNodeIdRef = useRef<string | null>(null);
+  const imageNodeIdReservationsRef = useRef(new Set<string>());
   const stageFrameRef = useRef<HTMLDivElement | null>(null);
   const konvaStageRef = useRef<KonvaStage | null>(null);
   const inlineTextEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -11450,6 +11452,7 @@ export function App() {
     displayedDocument?.pages.find((page) => page.id === activePageId) ??
     displayedDocument?.pages[0] ??
     null;
+  activePageIdRef.current = activePage?.id ?? null;
   const activePageDocument = useMemo(
     () =>
       displayedDocument && activePage
@@ -12970,30 +12973,36 @@ export function App() {
     }
 
     const currentEditor = editorRef.current;
-    const node = currentEditor ? findNodeById(currentEditor.document, nodeId) : null;
-    if (!node || node.kind !== "image" || isNodeLocked(node)) {
+    if (!currentEditor) {
+      return;
+    }
+    const node = findNodeById(currentEditor.document, nodeId);
+    if (
+      !node ||
+      node.kind !== "image" ||
+      node.content.type !== "image" ||
+      isNodeLocked(node)
+    ) {
       return;
     }
 
     const fileId = currentProject.currentDocumentId;
     const mutationGeneration = editorMutationGenerationRef.current;
+    const targetPageId = activePageIdRef.current;
+    const isCurrentPageReplacement = () =>
+      !isEditorDocumentMutationBlocked() &&
+      mutationGeneration === editorMutationGenerationRef.current &&
+      currentProjectRef.current?.currentDocumentId === fileId &&
+      activePageIdRef.current === targetPageId;
     let pendingAsset: UploadedAsset | null = null;
     try {
       const naturalSize = await readImageFileSize(file);
-      if (
-        isEditorDocumentMutationBlocked() ||
-        mutationGeneration !== editorMutationGenerationRef.current ||
-        currentProjectRef.current?.currentDocumentId !== fileId
-      ) {
+      if (!isCurrentPageReplacement()) {
         return;
       }
       const asset = await uploadImageAsset(file);
       pendingAsset = asset;
-      if (
-        isEditorDocumentMutationBlocked() ||
-        mutationGeneration !== editorMutationGenerationRef.current ||
-        currentProjectRef.current?.currentDocumentId !== fileId
-      ) {
+      if (!isCurrentPageReplacement()) {
         await deleteImageAssetIfUnreferenced(asset.assetId);
         pendingAsset = null;
         return;
@@ -13003,18 +13012,62 @@ export function App() {
         naturalWidth: naturalSize.width,
         naturalHeight: naturalSize.height
       };
-      await enqueueDocumentPersistence(fileId, () =>
-        persistImageAssetReplacement(fileId, nodeId, replacement)
-      );
-      pendingAsset = null;
-      applyPersistedEditorCommand(fileId, {
-        type: "replace_image_asset",
+      const confirmedCommand = {
+        type: "replace_image_asset" as const,
         nodeId,
         assetId: replacement.assetId,
         naturalWidth: replacement.naturalWidth,
         naturalHeight: replacement.naturalHeight
+      };
+      let persistenceStarted = false;
+      const reconciliationResult = await enqueueDocumentPersistence(fileId, async () => {
+        if (!isCurrentPageReplacement()) {
+          return "unavailable" as const;
+        }
+        const queuedEditor = editorRef.current;
+        if (!queuedEditor || queuedEditor.document.id !== fileId) {
+          return "unavailable" as const;
+        }
+        const operationBaseDocument = structuredClone(
+          collabSessionRef.current?.documentId === fileId
+            ? collabSessionRef.current.getDocument()
+            : queuedEditor.document
+        );
+        const queuedNode = findNodeById(operationBaseDocument, nodeId);
+        if (!queuedNode || queuedNode.content.type !== "image") {
+          return "unavailable" as const;
+        }
+        const candidateState = executeEditorCommand(
+          { ...queuedEditor, document: operationBaseDocument },
+          confirmedCommand
+        );
+        if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
+          return "unavailable" as const;
+        }
+        persistenceStarted = true;
+        await persistImageAssetReplacement(fileId, nodeId, replacement);
+        const pageStillActive = isCurrentPageReplacement();
+        return reconcileConfirmedEditorCommand(
+          fileId,
+          operationBaseDocument,
+          confirmedCommand,
+          { preserveSelection: !pageStillActive }
+        );
       });
-      setProjectStatus(`${node.name} 이미지 바뀜`);
+      if (!persistenceStarted) {
+        await deleteImageAssetIfUnreferenced(asset.assetId);
+        pendingAsset = null;
+        return;
+      }
+      pendingAsset = null;
+      if (reconciliationResult === "discarded") {
+        await enqueueDocumentPersistence(fileId, () =>
+          deleteImageAssetIfUnreferenced(replacement.assetId)
+        );
+        setProjectStatus(`${node.name} 이미지 교체 취소됨`);
+      } else if (reconciliationResult === "applied") {
+        setProjectStatus(`${node.name} 이미지 바뀜`);
+      }
     } catch (error) {
       let cleanupError: unknown;
       if (pendingAsset) {
@@ -13548,6 +13601,71 @@ export function App() {
       return false;
     }
     return applyEditorCommand(command);
+  };
+
+  const reconcileConfirmedEditorCommand = (
+    fileId: string,
+    baseDocument: RendererDocument,
+    command: Parameters<typeof executeEditorCommand>[1],
+    options: { preserveSelection: boolean }
+  ) => {
+    const currentEditor = editorRef.current;
+    if (
+      !currentEditor ||
+      currentProjectRef.current?.currentDocumentId !== fileId ||
+      currentEditor.document.id !== fileId
+    ) {
+      return "unavailable" as const;
+    }
+
+    const activeSession =
+      collabSessionRef.current?.documentId === fileId ? collabSessionRef.current : null;
+    const currentDocument = activeSession?.getDocument() ?? currentEditor.document;
+    const confirmedState = executeEditorCommand(
+      { ...currentEditor, document: structuredClone(baseDocument) },
+      command
+    );
+    if (rendererDocumentsEqual(confirmedState.document, baseDocument)) {
+      return "unavailable" as const;
+    }
+
+    const reconciledDocument = mergeConcurrentDocumentSnapshots(
+      baseDocument,
+      confirmedState.document,
+      currentDocument,
+      { conflictPreference: "current" }
+    );
+    if (rendererDocumentsEqual(reconciledDocument, currentDocument)) {
+      return "discarded" as const;
+    }
+    let nextState: EditorState = {
+      ...confirmedState,
+      document: reconciledDocument
+    };
+    if (options.preserveSelection) {
+      nextState = setMultiSelection(
+        nextState,
+        currentEditor.selection.nodeIds,
+        currentEditor.selection.nodeId
+      );
+    }
+
+    if (activeSession) {
+      activeSession.transact(
+        "confirmed-image-reconciliation",
+        () => reconciledDocument,
+        { undoable: false }
+      );
+      nextState = {
+        ...nextState,
+        document: activeSession.getDocument(),
+        history: { past: [], future: [] }
+      };
+      publishEditorPresence(nextState);
+    }
+    editorRef.current = nextState;
+    setEditor(nextState);
+    return "applied" as const;
   };
 
   gridTrackDispatchRef.current = dispatch;
@@ -16809,6 +16927,7 @@ export function App() {
     }
     cancelActiveCanvasInteractions();
     setMeasurementTargetNodeId(null);
+    activePageIdRef.current = pageId;
     setActivePageId(pageId);
     clearSelectionFromInteraction();
   };
@@ -18158,6 +18277,15 @@ export function App() {
     if (!targetPage) {
       return;
     }
+    const targetPageId = targetPage.id;
+    const isCurrentPageInsert = () => {
+      return (
+        !isEditorDocumentMutationBlocked() &&
+        mutationGeneration === editorMutationGenerationRef.current &&
+        currentProjectRef.current?.currentDocumentId === fileId &&
+        activePageIdRef.current === targetPageId
+      );
+    };
 
     const selectedContainer =
       selectedNode && (selectedNode.kind === "frame" || selectedNode.kind === "component")
@@ -18167,7 +18295,18 @@ export function App() {
     const parentOrigin = selectedContainer
       ? (getNodeAbsolutePosition(editor.document, selectedContainer.id) ?? { x: 0, y: 0 })
       : { x: 0, y: 0 };
-    const baseSequence = nodes.length;
+    const usedNodeIds = new Set(flattenRendererNodes(editor.document).map((node) => node.id));
+    const reservedImageSequences = files.map(() => {
+      let sequence = usedNodeIds.size + imageNodeIdReservationsRef.current.size + 1;
+      let nodeId = `image-${sequence}`;
+      while (usedNodeIds.has(nodeId) || imageNodeIdReservationsRef.current.has(nodeId)) {
+        sequence += 1;
+        nodeId = `image-${sequence}`;
+      }
+      imageNodeIdReservationsRef.current.add(nodeId);
+      return sequence;
+    });
+    const reservedImageIds = reservedImageSequences.map((sequence) => `image-${sequence}`);
     const point = insertionPoint ?? {
       x: (stageSize.width / 2 - editor.viewport.x) / editor.viewport.scale,
       y: (stageSize.height / 2 - editor.viewport.y) / editor.viewport.scale
@@ -18176,34 +18315,22 @@ export function App() {
     let pendingAsset: UploadedAsset | null = null;
     try {
       for (const [index, file] of files.entries()) {
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           return;
         }
         const naturalSize = await readImageFileSize(file);
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           return;
         }
         const asset = await uploadImageAsset(file);
         pendingAsset = asset;
-        if (
-          isEditorDocumentMutationBlocked() ||
-          mutationGeneration !== editorMutationGenerationRef.current ||
-          currentProjectRef.current?.currentDocumentId !== fileId
-        ) {
+        if (!isCurrentPageInsert()) {
           await deleteImageAssetIfUnreferenced(asset.assetId);
           pendingAsset = null;
           return;
         }
         const imageSize = fitImportedImageSize(naturalSize);
-        const node = createImageNode(baseSequence + index + 1, {
+        const node = createImageNode(reservedImageSequences[index]!, {
           assetId: asset.assetId,
           naturalWidth: naturalSize.width,
           naturalHeight: naturalSize.height,
@@ -18212,11 +18339,53 @@ export function App() {
           width: imageSize.width,
           height: imageSize.height
         });
+        const confirmedCommand = { type: "create_node" as const, parentId, node };
 
-        await enqueueDocumentPersistence(fileId, () => persistCreatedNode(fileId, parentId, node));
+        let persistenceStarted = false;
+        const reconciliationResult = await enqueueDocumentPersistence(fileId, async () => {
+          if (!isCurrentPageInsert()) {
+            return "unavailable" as const;
+          }
+          const queuedEditor = editorRef.current;
+          if (!queuedEditor || queuedEditor.document.id !== fileId) {
+            return "unavailable" as const;
+          }
+          const operationBaseDocument = structuredClone(
+            collabSessionRef.current?.documentId === fileId
+              ? collabSessionRef.current.getDocument()
+              : queuedEditor.document
+          );
+          const candidateState = executeEditorCommand(
+            { ...queuedEditor, document: operationBaseDocument },
+            confirmedCommand
+          );
+          if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
+            return "unavailable" as const;
+          }
+          persistenceStarted = true;
+          await persistCreatedNode(fileId, parentId, node);
+          const pageStillActive = isCurrentPageInsert();
+          return reconcileConfirmedEditorCommand(
+            fileId,
+            operationBaseDocument,
+            confirmedCommand,
+            { preserveSelection: !pageStillActive }
+          );
+        });
+        if (!persistenceStarted) {
+          await deleteImageAssetIfUnreferenced(asset.assetId);
+          pendingAsset = null;
+          return;
+        }
         pendingAsset = null;
-        applyPersistedEditorCommand(fileId, { type: "create_node", parentId, node });
-        setProjectStatus(`${node.name} 추가됨`);
+        if (reconciliationResult === "discarded") {
+          await enqueueDocumentPersistence(fileId, () =>
+            deleteImageAssetIfUnreferenced(asset.assetId)
+          );
+          setProjectStatus(`${node.name} 추가 취소됨`);
+        } else if (reconciliationResult === "applied") {
+          setProjectStatus(`${node.name} 추가됨`);
+        }
       }
     } catch (error) {
       let cleanupError: unknown;
@@ -18232,6 +18401,10 @@ export function App() {
         ? `${primaryMessage} · ${cleanupError.message}`
         : primaryMessage;
       setProjectStatus(message);
+    } finally {
+      for (const nodeId of reservedImageIds) {
+        imageNodeIdReservationsRef.current.delete(nodeId);
+      }
     }
   };
 

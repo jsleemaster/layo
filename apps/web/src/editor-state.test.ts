@@ -3597,6 +3597,47 @@ describe("editor state commands", () => {
       y: 144
     });
 
+    const movedSourceParent = executeEditorCommand(pageOneState, {
+      type: "update_node_geometry",
+      nodeId: "frame-1",
+      patch: { x: 300, y: 240 }
+    });
+    const pasteAfterSourceMove = pasteCopiedNode(
+      movedSourceParent,
+      pageOneClipboard,
+      "page-2"
+    );
+    expect(findNodeById(pasteAfterSourceMove.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 176,
+      y: 144
+    });
+
+    const sameParentAfterMove = pasteCopiedNode(
+      movedSourceParent,
+      pageOneClipboard,
+      "page-1"
+    );
+    expect(findNodeById(sameParentAfterMove.document, "frame-1")?.children.map((node) => node.id)).toContain(
+      "text-1-copy-1"
+    );
+    expect(findNodeById(sameParentAfterMove.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 56,
+      y: 64
+    });
+
+    const deletedSourceParent = deleteSelectedNode(
+      setSelection(createEditorState(document), "frame-1")
+    );
+    const pasteAfterSourceDelete = pasteCopiedNode(
+      deletedSourceParent,
+      pageOneClipboard,
+      "page-2"
+    );
+    expect(findNodeById(pasteAfterSourceDelete.document, "text-1-copy-1")?.transform).toMatchObject({
+      x: 176,
+      y: 144
+    });
+
     const crossPagePointPaste = pasteCopiedNodeAt(
       pageOneState,
       pageOneClipboard,
