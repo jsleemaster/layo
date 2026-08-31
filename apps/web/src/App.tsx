@@ -13020,13 +13020,13 @@ export function App() {
         naturalHeight: replacement.naturalHeight
       };
       let persistenceStarted = false;
-      const reconciliationResult = await enqueueDocumentPersistence(fileId, async () => {
+      const reconciliationResult = await enqueueDocumentPersistence(fileId, () => {
         if (!isCurrentPageReplacement()) {
-          return "unavailable" as const;
+          return Promise.resolve("unavailable" as const);
         }
         const queuedEditor = editorRef.current;
         if (!queuedEditor || queuedEditor.document.id !== fileId) {
-          return "unavailable" as const;
+          return Promise.resolve("unavailable" as const);
         }
         const operationBaseDocument = structuredClone(
           collabSessionRef.current?.documentId === fileId
@@ -13035,24 +13035,25 @@ export function App() {
         );
         const queuedNode = findNodeById(operationBaseDocument, nodeId);
         if (!queuedNode || queuedNode.content.type !== "image") {
-          return "unavailable" as const;
+          return Promise.resolve("unavailable" as const);
         }
         const candidateState = executeEditorCommand(
           { ...queuedEditor, document: operationBaseDocument },
           confirmedCommand
         );
         if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
-          return "unavailable" as const;
+          return Promise.resolve("unavailable" as const);
         }
         persistenceStarted = true;
-        await persistImageAssetReplacement(fileId, nodeId, replacement);
-        const pageStillActive = isCurrentPageReplacement();
-        return reconcileConfirmedEditorCommand(
-          fileId,
-          operationBaseDocument,
-          confirmedCommand,
-          { preserveSelection: !pageStillActive }
-        );
+        return persistImageAssetReplacement(fileId, nodeId, replacement).then(() => {
+          const pageStillActive = isCurrentPageReplacement();
+          return reconcileConfirmedEditorCommand(
+            fileId,
+            operationBaseDocument,
+            confirmedCommand,
+            { preserveSelection: !pageStillActive }
+          );
+        });
       });
       if (!persistenceStarted) {
         await deleteImageAssetIfUnreferenced(asset.assetId);
@@ -18342,13 +18343,13 @@ export function App() {
         const confirmedCommand = { type: "create_node" as const, parentId, node };
 
         let persistenceStarted = false;
-        const reconciliationResult = await enqueueDocumentPersistence(fileId, async () => {
+        const reconciliationResult = await enqueueDocumentPersistence(fileId, () => {
           if (!isCurrentPageInsert()) {
-            return "unavailable" as const;
+            return Promise.resolve("unavailable" as const);
           }
           const queuedEditor = editorRef.current;
           if (!queuedEditor || queuedEditor.document.id !== fileId) {
-            return "unavailable" as const;
+            return Promise.resolve("unavailable" as const);
           }
           const operationBaseDocument = structuredClone(
             collabSessionRef.current?.documentId === fileId
@@ -18360,17 +18361,18 @@ export function App() {
             confirmedCommand
           );
           if (rendererDocumentsEqual(candidateState.document, operationBaseDocument)) {
-            return "unavailable" as const;
+            return Promise.resolve("unavailable" as const);
           }
           persistenceStarted = true;
-          await persistCreatedNode(fileId, parentId, node);
-          const pageStillActive = isCurrentPageInsert();
-          return reconcileConfirmedEditorCommand(
-            fileId,
-            operationBaseDocument,
-            confirmedCommand,
-            { preserveSelection: !pageStillActive }
-          );
+          return persistCreatedNode(fileId, parentId, node).then(() => {
+            const pageStillActive = isCurrentPageInsert();
+            return reconcileConfirmedEditorCommand(
+              fileId,
+              operationBaseDocument,
+              confirmedCommand,
+              { preserveSelection: !pageStillActive }
+            );
+          });
         });
         if (!persistenceStarted) {
           await deleteImageAssetIfUnreferenced(asset.assetId);
