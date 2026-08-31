@@ -10553,6 +10553,50 @@ test("Figma-like selection shortcuts mirror object menu selection and fit action
   await expect(page.getByTestId("floating-toolbar").locator(".zoom-readout")).not.toHaveText("100%");
 });
 
+test("fit selection zooms below 25 percent for oversized frames", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  expect(documentResponse.ok()).toBeTruthy();
+  const document = (await documentResponse.json()).file;
+  const frame = document.pages[0].children.find((node: { id: string }) => node.id === "frame-1");
+  if (!frame) {
+    throw new Error("frame missing");
+  }
+  frame.size = { width: 5_000, height: 4_000 };
+  const updateResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(updateResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await page.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
+  await page.keyboard.press("Shift+1");
+
+  const zoomReadout = page.getByTestId("floating-toolbar").locator(".zoom-readout");
+  await expect
+    .poll(async () => Number((await zoomReadout.textContent())?.replace("%", "")))
+    .toBeLessThan(25);
+  const fittedZoom = await zoomReadout.textContent();
+  await page.getByTestId("floating-toolbar").getByRole("button", { name: "오른쪽으로 이동" }).click();
+  await expect(zoomReadout).toHaveText(fittedZoom ?? "");
+
+  const stageBox = await page.getByTestId("stage-frame").boundingBox();
+  if (!stageBox) {
+    throw new Error("stage frame missing");
+  }
+  for (const handle of ["top-left", "top-right", "bottom-right", "bottom-left"] as const) {
+    const handleBox = await page.getByTestId(`resize-handle-${handle}`).boundingBox();
+    if (!handleBox) {
+      throw new Error(`${handle} resize handle missing`);
+    }
+    expect(handleBox.x).toBeGreaterThanOrEqual(stageBox.x - 8);
+    expect(handleBox.y).toBeGreaterThanOrEqual(stageBox.y - 8);
+    expect(handleBox.x + handleBox.width).toBeLessThanOrEqual(stageBox.x + stageBox.width + 8);
+    expect(handleBox.y + handleBox.height).toBeLessThanOrEqual(stageBox.y + stageBox.height + 8);
+  }
+});
+
 test("Figma-like style and rename shortcuts mirror object menu edit actions", async ({ page }) => {
   await createProjectFromEmptyState(page);
 

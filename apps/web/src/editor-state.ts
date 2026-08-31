@@ -477,6 +477,7 @@ interface CommandResult {
 
 const MIN_NODE_SIZE = 1;
 const MIN_ZOOM = 0.25;
+const MIN_FIT_ZOOM = 0.01;
 const MAX_ZOOM = 4;
 const DEFAULT_SNAP_THRESHOLD = 6;
 const DEFAULT_CONSTRAINTS: NodeConstraints = { horizontal: "left", vertical: "top" };
@@ -1397,15 +1398,26 @@ export function selectNodesWithSameKind(state: EditorState, pageId?: string): Ed
   return setMultiSelection(state, nodeIds, nodeIds.at(-1) ?? null);
 }
 
-export function setViewport(state: EditorState, patch: Partial<EditorViewport>): EditorState {
+function setViewportWithMinimum(
+  state: EditorState,
+  patch: Partial<EditorViewport>,
+  minimumZoom: number
+): EditorState {
   return {
     ...state,
     viewport: {
-      scale: clamp(patch.scale ?? state.viewport.scale, MIN_ZOOM, MAX_ZOOM),
+      scale:
+        patch.scale === undefined
+          ? state.viewport.scale
+          : clamp(patch.scale, minimumZoom, MAX_ZOOM),
       x: patch.x ?? state.viewport.x,
       y: patch.y ?? state.viewport.y
     }
   };
+}
+
+export function setViewport(state: EditorState, patch: Partial<EditorViewport>): EditorState {
+  return setViewportWithMinimum(state, patch, MIN_ZOOM);
 }
 
 export function panViewport(state: EditorState, delta: Pick<EditorViewport, "x" | "y">): EditorState {
@@ -1416,9 +1428,11 @@ export function panViewport(state: EditorState, delta: Pick<EditorViewport, "x" 
 }
 
 export function zoomViewport(state: EditorState, delta: number): EditorState {
-  return setViewport(state, {
-    scale: state.viewport.scale + delta
-  });
+  return setViewportWithMinimum(
+    state,
+    { scale: state.viewport.scale + delta },
+    state.viewport.scale < MIN_ZOOM ? MIN_FIT_ZOOM : MIN_ZOOM
+  );
 }
 
 export function zoomViewportAtPoint(
@@ -1426,17 +1440,22 @@ export function zoomViewportAtPoint(
   delta: number,
   point: { x: number; y: number }
 ): EditorState {
-  const nextScale = clamp(state.viewport.scale + delta, MIN_ZOOM, MAX_ZOOM);
+  const minimumZoom = state.viewport.scale < MIN_ZOOM ? MIN_FIT_ZOOM : MIN_ZOOM;
+  const nextScale = clamp(state.viewport.scale + delta, minimumZoom, MAX_ZOOM);
   const documentPoint = {
     x: (point.x - state.viewport.x) / state.viewport.scale,
     y: (point.y - state.viewport.y) / state.viewport.scale
   };
 
-  return setViewport(state, {
-    scale: nextScale,
-    x: point.x - documentPoint.x * nextScale,
-    y: point.y - documentPoint.y * nextScale
-  });
+  return setViewportWithMinimum(
+    state,
+    {
+      scale: nextScale,
+      x: point.x - documentPoint.x * nextScale,
+      y: point.y - documentPoint.y * nextScale
+    },
+    minimumZoom
+  );
 }
 
 export function nudgeSelectedNode(
@@ -1534,7 +1553,7 @@ export function fitViewportToSelection(
   const availableHeight = Math.max(1, viewportSize.height - padding * 2);
   const scale = clamp(
     Math.min(availableWidth / Math.max(1, bounds.width), availableHeight / Math.max(1, bounds.height)),
-    MIN_ZOOM,
+    MIN_FIT_ZOOM,
     MAX_ZOOM
   );
   const center = {
@@ -1542,11 +1561,15 @@ export function fitViewportToSelection(
     y: bounds.y + bounds.height / 2
   };
 
-  return setViewport(state, {
-    scale,
-    x: viewportSize.width / 2 - center.x * scale,
-    y: viewportSize.height / 2 - center.y * scale
-  });
+  return setViewportWithMinimum(
+    state,
+    {
+      scale,
+      x: viewportSize.width / 2 - center.x * scale,
+      y: viewportSize.height / 2 - center.y * scale
+    },
+    MIN_FIT_ZOOM
+  );
 }
 
 export function calculateSnapForMovingBounds(
