@@ -1197,6 +1197,26 @@ export function setMultiSelection(
   };
 }
 
+export function scopeSelectionToPage(
+  state: EditorState,
+  pageId: string | null
+): EditorState {
+  const page = pageId ? state.document.pages.find((candidate) => candidate.id === pageId) : null;
+  if (!page) {
+    return setSelection(state, null);
+  }
+
+  const pageDocument = { ...state.document, pages: [page] };
+  const nodeIds = selectionNodeIds(state.selection).filter((nodeId) =>
+    Boolean(findNodeById(pageDocument, nodeId))
+  );
+  const primaryNodeId =
+    state.selection.nodeId && nodeIds.includes(state.selection.nodeId)
+      ? state.selection.nodeId
+      : nodeIds.at(-1) ?? null;
+  return setMultiSelection(state, nodeIds, primaryNodeId);
+}
+
 export function toggleSelection(state: EditorState, nodeId: string): EditorState {
   if (!findNodeById(state.document, nodeId)) {
     return state;

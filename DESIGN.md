@@ -150,6 +150,7 @@ Initial MVP targets desktop-first editor use.
 - Concurrent image drops reserve distinct node IDs before their first async boundary. Previous replacement assets are not deleted immediately because editor undo history may still reference them; cleanup requires a separate history-aware GC policy.
 - If a confirmed image delta is completely superseded by a newer local delete, cleanup of that newly uploaded asset is queued after pending file writes; the server reference check remains authoritative.
 - Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
+- Local and collaborative Undo/Redo may mutate hidden pages, but their resulting selection is always filtered back to the live active page before Inspector, presence, or keyboard shortcuts can consume it.
 - Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
 
 ## 9. Agent Prompt Guide

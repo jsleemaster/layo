@@ -35,6 +35,7 @@ import {
   selectAllPageNodes,
   selectNodesInBounds,
   selectNodesWithSameKind,
+  scopeSelectionToPage,
   setSelectedImageFitMode,
   setSelectedNodeLocked,
   setSelectedNodeStyle,
@@ -3226,6 +3227,36 @@ describe("editor state commands", () => {
       "page-2"
     );
     expect(selectedSameKind.selection.nodeIds).toEqual(["page-2-rectangle"]);
+
+    const mixedSelection = setMultiSelection(
+      activePageState,
+      ["rectangle-1", "page-2-rectangle"],
+      "rectangle-1"
+    );
+    expect(scopeSelectionToPage(mixedSelection, "page-2").selection).toEqual({
+      nodeId: "page-2-rectangle",
+      nodeIds: ["page-2-rectangle"]
+    });
+  });
+
+  test("keeps redo-created nodes from selecting a hidden page", () => {
+    const document = sampleDocumentWithTopLevelRectangle();
+    document.pages.push({
+      id: "page-2",
+      name: "페이지 2",
+      children: []
+    });
+    const created = executeEditorCommand(createEditorState(document), {
+      type: "create_node",
+      parentId: "page-1",
+      node: createRectangleNode(3)
+    });
+    const pageTwoState = setSelection(created, null);
+    const undone = scopeSelectionToPage(undo(pageTwoState), "page-2");
+    const redone = scopeSelectionToPage(redo(undone), "page-2");
+
+    expect(findNodeById(redone.document, "rectangle-3")).not.toBeNull();
+    expect(redone.selection).toEqual({ nodeId: null, nodeIds: [] });
   });
 
   test("flips selected sibling nodes around the selection bounds with undo support", () => {

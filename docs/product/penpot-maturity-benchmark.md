@@ -66,6 +66,8 @@ The final review added explicit page identity to presence, first-page-only
 legacy compatibility, a self-contained relay-backed two-browser regression,
 and preview-local page fallback so older saved versions cannot replace the live
 active page or clear its selection.
+Undo/Redo result selection is also re-scoped to the active page after hidden-page
+history mutations, preventing Inspector and shortcut leakage.
 
 This advances editor completeness and direct task entry, but it is not page
 management maturity. Page create/rename/delete/reorder and corresponding

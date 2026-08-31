@@ -89,6 +89,8 @@ New code is limited to:
   collaboration overlays hidden throughout saved-version preview.
 - Keep preview page fallback state separate from the live active page so every
   non-Restore preview exit preserves the live page and selection.
+- Scope local and collaborative Undo/Redo result selections to the active page
+  before Inspector, presence, or shortcuts can consume them.
 - Restrict pointer hit testing, measurement, marquee selection, Select All, and
   Select Same Kind to the active page.
 - Route keyboard/context paste and drag-snap targets through the active page;

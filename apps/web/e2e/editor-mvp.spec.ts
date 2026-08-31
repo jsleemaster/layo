@@ -143,11 +143,34 @@ test("switches existing document pages without mixing hidden-page layers", async
   await page.getByRole("button", { name: "랜딩 프레임", exact: true }).click();
   await page.getByTestId("inspector-x").fill("300");
   await expect(page.getByTestId("inspector-x")).toHaveValue("300");
+  await page.getByRole("button", { name: "사각형 만들기" }).click();
+  await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toBeVisible();
   await page.getByRole("button", { name: "두 번째 페이지", exact: true }).click();
   await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
   await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "두 번째 헤드라인", exact: true })).toBeVisible();
   await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await page.keyboard.press("Control+Z");
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByTestId("active-page-name")).toHaveText("두 번째 페이지");
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^사각형 \d+$/ })).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "rectangle").length;
+    })
+    .toBe(1);
+  await page.keyboard.press("Control+D");
+  await page.keyboard.press("Control+Z");
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "rectangle").length;
+    })
+    .toBe(0);
   await expect.poll(() => canvasColorPixelCount(page, { r: 22, g: 163, b: 74 })).toBeGreaterThan(1_000);
   await expect.poll(() => canvasColorPixelCount(page, { r: 220, g: 38, b: 38 })).toBe(0);
 
@@ -6935,6 +6958,14 @@ test("queued image replacements keep the latest server and editor asset", async 
 
 test("confirmed collaborative image insertions and replacements remain undoable", async ({ page }) => {
   const { documentId } = await createProjectFromEmptyState(page);
+  const documentResponse = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+  const document = (await documentResponse.json()).file;
+  document.pages.push({ id: "page-history-2", name: "히스토리 페이지 2", children: [] });
+  const replaceResponse = await page.request.put(`http://127.0.0.1:4317/files/${documentId}`, {
+    data: { document }
+  });
+  expect(replaceResponse.ok()).toBeTruthy();
+  await page.reload();
   await page.getByTestId("editor-rail").getByRole("button", { name: "팀" }).click();
   await page.getByRole("button", { name: "로컬 팀 만들기" }).click();
   await expect(page.getByTestId("team-status")).toContainText("디자인 팀");
@@ -6973,14 +7004,34 @@ test("confirmed collaborative image insertions and replacements remain undoable"
   }
   await expect.poll(() => canvasColorPixelCount(page, { r: 37, g: 99, b: 235 })).toBeGreaterThan(100);
 
-  await page.keyboard.press("Control+Z");
+  await page.getByRole("button", { name: "히스토리 페이지 2", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("히스토리 페이지 2");
   await expect(page.getByRole("button", { name: "이미지 3" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
+  await page.keyboard.press("Control+Z");
   await expect.poll(readPersistedImageAssetId).toBeNull();
 
   await page.keyboard.press("Control+Shift+Z");
-  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
   await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect(page.getByTestId("active-page-name")).toHaveText("히스토리 페이지 2");
+  await expect(page.getByRole("button", { name: "이미지 3" })).toHaveCount(0);
+  await expect(page.getByText("레이어 또는 캔버스 요소를 선택하세요.")).toBeVisible();
 
+  await page.keyboard.press("Control+D");
+  await page.keyboard.press("Control+Z");
+  await expect.poll(readPersistedImageAssetId).toBeNull();
+  await page.keyboard.press("Control+Shift+Z");
+  await expect.poll(readPersistedImageAssetId).toBe(originalAssetId);
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      const persisted = (await response.json()).file;
+      return flattenNodeKinds(persisted.pages[0].children).filter((kind) => kind === "image").length;
+    })
+    .toBe(1);
+
+  await page.getByRole("button", { name: "페이지 1", exact: true }).click();
+  await expect(page.getByRole("button", { name: "이미지 3" })).toBeVisible();
   await page.getByRole("button", { name: "이미지 3" }).click();
   await page.mouse.click(stageBox.x + 260, stageBox.y + 220, { button: "right" });
   const chooserPromise = page.waitForEvent("filechooser");

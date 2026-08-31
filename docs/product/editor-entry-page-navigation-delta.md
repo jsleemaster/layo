@@ -224,6 +224,16 @@ passes 11/11 without retry. Its marker-owned raw-storage reset now allows a
 nine-second quieting window and reports remaining entry names, covering late
 async writes from the longer relay suite without masking persistent contamination.
 
+The next exact-head review found that local Redo could recreate and select a
+Page 1 node while the user remained on Page 2. The page/session effect did not
+rerun because its dependencies were unchanged, exposing the hidden node to
+Inspector and keyboard shortcuts. A shared `scopeSelectionToPage` contract now
+filters local Undo/Redo results and collaborative history selection reattachment
+before UI or presence publication. Unit coverage fixes mixed multi-selection and
+create→switch→Undo→Redo, while the two-page browser flow proves Page 2 remains
+active, Inspector stays empty, hidden duplication is a no-op, and the Page 1
+Redo still persists.
+
 The final exact-head review then found that collaboration overlays still used
 document-space coordinates without carrying page identity. Presence now
 publishes `activePageId`, clears cursor and editing claims on page changes, and

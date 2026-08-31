@@ -210,6 +210,7 @@ import {
   selectAllPageNodes,
   selectNodesInBounds,
   selectNodesWithSameKind,
+  scopeSelectionToPage,
   setSelection,
   setMultiSelection,
   setSelectedNodeLocked,
@@ -12483,10 +12484,13 @@ export function App() {
       return false;
     }
 
-    const nextState = setMultiSelection(
-      { ...current, document, history: { past: [], future: [] } },
-      current.selection.nodeIds,
-      current.selection.nodeId
+    const nextState = scopeSelectionToPage(
+      setMultiSelection(
+        { ...current, document, history: { past: [], future: [] } },
+        current.selection.nodeIds,
+        current.selection.nodeId
+      ),
+      activePageIdRef.current
     );
     editorRef.current = nextState;
     setEditor(nextState);
@@ -13353,7 +13357,12 @@ export function App() {
         if (collabSessionRef.current) {
           applyCollaborativeHistory(event.shiftKey ? "redo" : "undo");
         } else {
-          updateEditorFromInteraction(event.shiftKey ? redo : undo);
+          updateEditorFromInteraction((state) =>
+            scopeSelectionToPage(
+              event.shiftKey ? redo(state) : undo(state),
+              activePageIdRef.current
+            )
+          );
         }
         return;
       }

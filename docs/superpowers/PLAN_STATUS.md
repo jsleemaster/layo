@@ -61,7 +61,8 @@ both directions. Final review also
 scoped remote cursor, selection, and editing presence to the active page,
 reconciled incoming delete/move presence, kept saved-version preview overlays
 silent, preserved the live active page and selection across older-version
-preview fallbacks, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
+preview fallbacks, scopes local and collaborative Undo/Redo selection back to
+the active page, and made the isolated E2E runner start or reuse a collaboration relay. Local proof
 passed workspace typecheck, the full root test gate, the production web build,
 the focused no-retry Playwright cases, the complete collaboration Playwright
 suite 11/11 without retry, the combined image/preview matrix 9/9 without retry, and a
