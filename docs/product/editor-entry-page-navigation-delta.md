@@ -2,8 +2,8 @@
 
 Last checked: 2026-08-31
 
-Status: Implemented; focused Playwright and local full verification GREEN,
-remote merge gates pending.
+Status: Completed by PR #322 merge gate; focused Playwright and local full
+verification GREEN.
 
 ## Reference And Decision
 

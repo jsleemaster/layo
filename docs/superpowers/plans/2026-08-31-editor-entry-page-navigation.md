@@ -2,7 +2,7 @@
 
 Last Updated: 2026-08-31
 
-Status: Implemented and locally verified; remote merge pending
+Status: Completed by PR #322 merge gate
 
 ## Goal
 

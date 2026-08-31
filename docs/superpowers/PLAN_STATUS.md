@@ -29,15 +29,24 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-`2026-08-31-editor-entry-page-navigation.md` - adapting Penpot's explicit
-project entry, workspace shortcuts panel, and page navigation to Layo's
-local-first editor shell. Implementation and local full verification are green;
-remote PR review and merge gates remain. The captured RED cases were dead
-first-run affordances, native-control shortcut interception, and multi-page
-documents whose hidden-page layers and hit/selection paths could diverge from
-the painted page.
+No active plan. The editor-entry and active-page navigation slice is completed
+by PR #322's merge gate. Start the next Penpot gap from the product maturity
+benchmark instead of extending that bounded navigation slice without a new
+failed case.
 
 ## Recently Completed Plan
+
+`2026-08-31-editor-entry-page-navigation.md` is completed by PR #322. It adapts
+Penpot's explicit project entry, workspace shortcut Help, and visible page
+navigation to Layo's local-first editor shell. The shipped contract replaces
+dead first-run affordances, preserves native controls without breaking layer
+selection shortcuts, and makes the active page own canvas paint, Layers,
+comments, Inspector/Dev context, pointer hit testing, measurement, marquee, and
+bulk selection. Local proof passed workspace typecheck, the full root test
+gate, the production web build, five focused no-retry Playwright cases, and a
+direct live browser pass with zero console errors or warnings. Page CRUD,
+File-panel density, 1024px comfort, focus return, and persistent status feedback
+remain separate gaps.
 
 2026-07-23-penpot-comment-management.md completed across PR #319 and the
 failure-learning repair PR #320. PR #319 shipped the main comment workflow as
