@@ -1,6 +1,6 @@
 # Superpowers Plan Status
 
-Last audited: 2026-08-31
+Last audited: 2026-09-01
 
 This file is the routing source of truth for `docs/superpowers/plans/*`.
 The individual plan files are historical execution plans. Some older files still
@@ -29,10 +29,15 @@ Use this order when entering the repo:
 
 ## Current Active Plan
 
-No active plan. The editor-entry and active-page navigation slice is completed
-by PR #322's merge gate. Start the next Penpot gap from the product maturity
-benchmark instead of extending that bounded navigation slice without a new
-failed case.
+[2026-09-01-page-management.md](plans/2026-09-01-page-management.md) is active. The exact failed case is the
+four-page Resume Admin audit requiring a raw complete-document `PUT` because
+Layo could navigate existing pages but could not create, rename, reorder, or
+delete them through UI or typed agent commands. The bounded repair reuses the
+existing `pages[]`, Undo/Redo, collaboration transaction, persistence queue,
+and agent batch paths. It keeps the last page undeletable. External reviewer
+invite, viewer permissions, layer-tree hierarchy, and drag page reorder remain
+separate gaps. Do not mark this plan complete before browser, HTTP/MCP,
+collaboration, exact-head CI/review, merge, and cleanup evidence exists.
 
 ## Recently Completed Plan
 
@@ -66,9 +71,10 @@ the active page, and made the isolated E2E runner start or reuse a collaboration
 passed workspace typecheck, the full root test gate, the production web build,
 the focused no-retry Playwright cases, the complete collaboration Playwright
 suite 11/11 without retry, the combined image/preview matrix 9/9 without retry, and a
-direct live browser pass with zero console errors or warnings. Page CRUD,
-File-panel density, 1024px comfort, focus return, and persistent status feedback
-remain separate gaps.
+direct live browser pass with zero console errors or warnings. Page CRUD is now
+owned by the active page-management plan; File-panel density,
+1024px comfort, focus return, and persistent status feedback remain separate
+gaps.
 
 A post-merge real-board follow-up also repairs `Shift+1` for oversized audit
 frames: semantic fit may drop below the 25% manual floor to keep the complete

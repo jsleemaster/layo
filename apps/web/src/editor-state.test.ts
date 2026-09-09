@@ -6,6 +6,8 @@ import {
   calculateSnapForMovingBounds,
   copySelectedNode,
   createEditorState,
+  createPage,
+  deletePage,
   deleteSelectedNode,
   distributeSelectedNodes,
   duplicateSelectedNode,
@@ -28,7 +30,9 @@ import {
   pasteCopiedNode,
   pasteCopiedNodeAt,
   redo,
+  renamePage,
   renameSelectedNode,
+  reorderPage,
   reorderSelectedNode,
   replaceSelectedImageAsset,
   resizeSelectedImageToNaturalSize,
@@ -130,6 +134,145 @@ function sampleDocumentWithTopLevelRectangle(): RendererDocument {
 }
 
 describe("editor state commands", () => {
+  describe("page management", () => {
+    test("creates a named page at the requested position with undo and redo", () => {
+      const initial = createEditorState(sampleDocument());
+
+      const created = createPage(initial, {
+        pageId: "page-2",
+        name: "  검토 메모  ",
+        index: 0
+      });
+
+      expect(created.document.pages.map((page) => [page.id, page.name])).toEqual([
+        ["page-2", "검토 메모"],
+        ["page-1", "페이지 1"]
+      ]);
+      expect(created.document.pages[0]?.children).toEqual([]);
+
+      const undone = undo(created);
+      expect(undone.document.pages.map((page) => page.id)).toEqual(["page-1"]);
+
+      const redone = redo(undone);
+      expect(redone.document.pages.map((page) => [page.id, page.name])).toEqual([
+        ["page-2", "검토 메모"],
+        ["page-1", "페이지 1"]
+      ]);
+    });
+
+    test("generates a default page name and rejects duplicate ids or blank names", () => {
+      const initial = createEditorState(sampleDocument());
+      const created = createPage(initial, { pageId: "page-2" });
+
+      expect(created.document.pages.at(-1)).toMatchObject({
+        id: "page-2",
+        name: "페이지 2",
+        children: []
+      });
+      expect(createPage(created, { pageId: "page-2", name: "중복" })).toBe(created);
+      expect(createPage(created, { pageId: "frame-1", name: "노드 충돌" })).toBe(created);
+      expect(createPage(created, { pageId: "page-3", name: "   " })).toBe(created);
+      expect(createPage(created, { pageId: "   ", name: "빈 식별자" })).toBe(created);
+      expect(createPage(created, { pageId: "page-3", index: 0.5 })).toBe(created);
+    });
+
+    test("renames pages with trimmed non-empty names and supports undo and redo", () => {
+      const withSecondPage = createPage(createEditorState(sampleDocument()), {
+        pageId: "page-2",
+        name: "초안"
+      });
+
+      const renamed = renamePage(withSecondPage, "page-2", "  최종 검토  ");
+      expect(renamed.document.pages[1]?.name).toBe("최종 검토");
+      expect(renamePage(renamed, "page-2", "   ")).toBe(renamed);
+      expect(renamePage(renamed, "missing-page", "없음")).toBe(renamed);
+
+      const undone = undo(renamed);
+      expect(undone.document.pages[1]?.name).toBe("초안");
+      expect(redo(undone).document.pages[1]?.name).toBe("최종 검토");
+    });
+
+    test("reorders pages with clamped positions and supports undo and redo", () => {
+      const withThreePages = createPage(
+        createPage(createEditorState(sampleDocument()), { pageId: "page-2", name: "페이지 2" }),
+        { pageId: "page-3", name: "페이지 3" }
+      );
+
+      const reordered = reorderPage(withThreePages, "page-1", 99);
+      expect(reordered.document.pages.map((page) => page.id)).toEqual([
+        "page-2",
+        "page-3",
+        "page-1"
+      ]);
+      expect(reorderPage(reordered, "page-1", 2)).toBe(reordered);
+      expect(reorderPage(reordered, "page-1", Number.NaN)).toBe(reordered);
+      expect(reorderPage(reordered, "page-1", 0.5)).toBe(reordered);
+
+      const undone = undo(reordered);
+      expect(undone.document.pages.map((page) => page.id)).toEqual([
+        "page-1",
+        "page-2",
+        "page-3"
+      ]);
+      expect(redo(undone).document.pages.map((page) => page.id)).toEqual([
+        "page-2",
+        "page-3",
+        "page-1"
+      ]);
+    });
+
+    test("deletes a page, clears its selected nodes, and restores its contents on undo", () => {
+      const document = sampleDocument();
+      document.pages.push({
+        id: "page-2",
+        name: "검토",
+        children: [
+          {
+            id: "page-2-note",
+            kind: "text",
+            name: "검토 메모",
+            transform: { x: 24, y: 24, rotation: 0 },
+            size: { width: 200, height: 48 },
+            style: { fill: "#111827", stroke: null, stroke_width: 0, opacity: 1 },
+            content: {
+              type: "text",
+              value: "수정 필요",
+              font_size: 16,
+              font_family: "Inter"
+            },
+            children: []
+          }
+        ]
+      });
+      const selected = setSelection(createEditorState(document), "page-2-note");
+
+      const deleted = deletePage(selected, "page-2");
+      expect(deleted.document.pages.map((page) => page.id)).toEqual(["page-1"]);
+      expect(deleted.selection).toEqual({ nodeId: null, nodeIds: [] });
+
+      const undone = undo(deleted);
+      expect(undone.document.pages.map((page) => page.id)).toEqual(["page-1", "page-2"]);
+      expect(undone.document.pages[1]?.children[0]).toMatchObject({
+        id: "page-2-note",
+        name: "검토 메모"
+      });
+      expect(undone.selection).toEqual({ nodeId: null, nodeIds: [] });
+
+      const redone = redo(undone);
+      expect(redone.document.pages.map((page) => page.id)).toEqual(["page-1"]);
+      expect(redone.selection).toEqual({ nodeId: null, nodeIds: [] });
+    });
+
+    test("does not delete the last page and preserves selection when deleting another page", () => {
+      const initial = setSelection(createEditorState(sampleDocument()), "text-1");
+      expect(deletePage(initial, "page-1")).toBe(initial);
+
+      const withSecondPage = createPage(initial, { pageId: "page-2", name: "페이지 2" });
+      const deletedSecondPage = deletePage(withSecondPage, "page-2");
+      expect(deletedSecondPage.selection).toEqual({ nodeId: "text-1", nodeIds: ["text-1"] });
+    });
+  });
+
   test("sets selected node export presets with undo and redo", () => {
     const initial = setSelection(createEditorState(sampleDocument()), "text-1");
 

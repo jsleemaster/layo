@@ -152,7 +152,25 @@ Initial MVP targets desktop-first editor use.
 - If a confirmed image delta is completely superseded by a newer local delete, cleanup of that newly uploaded asset is queued after pending file writes; the server reference check remains authoritative.
 - Changing active page clears stale selection. Active page is editor-session state; switching pages does not mutate the document.
 - Local and collaborative Undo/Redo may mutate hidden pages, but their resulting selection is always filtered back to the live active page before Inspector, presence, or keyboard shortcuts can consume it.
-- Page creation, rename, delete, and reorder remain a separate document-mutation capability and must not be implied by the page switcher.
+- Page create, rename, delete, and reorder are document mutations, not session-only
+  navigation. They must enter the same Undo/Redo, collaboration transaction, and
+  ordered persistence path as other editor interactions.
+- The page section exposes one Korean-first add action plus explicit rename,
+  move up/down, and delete controls for each page. Boundary moves and deletion
+  of the only page are visibly disabled; compact page controls remain keyboard
+  reachable, programmatically named, tokenized, and at least 32px.
+- Creating a page activates the new empty page and clears selection. Rename and
+  reorder keep the same active page and valid selection. Deleting an inactive
+  page keeps the current context; deleting the active page activates the nearest
+  surviving page and clears stale selection before Inspector, presence, or
+  shortcuts can consume it.
+- Browser page actions and typed HTTP/MCP page commands share one `pages[]`
+  mutation contract. Invalid IDs, blank names, unknown pages, last-page delete,
+  must not persist or add history. Browser boundary no-ops add no history;
+  agent commands reject out-of-range indexes with HTTP 400.
+- Page management does not imply external reviewer access. Invite identity,
+  viewer permissions, and initial document delivery remain a separate
+  security-sensitive collaboration capability.
 
 ## 9. Agent Prompt Guide
 

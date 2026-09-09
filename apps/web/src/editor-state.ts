@@ -90,6 +90,7 @@ export interface EditorNodeClipboard {
 }
 
 export type EditorNodeStyle = RendererNode["style"];
+export type EditorPage = RendererDocument["pages"][number];
 
 export type GeometryPatch = Partial<{
   x: number;
@@ -125,6 +126,31 @@ interface StyleBindingSnapshot {
 }
 
 export type EditorCommand =
+  | {
+      type: "create_page";
+      pageId: string;
+      name?: string;
+      index?: number;
+    }
+  | {
+      type: "restore_page";
+      page: EditorPage;
+      index: number;
+    }
+  | {
+      type: "rename_page";
+      pageId: string;
+      name: string;
+    }
+  | {
+      type: "reorder_page";
+      pageId: string;
+      toIndex: number;
+    }
+  | {
+      type: "delete_page";
+      pageId: string;
+    }
   | {
       type: "update_node_geometry";
       nodeId: string;
@@ -485,6 +511,13 @@ const DEFAULT_LAYOUT_ITEM: NodeLayoutItem = { position: "static", margin: { top:
 const PASTE_OFFSET = 24;
 const VERTICAL_TEXT_WRITING_MODES = new Set<TextWritingMode>(["vertical_rl", "vertical_lr"]);
 
+function normalizedPageIndex(value: number, max: number): number | null {
+  if (!Number.isInteger(value) || max < 0) {
+    return null;
+  }
+  return Math.min(max, Math.max(0, Math.trunc(value)));
+}
+
 function safeComponentSlug(value: string): string {
   return (
     value
@@ -621,6 +654,30 @@ export function createEditorState(document: RendererDocument): EditorState {
     viewport: { scale: 1, x: 0, y: 0 },
     history: { past: [], future: [] }
   };
+}
+
+export function createPage(
+  state: EditorState,
+  input: { pageId: string; name?: string; index?: number }
+): EditorState {
+  return executeEditorCommand(state, {
+    type: "create_page",
+    pageId: input.pageId,
+    name: input.name,
+    index: input.index
+  });
+}
+
+export function renamePage(state: EditorState, pageId: string, name: string): EditorState {
+  return executeEditorCommand(state, { type: "rename_page", pageId, name });
+}
+
+export function reorderPage(state: EditorState, pageId: string, toIndex: number): EditorState {
+  return executeEditorCommand(state, { type: "reorder_page", pageId, toIndex });
+}
+
+export function deletePage(state: EditorState, pageId: string): EditorState {
+  return executeEditorCommand(state, { type: "delete_page", pageId });
 }
 
 export function findNodeById(document: RendererDocument, nodeId: string): RendererNode | null {
@@ -1989,6 +2046,105 @@ function applyCommand(document: RendererDocument, command: EditorCommand): Comma
   const next = structuredClone(document);
 
   switch (command.type) {
+    case "create_page": {
+      const pageId = command.pageId.trim();
+      const name = command.name === undefined
+        ? `페이지 ${next.pages.length + 1}`
+        : command.name.trim();
+      if (
+        !pageId ||
+        !name ||
+        next.pages.some((page) => page.id === pageId) ||
+        findNodeById(next, pageId)
+      ) {
+        return { document, inverse: null };
+      }
+
+      const index = command.index === undefined
+        ? next.pages.length
+        : normalizedPageIndex(command.index, next.pages.length);
+      if (index === null) {
+        return { document, inverse: null };
+      }
+
+      next.pages.splice(index, 0, { id: pageId, name, children: [] });
+      return {
+        document: next,
+        inverse: { type: "delete_page", pageId }
+      };
+    }
+    case "restore_page": {
+      const page = structuredClone(command.page);
+      const pageId = page.id.trim();
+      const name = page.name.trim();
+      const index = normalizedPageIndex(command.index, next.pages.length);
+      if (
+        !pageId ||
+        !name ||
+        index === null ||
+        next.pages.some((candidate) => candidate.id === pageId) ||
+        findNodeById(next, pageId)
+      ) {
+        return { document, inverse: null };
+      }
+
+      page.id = pageId;
+      page.name = name;
+      next.pages.splice(index, 0, page);
+      return {
+        document: next,
+        inverse: { type: "delete_page", pageId }
+      };
+    }
+    case "rename_page": {
+      const pageId = command.pageId.trim();
+      const page = next.pages.find((candidate) => candidate.id === pageId);
+      const name = command.name.trim();
+      if (!page || !name || page.name === name) {
+        return { document, inverse: null };
+      }
+
+      const previousName = page.name;
+      page.name = name;
+      return {
+        document: next,
+        inverse: { type: "rename_page", pageId, name: previousName }
+      };
+    }
+    case "reorder_page": {
+      const pageId = command.pageId.trim();
+      const fromIndex = next.pages.findIndex((page) => page.id === pageId);
+      const toIndex = normalizedPageIndex(command.toIndex, next.pages.length - 1);
+      if (fromIndex < 0 || toIndex === null || fromIndex === toIndex) {
+        return { document, inverse: null };
+      }
+
+      const [page] = next.pages.splice(fromIndex, 1);
+      if (!page) {
+        return { document, inverse: null };
+      }
+      next.pages.splice(toIndex, 0, page);
+      return {
+        document: next,
+        inverse: { type: "reorder_page", pageId, toIndex: fromIndex }
+      };
+    }
+    case "delete_page": {
+      const pageId = command.pageId.trim();
+      const index = next.pages.findIndex((page) => page.id === pageId);
+      if (index < 0 || next.pages.length <= 1) {
+        return { document, inverse: null };
+      }
+
+      const [page] = next.pages.splice(index, 1);
+      if (!page) {
+        return { document, inverse: null };
+      }
+      return {
+        document: next,
+        inverse: { type: "restore_page", page, index }
+      };
+    }
     case "update_node_geometry": {
       const node = findNodeById(next, command.nodeId);
       if (!node || isNodeLocked(node)) {

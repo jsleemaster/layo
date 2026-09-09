@@ -4658,6 +4658,83 @@ describe("HTTP server", () => {
     expect(summary.json().summary.createdNodeIds).toEqual(["agent-http-note"]);
   });
 
+  test("serves page management agent commands without persisting dry runs", async () => {
+    const server = await createServerWithDocument();
+    const pageCommands = [
+      { type: "create_page" as const, pageId: "page-2", index: 0 },
+      { type: "rename_page" as const, pageId: "page-2", name: "검토 기록" },
+      { type: "reorder_page" as const, pageId: "page-2", toIndex: 1 }
+    ];
+
+    const dryRun = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: true,
+        commands: pageCommands
+      }
+    });
+    expect(dryRun.statusCode).toBe(200);
+    const reviewedPreview = dryRun.json().result.preview;
+    expect(reviewedPreview.pages.map((page: { id: string }) => page.id)).toEqual([
+      "page-1",
+      "page-2"
+    ]);
+
+    const afterDryRun = await server.inject({ method: "GET", url: "/files/sample-file" });
+    expect(afterDryRun.json().file.pages.map((page: { id: string }) => page.id)).toEqual(["page-1"]);
+
+    const persisted = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: pageCommands
+      }
+    });
+    expect(persisted.statusCode).toBe(200);
+    expect(persisted.json().result.preview).toEqual(reviewedPreview);
+    expect(persisted.json().result.audit).toMatchObject({
+      commandTypes: ["create_page", "rename_page", "reorder_page"],
+      changedNodeIds: ["page-2"]
+    });
+
+    const afterPersist = await server.inject({ method: "GET", url: "/files/sample-file" });
+    expect(afterPersist.json().file.pages).toMatchObject([
+      { id: "page-1", name: "페이지 1" },
+      { id: "page-2", name: "검토 기록", children: [] }
+    ]);
+
+    const deleted = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [{ type: "delete_page", pageId: "page-2" }]
+      }
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json().result.preview.pages.map((page: { id: string }) => page.id)).toEqual([
+      "page-1"
+    ]);
+
+    const rejectedLastPageDelete = await server.inject({
+      method: "POST",
+      url: "/files/sample-file/agent/commands",
+      payload: {
+        dryRun: false,
+        commands: [{ type: "delete_page", pageId: "page-1" }]
+      }
+    });
+    expect(rejectedLastPageDelete.statusCode).toBe(400);
+    expect(rejectedLastPageDelete.json().message).toContain("cannot delete the last page");
+
+    const afterRejectedDelete = await server.inject({ method: "GET", url: "/files/sample-file" });
+    expect(afterRejectedDelete.json().file.pages.map((page: { id: string }) => page.id)).toEqual([
+      "page-1"
+    ]);
+  });
+
   test("serves file version save, list, read, and restore routes", async () => {
     const server = await createServerWithDocument();
 

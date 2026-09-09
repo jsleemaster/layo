@@ -1,6 +1,6 @@
 # Penpot Maturity Benchmark
 
-Last checked: 2026-08-31 (editor entry and page-navigation delta; reference set unchanged)
+Last checked: 2026-09-01 (page-management delta)
 
 ## Product Target
 
@@ -31,6 +31,8 @@ Use these sources before changing Layo's team-product roadmap:
 - Penpot design tokens: https://help.penpot.app/user-guide/design-systems/design-tokens/
 - Penpot flexible layouts: https://help.penpot.app/user-guide/designing/flexible-layouts/
 - Penpot workspace history: https://help.penpot.app/user-guide/designing/workspace-basics/#file-history-versions
+- Penpot workspace pages: https://help.penpot.app/user-guide/designing/workspace-basics/#pages
+- Penpot interface page controls: https://help.penpot.app/user-guide/first-steps/the-interface/#workspace
 - Penpot comments: https://help.penpot.app/user-guide/designing/workspace-basics/#comments
 - Penpot autosave configuration: https://help.penpot.app/technical-guide/configuration/#autosave
 
@@ -69,12 +71,45 @@ active page or clear its selection.
 Undo/Redo result selection is also re-scoped to the active page after hidden-page
 history mutations, preventing Inspector and shortcut leakage.
 
-This advances editor completeness and direct task entry, but it is not page
-management maturity. Page create/rename/delete/reorder and corresponding
-undo/redo plus HTTP/MCP commands remain open. File-panel density, the declared
-1024px comfortable viewport, focus return, and persistent server/save/status
-feedback also remain separate gaps. Wider merge gates remain pending; see
+This advanced editor completeness and direct task entry, but it did not include
+page management. The exact create/rename/delete/reorder gap is now owned by the
+active `2026-09-01-page-management.md` slice; it remains open until that slice's
+browser, agent, collaboration, and merge evidence passes. File-panel density,
+the declared 1024px comfortable viewport, focus return, and persistent
+server/save/status feedback remain separate gaps. See
 `docs/product/editor-entry-page-navigation-delta.md`.
+
+## Active Page Management Delta
+
+The 2026-09-01 comparison corrects an over-broad review-tool claim. Layo already
+has substantial comment CRUD and review state. The exact real-board failure was
+that a four-page audit could only be authored by replacing the complete
+document through a raw `PUT`; the UI and typed agent command surface could only
+navigate pages that already existed.
+
+The active slice **adopts** Penpot's visible create, rename, reorder, and delete
+expectations and **adapts** them to Layo's local-first architecture:
+
+- Browser and HTTP/MCP operations share `RendererDocument.pages[]` semantics.
+- Browser mutations reuse existing Undo/Redo, Yjs collaboration transactions,
+  active-page reconciliation, and ordered per-file persistence.
+- Agent commands support reviewed dry-run and commit rather than complete
+  document replacement.
+- The first reorder UI uses explicit keyboard-reachable move controls over the
+  same deterministic reorder command.
+
+Layo deliberately keeps at least one page. Penpot separators, page duplication,
+thumbnails, cross-page layer movement, and drag reorder are deferred. External
+reviewer invite, viewer identity/permissions, and initial document delivery are
+a separate security-sensitive collaboration gap and must not be reported as
+closed by page CRUD.
+
+The active acceptance gate requires UI and agent create/rename/reorder/delete,
+last-page protection, exact Undo/Redo, reload persistence, two-client
+collaboration convergence, focused Playwright CLI, and direct browser proof.
+Until those results and exact-head merge evidence exist, the status remains
+active rather than completed. See
+`docs/product/penpot-page-management-delta.md`.
 
 ## Current Comment Management Evidence
 

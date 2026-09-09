@@ -237,6 +237,26 @@ const nodeStyleSchema = z.object({
 
 const agentCommandSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("create_page"),
+    pageId: z.string().trim().min(1),
+    name: z.string().trim().min(1).optional(),
+    index: z.number().int().nonnegative().optional()
+  }),
+  z.object({
+    type: z.literal("rename_page"),
+    pageId: z.string().trim().min(1),
+    name: z.string().trim().min(1)
+  }),
+  z.object({
+    type: z.literal("reorder_page"),
+    pageId: z.string().trim().min(1),
+    toIndex: z.number().int().nonnegative()
+  }),
+  z.object({
+    type: z.literal("delete_page"),
+    pageId: z.string().trim().min(1)
+  }),
+  z.object({
     type: z.literal("update_geometry"),
     nodeId: z.string(),
     x: z.number().optional(),
