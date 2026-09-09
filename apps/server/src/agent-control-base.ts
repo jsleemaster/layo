@@ -2113,6 +2113,9 @@ function requireNode(document: DesignFile, nodeId: string): DesignNode {
 }
 
 function normalizePageId(pageId: string): string {
+  if (typeof pageId !== "string") {
+    throw Object.assign(new Error("page id must be a string"), { statusCode: 400 });
+  }
   const normalized = pageId.trim();
   if (!normalized) {
     throw Object.assign(new Error("page id is required"), { statusCode: 400 });
@@ -2121,6 +2124,9 @@ function normalizePageId(pageId: string): string {
 }
 
 function normalizePageName(name: string): string {
+  if (typeof name !== "string") {
+    throw Object.assign(new Error("page name must be a string"), { statusCode: 400 });
+  }
   const normalized = name.trim();
   if (!normalized) {
     throw Object.assign(new Error("page name is required"), { statusCode: 400 });

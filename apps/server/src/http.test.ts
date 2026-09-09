@@ -4660,6 +4660,20 @@ describe("HTTP server", () => {
 
   test("serves page management agent commands without persisting dry runs", async () => {
     const server = await createServerWithDocument();
+    for (const command of [
+      { type: "create_page", pageId: null },
+      { type: "create_page", pageId: "page-2", name: 12 },
+      { type: "rename_page", pageId: "page-1", name: null },
+      { type: "delete_page", pageId: 12 },
+      { type: "reorder_page", pageId: null, toIndex: 0 }
+    ]) {
+      const rejected = await server.inject({
+        method: "POST",
+        url: "/files/sample-file/agent/commands",
+        payload: { dryRun: false, commands: [command] }
+      });
+      expect(rejected.statusCode).toBe(400);
+    }
     const pageCommands = [
       { type: "create_page" as const, pageId: "page-2", index: 0 },
       { type: "rename_page" as const, pageId: "page-2", name: "검토 기록" },
