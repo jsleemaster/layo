@@ -1,8 +1,8 @@
 # Figma To Layo Migration Roadmap
 
-Last checked: 2026-06-27
+Last checked: 2026-09-01
 
-Layo implementation delta: 2026-08-31
+Layo implementation delta: 2026-09-01
 
 This roadmap translates `docs/product/figma-feature-inventory.md` into implementation lanes for Layo. It now sits under the broader Penpot-comparable team-product maturity target in `docs/product/penpot-maturity-benchmark.md`: Layo should mature into a professional team design platform while preserving local-first storage and deterministic MCP/HTTP control.
 
@@ -43,6 +43,26 @@ Playwright passed 3/3 and then 15/15 repeated cases without retry after Cargo
 binding generation and browser E2E were serialized; expanded editor/keyboard
 coverage passed 5/5 without retry.
 
+## 2026-09-01 Page Management Delta
+
+The Resume Admin audit narrowed the practical authoring gap: Layo already has
+substantial comment/review behavior, but creating its four-page structure still
+required a raw complete-document `PUT`. The active slice closes that exact gap
+through normal Layers controls and typed agent commands.
+
+Layo **adopts** the familiar create, rename, reorder, and delete expectations
+from Penpot/Figma page lists, then **adapts** them to one local-first
+`RendererDocument.pages[]` contract shared by UI, HTTP, and MCP. Browser actions
+reuse editor Undo/Redo, Yjs transactions, active-page reconciliation, and
+ordered persistence. Agent actions reuse reviewed dry-run/commit batches.
+
+Layo deliberately refuses last-page deletion. The bounded UI uses explicit
+keyboard-reachable move controls over the deterministic reorder command; drag
+reorder, separators, duplication, thumbnails, and cross-page layer movement are
+deferred. External reviewer invite, viewer identity/permissions, and initial
+document delivery remain a separate security slice. See
+`docs/product/penpot-page-management-delta.md`.
+
 ## Current Baseline
 
 The current main branch already has:
@@ -56,7 +76,7 @@ The current main branch already has:
 - HTTP and MCP agent control for inspect, find, command application, validation, change summaries, components, and code export.
 - Structured code export with implementation specs and token candidates.
 - Team manifests, relay collaboration, remote presence/selection, role-based relay auth, E2EE snapshots, complete top-level document-field Yjs mapping, local-transaction Undo/Redo that preserves later remote edits, and experimental Rust relay support.
-- An empty-store project entry, honest static asset-catalog previews, Korean shortcut Help, native-control-safe global shortcuts, and active-page Layers/canvas/selection/paste/snap/Inspector/Dev context are implemented as an editor-shell adaptation. Page CRUD and reorder are not part of this slice.
+- An empty-store project entry, honest static asset-catalog previews, Korean shortcut Help, native-control-safe global shortcuts, and active-page Layers/canvas/selection/paste/snap/Inspector/Dev context are implemented as an editor-shell adaptation. The active page-management slice adds create/rename/reorder/delete through UI and typed agent commands; it is not complete until its verification and merge gates pass.
 
 ## Lane 1: Layout Foundation
 
@@ -194,11 +214,12 @@ Implementation shape:
 
 ## Immediate Implementation Order
 
-1. Keep the landed Lane 1 layout foundation, Flex alignment, reverse row/column flow, child-margin flow, child fill sizing, equal-cell grid auto-placement, manual grid cell placement, grid item span, static/absolute layout item positioning, wrap, row/column gap split, container fit sizing, min/max sizing, viewport grid resize/add/remove/reorder controls including Ctrl/Command preserve-elements reorder, bounded span/named-area reorder, direct selected area/span boundary handles, single-cell empty-cell area creation menu, viewport grid row/column header context menus, viewport delete-track-with-shapes actions, and PR #20 navigation fixes green.
-2. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, single-object Cmd/Ctrl+C/V/X copy/cut/paste, Cmd/Ctrl+A select all, Shift+Cmd/Ctrl+A select same kind, Shift+1 fit selection, Option/Alt+Cmd/Ctrl+C/V style copy/paste, Cmd/Ctrl+R rename, Cmd/Ctrl+G grouping, Shift+Cmd/Ctrl+G ungrouping, and Option/Alt alignment shortcuts.
-3. Keep Shift-click multi-selection and drag 영역 선택 green.
-4. Keep alignment/distribute commands and grouped Inspector affordances green for selected layers.
-5. Keep the multi-selection group outline and combined size badge green while deferring multi-selected bounding-box resize behavior to a separate slice.
-6. Extend the landed grouped drag, measurement, frame-spacing, and corner-resize slices with rotation, rulers, manual guides, and snap settings.
-7. Keep the Penpot/Figma migration preflight, Figma REST JSON write import, and Figma packaged image-fill import green, then extend full Figma/Penpot mapping on top of the local asset pipeline with components, variants, effects, advanced styles, and Penpot ZIP shape mapping.
-8. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.
+1. Close the active page-management raw-`PUT` gap through UI and typed agent create/rename/reorder/delete, last-page protection, Undo/Redo, reload, collaboration, and direct Playwright evidence.
+2. Keep the landed Lane 1 layout foundation, Flex alignment, reverse row/column flow, child-margin flow, child fill sizing, equal-cell grid auto-placement, manual grid cell placement, grid item span, static/absolute layout item positioning, wrap, row/column gap split, container fit sizing, min/max sizing, viewport grid resize/add/remove/reorder controls including Ctrl/Command preserve-elements reorder, bounded span/named-area reorder, direct selected area/span boundary handles, single-cell empty-cell area creation menu, viewport grid row/column header context menus, viewport delete-track-with-shapes actions, and PR #20 navigation fixes green.
+3. Keep the core shortcut slice from `docs/product/figma-core-interaction-rules.md` green: selected-layer Delete/Backspace, Cmd/Ctrl+D duplicate, single-object Cmd/Ctrl+C/V/X copy/cut/paste, Cmd/Ctrl+A select all, Shift+Cmd/Ctrl+A select same kind, Shift+1 fit selection, Option/Alt+Cmd/Ctrl+C/V style copy/paste, Cmd/Ctrl+R rename, Cmd/Ctrl+G grouping, Shift+Cmd/Ctrl+G ungrouping, and Option/Alt alignment shortcuts.
+4. Keep Shift-click multi-selection and drag 영역 선택 green.
+5. Keep alignment/distribute commands and grouped Inspector affordances green for selected layers.
+6. Keep the multi-selection group outline and combined size badge green while deferring multi-selected bounding-box resize behavior to a separate slice.
+7. Extend the landed grouped drag, measurement, frame-spacing, and corner-resize slices with rotation, rulers, manual guides, and snap settings.
+8. Keep the Penpot/Figma migration preflight, Figma REST JSON write import, and Figma packaged image-fill import green, then extend full Figma/Penpot mapping on top of the local asset pipeline with components, variants, effects, advanced styles, and Penpot ZIP shape mapping.
+9. Merge only after `pnpm test`, `pnpm typecheck`, web build, relevant Playwright suites, and direct live UI interaction verification pass.

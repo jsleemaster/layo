@@ -545,9 +545,28 @@ button:disabled {
   gap: var(--editor-space-xxs);
 }
 
-.page-switcher-heading span {
+.page-switcher-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--editor-space-xs);
+}
+
+.page-switcher-title-row span {
   color: var(--editor-color-muted);
   font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.page-create-button {
+  min-height: var(--editor-space-xl);
+  padding: 0 var(--editor-space-sm);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-control);
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  font-weight: var(--editor-text-control-weight);
   line-height: var(--editor-text-small-line);
 }
 
@@ -565,7 +584,12 @@ button:disabled {
   gap: var(--editor-space-xxs);
 }
 
-.page-switcher-list button {
+.page-switcher-row {
+  display: grid;
+  gap: var(--editor-space-xxs);
+}
+
+.page-switcher-page {
   width: 100%;
   min-height: var(--editor-space-xl);
   padding: var(--editor-space-xs) var(--editor-space-sm);
@@ -582,10 +606,91 @@ button:disabled {
   line-height: var(--editor-text-control-line);
 }
 
-.page-switcher-list button.is-selected {
+.page-switcher-row.is-selected .page-switcher-page {
   border-color: var(--editor-color-selection);
   background: var(--editor-color-selection-soft);
   color: var(--editor-color-selection);
+}
+
+.page-switcher-actions {
+  display: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--editor-space-xxs);
+  padding: 0 var(--editor-space-xxs) var(--editor-space-xs);
+}
+
+.page-switcher-row.is-selected .page-switcher-actions,
+.page-switcher-row:hover .page-switcher-actions,
+.page-switcher-row:focus-within .page-switcher-actions {
+  display: grid;
+}
+
+.page-switcher-actions button,
+.page-switcher-rename-actions button {
+  min-height: var(--editor-space-xl);
+  min-width: 0;
+  padding: 0 var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-surface);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.page-switcher-actions button:hover:not(:disabled),
+.page-switcher-rename-actions button:hover:not(:disabled) {
+  border-color: var(--editor-color-selection);
+  color: var(--editor-color-ink);
+}
+
+.page-switcher-rename {
+  display: grid;
+  gap: var(--editor-space-xxs);
+  padding: var(--editor-space-xs);
+  border: var(--editor-border-hairline) solid var(--editor-color-selection);
+  border-radius: var(--editor-radius-sm);
+  background: var(--editor-color-selection-soft);
+}
+
+.page-switcher-rename input {
+  width: 100%;
+  min-height: var(--editor-space-xl);
+  padding: var(--editor-space-xs) var(--editor-space-sm);
+  border: var(--editor-border-hairline) solid var(--editor-color-border);
+  border-radius: var(--editor-radius-xs);
+  background: var(--editor-color-surface);
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-control-size);
+  line-height: var(--editor-text-control-line);
+}
+
+.page-name-error {
+  margin: 0;
+  color: var(--editor-color-ink);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
+}
+
+.page-switcher-rename input[aria-invalid="true"] {
+  border-color: var(--editor-color-warning);
+  box-shadow: 0 0 0 var(--editor-border-hairline) var(--editor-color-warning);
+}
+
+.page-switcher-rename-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--editor-space-xxs);
+}
+
+.page-switcher-empty {
+  margin: 0;
+  padding: var(--editor-space-sm);
+  border: var(--editor-border-hairline) dashed var(--editor-color-border-soft);
+  border-radius: var(--editor-radius-sm);
+  color: var(--editor-color-muted);
+  font-size: var(--editor-text-small-size);
+  line-height: var(--editor-text-small-line);
 }
 
 .sidebar h1,
@@ -669,7 +774,9 @@ button:disabled {
 .asset-empty-card button:focus-visible,
 .asset-library-card:focus-visible,
 .help-primary-action:focus-visible,
+.page-create-button:focus-visible,
 .page-switcher-list button:focus-visible,
+.page-switcher-rename input:focus-visible,
 .top-file-share:focus-visible,
 .team-panel textarea:focus-visible,
 .team-mode-tabs button:focus-visible,

@@ -265,6 +265,222 @@ test("switches existing document pages without mixing hidden-page layers", async
     });
 });
 
+function pageManagementRow(page: Page, name: string) {
+  return page
+    .getByTestId("page-switcher")
+    .getByRole("group", {
+      name: new RegExp(`^\\d+번째 ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} 페이지 작업$`)
+    });
+}
+
+function pageSelectionButtons(page: Page) {
+  return page.getByTestId("page-switcher").locator('button[aria-pressed]');
+}
+
+async function selectDocumentPage(page: Page, name: string) {
+  await pageManagementRow(page, name)
+    .locator(".page-switcher-page")
+    .click();
+  await expect(page.getByTestId("active-page-name")).toHaveText(name);
+}
+
+async function renameActiveDocumentPage(page: Page, name: string) {
+  const currentName = (await page.getByTestId("active-page-name").textContent())?.trim();
+  if (!currentName) {
+    throw new Error("active page name was missing before rename");
+  }
+
+  const row = pageManagementRow(page, currentName);
+  await row
+    .getByRole("button")
+    .filter({ hasText: /^페이지 이름 변경$/ })
+    .click();
+  const nameInput = row.getByRole("textbox", { name: "페이지 이름", exact: true });
+  await expect(nameInput).toBeVisible();
+  await nameInput.fill(name);
+  await row.getByRole("button", { name: "이름 저장", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText(name);
+  await expect(pageManagementRow(page, name)).toBeVisible();
+  await expect(pageManagementRow(page, name).locator(".page-switcher-page")).toBeFocused();
+}
+
+async function deleteActiveDocumentPage(page: Page, name: string) {
+  const row = pageManagementRow(page, name);
+  await row.hover();
+  await Promise.all([
+    page.waitForEvent("dialog").then(async (dialog) => {
+      expect(dialog.message()).toBe(
+        `"${name}" 페이지를 삭제할까요? 페이지 안의 모든 레이어도 삭제됩니다.`
+      );
+      await dialog.accept();
+    }),
+    row
+      .getByRole("button")
+      .filter({ hasText: /^페이지 삭제$/ })
+      .click()
+  ]);
+}
+
+test("creates and manages a four-page document entirely from the page switcher", async ({ page }) => {
+  const { documentId } = await createProjectFromEmptyState(page);
+  const savedPageNames = async () => {
+    const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+    return (await response.json()).file.pages.map((item: { name: string }) => item.name);
+  };
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+
+  const pageSwitcher = page.getByTestId("page-switcher");
+  const addPage = pageSwitcher.getByRole("button", { name: "페이지 추가", exact: true });
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect(pageSelectionButtons(page)).toHaveText(["페이지 1"]);
+
+  const initialRow = pageManagementRow(page, "페이지 1");
+  await initialRow
+    .getByRole("button")
+    .filter({ hasText: /^페이지 이름 변경$/ })
+    .click();
+  const initialNameInput = initialRow.getByRole("textbox", { name: "페이지 이름", exact: true });
+  await initialNameInput.fill("   ");
+  await initialRow.getByRole("button", { name: "이름 저장", exact: true }).click();
+  await expect(initialNameInput).toHaveAttribute("aria-invalid", "true");
+  await expect(initialRow.getByRole("alert")).toHaveText("페이지 이름을 입력하세요.");
+  await expect(initialNameInput).toBeFocused();
+  await initialNameInput.press("Escape");
+  await expect(initialRow.locator(".page-switcher-page")).toBeFocused();
+
+  await page.getByRole("button", { name: "헤드라인", exact: true }).click();
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+
+  await addPage.click();
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 2");
+  await expect(page.getByTestId("layer-panel").locator('.layer-list button[aria-pressed="true"]')).toHaveCount(0);
+  await page.keyboard.press("Control+z");
+  await expect(pageSelectionButtons(page)).toHaveText(["페이지 1"]);
+  await expect(page.getByTestId("active-page-name")).toHaveText("페이지 1");
+  await expect.poll(savedPageNames).toEqual(["페이지 1"]);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(pageSelectionButtons(page)).toHaveText(["페이지 1", "페이지 2"]);
+  await expect.poll(savedPageNames).toEqual(["페이지 1", "페이지 2"]);
+  await selectDocumentPage(page, "페이지 2");
+  await renameActiveDocumentPage(page, "리서치");
+  await addPage.click();
+  await renameActiveDocumentPage(page, "와이어프레임");
+  await addPage.click();
+  await renameActiveDocumentPage(page, "최종 검토");
+  await expect(pageSelectionButtons(page)).toHaveText([
+    "페이지 1",
+    "리서치",
+    "와이어프레임",
+    "최종 검토"
+  ]);
+
+  await selectDocumentPage(page, "와이어프레임");
+  await page.getByRole("button", { name: "사각형 만들기", exact: true }).click();
+  const pageOnlyLayer = page
+    .getByTestId("layer-panel")
+    .getByRole("button", { name: /^사각형 \d+$/ })
+    .last();
+  await expect(pageOnlyLayer).toBeVisible();
+  const pageOnlyLayerName = (await pageOnlyLayer.textContent())?.trim();
+  if (!pageOnlyLayerName) {
+    throw new Error("page-only layer name was missing");
+  }
+
+  await selectDocumentPage(page, "페이지 1");
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: pageOnlyLayerName, exact: true })).toHaveCount(0);
+  await selectDocumentPage(page, "와이어프레임");
+  await expect(page.getByRole("button", { name: pageOnlyLayerName, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "헤드라인", exact: true })).toHaveCount(0);
+
+  await selectDocumentPage(page, "최종 검토");
+  await pageManagementRow(page, "최종 검토")
+    .getByRole("button")
+    .filter({ hasText: /^위로 이동$/ })
+    .click();
+  await expect(pageSelectionButtons(page)).toHaveText([
+    "페이지 1",
+    "리서치",
+    "최종 검토",
+    "와이어프레임"
+  ]);
+
+  await selectDocumentPage(page, "리서치");
+  await pageManagementRow(page, "리서치")
+    .getByRole("button")
+    .filter({ hasText: /^아래로 이동$/ })
+    .click();
+  await expect(pageSelectionButtons(page)).toHaveText([
+    "페이지 1",
+    "최종 검토",
+    "리서치",
+    "와이어프레임"
+  ]);
+
+  await selectDocumentPage(page, "와이어프레임");
+  await page.getByRole("button", { name: pageOnlyLayerName, exact: true }).click();
+  await deleteActiveDocumentPage(page, "리서치");
+  await expect(pageManagementRow(page, "리서치")).toHaveCount(0);
+  await page.keyboard.press("Control+z");
+  await expect(pageManagementRow(page, "리서치")).toBeVisible();
+  await expect.poll(savedPageNames).toEqual(["페이지 1", "최종 검토", "리서치", "와이어프레임"]);
+  await selectDocumentPage(page, "리서치");
+  await page.keyboard.press("Control+Shift+z");
+  await expect(pageManagementRow(page, "리서치")).toHaveCount(0);
+  await expect(page.getByTestId("active-page-name")).toHaveText("와이어프레임");
+  await expect.poll(savedPageNames).toEqual(["페이지 1", "최종 검토", "와이어프레임"]);
+  await page.getByRole("button", { name: pageOnlyLayerName, exact: true }).click();
+  await pageManagementRow(page, "와이어프레임").locator(".page-switcher-page").focus();
+  await expect(page.getByTestId("active-page-name")).toHaveText("와이어프레임");
+  await expect(page.getByRole("button", { name: pageOnlyLayerName, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect(pageManagementRow(page, "와이어프레임").locator(".page-switcher-page")).toBeFocused();
+  await expect(pageSwitcher.locator('button[aria-pressed="true"]')).toHaveCount(1);
+
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      expect(response.ok()).toBeTruthy();
+      return (await response.json()).file.pages.map((documentPage: { name: string }) => documentPage.name);
+    })
+    .toEqual(["페이지 1", "최종 검토", "와이어프레임"]);
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(pageSelectionButtons(page)).toHaveText(["페이지 1", "최종 검토", "와이어프레임"]);
+  await selectDocumentPage(page, "와이어프레임");
+  await expect(page.getByRole("button", { name: pageOnlyLayerName, exact: true })).toBeVisible();
+  await selectDocumentPage(page, "최종 검토");
+  await expect(page.getByRole("button", { name: pageOnlyLayerName, exact: true })).toHaveCount(0);
+
+  await selectDocumentPage(page, "페이지 1");
+  await deleteActiveDocumentPage(page, "페이지 1");
+  await selectDocumentPage(page, "최종 검토");
+  await deleteActiveDocumentPage(page, "최종 검토");
+  await expect(pageSelectionButtons(page)).toHaveText(["와이어프레임"]);
+  await expect(page.getByTestId("active-page-name")).toHaveText("와이어프레임");
+  await expect(
+    pageManagementRow(page, "와이어프레임")
+      .getByRole("button")
+      .filter({ hasText: /^페이지 삭제$/ })
+  ).toBeDisabled();
+
+  await page.reload();
+  await page.getByTestId("editor-rail").getByRole("button", { name: "레이어" }).click();
+  await expect(pageSelectionButtons(page)).toHaveText(["와이어프레임"]);
+  await expect(page.getByTestId("active-page-name")).toHaveText("와이어프레임");
+  await expect(
+    pageManagementRow(page, "와이어프레임")
+      .getByRole("button")
+      .filter({ hasText: /^페이지 삭제$/ })
+  ).toBeDisabled();
+});
+
 test("editor chrome uses the generated Layo brand logo assets", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
 

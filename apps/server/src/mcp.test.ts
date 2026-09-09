@@ -359,6 +359,112 @@ describe("MCP AI editing workflow", () => {
     expect(validation.validation).toMatchObject({ ok: true, issueCount: 0 });
   });
 
+  test("lets an MCP client dry-run and persist page management commands", async () => {
+    const client = await connectMcpClient();
+
+    await client.callTool({
+      name: "create_project",
+      arguments: {
+        projectId: "page-command-project",
+        name: "페이지 명령 프로젝트",
+        documentId: "page-command-file",
+        documentName: "페이지 명령 문서"
+      }
+    });
+
+    const pageCommands = [
+      { type: "create_page" as const, pageId: "page-2", index: 0 },
+      { type: "rename_page" as const, pageId: "page-2", name: "검토 기록" },
+      { type: "reorder_page" as const, pageId: "page-2", toIndex: 1 }
+    ];
+
+    const dryRun = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "page-command-file",
+          dryRun: true,
+          commands: pageCommands
+        }
+      })
+    );
+    expect(dryRun.result).toMatchObject({
+      persisted: false,
+      preview: {
+        pages: [
+          { id: "page-1", name: "페이지 1" },
+          { id: "page-2", name: "검토 기록", children: [] }
+        ]
+      },
+      audit: {
+        commandTypes: ["create_page", "rename_page", "reorder_page"],
+        changedNodeIds: ["page-2"]
+      }
+    });
+    const afterDryRun = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "page-command-file" }
+      })
+    );
+    expect(afterDryRun.inspection.pages.map((page: { id: string }) => page.id)).toEqual(["page-1"]);
+
+    const persisted = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "page-command-file",
+          dryRun: false,
+          commands: pageCommands
+        }
+      })
+    );
+    expect(persisted.result).toMatchObject({
+      persisted: true,
+      preview: {
+        pages: [
+          { id: "page-1", name: "페이지 1" },
+          { id: "page-2", name: "검토 기록", children: [] }
+        ]
+      },
+      audit: {
+        commandTypes: ["create_page", "rename_page", "reorder_page"],
+        changedNodeIds: ["page-2"]
+      }
+    });
+    expect(persisted.result.preview).toEqual(dryRun.result.preview);
+
+    const deleted = parseToolJson(
+      await client.callTool({
+        name: "apply_agent_commands",
+        arguments: {
+          fileId: "page-command-file",
+          dryRun: false,
+          commands: [{ type: "delete_page", pageId: "page-2" }]
+        }
+      })
+    );
+    expect(deleted.result.preview.pages.map((page: { id: string }) => page.id)).toEqual(["page-1"]);
+
+    const rejected = await client.callTool({
+      name: "apply_agent_commands",
+      arguments: {
+        fileId: "page-command-file",
+        dryRun: false,
+        commands: [{ type: "delete_page", pageId: "page-1" }]
+      }
+    });
+    expect(rejected).toMatchObject({ isError: true });
+
+    const afterRejectedDelete = parseToolJson(
+      await client.callTool({
+        name: "inspect_canvas",
+        arguments: { fileId: "page-command-file" }
+      })
+    );
+    expect(afterRejectedDelete.inspection.pages.map((page: { id: string }) => page.id)).toEqual(["page-1"]);
+  });
+
   test("lets an MCP client import and export DTCG design tokens", async () => {
     const client = await connectMcpClient();
 

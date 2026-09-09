@@ -149,6 +149,48 @@ async function connectRelayEditors(pageA: Page, pageB: Page) {
   await expect(pageB.getByTestId("team-status")).toContainText("동기화됨", { timeout: 8000 });
 }
 
+function collaborationPageRow(page: Page, name: string) {
+  return page
+    .getByTestId("page-switcher")
+    .getByRole("group", {
+      name: new RegExp(`^\\d+번째 ${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} 페이지 작업$`)
+    });
+}
+
+function collaborationPageButtons(page: Page) {
+  return page.getByTestId("page-switcher").locator('button[aria-pressed]');
+}
+
+async function selectCollaborationPage(page: Page, name: string) {
+  await collaborationPageRow(page, name)
+    .locator(".page-switcher-page")
+    .click();
+  await expect(page.getByTestId("active-page-name")).toHaveText(name);
+}
+
+async function renameCollaborationPage(page: Page, currentName: string, nextName: string) {
+  const row = collaborationPageRow(page, currentName);
+  await row
+    .getByRole("button")
+    .filter({ hasText: /^페이지 이름 변경$/ })
+    .click();
+  await row.getByRole("textbox", { name: "페이지 이름", exact: true }).fill(nextName);
+  await row.getByRole("button", { name: "이름 저장", exact: true }).click();
+  await expect(page.getByTestId("active-page-name")).toHaveText(nextName);
+}
+
+async function expectValidActiveCollaborationPage(page: Page, expectedNames: string[]) {
+  const activeName = (await page.getByTestId("active-page-name").textContent())?.trim();
+  expect(activeName).toBeTruthy();
+  expect(expectedNames).toContain(activeName);
+  const selectedPage = page
+    .getByTestId("page-switcher")
+    .locator('button[aria-pressed="true"]');
+  await expect(selectedPage).toHaveCount(1);
+  await expect(selectedPage).toHaveText(activeName!);
+  await expect(selectedPage).toHaveAttribute("aria-current", "page");
+}
+
 test("team panel shows live collaboration controls only in the collaboration tab", async ({ page }) => {
   await page.goto("http://127.0.0.1:5173/");
   await openTeamPanel(page);
@@ -184,6 +226,152 @@ test("team panel shows live collaboration controls only in the collaboration tab
   await expect(page.getByLabel("팀 설정 URL")).toBeVisible();
   await expect(page.getByTestId("team-manifest-url")).toBeVisible();
   await expect(page.getByTestId("team-manifest")).toBeVisible();
+});
+
+test("page management converges and remote active-page deletion keeps both editors valid", async ({ browser }) => {
+  const contextA = await browser.newContext();
+  const contextB = await browser.newContext();
+  const pageA = await contextA.newPage();
+  const pageB = await contextB.newPage();
+
+  try {
+    const documentId = await createProjectFromEmptyState(pageA);
+    const savedPageNames = async () => {
+      const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+      return (await response.json()).file.pages.map((item: { name: string }) => item.name);
+    };
+    await pageB.goto("http://127.0.0.1:5173/");
+    await connectRelayEditors(pageA, pageB);
+    await openLayersPanel(pageA);
+    await openLayersPanel(pageB);
+
+    const addPageA = pageA
+      .getByTestId("page-switcher")
+      .getByRole("button", { name: "페이지 추가", exact: true });
+
+    await addPageA.click();
+    await expect(collaborationPageButtons(pageA)).toHaveText(["페이지 1", "페이지 2"]);
+    await expect(collaborationPageButtons(pageB)).toHaveText(["페이지 1", "페이지 2"], {
+      timeout: 8000
+    });
+
+    await selectCollaborationPage(pageB, "페이지 2");
+    await renameCollaborationPage(pageB, "페이지 2", "협업 검토");
+    await expect(collaborationPageButtons(pageA)).toHaveText(["페이지 1", "협업 검토"], {
+      timeout: 8000
+    });
+    await expect(collaborationPageButtons(pageB)).toHaveText(["페이지 1", "협업 검토"]);
+
+    await addPageA.click();
+    await renameCollaborationPage(pageA, "페이지 3", "출시 후보");
+    await expect(collaborationPageButtons(pageA)).toHaveText([
+      "페이지 1",
+      "협업 검토",
+      "출시 후보"
+    ]);
+    await expect(collaborationPageButtons(pageB)).toHaveText(
+      ["페이지 1", "협업 검토", "출시 후보"],
+      { timeout: 8000 }
+    );
+
+    await selectCollaborationPage(pageB, "출시 후보");
+    await collaborationPageRow(pageB, "출시 후보")
+      .getByRole("button")
+      .filter({ hasText: /^위로 이동$/ })
+      .click();
+    await expect(collaborationPageButtons(pageA)).toHaveText(
+      ["페이지 1", "출시 후보", "협업 검토"],
+      { timeout: 8000 }
+    );
+    await expect(collaborationPageButtons(pageB)).toHaveText([
+      "페이지 1",
+      "출시 후보",
+      "협업 검토"
+    ]);
+    await pageB.keyboard.press("Control+z");
+    await expect.poll(savedPageNames).toEqual(["페이지 1", "협업 검토", "출시 후보"]);
+    await expect(collaborationPageButtons(pageA)).toHaveText(
+      ["페이지 1", "협업 검토", "출시 후보"],
+      { timeout: 8000 }
+    );
+    await expect(collaborationPageButtons(pageB)).toHaveText([
+      "페이지 1",
+      "협업 검토",
+      "출시 후보"
+    ]);
+    await pageB.keyboard.press("Control+Shift+z");
+    await expect.poll(savedPageNames).toEqual(["페이지 1", "출시 후보", "협업 검토"]);
+    await expect(collaborationPageButtons(pageA)).toHaveText(
+      ["페이지 1", "출시 후보", "협업 검토"],
+      { timeout: 8000 }
+    );
+    await expect(collaborationPageButtons(pageB)).toHaveText([
+      "페이지 1",
+      "출시 후보",
+      "협업 검토"
+    ]);
+
+    await selectCollaborationPage(pageA, "협업 검토");
+    await selectCollaborationPage(pageB, "협업 검토");
+    await pageB.getByRole("button", { name: "사각형 만들기", exact: true }).click();
+    const selectedRemoteLayer = pageB
+      .getByTestId("layer-panel")
+      .getByRole("button", { name: /^사각형 \d+$/ })
+      .last();
+    await expect(selectedRemoteLayer).toHaveAttribute("aria-pressed", "true");
+    const selectedRemoteLayerName = (await selectedRemoteLayer.textContent())?.trim();
+    expect(selectedRemoteLayerName).toBeTruthy();
+    await expect(pageA.getByRole("button", { name: selectedRemoteLayerName!, exact: true })).toBeVisible({
+      timeout: 8000
+    });
+    await expect(pageA.getByTestId("remote-selection")).toBeVisible({ timeout: 8000 });
+    const stageBox = await pageB.getByTestId("stage-frame").boundingBox();
+    expect(stageBox).not.toBeNull();
+    await pageB.mouse.move(stageBox!.x + 320, stageBox!.y + 240);
+    await expect(pageA.getByTestId("remote-cursor")).toBeVisible({ timeout: 8000 });
+    await Promise.all([
+      pageA.waitForEvent("dialog").then(async (dialog) => {
+        expect(dialog.message()).toBe(
+          '"협업 검토" 페이지를 삭제할까요? 페이지 안의 모든 레이어도 삭제됩니다.'
+        );
+        await dialog.accept();
+      }),
+      collaborationPageRow(pageA, "협업 검토")
+        .getByRole("button")
+        .filter({ hasText: /^페이지 삭제$/ })
+        .click()
+    ]);
+
+    await expect(collaborationPageButtons(pageA)).toHaveText(["페이지 1", "출시 후보"]);
+    await expect(collaborationPageButtons(pageB)).toHaveText(["페이지 1", "출시 후보"], {
+      timeout: 8000
+    });
+    await expect(collaborationPageRow(pageA, "협업 검토")).toHaveCount(0);
+    await expect(collaborationPageRow(pageB, "협업 검토")).toHaveCount(0);
+
+    await expect(pageA.getByTestId("active-page-name")).toHaveText("출시 후보");
+    await expect(pageB.getByTestId("active-page-name")).toHaveText("출시 후보");
+    await expect(pageB.getByTestId("layer-panel").locator('.layer-list button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(pageA.getByTestId("remote-selection")).toHaveCount(0, { timeout: 1500 });
+    await expect(pageA.getByTestId("remote-cursor")).toHaveCount(0, { timeout: 1500 });
+    await expectValidActiveCollaborationPage(pageA, ["페이지 1", "출시 후보"]);
+    await expectValidActiveCollaborationPage(pageB, ["페이지 1", "출시 후보"]);
+
+    await expect
+      .poll(async () => {
+        const response = await pageA.request.get(`http://127.0.0.1:4317/files/${documentId}`);
+        expect(response.ok()).toBeTruthy();
+        return (await response.json()).file.pages.map((item: { name: string }) => item.name);
+      })
+      .toEqual(["페이지 1", "출시 후보"]);
+
+    await pageA.reload();
+    await openLayersPanel(pageA);
+    await expect(collaborationPageButtons(pageA)).toHaveText(["페이지 1", "출시 후보"]);
+  } finally {
+    await contextA.close();
+    await contextB.close();
+  }
 });
 
 test("relay team syncs document edits between two browser contexts", async ({ browser }) => {

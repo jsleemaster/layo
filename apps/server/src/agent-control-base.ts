@@ -98,6 +98,10 @@ export interface ChangeSummary {
 }
 
 export type AgentCommand =
+  | { type: "create_page"; pageId: string; name?: string; index?: number }
+  | { type: "rename_page"; pageId: string; name: string }
+  | { type: "reorder_page"; pageId: string; toIndex: number }
+  | { type: "delete_page"; pageId: string }
   | {
       type: "update_geometry";
       nodeId: string;
@@ -1177,6 +1181,46 @@ export function normalizeAgentNodeStyleForNode(node: DesignNode, style: DesignNo
 
 function applyAgentCommand(document: DesignFile, command: AgentCommand): string {
   switch (command.type) {
+    case "create_page": {
+      const pageId = normalizePageId(command.pageId);
+      if (
+        document.pages.some((page) => page.id === pageId) ||
+        findNodeById(document, pageId)
+      ) {
+        throw Object.assign(new Error(`page id already exists: ${pageId}`), { statusCode: 400 });
+      }
+      const name = command.name === undefined
+        ? `페이지 ${document.pages.length + 1}`
+        : normalizePageName(command.name);
+      const index = command.index === undefined
+        ? document.pages.length
+        : requirePageIndex(command.index, document.pages.length);
+      document.pages.splice(index, 0, { id: pageId, name, children: [] });
+      return pageId;
+    }
+    case "rename_page": {
+      const page = requirePage(document, command.pageId);
+      page.name = normalizePageName(command.name);
+      return page.id;
+    }
+    case "reorder_page": {
+      const page = requirePage(document, command.pageId);
+      const toIndex = requirePageIndex(command.toIndex, document.pages.length - 1);
+      const fromIndex = document.pages.indexOf(page);
+      if (fromIndex !== toIndex) {
+        document.pages.splice(fromIndex, 1);
+        document.pages.splice(toIndex, 0, page);
+      }
+      return page.id;
+    }
+    case "delete_page": {
+      const page = requirePage(document, command.pageId);
+      if (document.pages.length <= 1) {
+        throw Object.assign(new Error("cannot delete the last page"), { statusCode: 400 });
+      }
+      document.pages.splice(document.pages.indexOf(page), 1);
+      return page.id;
+    }
     case "update_geometry": {
       const node = requireNode(document, command.nodeId);
       const previousSize = { ...node.size };
@@ -2066,6 +2110,50 @@ function requireNode(document: DesignFile, nodeId: string): DesignNode {
     throw new Error(`node not found: ${nodeId}`);
   }
   return node;
+}
+
+function normalizePageId(pageId: string): string {
+  if (typeof pageId !== "string") {
+    throw Object.assign(new Error("page id must be a string"), { statusCode: 400 });
+  }
+  const normalized = pageId.trim();
+  if (!normalized) {
+    throw Object.assign(new Error("page id is required"), { statusCode: 400 });
+  }
+  return normalized;
+}
+
+function normalizePageName(name: string): string {
+  if (typeof name !== "string") {
+    throw Object.assign(new Error("page name must be a string"), { statusCode: 400 });
+  }
+  const normalized = name.trim();
+  if (!normalized) {
+    throw Object.assign(new Error("page name is required"), { statusCode: 400 });
+  }
+  return normalized;
+}
+
+function requirePage(
+  document: DesignFile,
+  pageId: string
+): DesignFile["pages"][number] {
+  const normalizedPageId = normalizePageId(pageId);
+  const page = document.pages.find((candidate) => candidate.id === normalizedPageId);
+  if (!page) {
+    throw Object.assign(new Error(`page not found: ${normalizedPageId}`), { statusCode: 400 });
+  }
+  return page;
+}
+
+function requirePageIndex(index: number, maxIndex: number): number {
+  if (!Number.isInteger(index)) {
+    throw Object.assign(new Error(`page index must be an integer: ${index}`), { statusCode: 400 });
+  }
+  if (index < 0 || index > maxIndex) {
+    throw Object.assign(new Error(`page index is out of bounds: ${index}`), { statusCode: 400 });
+  }
+  return index;
 }
 
 function requireParent(document: DesignFile, parentId: string): { children: DesignNode[] } {

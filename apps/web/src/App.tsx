@@ -177,10 +177,12 @@ import {
   alignSelectedNodes,
   calculateSnapForMovingBounds,
   copySelectedNode,
+  createPage,
   createEditorState,
   createImageNode,
   createRectangleNode,
   createTextNode,
+  deletePage,
   deleteSelectedNode,
   distributeSelectedNodes,
   duplicateSelectedNode,
@@ -203,7 +205,9 @@ import {
   pasteCopiedNode,
   pasteCopiedNodeAt,
   redo,
+  renamePage,
   renameSelectedNode,
+  reorderPage,
   reorderSelectedNode,
   resizeSelectedImageToNaturalSize,
   resolveActiveDesignTokens,
@@ -266,6 +270,27 @@ const DOCUMENT_SNAPSHOT_PERSISTENCE_STABILIZATION_LIMIT = 8;
 
 function rendererDocumentsEqual(first: RendererDocument, second: RendererDocument) {
   return JSON.stringify(first) === JSON.stringify(second);
+}
+
+function nearestSurvivingPageId(
+  previousDocument: RendererDocument,
+  nextDocument: RendererDocument,
+  currentPageId: string | null
+) {
+  if (currentPageId && nextDocument.pages.some((page) => page.id === currentPageId)) {
+    return currentPageId;
+  }
+  const previousPageIndex = previousDocument.pages.findIndex((page) => page.id === currentPageId);
+  if (previousPageIndex >= 0) {
+    const nearestPage = [
+      ...previousDocument.pages.slice(previousPageIndex + 1),
+      ...previousDocument.pages.slice(0, previousPageIndex).reverse()
+    ].find((page) => nextDocument.pages.some((candidate) => candidate.id === page.id));
+    if (nearestPage) {
+      return nearestPage.id;
+    }
+  }
+  return nextDocument.pages[0]?.id ?? null;
 }
 
 function formatCommentActivityType(type: CommentActivityFeed["events"][number]["type"]) {
@@ -10181,6 +10206,9 @@ export function App() {
   const [leftPanelMode, setLeftPanelMode] = useState<LeftPanelMode>("assets");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [renamingPageId, setRenamingPageId] = useState<string | null>(null);
+  const [pageNameDraft, setPageNameDraft] = useState("");
+  const [pageNameError, setPageNameError] = useState("");
   const [collabSession, setCollabSession] = useState<CollabDocumentSession | null>(null);
   const [activeTeamContext, setActiveTeamContext] = useState<TeamManifest | null>(null);
   const activeProjectTeamContext =
@@ -10261,6 +10289,8 @@ export function App() {
   accountTokenSessionRef.current = collabSession;
   const editorRef = useRef<EditorState | null>(null);
   const activePageIdRef = useRef<string | null>(activePageId);
+  const pageButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pageNameInputRef = useRef<HTMLInputElement | null>(null);
   const documentPersistenceQueueRef = useRef(createFileOperationQueue());
   const componentVariantPersistenceRevisionRef = useRef(0);
   const documentSnapshotRevisionRef = useRef(0);
@@ -11461,6 +11491,7 @@ export function App() {
   }, [collabSession]);
 
   const isFileVersionPreviewing = fileVersionPreview !== null;
+  const isPageManagementDisabled = isFileVersionPreviewing || projectDocumentTransitionActive;
   const displayedDocument = fileVersionPreview?.document ?? editor?.document ?? null;
   const livePageIdSignature = editor?.document.pages.map((page) => page.id).join("\u0000") ?? "";
   useEffect(() => {
@@ -11472,6 +11503,21 @@ export function App() {
       return pages[0]?.id ?? null;
     });
   }, [editor?.document.id, livePageIdSignature]);
+  useEffect(() => {
+    setRenamingPageId(null);
+    setPageNameDraft("");
+    setPageNameError("");
+  }, [editor?.document.id]);
+  useEffect(() => {
+    if (
+      renamingPageId &&
+      !editor?.document.pages.some((page) => page.id === renamingPageId)
+    ) {
+      setRenamingPageId(null);
+      setPageNameDraft("");
+      setPageNameError("");
+    }
+  }, [editor?.document.id, livePageIdSignature, renamingPageId]);
 
   const nodes = useMemo(
     () => (displayedDocument ? flattenRendererNodes(displayedDocument) : []),
@@ -12515,21 +12561,30 @@ export function App() {
     const derivedState = deriveNextState(baseState);
     const documentChanged = derivedState.document !== baseState.document;
     let nextState = derivedState;
+    const nextPageId = nearestSurvivingPageId(baseState.document, derivedState.document, activePageIdRef.current);
+    const didFallbackPage = nextPageId !== activePageIdRef.current;
+    if (didFallbackPage) {
+      cancelActiveCanvasInteractions();
+      publishedCursorRef.current = null;
+      activePageIdRef.current = nextPageId;
+      setActivePageId(nextPageId);
+      nextState = scopeSelectionToPage(nextState, nextPageId);
+    }
 
     if (documentChanged && activeSession) {
       activeSession.transact("editor-interaction", () => derivedState.document);
       nextState = {
-        ...derivedState,
+        ...nextState,
         document: activeSession.getDocument(),
         history: { past: [], future: [] }
       };
     } else if (activeSession) {
-      nextState = { ...derivedState, history: { past: [], future: [] } };
+      nextState = { ...nextState, history: { past: [], future: [] } };
     }
 
     editorRef.current = nextState;
     setEditor(nextState);
-    publishEditorPresence(nextState);
+    publishEditorPresence(nextState, didFallbackPage ? { cursor: null, editingNodeId: null, editingMode: null } : {});
 
     if (documentChanged) {
       enqueueDocumentSnapshotPersistence(baseState.document, nextState.document);
@@ -17030,7 +17085,7 @@ export function App() {
   };
 
   const switchActivePage = (pageId: string) => {
-    if (fileVersionPreviewActiveRef.current) {
+    if (isEditorDocumentMutationBlocked()) {
       return;
     }
     const liveDocument = editorRef.current?.document;
@@ -17040,6 +17095,9 @@ export function App() {
     ) {
       return;
     }
+    setRenamingPageId(null);
+    setPageNameDraft("");
+    setPageNameError("");
     cancelActiveCanvasInteractions();
     setMeasurementTargetNodeId(null);
     activePageIdRef.current = pageId;
@@ -17058,6 +17116,136 @@ export function App() {
       });
     }
     setActivePageId(pageId);
+  };
+
+  const addEditorPage = () => {
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    const current = editorRef.current;
+    if (!current) {
+      return;
+    }
+
+    const usedNames = new Set(current.document.pages.map((page) => page.name));
+    let pageNumber = current.document.pages.length + 1;
+    while (usedNames.has(`페이지 ${pageNumber}`)) {
+      pageNumber += 1;
+    }
+    const pageId = `page-${crypto.randomUUID()}`;
+    const pageName = `페이지 ${pageNumber}`;
+    const didUpdate = updateEditorFromInteraction((state) =>
+      createPage(state, {
+        pageId,
+        name: pageName,
+        index: state.document.pages.length
+      })
+    );
+    if (!didUpdate) {
+      return;
+    }
+
+    setRenamingPageId(null);
+    setPageNameDraft("");
+    setPageNameError("");
+    switchActivePage(pageId);
+    setProjectStatus(`${pageName} 추가됨`);
+  };
+
+  const beginPageRename = (pageId: string, pageName: string) => {
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    setRenamingPageId(pageId);
+    setPageNameDraft(pageName);
+    setPageNameError("");
+  };
+
+  const focusPageButton = (pageId: string | null) => {
+    if (!pageId) {
+      return;
+    }
+    window.requestAnimationFrame(() => pageButtonRefs.current.get(pageId)?.focus());
+  };
+
+  const cancelPageRename = (restoreFocus = true) => {
+    const pageId = renamingPageId;
+    setRenamingPageId(null);
+    setPageNameDraft("");
+    setPageNameError("");
+    if (restoreFocus) {
+      focusPageButton(pageId);
+    }
+  };
+
+  const commitPageRename = (pageId: string) => {
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    const pageName = pageNameDraft.trim();
+    if (!pageName) {
+      setPageNameError("페이지 이름을 입력하세요.");
+      window.requestAnimationFrame(() => pageNameInputRef.current?.focus());
+      return;
+    }
+    const page = editorRef.current?.document.pages.find((candidate) => candidate.id === pageId);
+    if (!page) {
+      cancelPageRename(false);
+      return;
+    }
+    if (page.name !== pageName) {
+      updateEditorFromInteraction((state) => renamePage(state, pageId, pageName));
+      setProjectStatus(`${pageName}으로 이름 변경됨`);
+    }
+    cancelPageRename();
+  };
+
+  const moveEditorPage = (pageId: string, direction: -1 | 1) => {
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    const pages = editorRef.current?.document.pages ?? [];
+    const currentIndex = pages.findIndex((page) => page.id === pageId);
+    if (currentIndex < 0) {
+      return;
+    }
+    const toIndex = currentIndex + direction;
+    if (toIndex < 0 || toIndex >= pages.length) {
+      return;
+    }
+    updateEditorFromInteraction((state) => reorderPage(state, pageId, toIndex));
+    setProjectStatus(`${pages[currentIndex]?.name ?? "페이지"} 순서 변경됨`);
+  };
+
+  const removeEditorPage = (pageId: string) => {
+    if (isEditorDocumentMutationBlocked()) {
+      return;
+    }
+    const pages = editorRef.current?.document.pages ?? [];
+    if (pages.length <= 1) {
+      setProjectStatus("마지막 페이지는 삭제할 수 없습니다");
+      return;
+    }
+    const pageIndex = pages.findIndex((page) => page.id === pageId);
+    if (pageIndex < 0) {
+      return;
+    }
+    const pageName = pages[pageIndex]?.name ?? "페이지";
+    const fallbackPageId = pages[pageIndex + 1]?.id ?? pages[pageIndex - 1]?.id ?? null;
+    const wasActivePage = activePageIdRef.current === pageId;
+    if (!window.confirm(`"${pageName}" 페이지를 삭제할까요? 페이지 안의 모든 레이어도 삭제됩니다.`)) {
+      return;
+    }
+    if (wasActivePage && fallbackPageId) {
+      switchActivePage(fallbackPageId);
+    }
+    const didUpdate = updateEditorFromInteraction((state) => deletePage(state, pageId));
+    if (!didUpdate) {
+      return;
+    }
+    cancelPageRename(false);
+    focusPageButton(wasActivePage ? fallbackPageId : activePageIdRef.current ?? fallbackPageId);
+    setProjectStatus(`${pageName} 삭제됨`);
   };
 
   const previewCurrentFileVersion = async (version: FileVersionSummary) => {
@@ -18682,7 +18870,16 @@ export function App() {
         }
       }
       const current = editorRef.current;
-      const nextPageId = activePageIdRef.current;
+      const currentPageId = activePageIdRef.current;
+      const nextPageId = nearestSurvivingPageId(current?.document ?? document, document, currentPageId);
+      const didFallbackPage = nextPageId !== currentPageId;
+      if (didFallbackPage) {
+        cancelActiveCanvasInteractions();
+        setMeasurementTargetNodeId(null);
+        publishedCursorRef.current = null;
+        activePageIdRef.current = nextPageId;
+        setActivePageId(nextPageId);
+      }
       const isPreviewing = fileVersionPreviewActiveRef.current;
       const activeSelectionNodeIds = current
         ? isPreviewing
@@ -18720,7 +18917,7 @@ export function App() {
         selectedNodeBounds: pageSelection.bounds,
         editingNodeId,
         editingMode: editingNodeId ? localPresence.editingMode : null,
-        cursor: isPreviewing ? null : localPresence.cursor,
+        cursor: isPreviewing || didFallbackPage ? null : localPresence.cursor,
         viewport: nextState.viewport,
         updatedAtMs: Date.now()
       });
@@ -20441,24 +20638,146 @@ export function App() {
             ) : null}
             {showLayerPanel ? (
               <section data-testid="layer-panel" aria-label="레이어">
-                {displayedDocument?.pages.length ? (
-                  <div className="page-switcher" data-testid="page-switcher" role="group" aria-label="페이지 전환">
+                {displayedDocument ? (
+                  <div className="page-switcher" data-testid="page-switcher" role="group" aria-label="페이지 관리">
                     <div className="page-switcher-heading">
-                      <span>페이지</span>
+                      <div className="page-switcher-title-row">
+                        <span>페이지</span>
+                        <button
+                          type="button"
+                          className="page-create-button"
+                          onClick={addEditorPage}
+                          disabled={isPageManagementDisabled || !editor}
+                        >
+                          페이지 추가
+                        </button>
+                      </div>
                       <strong data-testid="active-page-name">{activePage?.name ?? "페이지 없음"}</strong>
                     </div>
                     <div className="page-switcher-list">
-                      {displayedDocument.pages.map((page) => (
-                        <button
-                          key={page.id}
-                          type="button"
-                          className={page.id === activePage?.id ? "is-selected" : undefined}
-                          aria-pressed={page.id === activePage?.id}
-                          onClick={() => switchActivePage(page.id)}
-                        >
-                          {page.name}
-                        </button>
-                      ))}
+                      {displayedDocument.pages.length === 0 ? (
+                        <p className="page-switcher-empty">페이지가 없습니다. 새 페이지를 추가하세요.</p>
+                      ) : displayedDocument.pages.map((page, pageIndex) => {
+                        const isActivePage = page.id === activePage?.id;
+                        const isRenamingPage = page.id === renamingPageId;
+                        return (
+                          <div
+                            key={page.id}
+                            className={`page-switcher-row${isActivePage ? " is-selected" : ""}`}
+                            role="group"
+                            aria-label={`${pageIndex + 1}번째 ${page.name} 페이지 작업`}
+                            aria-posinset={pageIndex + 1}
+                            aria-setsize={displayedDocument.pages.length}
+                          >
+                            {isRenamingPage ? (
+                              <div className="page-switcher-rename">
+                                <input
+                                  type="text"
+                                  ref={pageNameInputRef}
+                                  aria-label="페이지 이름"
+                                  aria-invalid={Boolean(pageNameError)}
+                                  aria-describedby={pageNameError ? `page-name-error-${page.id}` : undefined}
+                                  value={pageNameDraft}
+                                  autoFocus
+                                  disabled={isPageManagementDisabled}
+                                  onFocus={(event) => event.currentTarget.select()}
+                                  onChange={(event) => {
+                                    setPageNameDraft(event.currentTarget.value);
+                                    if (pageNameError) {
+                                      setPageNameError("");
+                                    }
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      commitPageRename(page.id);
+                                    } else if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      cancelPageRename();
+                                    }
+                                  }}
+                                />
+                                {pageNameError ? (
+                                  <p
+                                    id={`page-name-error-${page.id}`}
+                                    className="page-name-error"
+                                    role="alert"
+                                  >
+                                    {pageNameError}
+                                  </p>
+                                ) : null}
+                                <div className="page-switcher-rename-actions">
+                                  <button
+                                    type="button"
+                                    onClick={() => commitPageRename(page.id)}
+                                    disabled={isPageManagementDisabled}
+                                  >
+                                    이름 저장
+                                  </button>
+                                  <button type="button" onClick={() => cancelPageRename()}>
+                                    이름 변경 취소
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="page-switcher-page"
+                                ref={(element) => {
+                                  if (element) {
+                                    pageButtonRefs.current.set(page.id, element);
+                                  } else {
+                                    pageButtonRefs.current.delete(page.id);
+                                  }
+                                }}
+                                aria-pressed={isActivePage}
+                                aria-current={isActivePage ? "page" : undefined}
+                                onClick={() => switchActivePage(page.id)}
+                                disabled={isPageManagementDisabled}
+                              >
+                                {page.name}
+                              </button>
+                            )}
+                            {!isRenamingPage ? (
+                              <div className="page-switcher-actions">
+                                <button
+                                  type="button"
+                                  aria-label={`${pageIndex + 1}번째 ${page.name} 페이지 이름 변경`}
+                                  onClick={() => beginPageRename(page.id, page.name)}
+                                  disabled={isPageManagementDisabled}
+                                >
+                                  페이지 이름 변경
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`${pageIndex + 1}번째 ${page.name} 페이지 위로 이동`}
+                                  onClick={() => moveEditorPage(page.id, -1)}
+                                  disabled={isPageManagementDisabled || pageIndex === 0}
+                                >
+                                  위로 이동
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`${pageIndex + 1}번째 ${page.name} 페이지 아래로 이동`}
+                                  onClick={() => moveEditorPage(page.id, 1)}
+                                  disabled={isPageManagementDisabled || pageIndex === displayedDocument.pages.length - 1}
+                                >
+                                  아래로 이동
+                                </button>
+                                <button
+                                  type="button"
+                                  className="page-delete-button"
+                                  aria-label={`${pageIndex + 1}번째 ${page.name} 페이지 삭제`}
+                                  onClick={() => removeEditorPage(page.id)}
+                                  disabled={isPageManagementDisabled || displayedDocument.pages.length <= 1}
+                                >
+                                  페이지 삭제
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}
